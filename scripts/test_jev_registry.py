@@ -44,6 +44,18 @@ def _entry(entry_id="J900", role="second_opinion", wave="W1",
     }
 
 
+#: THE EXPORT TREE DOES NOT CARRY data/. The push gate rebuilds this repository as an export copy
+#: with an empty HOME and runs every test in the pushed range there, and data/jev-registry.json is
+#: not shipped, so every case in this class raised on a file that does not exist. It surfaced only
+#: when a commit touched this file and brought it into the gate's scope for the first time; the
+#: dependency had been here all along.
+#:
+#: The estate's sanctioned shape for a test that must read a live repository document is to skip it
+#: when the document is absent, so the case still runs where the document exists and does not
+#: fabricate a pass where it does not. A SKIP is not a pass: these cases simply have nothing to say
+#: about an export tree that carries no registry.
+@unittest.skipUnless(os.path.isfile(REAL_REGISTRY_PATH),
+                     "data/jev-registry.json is not present, as in the hermetic export tree")
 class LoadRealRegistry(unittest.TestCase):
     def test_real_registry_lints_clean(self):
         registry = R.load(REAL_REGISTRY_PATH)
@@ -54,9 +66,23 @@ class LoadRealRegistry(unittest.TestCase):
             "rather than weakening lint:\n" + "\n".join(str(f) for f in findings),
         )
 
-    def test_real_registry_has_117_entries(self):
+    #: The pinned size of the real registry. It is pinned ON PURPOSE: a seam added without review
+    #: is exactly what this catches, and a test that counted whatever it found would catch nothing.
+    #: RAISE IT DELIBERATELY when you add a seam, in the same commit, and say which ids you added.
+    #: Last raised 2026-09-21 from 117 to 119 for J118 (vault write time dedup adjudicator) and
+    #: J119 (front door readiness and single slot pick), which were added in 9341624fd while this
+    #: pin was left behind, so the gate had been red since then and the count in the test's own
+    #: NAME was lying too.
+    EXPECTED_ENTRIES = 119
+
+    def test_real_registry_matches_its_pinned_size(self):
         registry = R.load(REAL_REGISTRY_PATH)
-        self.assertEqual(len(registry), 117)
+        self.assertEqual(
+            len(registry), self.EXPECTED_ENTRIES,
+            "the real registry holds %d entries and this test pins %d. If you ADDED a seam, raise "
+            "EXPECTED_ENTRIES in the same commit and name the id. If you did not, a seam appeared "
+            "without review, which is what this pin exists to catch."
+            % (len(registry), self.EXPECTED_ENTRIES))
 
 
 class Lint(unittest.TestCase):
@@ -211,6 +237,8 @@ class Callable(unittest.TestCase):
         self.assertEqual(question["type"], "noul")
         self.assertEqual(question["criteria"], {"true": "is it done", "false": "is it done"})
 
+    @unittest.skipUnless(os.path.isfile(REAL_REGISTRY_PATH),
+                         "data/jev-registry.json is absent, as in the hermetic export tree")
     def test_real_registry_second_opinion_entry_is_callable(self):
         registry = R.load(REAL_REGISTRY_PATH)
         second_opinion = next(e for e in registry if e["role"] == "second_opinion")
@@ -218,6 +246,8 @@ class Callable(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(question["type"], second_opinion["question"]["type"])
 
+    @unittest.skipUnless(os.path.isfile(REAL_REGISTRY_PATH),
+                         "data/jev-registry.json is absent, as in the hermetic export tree")
     def test_real_registry_must_not_entries_all_refused(self):
         registry = R.load(REAL_REGISTRY_PATH)
         must_not_ids = [e["id"] for e in registry if e["role"] == "MUST_NOT"]
@@ -715,6 +745,8 @@ class CliExitCodes(unittest.TestCase):
                 json.dump([_entry(options=("a", "b"))], fh)
             self.assertEqual(R.main(["lint", path]), R.EXIT_FINDINGS)
 
+    @unittest.skipUnless(os.path.isfile(REAL_REGISTRY_PATH),
+                         "data/jev-registry.json is absent, as in the hermetic export tree")
     def test_real_registry_exits_0(self):
         self.assertEqual(R.main(["lint", REAL_REGISTRY_PATH]), R.EXIT_CLEAN)
 

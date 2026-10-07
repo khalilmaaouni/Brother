@@ -214,12 +214,12 @@ def main():
         # The one line a newcomer actually needs, and the whole gap between
         # "installed" and "used". README.md names this command as the first
         # thing to type; until now the product's own first words never did.
-        _say("BrotherMode: new project. Run /brothermode:start to begin.\n")
+        _say("BrotherMode: new project. Run /brother:brothermode-start to begin.\n")
         # Row V2: a fresh install binds no vault at all, and a nag that fires
         # every session stops being read, so this line is gated to the same
         # first-run moment as the line above, silent ever after.
         if _no_vault_bound():
-            _say("No memory vault is bound yet; /brothermode:start will ask "
+            _say("No memory vault is bound yet; /brother:brothermode-start will ask "
                  "where it should live and bind it.\n")
 
     # R-4 (persona dogfood 2026-09-07): DIGEST.md printed to every session,

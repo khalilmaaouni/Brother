@@ -34,6 +34,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import fault_lab as FL  # noqa: E402
 import fault_barrier as FB  # noqa: E402
+from hermetic_worker_env import worker_environment  # noqa: E402
+
+
+def setUpModule():
+    fixture = worker_environment()
+    fixture.__enter__()
+    unittest.addModuleCleanup(fixture.__exit__, None, None, None)
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -296,6 +303,51 @@ class TheSevenLifecycleBoundariesAreDrivenForReal(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIn("NO-DATA", r["detail"])
         self.assertIn("brother_run.py", r["detail"])
+
+
+class ACapturedWorkerResultSurvivesARealResume(unittest.TestCase):
+    """RESUME-FIX F4, end to end: the same real SIGKILL and bare resume as
+    the boundary matrix above, around the one thing the fix decides, whether
+    a worker that already returned is run again. after_edit_before_check and
+    after_check_before_integration above are the two kills after the worker
+    returned; these are the kill before it returned, two resumes racing,
+    and a lane tampered with between the kill and the resume."""
+
+    def _variant(self, name):
+        facts, problem = FL.resume_variant(name, timeout=60)
+        self.assertIsNone(problem, problem)
+        return facts
+
+    def test_a_kill_before_the_worker_returned_runs_it_again(self):
+        f = self._variant("mid_worker")
+        # Its completion is unproven: nothing recovered, the worker is asked
+        # again, and the unit still lands exactly once.
+        self.assertEqual(f["invocations_before"], 1, f)
+        self.assertEqual(f["invocations_after"], 2, f)
+        self.assertEqual(f["recovered"], 0, f)
+        self.assertTrue(any("no checkpoint" in w for w in f["refused_whys"]), f)
+        self.assertEqual(f["merges"], 1, f)
+        self.assertEqual(f["resume_exits"], [0], f)
+        self.assertEqual(f["canonical_dirty"], "", f)
+
+    def test_two_concurrent_resumes_recover_once_and_never_rerun_the_worker(self):
+        f = self._variant("concurrent")
+        self.assertEqual(f["invocations_before"], 1, f)
+        self.assertEqual(f["invocations_after"], 1, f)
+        self.assertEqual(f["recovered"], 1, f)
+        self.assertEqual(f["merges"], 1, f)
+        self.assertIn(0, f["resume_exits"], f)
+        self.assertEqual(f["canonical_dirty"], "", f)
+
+    def test_a_tampered_lane_is_refused_and_its_write_never_lands(self):
+        f = self._variant("tampered")
+        self.assertEqual(f["recovered"], 0, f)
+        self.assertTrue(any("lane HEAD" in w for w in f["refused_whys"]), f)
+        self.assertNotIn("foreign.txt", f["canonical_files"], f)
+        self.assertIn("done.txt", f["canonical_files"], f)
+        self.assertEqual(f["invocations_after"], 2, f)
+        self.assertEqual(f["merges"], 1, f)
+        self.assertEqual(f["resume_exits"], [0], f)
 
 
 class TheMarkerFileIsOpenedSafely(unittest.TestCase):

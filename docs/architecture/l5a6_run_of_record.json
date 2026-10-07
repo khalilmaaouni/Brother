@@ -1,0 +1,879 @@
+{
+ "evidence": [
+  {
+   "command": "grep -R -E -n -I 'api[_-]?key|secret|passwd|BEGIN.*PRIVATE KEY|sk-or-' plugin/runtime/brother scripts/brother_antigravity_hook.py > /tmp/l5a_secrets.txt; ec=$?; head -n 50 /tmp/l5a_secrets.txt; echo exit:$ec",
+   "excerpt": "plugin/runtime/brother/core/claims_triage_test.py:68:                run_repro(\"/etc/passwd\", scratch, 30)\nplugin/runtime/brother/core/claims_triage_test.py:174:        row = triage_claim(\"P1\", \"/etc/passwd\", \"process\")\nplugin/runtime/brother/core/run.py:7:import secrets\nplugin/runtime/brother/core/run.py:22:    random_suffix = secrets.token_hex(4)\nplugin/runtime/brother/core/run.py:58:    random_suffix = secrets.token_hex(4)\nplugin/runtime/brother/core/test_dream_episode.py:93:        for bad in (\"../grade.txt\", \"/etc/passwd\", \"a/../../b\", \"..\", \"\",\nplugin/runtime/brother/core/test_dream_episode.py:176:            _valid_record(receipt_ref=\"/etc/passwd\"),\nplugin/runtime/brother/core/test_l5a4.py:43:                {\"id\": \"j1\", \"model\": \"muse\", \"prompt\": \"hi\", \"out\": \"../../etc/passwd\"},\nplugin/runtime/brother/core/test_l5a4.py:74:            or_fanout._load_prompt({\"prompt_file\": \"../../etc/passwd\"}, T)\nplugin/runtime/brother/core/or_fanout.py:71:    re.compile(r\"\\bsk-or-[A-Za-z0-9._-]{8,}\"),\nplugin/runtime/brother/core/or_fanout.py:73:    re.compile(r\"(?i)\\b(?:api[_-]?key|secret|passwd|password|token)\\b\\s*[:=]\\s*\"\nplugin/runtime/brother/core/or_fanout.py:75:    re.compile(r\"-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?\"\nplugin/runtime/brother/core/or_fanout.py:84:    r\"(?i)(?:\\bsk-or-[A-Za-z0-9]{8,}\"\nplugin/runtime/brother/core/or_fanout.py:86:    r\"|(?:api[_-]?key|secret|passwd|password|token)\\b\\s*[:=]\\s*\"\nplugin/runtime/brother/core/or_fanout.py:90:    r\"-----BEGIN [A-Z ]*PRIVATE KEY-----[\\r\\n]+\"\nplugin/runtime/brother/core/or_fanout.py:157:def sweep_secrets(root, patterns):\nplugin/runtime/brother/core/or_fanout.py:215:                    \"pattern\": \"BEGIN.*PRIVATE KEY\", \"kind\": \"credential_value\",\nplugin/runtime/brother/core/or_fanout.py:952:        # sensitivity \"private\" to this function and watched the secret reach the bridge argv, exit\nplugin/runtime/brother/core/secrets_gate_test.py:1:\"\"\"Tests for secrets_gate.py (L5.2).\nplugin/runtime/brother/core/secrets_gate_test.py:3:Every secret-shaped fixture is assembled at run time from harmless pieces,\nplugin/runtime/brother/core/secrets_gate_test.py:4:never written as a literal secret shape anywhere in this file: the landing\nplugin/runtime/brother/core/secrets_gate_test.py:5:commit scan refuses any committed line matching a secret pattern, test files\nplugin/runtime/brother/core/secrets_gate_test.py:14:from plugin.runtime.brother.core import secrets_gate\nplugin/runtime/brother/core/secrets_gate_test.py:24:    \"assigned_secret\",\nplugin/runtime/brother/core/secrets_gate_test.py:42:    if name == \"assigned_secret\":\nplugin/runtime/brother/core/secrets_gate_test.py:52:            return secrets_gate.scan_paths([root])\nplugin/runtime/brother/core/secrets_gate_test.py:54:    def test_secret_blocks(self):\nplugin/runtime/brother/core/secrets_gate_test.py:56:        self.assertTrue(findings, \"a secret-shaped file must yield a finding\")\nplugin/runtime/brother/core/secrets_gate_test.py:57:        self.assertTrue(any(f[\"action\"] == secrets_gate.ACTION_BLOCK for f in findings))\nplugin/runtime/brother/core/secrets_gate_test.py:58:        with self.assertRaises(secrets_gate.SecretsBlocked):\nplugin/runtime/brother/core/secrets_gate_test.py:59:            secrets_gate.block_on_secret(findings)\nplugin/runtime/brother/core/secrets_gate_test.py:62:        names = [name for name, _ in secrets_gate.PATTERNS]\nplugin/runtime/brother/core/secrets_gate_test.py:69:                any(f[\"action\"] == secrets_gate.ACTION_BLOCK for f in findings),\nplugin/runtime/brother/core/secrets_gate_test.py:71:            with self.assertRaises(secrets_gate.SecretsBlocked):\nplugin/runtime/brother/core/secrets_gate_test.py:72:                secrets_gate.block_on_secret(findings)\nplugin/runtime/brother/core/secrets_gate_test.py:74:    def test_encoded_secret_blocks(self):\nplugin/runtime/brother/core/secrets_gate_test.py:78:            any(f[\"action\"] == secrets_gate.ACTION_BLOCK for f in findings),\nplugin/runtime/brother/core/secrets_gate_test.py:79:            \"a base64 encoded secret must still block: %r\" % (findi",
+   "excerpt_hash": "a4f89da49299145968390877a9b052f4a4a399451c1f67e829ca68f6588f91ae",
+   "exit_code": 0,
+   "full_output_lines": 51,
+   "id": "EV-001",
+   "point": 1,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -c \"\nimport os\nfrom plugin.runtime.brother.core import or_fanout as f\npats = ['api[_-]?key', 'secret', 'passwd', 'BEGIN.*PRIVATE KEY', 'sk-or-']\nrecs = [dict(r, path='plugin/runtime/brother/' + r['path']) for r in f.sweep_secrets('plugin/runtime/brother', pats)]\nrecs += [dict(r, path='scripts/' + r['path']) for r in f.sweep_secrets('scripts', pats) if r['path'] == 'brother_antigravity_hook.py']\ncache = [r for r in recs if '__pycache__' in r['path'].split('/')]\nrecs = [r for r in recs if r not in cache]\nis_test = lambda p: os.path.basename(p).startswith('test_') or os.path.basename(p).endswith('_test.py')\nprint('skipped_bytecode_cache_records:', len(cache))\nfor group, rows in (('test', [r for r in recs if is_test(r['path'])]), ('non_test', [r for r in recs if not is_test(r['path'])])):\n    for kind in ('mention', 'credential_value', 'no_data'):\n        print(group, kind, sum(1 for r in rows if r['kind'] == kind))\nblock = [r for r in recs if not is_test(r['path']) and r['kind'] in ('credential_value', 'no_data')]\nfor r in block:\n    print('BLOCKING', r['path'], r['line'], r['kind'], r['excerpt'][:120])\nprint('blocking_hits:', len(block))\n\"",
+   "excerpt": "skipped_bytecode_cache_records: 0\ntest mention 103\ntest credential_value 0\ntest no_data 0\nnon_test mention 33\nnon_test credential_value 0\nnon_test no_data 0\nblocking_hits: 0\n",
+   "excerpt_hash": "a93771dbc117919b1a2e856b8cc83e77ba532f0ad7723b3ac96a8299cdd8c9c0",
+   "exit_code": 0,
+   "full_output_lines": 8,
+   "hit_count": 0,
+   "id": "EV-002",
+   "point": 1,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -m unittest plugin.runtime.brother.core.test_or_fanout_l5a2 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+   "excerpt": "Ran 10 tests\n\nOK\n",
+   "excerpt_hash": "95be63a11878718c55a73a64706599418d5e68085c5a24183e935d71bf2526d2",
+   "exit_code": 0,
+   "full_output_lines": 3,
+   "id": "EV-003",
+   "point": 1,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -c \"\nfrom plugin.runtime.brother.core.test_l5a3 import audit_exec, _REPO_ROOT\nfor r in audit_exec(_REPO_ROOT):\n    print(r['id'], r['file'] + ':' + str(r['line']), r['family'], r['status'])\n\"",
+   "excerpt": "X1 plugin/runtime/brother/core/openrouter_strict.py:228 shell-string present\nX2 plugin/runtime/brother/core/openrouter_dispatch.py:474 shell-string present\nX3 plugin/runtime/brother/core/or_fanout.py:972 option-injection present\nX4 plugin/runtime/brother/core/or_dispatch_cli.py:205 option-injection present\nX5 plugin/runtime/brother/core/or_dispatch_cli.py:35 pinned-entry present\nX6 plugin/runtime/brother/core/or_fanout.py:965 pinned-entry present\nX7 plugin/runtime/brother/core/openrouter_strict.py:255 usage-proof present\nX8 plugin/runtime/brother/core/openrouter_strict.py:262 usage-proof present\nX9 plugin/runtime/brother/core/openrouter_strict.py:239 argv-type present\nX10 plugin/runtime/brother/core/openrouter_strict.py:77 finite-floor present\nX11 plugin/runtime/brother/core/or_dispatch_cli.py:259 usage-proof present\n",
+   "excerpt_hash": "caacde65b1ef9bddef1a63470129ba1ef47ffd2bee6df960e94135fbd3e7f98c",
+   "exit_code": 0,
+   "full_output_lines": 11,
+   "id": "EV-004",
+   "point": 2,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a3.TestExec.test_the_four_files_carry_no_shell_string_or_dynamic_eval_sink 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+   "excerpt": "Ran 1 test\n\nOK\n",
+   "excerpt_hash": "f1a3ddd74dda3435f55d739bb4ff61021217c8dd0902edb099811e4bd0e6fb75",
+   "exit_code": 0,
+   "full_output_lines": 3,
+   "id": "EV-005",
+   "point": 2,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "grep -R -E -n -I 'open\\(|\\.write\\(|shutil|pathlib|os\\.makedirs|os\\.remove' plugin/runtime/brother scripts/brother_antigravity_hook.py > /tmp/l5a_writes.txt; ec=$?; head -n 100 /tmp/l5a_writes.txt; echo exit:$ec",
+   "excerpt": "plugin/runtime/brother/core/test_openrouter_ledger_m41.py:24:        # tempfile.TemporaryDirectory, not shutil.rmtree: this file must not\nplugin/runtime/brother/core/test_openrouter_ledger_m41.py:25:        # import shutil (safety screen).\nplugin/runtime/brother/core/test_dream_coverage.py:6:import shutil\nplugin/runtime/brother/core/test_dream_coverage.py:238:        shutil.rmtree(self.run_dir, ignore_errors=True)\nplugin/runtime/brother/core/test_dream_coverage.py:299:        with open(empty, \"wb\") as handle:\nplugin/runtime/brother/core/test_dream_coverage.py:300:            handle.write(b\"\")\nplugin/runtime/brother/core/test_dream_coverage.py:303:        with open(torn, \"wb\") as handle:\nplugin/runtime/brother/core/test_dream_coverage.py:304:            handle.write(b\"version-truth\\t0\\t812\\nnot a gate line\\n\")\nplugin/runtime/brother/core/test_dream_coverage.py:308:        with open(binary, \"wb\") as handle:\nplugin/runtime/brother/core/test_dream_coverage.py:309:            handle.write(b\"version-truth\\t0\\t\\xff\\xfe\\n\")\nplugin/runtime/brother/core/test_dream_coverage.py:319:        with open(path, \"wb\") as handle:\nplugin/runtime/brother/core/test_dream_coverage.py:320:            handle.write(dream_record.format_gate_line(\"version-truth\", 0, 812).encode(\"utf-8\"))\nplugin/runtime/brother/core/test_dream_coverage.py:321:            handle.write(dream_record.format_gate_line(\"build\", 2, 0).encode(\"utf-8\"))\nplugin/runtime/brother/core/test_dream_coverage.py:426:            shutil.rmtree(empty, ignore_errors=True)\nplugin/runtime/brother/core/test_dream_coverage.py:483:        with open(os.path.join(self.run_dir, rows[0][\"artifact\"]), \"wb\") as handle:\nplugin/runtime/brother/core/test_dream_coverage.py:484:            handle.write(b'{\"schema\": \"brother-dream-call-v1\", \"status\": \"PASS\"}')\nplugin/runtime/brother/core/claims_triage_test.py:105:            with open(site, \"r\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/claims_triage_test.py:114:            with open(path, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/claims_triage_test.py:115:                fh.write(\"not json\")\nplugin/runtime/brother/core/claims_triage_test.py:118:            with open(path, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/claims_triage_test.py:119:                fh.write('{\"not\": \"a list\"}')\nplugin/runtime/brother/core/claims_triage_test.py:122:            with open(path, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/claims_triage_test.py:123:                fh.write(\"[1, 2]\")\nplugin/runtime/brother/core/claims_triage_test.py:132:            with open(path, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:26:            os.makedirs(parent)\nplugin/runtime/brother/core/supply_gate_test.py:27:        with open(path, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:28:            fh.write(textwrap.dedent(source))\nplugin/runtime/brother/core/supply_gate_test.py:129:        with open(req, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:130:            fh.write(\"requests==2.31.0\\n\")\nplugin/runtime/brother/core/supply_gate_test.py:131:        with open(allow, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:132:            fh.write(\"requests\\n\")\nplugin/runtime/brother/core/supply_gate_test.py:138:        with open(req, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:139:            fh.write(\"requests\\n\")\nplugin/runtime/brother/core/supply_gate_test.py:140:        with open(allow, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:141:            fh.write(\"requests\\n\")\nplugin/runtime/brother/core/supply_gate_test.py:150:        with open(req, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:151:            fh.write(\"boto3==1.0\\n\")\nplugin/runtime/brother/core/supply_gate_test.py:152:        with open(allow, \"w\", encoding=\"utf-8\") as fh:\nplugin/runtime/brother/core/supply_gate_test.py:153:            fh.write(\"requests\\",
+   "excerpt_hash": "0260a8cd465bbde32aff81dddc6a0258eb8c4e30594c40fe94e959b74bd64c3e",
+   "exit_code": 0,
+   "full_output_lines": 101,
+   "id": "EV-006",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a4 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+   "excerpt": "Ran 5 tests\n\nOK\n",
+   "excerpt_hash": "8755afe2711c37ff5df3858da9e9e81ebb852c237ddf3076d831f85e0e4465d1",
+   "exit_code": 0,
+   "full_output_lines": 3,
+   "id": "EV-007",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "env -u BROTHER_WORKSPACE_ROOT python3 -B -c \"\nfrom plugin.runtime.brother.core import or_fanout as f\ntry:\n    text = f._load_prompt({'prompt_file': '/etc/hosts'})\n    print('prompt_file /etc/hosts with no workspace root pinned was read:', len(text) > 0)\nexcept ValueError as exc:\n    print('prompt_file /etc/hosts with no workspace root pinned was refused:', str(exc)[:90])\n\"",
+   "excerpt": "prompt_file /etc/hosts with no workspace root pinned was refused: no workspace root is pinned: neither the workspace_root argument nor BROTHER_WORKSPACE_ROO\n",
+   "excerpt_hash": "7768b0b1262796048dba7e65ae755a457155dde804622cc29818f401670127b2",
+   "exit_code": 0,
+   "full_output_lines": 1,
+   "id": "EV-008",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -c \"\nimport json, os, shutil, tempfile\nfrom plugin.runtime.brother.core import openrouter_dispatch as d\nroot = tempfile.mkdtemp()\ntry:\n    p = os.path.join(root, d.CAP_GRANT_FILENAME)\n    with open(p, 'w') as fh:\n        fh.write(json.dumps({'daily_cap': 9999, 'until': '2099-01-01T00:00:00+00:00'}))\n    os.chmod(p, 0o644)\n    os.chmod(root, 0o755)\n    print('grant file mode 0644 in a 0755 dir, base cap 5.0, cap in force:', d.effective_daily_cap(root, 5.0))\nfinally:\n    shutil.rmtree(root)\n\"",
+   "excerpt": "grant file mode 0644 in a 0755 dir, base cap 5.0, cap in force: 5.0\nopenrouter_dispatch: cap grant ignored (grant mode 0o644 is open to group or others); cap stays 5.0\n",
+   "excerpt_hash": "f0f9f18fd175748c6d493cd93aa0901b3274795d94232691b0888032b645293c",
+   "exit_code": 0,
+   "full_output_lines": 2,
+   "id": "EV-009",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -c \"\nimport sys\nsys.path.insert(0, 'scripts')\nimport brother_antigravity_hook as h\nd = h.handle_pre_tool({'toolCall': {'name': 'run_command', 'args': {'command': 'id > /tmp/pwned'}}})\nprint('M6 payload decision:', d['decision'])\n\"",
+   "excerpt": "{\"decision\": \"allow\"}\nM6 payload decision: allow\n",
+   "excerpt_hash": "82fcd3b5d5aef9564a1e0ed367d777befd0e539c739c8685d56aca13514b494b",
+   "exit_code": 0,
+   "full_output_lines": 2,
+   "id": "EV-010",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "find plugin/runtime/brother scripts \\( -name 'requirements*.txt' -o -name 'pyproject.toml' -o -name 'poetry.lock' -o -name 'Pipfile.lock' \\) > /tmp/l5a_deps.txt; ec=$?; cat /tmp/l5a_deps.txt; echo manifests:$(wc -l < /tmp/l5a_deps.txt | tr -d ' '); echo exit:$ec",
+   "excerpt": "manifests:0\nexit:0\n",
+   "excerpt_hash": "3e8ca1a1edc6e59d04daf2a469b37d937b656d3e247653b68cd4c330938ba2b2",
+   "exit_code": 0,
+   "full_output_lines": 2,
+   "id": "EV-011",
+   "point": 4,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "command -v pip-audit || echo 'pip-audit: not on PATH'",
+   "excerpt": "pip-audit: not on PATH\n",
+   "excerpt_hash": "160a3999e394d60f0f144f09f8ea5b3a0b2d21ed91da17c787c90639822d0d10",
+   "exit_code": 0,
+   "full_output_lines": 1,
+   "id": "EV-012",
+   "point": 4,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a5 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+   "excerpt": "Ran 17 tests\n\nOK\n",
+   "excerpt_hash": "a12bbbe24592d2918419702a8a32c7b518b5f3b777949ac7d00f068cb1a0feb6",
+   "exit_code": 0,
+   "full_output_lines": 3,
+   "id": "EV-013",
+   "point": 4,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "audited_count": 44,
+   "command": "python3 -B -c \"\nfrom plugin.runtime.brother.core import l5a_census as c\ncensus = c.dependency_census('.', ['plugin/runtime/brother/core/openrouter_dispatch.py', 'plugin/runtime/brother/core/openrouter_strict.py', 'plugin/runtime/brother/core/or_fanout.py', 'plugin/runtime/brother/core/or_dispatch_cli.py', 'plugin/runtime/brother/core/dispatch_semaphore.py', 'scripts/brother_antigravity_hook.py'])\nprint('files walked:', len(census['files']), 'repo names:', ','.join(census['repo']))\nfor r in census['third_party']: print('THIRD_PARTY', r['name'], r['file'], r['line'])\nfor r in census['unresolved']: print('UNRESOLVED', r['file'], r['line'])\nprint(c.census_line(census))\n\"",
+   "excerpt": "files walked: 25 repo names: brother_paths,claude_ledger,journal,model_call,model_router,plugin,proof_ledger,scripts\ncensus: audited=44 third_party=0 unresolved=0\n",
+   "excerpt_hash": "eda7ddc58148c561d9af5afc2af6938c587a015233919a1a1a7be463491a29b0",
+   "exit_code": 0,
+   "full_output_lines": 2,
+   "hit_count": 0,
+   "id": "EV-014",
+   "point": 4,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T1.json",
+   "excerpt": "FAIL: test_secrets_no_hardcoded_or_logged (plugin.runtime.brother.core.test_or_fanout_l5a2.TestSecrets.test_secrets_no_hardcoded_or_logged)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M1: RED\n",
+   "excerpt_hash": "ed638e4ae3ae4555a5d0754512591e5d0aa656b1c4056316f2c883e149907df8",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-015",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T1.json",
+   "mutation_id": "M1",
+   "point": 1,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T2.json",
+   "excerpt": "FAIL: test_exit_zero_without_usage_raises (plugin.runtime.brother.core.test_l5a7.TestExecGateway.test_exit_zero_without_usage_raises)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M2d: RED\n",
+   "excerpt_hash": "154c3ff4e8f26edd2e0ce39907c915b56d1a1484eca0e3286267ac7857b2ddad",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-016",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T2.json",
+   "mutation_id": "M2d",
+   "point": 2,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T3.json",
+   "excerpt": "FAIL: test_file_write_boundary (plugin.runtime.brother.core.test_l5a4.TestWrites.test_file_write_boundary)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M3b: RED\n",
+   "excerpt_hash": "c39bba679bab437d92764a542235ce7f0f30b34cbcec6921cd2196795dad3977",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-017",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T3.json",
+   "mutation_id": "M3b",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T4.json",
+   "excerpt": "FAIL: test_a_third_party_import_with_no_vulnerability_db_is_no_data (plugin.runtime.brother.core.test_l5a10.TestPointFour.test_a_third_party_import_with_no_vulnerability_db_is_no_data)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M4c: RED\n",
+   "excerpt_hash": "3140a12cc84da34883d54a8f8d032bfb406e9accef55f7802d00e43feef99f9c",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-018",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T4.json",
+   "mutation_id": "M4c",
+   "point": 4,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T5.json",
+   "excerpt": "FAIL: test_an_edited_output_block_is_caught_by_the_replay_hash (plugin.runtime.brother.core.test_l5a6.TestScore.test_an_edited_output_block_is_caught_by_the_replay_hash)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M5: RED\n",
+   "excerpt_hash": "3701d9b4d9e2d9901fd5a0ac081b8fce71e45329839be51dcfb4305e502a4d84",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-019",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T5.json",
+   "mutation_id": "M5",
+   "point": 4,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T6.json",
+   "excerpt": "FAIL: test_hostile_tool_calls_are_denied (plugin.runtime.brother.core.test_or_fanout_l5a1.TestHookRefusal.test_hostile_tool_calls_are_denied) (payload=\"{'toolCall': {'name': 'not_a_known_tool'}}\")\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M6: RED\n",
+   "excerpt_hash": "1c9427766c3c0539bb527138f464d173a3678fb40eb47792071a96d942932b6c",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-020",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T6.json",
+   "mutation_id": "M6",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T7.json",
+   "excerpt": "FAIL: test_a_grant_owned_by_another_user_is_refused (plugin.runtime.brother.core.test_l5a9c.TestCapGrantOwner.test_a_grant_owned_by_another_user_is_refused)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M7: RED\n",
+   "excerpt_hash": "830e6503bdcdc76eafe5a3fefe6eeaf35af11c5ed8fa20b42b7d3c90a798b946",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-021",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T7.json",
+   "mutation_id": "M7",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T8.json",
+   "excerpt": "FAIL: test_hostile_timeout_is_refused (plugin.runtime.brother.core.test_or_fanout_l5a1.TestJobRefusal.test_hostile_timeout_is_refused) (timeout='nan')\nFAIL: test_hostile_timeout_is_refused (plugin.runtime.brother.core.test_or_fanout_l5a1.TestJobRefusal.test_hostile_timeout_is_refused) (timeout='inf')\nRan 1 test(s)\nFAILED (failures=2)\nMUTATION M8: RED\n",
+   "excerpt_hash": "5b792be6a28dd3ef4d553a659752893971821b7bd96f529c10cc24a881f6063a",
+   "exit_code": 0,
+   "full_output_lines": 5,
+   "id": "EV-022",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T8.json",
+   "mutation_id": "M8",
+   "point": 2,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  },
+  {
+   "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T9.json",
+   "excerpt": "FAIL: test_slot_claim_owner (plugin.runtime.brother.core.test_l5a4.TestWrites.test_slot_claim_owner)\nRan 1 test(s)\nFAILED (failures=1)\nMUTATION M9d: RED\n",
+   "excerpt_hash": "be5ddd5bd44bed4a17d4aeafcabc4c6ffae6c72ce95a60c8038b767e8e6e6eba",
+   "exit_code": 0,
+   "full_output_lines": 4,
+   "id": "EV-023",
+   "mutation_artifact": "docs/architecture/l5a-mutations/T9.json",
+   "mutation_id": "M9d",
+   "point": 3,
+   "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+  }
+ ],
+ "findings": [
+  {
+   "control": "redactor",
+   "evidence_id": "EV-003",
+   "id": "F-001",
+   "note": "",
+   "point": 1,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/or_fanout.py",
+   "target_function": "redact_text"
+  },
+  {
+   "control": "exec_gateway",
+   "evidence_id": "EV-004",
+   "id": "F-002",
+   "note": "L5a-7: X8 a missing usage line on exit 0 raises FallbackDetected; X9 bridge_argv is type checked before the runner (EV-004 rows present)",
+   "point": 2,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/openrouter_strict.py",
+   "target_function": "run_strict"
+  },
+  {
+   "control": "exec_gateway",
+   "evidence_id": "EV-004",
+   "id": "F-003",
+   "note": "L5a-7: X4 -- before the appended prompt; X11 a nonzero exit or a missing reported model returns 4 at the command entry (EV-004 rows present)",
+   "point": 2,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/or_dispatch_cli.py",
+   "target_function": "main"
+  },
+  {
+   "control": "path_resolver",
+   "evidence_id": "EV-008",
+   "id": "F-004",
+   "note": "L5a-8: every read and write under or_fanout requires a pinned root; EV-008 shows the unpinned read refused",
+   "point": 3,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/or_fanout.py",
+   "target_function": "run_job"
+  },
+  {
+   "control": "slot_owner",
+   "evidence_id": "EV-007",
+   "id": "F-005",
+   "note": "",
+   "point": 3,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/dispatch_semaphore.py",
+   "target_function": "_checked_dir"
+  },
+  {
+   "control": "cap_grant",
+   "evidence_id": "EV-009",
+   "id": "F-006",
+   "limitation": "the same-user forger case is a documented limitation of point 3, not a defended attack: a process running as the owner's own OS user can write a grant with the right uid and modes, so no uid or mode check can tell it from the owner's own grant",
+   "note": "L5a-9: a grant open to others, owned by another user, or reached through a link never lifts the cap; EV-009 shows the 0644 grant refused",
+   "point": 3,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/openrouter_dispatch.py",
+   "target_function": "_effective_cap_grant"
+  },
+  {
+   "control": "hook",
+   "evidence_id": "EV-010",
+   "id": "F-007",
+   "note": "REQ-02 args gate not landed: EV-010 shows the spec's M6 payload allowed. Not in the L5a-7 to L5a-11 fix set; the owner ruled 2026-09-30 06:06 JST that the host is a trusted tool with full access (FX-49 retired, the host data guard opt in), and at 08:2x JST he ruled it out of L5a's scope (his words: Change of mind out of scope, I Trust antigravity, Go for option 1): a stated limitation, scoped out of point 3 in l5a6_score.SCOPED_OUT_CONTROLS",
+   "point": 3,
+   "status": "absent",
+   "target_file": "scripts/brother_antigravity_hook.py",
+   "target_function": "handle_pre_tool"
+  },
+  {
+   "control": "check_deps",
+   "evidence_id": "EV-014",
+   "id": "F-008",
+   "note": "L5a-10: the import census over the six inventory files answers point 4 from the tree (EV-014 carries the census line); pip-audit stays NO-DATA for a manifest that does not exist (EV-011, EV-012)",
+   "point": 4,
+   "status": "present",
+   "target_file": "plugin/runtime/brother/core/or_dispatch_cli.py",
+   "target_function": "check_deps"
+  }
+ ],
+ "outputs": {
+  "python3.13": {
+   "overall_mean": 10.0,
+   "python": "3.13.14",
+   "replay": [
+    {
+     "command": "grep -R -E -n -I 'api[_-]?key|secret|passwd|BEGIN.*PRIVATE KEY|sk-or-' plugin/runtime/brother scripts/brother_antigravity_hook.py > /tmp/l5a_secrets.txt; ec=$?; head -n 50 /tmp/l5a_secrets.txt; echo exit:$ec",
+     "consistent": true,
+     "excerpt_hash": "a4f89da49299145968390877a9b052f4a4a399451c1f67e829ca68f6588f91ae",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 1,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nimport os\nfrom plugin.runtime.brother.core import or_fanout as f\npats = ['api[_-]?key', 'secret', 'passwd', 'BEGIN.*PRIVATE KEY', 'sk-or-']\nrecs = [dict(r, path='plugin/runtime/brother/' + r['path']) for r in f.sweep_secrets('plugin/runtime/brother', pats)]\nrecs += [dict(r, path='scripts/' + r['path']) for r in f.sweep_secrets('scripts', pats) if r['path'] == 'brother_antigravity_hook.py']\ncache = [r for r in recs if '__pycache__' in r['path'].split('/')]\nrecs = [r for r in recs if r not in cache]\nis_test = lambda p: os.path.basename(p).startswith('test_') or os.path.basename(p).endswith('_test.py')\nprint('skipped_bytecode_cache_records:', len(cache))\nfor group, rows in (('test', [r for r in recs if is_test(r['path'])]), ('non_test', [r for r in recs if not is_test(r['path'])])):\n    for kind in ('mention', 'credential_value', 'no_data'):\n        print(group, kind, sum(1 for r in rows if r['kind'] == kind))\nblock = [r for r in recs if not is_test(r['path']) and r['kind'] in ('credential_value', 'no_data')]\nfor r in block:\n    print('BLOCKING', r['path'], r['line'], r['kind'], r['excerpt'][:120])\nprint('blocking_hits:', len(block))\n\"",
+     "consistent": true,
+     "excerpt_hash": "a93771dbc117919b1a2e856b8cc83e77ba532f0ad7723b3ac96a8299cdd8c9c0",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 2,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_or_fanout_l5a2 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "95be63a11878718c55a73a64706599418d5e68085c5a24183e935d71bf2526d2",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 3,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nfrom plugin.runtime.brother.core.test_l5a3 import audit_exec, _REPO_ROOT\nfor r in audit_exec(_REPO_ROOT):\n    print(r['id'], r['file'] + ':' + str(r['line']), r['family'], r['status'])\n\"",
+     "consistent": true,
+     "excerpt_hash": "caacde65b1ef9bddef1a63470129ba1ef47ffd2bee6df960e94135fbd3e7f98c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 4,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a3.TestExec.test_the_four_files_carry_no_shell_string_or_dynamic_eval_sink 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "f1a3ddd74dda3435f55d739bb4ff61021217c8dd0902edb099811e4bd0e6fb75",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 5,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "grep -R -E -n -I 'open\\(|\\.write\\(|shutil|pathlib|os\\.makedirs|os\\.remove' plugin/runtime/brother scripts/brother_antigravity_hook.py > /tmp/l5a_writes.txt; ec=$?; head -n 100 /tmp/l5a_writes.txt; echo exit:$ec",
+     "consistent": true,
+     "excerpt_hash": "0260a8cd465bbde32aff81dddc6a0258eb8c4e30594c40fe94e959b74bd64c3e",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 6,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a4 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "8755afe2711c37ff5df3858da9e9e81ebb852c237ddf3076d831f85e0e4465d1",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 7,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "env -u BROTHER_WORKSPACE_ROOT python3 -B -c \"\nfrom plugin.runtime.brother.core import or_fanout as f\ntry:\n    text = f._load_prompt({'prompt_file': '/etc/hosts'})\n    print('prompt_file /etc/hosts with no workspace root pinned was read:', len(text) > 0)\nexcept ValueError as exc:\n    print('prompt_file /etc/hosts with no workspace root pinned was refused:', str(exc)[:90])\n\"",
+     "consistent": true,
+     "excerpt_hash": "7768b0b1262796048dba7e65ae755a457155dde804622cc29818f401670127b2",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 8,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nimport json, os, shutil, tempfile\nfrom plugin.runtime.brother.core import openrouter_dispatch as d\nroot = tempfile.mkdtemp()\ntry:\n    p = os.path.join(root, d.CAP_GRANT_FILENAME)\n    with open(p, 'w') as fh:\n        fh.write(json.dumps({'daily_cap': 9999, 'until': '2099-01-01T00:00:00+00:00'}))\n    os.chmod(p, 0o644)\n    os.chmod(root, 0o755)\n    print('grant file mode 0644 in a 0755 dir, base cap 5.0, cap in force:', d.effective_daily_cap(root, 5.0))\nfinally:\n    shutil.rmtree(root)\n\"",
+     "consistent": true,
+     "excerpt_hash": "f0f9f18fd175748c6d493cd93aa0901b3274795d94232691b0888032b645293c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 9,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nimport sys\nsys.path.insert(0, 'scripts')\nimport brother_antigravity_hook as h\nd = h.handle_pre_tool({'toolCall': {'name': 'run_command', 'args': {'command': 'id > /tmp/pwned'}}})\nprint('M6 payload decision:', d['decision'])\n\"",
+     "consistent": true,
+     "excerpt_hash": "82fcd3b5d5aef9564a1e0ed367d777befd0e539c739c8685d56aca13514b494b",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 10,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "find plugin/runtime/brother scripts \\( -name 'requirements*.txt' -o -name 'pyproject.toml' -o -name 'poetry.lock' -o -name 'Pipfile.lock' \\) > /tmp/l5a_deps.txt; ec=$?; cat /tmp/l5a_deps.txt; echo manifests:$(wc -l < /tmp/l5a_deps.txt | tr -d ' '); echo exit:$ec",
+     "consistent": true,
+     "excerpt_hash": "3e8ca1a1edc6e59d04daf2a469b37d937b656d3e247653b68cd4c330938ba2b2",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 11,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "command -v pip-audit || echo 'pip-audit: not on PATH'",
+     "consistent": true,
+     "excerpt_hash": "160a3999e394d60f0f144f09f8ea5b3a0b2d21ed91da17c787c90639822d0d10",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 12,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a5 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "a12bbbe24592d2918419702a8a32c7b518b5f3b777949ac7d00f068cb1a0feb6",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 13,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nfrom plugin.runtime.brother.core import l5a_census as c\ncensus = c.dependency_census('.', ['plugin/runtime/brother/core/openrouter_dispatch.py', 'plugin/runtime/brother/core/openrouter_strict.py', 'plugin/runtime/brother/core/or_fanout.py', 'plugin/runtime/brother/core/or_dispatch_cli.py', 'plugin/runtime/brother/core/dispatch_semaphore.py', 'scripts/brother_antigravity_hook.py'])\nprint('files walked:', len(census['files']), 'repo names:', ','.join(census['repo']))\nfor r in census['third_party']: print('THIRD_PARTY', r['name'], r['file'], r['line'])\nfor r in census['unresolved']: print('UNRESOLVED', r['file'], r['line'])\nprint(c.census_line(census))\n\"",
+     "consistent": true,
+     "excerpt_hash": "eda7ddc58148c561d9af5afc2af6938c587a015233919a1a1a7be463491a29b0",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 14,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T1.json",
+     "consistent": true,
+     "excerpt_hash": "ed638e4ae3ae4555a5d0754512591e5d0aa656b1c4056316f2c883e149907df8",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 15,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T2.json",
+     "consistent": true,
+     "excerpt_hash": "154c3ff4e8f26edd2e0ce39907c915b56d1a1484eca0e3286267ac7857b2ddad",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 16,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T3.json",
+     "consistent": true,
+     "excerpt_hash": "c39bba679bab437d92764a542235ce7f0f30b34cbcec6921cd2196795dad3977",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 17,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T4.json",
+     "consistent": true,
+     "excerpt_hash": "3140a12cc84da34883d54a8f8d032bfb406e9accef55f7802d00e43feef99f9c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 18,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T5.json",
+     "consistent": true,
+     "excerpt_hash": "3701d9b4d9e2d9901fd5a0ac081b8fce71e45329839be51dcfb4305e502a4d84",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 19,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T6.json",
+     "consistent": true,
+     "excerpt_hash": "1c9427766c3c0539bb527138f464d173a3678fb40eb47792071a96d942932b6c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 20,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T7.json",
+     "consistent": true,
+     "excerpt_hash": "830e6503bdcdc76eafe5a3fefe6eeaf35af11c5ed8fa20b42b7d3c90a798b946",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 21,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T8.json",
+     "consistent": true,
+     "excerpt_hash": "5b792be6a28dd3ef4d553a659752893971821b7bd96f529c10cc24a881f6063a",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 22,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T9.json",
+     "consistent": true,
+     "excerpt_hash": "be5ddd5bd44bed4a17d4aeafcabc4c6ffae6c72ce95a60c8038b767e8e6e6eba",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 23,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    }
+   ],
+   "scores": [
+    {
+     "fix": null,
+     "point": 1,
+     "score": 10.0,
+     "verdict": "PASS"
+    },
+    {
+     "fix": null,
+     "point": 2,
+     "score": 10.0,
+     "verdict": "PASS"
+    },
+    {
+     "fix": null,
+     "point": 3,
+     "scoped_out": [
+      {
+       "control": "hook",
+       "ruling": "owner ruling 2026-09-30: Antigravity full access; F-007 is a stated limitation"
+      }
+     ],
+     "score": 10.0,
+     "verdict": "PASS"
+    },
+    {
+     "fix": null,
+     "point": 4,
+     "score": 10.0,
+     "verdict": "PASS"
+    }
+   ]
+  },
+  "python3.9": {
+   "overall_mean": 10.0,
+   "python": "3.9.6",
+   "replay": [
+    {
+     "command": "grep -R -E -n -I 'api[_-]?key|secret|passwd|BEGIN.*PRIVATE KEY|sk-or-' plugin/runtime/brother scripts/brother_antigravity_hook.py > /tmp/l5a_secrets.txt; ec=$?; head -n 50 /tmp/l5a_secrets.txt; echo exit:$ec",
+     "consistent": true,
+     "excerpt_hash": "a4f89da49299145968390877a9b052f4a4a399451c1f67e829ca68f6588f91ae",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 1,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nimport os\nfrom plugin.runtime.brother.core import or_fanout as f\npats = ['api[_-]?key', 'secret', 'passwd', 'BEGIN.*PRIVATE KEY', 'sk-or-']\nrecs = [dict(r, path='plugin/runtime/brother/' + r['path']) for r in f.sweep_secrets('plugin/runtime/brother', pats)]\nrecs += [dict(r, path='scripts/' + r['path']) for r in f.sweep_secrets('scripts', pats) if r['path'] == 'brother_antigravity_hook.py']\ncache = [r for r in recs if '__pycache__' in r['path'].split('/')]\nrecs = [r for r in recs if r not in cache]\nis_test = lambda p: os.path.basename(p).startswith('test_') or os.path.basename(p).endswith('_test.py')\nprint('skipped_bytecode_cache_records:', len(cache))\nfor group, rows in (('test', [r for r in recs if is_test(r['path'])]), ('non_test', [r for r in recs if not is_test(r['path'])])):\n    for kind in ('mention', 'credential_value', 'no_data'):\n        print(group, kind, sum(1 for r in rows if r['kind'] == kind))\nblock = [r for r in recs if not is_test(r['path']) and r['kind'] in ('credential_value', 'no_data')]\nfor r in block:\n    print('BLOCKING', r['path'], r['line'], r['kind'], r['excerpt'][:120])\nprint('blocking_hits:', len(block))\n\"",
+     "consistent": true,
+     "excerpt_hash": "a93771dbc117919b1a2e856b8cc83e77ba532f0ad7723b3ac96a8299cdd8c9c0",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 2,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_or_fanout_l5a2 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "95be63a11878718c55a73a64706599418d5e68085c5a24183e935d71bf2526d2",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 3,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nfrom plugin.runtime.brother.core.test_l5a3 import audit_exec, _REPO_ROOT\nfor r in audit_exec(_REPO_ROOT):\n    print(r['id'], r['file'] + ':' + str(r['line']), r['family'], r['status'])\n\"",
+     "consistent": true,
+     "excerpt_hash": "caacde65b1ef9bddef1a63470129ba1ef47ffd2bee6df960e94135fbd3e7f98c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 4,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a3.TestExec.test_the_four_files_carry_no_shell_string_or_dynamic_eval_sink 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "f1a3ddd74dda3435f55d739bb4ff61021217c8dd0902edb099811e4bd0e6fb75",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 5,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "grep -R -E -n -I 'open\\(|\\.write\\(|shutil|pathlib|os\\.makedirs|os\\.remove' plugin/runtime/brother scripts/brother_antigravity_hook.py > /tmp/l5a_writes.txt; ec=$?; head -n 100 /tmp/l5a_writes.txt; echo exit:$ec",
+     "consistent": true,
+     "excerpt_hash": "0260a8cd465bbde32aff81dddc6a0258eb8c4e30594c40fe94e959b74bd64c3e",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 6,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a4 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "8755afe2711c37ff5df3858da9e9e81ebb852c237ddf3076d831f85e0e4465d1",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 7,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "env -u BROTHER_WORKSPACE_ROOT python3 -B -c \"\nfrom plugin.runtime.brother.core import or_fanout as f\ntry:\n    text = f._load_prompt({'prompt_file': '/etc/hosts'})\n    print('prompt_file /etc/hosts with no workspace root pinned was read:', len(text) > 0)\nexcept ValueError as exc:\n    print('prompt_file /etc/hosts with no workspace root pinned was refused:', str(exc)[:90])\n\"",
+     "consistent": true,
+     "excerpt_hash": "7768b0b1262796048dba7e65ae755a457155dde804622cc29818f401670127b2",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 8,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nimport json, os, shutil, tempfile\nfrom plugin.runtime.brother.core import openrouter_dispatch as d\nroot = tempfile.mkdtemp()\ntry:\n    p = os.path.join(root, d.CAP_GRANT_FILENAME)\n    with open(p, 'w') as fh:\n        fh.write(json.dumps({'daily_cap': 9999, 'until': '2099-01-01T00:00:00+00:00'}))\n    os.chmod(p, 0o644)\n    os.chmod(root, 0o755)\n    print('grant file mode 0644 in a 0755 dir, base cap 5.0, cap in force:', d.effective_daily_cap(root, 5.0))\nfinally:\n    shutil.rmtree(root)\n\"",
+     "consistent": true,
+     "excerpt_hash": "f0f9f18fd175748c6d493cd93aa0901b3274795d94232691b0888032b645293c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 9,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nimport sys\nsys.path.insert(0, 'scripts')\nimport brother_antigravity_hook as h\nd = h.handle_pre_tool({'toolCall': {'name': 'run_command', 'args': {'command': 'id > /tmp/pwned'}}})\nprint('M6 payload decision:', d['decision'])\n\"",
+     "consistent": true,
+     "excerpt_hash": "82fcd3b5d5aef9564a1e0ed367d777befd0e539c739c8685d56aca13514b494b",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 10,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "find plugin/runtime/brother scripts \\( -name 'requirements*.txt' -o -name 'pyproject.toml' -o -name 'poetry.lock' -o -name 'Pipfile.lock' \\) > /tmp/l5a_deps.txt; ec=$?; cat /tmp/l5a_deps.txt; echo manifests:$(wc -l < /tmp/l5a_deps.txt | tr -d ' '); echo exit:$ec",
+     "consistent": true,
+     "excerpt_hash": "3e8ca1a1edc6e59d04daf2a469b37d937b656d3e247653b68cd4c330938ba2b2",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 11,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "command -v pip-audit || echo 'pip-audit: not on PATH'",
+     "consistent": true,
+     "excerpt_hash": "160a3999e394d60f0f144f09f8ea5b3a0b2d21ed91da17c787c90639822d0d10",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 12,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -m unittest plugin.runtime.brother.core.test_l5a5 2>&1 | sed -E 's/ in [0-9.]+s$//' | tail -n 3; exit ${PIPESTATUS[0]}",
+     "consistent": true,
+     "excerpt_hash": "a12bbbe24592d2918419702a8a32c7b518b5f3b777949ac7d00f068cb1a0feb6",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 13,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B -c \"\nfrom plugin.runtime.brother.core import l5a_census as c\ncensus = c.dependency_census('.', ['plugin/runtime/brother/core/openrouter_dispatch.py', 'plugin/runtime/brother/core/openrouter_strict.py', 'plugin/runtime/brother/core/or_fanout.py', 'plugin/runtime/brother/core/or_dispatch_cli.py', 'plugin/runtime/brother/core/dispatch_semaphore.py', 'scripts/brother_antigravity_hook.py'])\nprint('files walked:', len(census['files']), 'repo names:', ','.join(census['repo']))\nfor r in census['third_party']: print('THIRD_PARTY', r['name'], r['file'], r['line'])\nfor r in census['unresolved']: print('UNRESOLVED', r['file'], r['line'])\nprint(c.census_line(census))\n\"",
+     "consistent": true,
+     "excerpt_hash": "eda7ddc58148c561d9af5afc2af6938c587a015233919a1a1a7be463491a29b0",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 14,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T1.json",
+     "consistent": true,
+     "excerpt_hash": "ed638e4ae3ae4555a5d0754512591e5d0aa656b1c4056316f2c883e149907df8",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 15,
+     "point": 1,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T2.json",
+     "consistent": true,
+     "excerpt_hash": "154c3ff4e8f26edd2e0ce39907c915b56d1a1484eca0e3286267ac7857b2ddad",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 16,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T3.json",
+     "consistent": true,
+     "excerpt_hash": "c39bba679bab437d92764a542235ce7f0f30b34cbcec6921cd2196795dad3977",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 17,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T4.json",
+     "consistent": true,
+     "excerpt_hash": "3140a12cc84da34883d54a8f8d032bfb406e9accef55f7802d00e43feef99f9c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 18,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T5.json",
+     "consistent": true,
+     "excerpt_hash": "3701d9b4d9e2d9901fd5a0ac081b8fce71e45329839be51dcfb4305e502a4d84",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 19,
+     "point": 4,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T6.json",
+     "consistent": true,
+     "excerpt_hash": "1c9427766c3c0539bb527138f464d173a3678fb40eb47792071a96d942932b6c",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 20,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T7.json",
+     "consistent": true,
+     "excerpt_hash": "830e6503bdcdc76eafe5a3fefe6eeaf35af11c5ed8fa20b42b7d3c90a798b946",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 21,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T8.json",
+     "consistent": true,
+     "excerpt_hash": "5b792be6a28dd3ef4d553a659752893971821b7bd96f529c10cc24a881f6063a",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 22,
+     "point": 2,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    },
+    {
+     "command": "python3 -B scripts/l5a_mutation_probe.py docs/architecture/l5a-mutations/T9.json",
+     "consistent": true,
+     "excerpt_hash": "be5ddd5bd44bed4a17d4aeafcabc4c6ffae6c72ce95a60c8038b767e8e6e6eba",
+     "exit_code": 0,
+     "mutation_artifact_ok": true,
+     "order": 23,
+     "point": 3,
+     "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+    }
+   ],
+   "scores": [
+    {
+     "fix": null,
+     "point": 1,
+     "score": 10.0,
+     "verdict": "PASS"
+    },
+    {
+     "fix": null,
+     "point": 2,
+     "score": 10.0,
+     "verdict": "PASS"
+    },
+    {
+     "fix": null,
+     "point": 3,
+     "scoped_out": [
+      {
+       "control": "hook",
+       "ruling": "owner ruling 2026-09-30: Antigravity full access; F-007 is a stated limitation"
+      }
+     ],
+     "score": 10.0,
+     "verdict": "PASS"
+    },
+    {
+     "fix": null,
+     "point": 4,
+     "score": 10.0,
+     "verdict": "PASS"
+    }
+   ]
+  }
+ },
+ "run_utc": "2026-09-30T06:34:11+00:00",
+ "schema": "l5a6-run-of-record/1",
+ "sha": "e3f171cc2f1fa5d1e1edba84cc9af52560aa7d86"
+}

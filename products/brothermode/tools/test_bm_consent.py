@@ -32,6 +32,7 @@ import io
 import re
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -268,10 +269,10 @@ class SessionStartPostConsentCase(unittest.TestCase):
         law and six demands about handover packs, close packs, a queue file,
         a calibration history and an upstream branch, none of which a brand
         new project can have, and NOT ONE line saying what to do. README.md
-        names /brothermode:start as the first thing to type and the product's
+        names /brother:brothermode-start as the first thing to type and the product's
         own first words never did."""
         out = self._sessionstart_stdout()
-        self.assertIn("/brothermode:start", out,
+        self.assertIn("/brother:brothermode-start", out,
                       "a new project's first session does not name the "
                       "command its own README tells a newcomer to run")
 
@@ -314,7 +315,7 @@ class SessionStartPostConsentCase(unittest.TestCase):
         with io.open(queue, "w", encoding="utf-8") as fh:
             fh.write("{}")
         out = self._sessionstart_stdout()
-        self.assertNotIn("/brothermode:start", out,
+        self.assertNotIn("/brother:brothermode-start", out,
                          "an established project is being greeted as new")
         self.assertIn("no close pack exists in this checkout at all", out,
                       "suppression outlived the first run, so a real debt "
@@ -682,8 +683,12 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
     # programs still run on the same eight command strings, and a program
     # dropped from the table fails here exactly as a program dropped from a
     # command string used to.
-    MIN_WIRED_COMMAND_STRINGS = 11
-    MIN_WIRED_PROGRAMS = 15
+    # Bumped 2026-09-15 (never lowered): the canary added one command
+    # string to SessionStart and one new "Skill" matcher entry under
+    # PostToolUse, each running one program (bm_brother_canary.py
+    # sessionstart / postskill).
+    MIN_WIRED_COMMAND_STRINGS = 15
+    MIN_WIRED_PROGRAMS = 19
     _PROGRAM_RE = re.compile(
         r"(?:python3|sh)\s+\S*?(?:tools|scripts)/\S+\.(?:py|sh)")
 
@@ -791,9 +796,16 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
             while written <= floor + 50000:
                 fh.write(row + "\n")
                 written += len(row) + 1
-        payload = json.dumps({"session_id": "sess-wired",
-                              "transcript_path": transcript,
-                              "cwd": self.project})
+        # hook_event_name is on every envelope Claude Code sends, and a
+        # hook that speaks a different protocol per event (the clock guard:
+        # a PreToolUse deny is JSON on stdout at exit 0, a bare CLI call
+        # with no event is exit 2) reads it to know which one to speak, so
+        # the fixture carries it the way the real host does.
+        def payload_for(event):
+            return json.dumps({"session_id": "sess-wired",
+                               "transcript_path": transcript,
+                               "cwd": self.project,
+                               "hook_event_name": event})
 
         ran = 0
         for event, command in self._wired_commands():
@@ -809,7 +821,7 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
             # the attacker already has commit rights and does not need this
             # test. The only interpolation is ROOT, computed from __file__.
             r = subprocess.run(concrete, shell=True, cwd=self.project, env=env,
-                               input=payload, stdout=subprocess.PIPE,
+                               input=payload_for(event), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, universal_newlines=True,
                                timeout=180)
             ran += 1
@@ -911,6 +923,18 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
             "gated directly in _run() rather than through either "
             "enumerated dispatch shape; see the comment on this entry and "
             "tools/test_attempt_hook.py's own consent tests for the proof."),
+        # J1.c (2026-09-30): the clock guard, wired on PreToolUse and Stop.
+        # The same posture as bm_session_cap.py above: it reads the hook
+        # envelope and the transcript, answers ALLOW or BLOCK on stdout,
+        # and writes no file and opens no store, so there is nothing for a
+        # consent gate to stand in front of. It has no subcommand and no
+        # dispatch table, so neither enumerated shape can name a gate for
+        # it. Its output funnels carry only its own fixed verdict JSON and
+        # the clock tokens it found, reviewed in tools/write_sites.json.
+        "bm_clock_guard.py": (
+            "reads the envelope and the transcript, refuses on stdout, "
+            "writes no file; the same shape as bm_session_cap.py, and "
+            "tools/test_bm_clock_guard_m13.py drives its every exit path."),
     }
 
     # WHERE each module's gate lives, and how it spells the check. Every
@@ -968,6 +992,15 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
         # as vault_recall_hook.py's own: a private, duplicated
         # _consented() checked before the vault or the index is touched.
         "bm_vault.py": ("per-command", "_consented()"),
+        # Canary (2026-09-15): postskill writes a state file under
+        # ~/.claude on a recognized brother*-prefixed skill call;
+        # sessionstart reads it. Both are wired as their OWN top-level
+        # hooks.json entries rather than something bm_sessionstart.py
+        # calls, so neither can lean on that script's own consent probe
+        # running first; each carries its own private, duplicated
+        # _consented(), the same per-command shape as vault_recall_hook.py
+        # and bm_vault.py above.
+        "bm_brother_canary.py": ("per-command", "_consented()"),
     }
 
     def test_every_hook_wired_command_of_every_module_checks_consent(self):
@@ -1469,7 +1502,7 @@ class DoctorCheckInventoryCase(unittest.TestCase):
             "hooks": {"PreToolUse": [{
                 "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                 "hooks": [{"type": "command",
-                           "command": "python3 " + fence_path,
+                           "command": "python3 " + shlex.quote(fence_path),
                            "timeout": 10}],
             }]},
             "enabledPlugins": {"brothermode@some-marketplace": True},
@@ -1703,7 +1736,7 @@ class DoctorStrictAndSummaryCase(unittest.TestCase):
         with io.open(self.settings, "w", encoding="utf-8") as fh:
             json.dump({"hooks": {"PreToolUse": [{
                 "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
-                "hooks": [{"type": "command", "command": "python3 " + self.fence,
+                "hooks": [{"type": "command", "command": "python3 " + shlex.quote(self.fence),
                           "timeout": 10}]}]}}, fh)
         self.vault = os.path.join(self.home, "Vault")
         os.makedirs(self.vault)

@@ -1,6 +1,6 @@
 ---
 name: next
-description: "Use when someone asks what to do next in their work. Evaluates a fixed priority ladder against observable state and returns exactly one recommended action with a one sentence reason, never a menu of options. Invoke as /brothersbe:next."
+description: "Use when someone asks what to do next in their work. Evaluates a fixed priority ladder against observable state and returns exactly one recommended action with a one sentence reason, never a menu of options. Invoke as /brother:brothersbe-next."
 ---
 
 Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
@@ -35,18 +35,18 @@ one that matches:
    it (`name`, `detail`) and recommend repairing that specific check, before anything else
    downstream can be trusted. `SETUP` means nothing is broken: the repository simply has not
    been set up yet, the normal state of a new project. Say so in plain language, never as a
-   failure, and recommend `/brothersbe:start`, which sets up the workspace in one step
+   failure, and recommend `/brother:brothersbe-start`, which sets up the workspace in one step
    (preview with `sbe init`, apply on a yes). Either way, stop at this rung: neither state
    is ready for anything downstream.
 2. **No intake recorded.** Run `"${CLAUDE_PLUGIN_ROOT}/bin/sbe" status --json` and read
    `scope.storesInspected`. `intake` null and `dossiers` null together mean no flat
    `00-intake.json` exists at the root and dossier discovery found none under the design
-   roots either: the work was never scored. Recommend `/brothersbe:kickoff`.
+   roots either: the work was never scored. Recommend `/brother:brothersbe-kickoff`.
 3. **Dossier incomplete for the tier.** Run `"${CLAUDE_PLUGIN_ROOT}/bin/sbe" design --strict
    <dir>` against the root `scope.storesInspected.intake` names, or a dossier
    `scope.storesInspected.dossiers` names. A nonzero exit means the run printed a FAIL line
    somewhere; read that line for the missing or malformed artifact. Recommend
-   `/brothersbe:design`.
+   `/brother:brothersbe-design`.
 
 ## Rung 4: everything the reducer already knows about
 
@@ -66,7 +66,7 @@ re-evaluated by hand:
   the plain report, or the matching team severity (1, 2, 3). A hard gate that WAS evidenced and
   FAILED lands here (`resolve-merge-blocker`), naming the failing receipt.
 - `provide-missing-evidence`: the declared tier owes a design, gate or score run and no receipt
-  declares one yet. Recommend `/brothersbe:verify`, which is where that run actually happens
+  declares one yet. Recommend `/brother:brothersbe-verify`, which is where that run actually happens
   and where a FAIL, if there is one, gets reported with full detail; this skill does not run
   the check itself to preview the answer.
 - `continue-active-task`: a task is claimed and in flight. Recommend continuing it, named
@@ -74,7 +74,7 @@ re-evaluated by hand:
 - `start-ready-task`: a task's dependencies are all closed clean and it carries no registry
   record yet. Recommend the `sbe work start` command the finding names.
 - `run-review`: the plan's tasks are done and evidence is clean, but review has not cleared
-  (missing, stale, self-reviewed, or not approved). Recommend `/brothersbe:review`.
+  (missing, stale, self-reviewed, or not approved). Recommend `/brother:brothersbe-review`.
 - `finish`: nothing outstanding that this tool can see. Recommend finish guidance: write the
   summary, open the pull request, and hand the merge decision to a human. The merge is never
   this skill's call.

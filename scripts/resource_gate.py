@@ -74,7 +74,10 @@ DISK_REFUSE_GIB = 8.0
 
 #: Cores held back for the supervisor and the OS itself, never offered to a
 #: dispatch's own admission arithmetic.
-CORE_RESERVE = 1
+#: Cores no Brother admission may count on: graph_loop.CORES_RESERVED says the same (never take the last two
+#: cores), and heavy_slot's load ceiling is every core but these. Owner 2026-09-27: "optimize it to perfection to
+#: not be a hog"; on the 8 core M3 (4 performance, 4 efficiency) this keeps two cores' worth for the person at it.
+CORE_RESERVE = 2
 
 NODATA = "NO-DATA"
 ADMIT, DEFER = "ADMIT", "DEFER"
@@ -109,6 +112,32 @@ def _read_cores_available(reserve):
     if n is None:
         return None, "os.cpu_count() returned None: the platform would not say"
     return n - reserve, None
+
+
+def cpu_ticks():
+    """(busy ticks, total ticks) summed over every core since boot, or None when the platform will not say.
+    Two readings a second apart give the cores actually busy, which load1 does not: on the 8 core M3 on 2026-09-27
+    load1 read 5.10 while these ticks and top both said 3.4 to 4.5 cores busy (load counts runnable threads, not
+    work done). macOS: host_statistics(HOST_CPU_LOAD_INFO), user system idle nice. Linux: /proc/stat's cpu line,
+    idle and iowait counted as not busy."""
+    try:
+        if sys.platform == "darwin":
+            import ctypes
+            import ctypes.util
+            lib = ctypes.CDLL(ctypes.util.find_library("System"))
+            lib.mach_host_self.restype = ctypes.c_uint
+            info = (ctypes.c_uint * 4)()
+            count = ctypes.c_uint(4)
+            if lib.host_statistics(lib.mach_host_self(), 3, ctypes.byref(info), ctypes.byref(count)) != 0:
+                return None
+            user, system, idle, nice = list(info)
+            return user + system + nice, user + system + idle + nice
+        with open("/proc/stat") as fh:
+            fields = [int(x) for x in fh.readline().split()[1:]]
+        total = sum(fields[:8])
+        return total - fields[3] - (fields[4] if len(fields) > 4 else 0), total
+    except (OSError, ValueError, AttributeError, IndexError, TypeError):
+        return None
 
 
 def _read_load1():

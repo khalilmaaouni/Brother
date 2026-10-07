@@ -54,6 +54,14 @@ RUNTIME_DIR = os.path.join(BUNDLE_DIR, "runtime")
 # "GENERATED... by `scripts/gen_door_table.py`" (router-details.md),
 # which describes how a file was built, not an instruction to run it.
 SCRIPTS_PY_REF = re.compile(r"\bpython3?\s+scripts/([A-Za-z0-9_]+\.py)\b")
+# ANY mention of a scripts/ path, invocation or not: no install carries scripts/.
+SCRIPTS_PATH = re.compile(r"(?<![\w./-])scripts/([A-Za-z0-9_]+\.py)\b")
+# A path spelled bundle/..., which only a checkout of the repository has.
+BUNDLE_PREFIXED = re.compile(r"(?<![\w./-])bundle/")
+# A path spelled from the plugin root, bare or behind a plugin root variable.
+PLUGIN_PATH = re.compile(
+    r"(?:\$\{?[A-Z_]*PLUGIN_ROOT\}?/|(?<![\w./${}-]))"
+    r"((?:skills|runtime|commands)/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(?:md|py|json))")
 USING_BROTHER_REFS_DIR = os.path.join(
     BUNDLE_DIR, "skills", "using-brother", "references")
 
@@ -130,6 +138,151 @@ class ShippedSurfaceIsPortable(unittest.TestCase):
         self.assertEqual([], hits, "using-brother references a script that "
                          "does not ship:\n  " + "\n  ".join(hits))
 
+    def test_the_door_defines_its_launcher_by_a_path_an_install_carries(self):
+        """The door's first sentence defines `brother-run`, which every later
+        step runs. Until 2026-10-05 it defined it by pointing at
+        docs/maintainer/BROTHER-MAINTAINER-VERBS.md, a file no install carries
+        (bundle/ ships no docs/), so an installed session had to guess the
+        launcher. The definition spells the launcher under each host's plugin
+        root, and that launcher ships."""
+        door = os.path.join(BUNDLE_DIR, "commands", "brother.md")
+        try:
+            with io.open(door, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            self.fail("cannot read the door %s: %s" % (door, exc))
+        definition = [line for line in lines if "`brother-run` below" in line]
+        self.assertEqual(1, len(definition), "the door defines `brother-run` "
+                         "exactly once, found %d definition line(s)"
+                         % len(definition))
+        for variable in ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT",
+                         "BROTHER_PLUGIN_ROOT"):
+            self.assertIn('"${%s}/runtime/brother-run"' % variable,
+                          definition[0], "the door's launcher definition "
+                          "does not spell it under %s" % variable)
+        self.assertNotIn("docs/maintainer", definition[0], "the door defines "
+                         "its launcher by a maintainer document no install "
+                         "carries")
+        self.assertTrue(os.path.isfile(os.path.join(RUNTIME_DIR, "brother-run")),
+                        "the launcher the door names does not ship (no "
+                        "bundle/runtime/brother-run)")
+
+    def numbered(self, path):
+        """[(line number, line)] of a shipped file; unreadable is a FAIL."""
+        try:
+            with io.open(path, encoding="utf-8") as fh:
+                return list(enumerate(fh.read().splitlines(), 1))
+        except (OSError, UnicodeDecodeError) as exc:
+            self.fail("cannot read shipped file %s: %s" % (path, exc))
+
+    def test_the_door_speaks_of_its_launcher_by_name_on_one_line_only(self):
+        """A SECOND definition is a contradiction no session can settle.
+        Review of 2026-10-06: a line defining `brother-run` another way
+        passed, because only the first definition's wording was counted.
+        Every later step USES the launcher, the name followed by its
+        arguments (`brother-run --continue ...`). The bare name, closed by
+        its backtick, is how a sentence DEFINES it, so it appears on the
+        definition line and on no other."""
+        lines = self.numbered(os.path.join(BUNDLE_DIR, "commands", "brother.md"))
+        named = [n for n, line in lines if "`brother-run`" in line]
+        defined = [n for n, line in lines if "`brother-run` below" in line]
+        self.assertEqual(1, len(defined), "the door defines `brother-run` on "
+                         "%d line(s), exactly one is owed" % len(defined))
+        self.assertEqual(defined, named, "the door speaks of `brother-run` by "
+                         "its bare name on line(s) %s, and its one definition "
+                         "is on line(s) %s: any other line is a second "
+                         "definition" % (named, defined))
+
+    def test_the_door_names_no_path_under_bundle(self):
+        """bundle/ IS the plugin root of an install, so a path spelled
+        bundle/... exists in a checkout of the repository and nowhere else."""
+        hits = ["%d: %s" % (n, line.strip()[:110]) for n, line
+                in self.numbered(os.path.join(BUNDLE_DIR, "commands", "brother.md"))
+                if BUNDLE_PREFIXED.search(line)]
+        self.assertEqual([], hits, "the door names a path under bundle/, which "
+                         "no install carries:\n  " + "\n  ".join(hits))
+
+    def test_every_plugin_path_the_door_and_its_references_name_ships(self):
+        """THE INSTALL ONLY CHECK: a path spelled from the plugin root
+        (skills/..., runtime/..., commands/...), bare or behind a plugin root
+        variable, is opened or run by an installed session, so it exists
+        under bundle/, which is all an install carries."""
+        files = [os.path.join(BUNDLE_DIR, "commands", "brother.md")] + using_brother_reference_files()
+        named, hits = 0, []
+        for path in files:
+            for n, line in self.numbered(path):
+                for rel in PLUGIN_PATH.findall(line):
+                    named += 1
+                    if not os.path.isfile(os.path.join(BUNDLE_DIR, rel)):
+                        hits.append("%s:%d: %s does not ship (no bundle/%s)" % (
+                            os.path.relpath(path, REPO_ROOT), n, rel, rel))
+        self.assertGreaterEqual(named, 4, "the scan found %d plugin path(s) in "
+                                "the door and its references; a scan that "
+                                "reads nothing proves nothing" % named)
+        self.assertEqual([], hits, "a path an installed session is told to "
+                         "open or run does not ship:\n  " + "\n  ".join(hits))
+
+    def test_a_scripts_path_in_the_references_is_only_the_checkout_spelling(self):
+        """WHY intake.md's `scripts/annotations_store.py add <record>.json`
+        slipped through until 2026-10-06: the check above it reads only a
+        mention that follows the word python3, and accepts it whenever the
+        mirror exists, so a bare `scripts/<name>.py` an install cannot open
+        passed twice over. No install carries scripts/. A scripts/ path may
+        stand in a reference only as the stated checkout spelling (the SAME
+        line says "checkout"); the path an install opens is spelled from the
+        plugin root and is held to shipping by the check above. A GENERATED
+        line is provenance for a maintainer, never an instruction."""
+        files = using_brother_reference_files()
+        self.assertTrue(files, "no references/*.md found under %s"
+                        % USING_BROTHER_REFS_DIR)
+        seen, hits = 0, []
+        for path in files:
+            for n, line in self.numbered(path):
+                if "GENERATED" in line:
+                    continue
+                for name in SCRIPTS_PATH.findall(line):
+                    seen += 1
+                    if "checkout" not in line:
+                        hits.append("%s:%d: scripts/%s is named as if an install "
+                                    "carried it" % (os.path.relpath(path, REPO_ROOT), n, name))
+        self.assertGreaterEqual(seen, 1, "the scan found no scripts/ mention at "
+                                "all; a scan that reads nothing proves nothing")
+        self.assertEqual([], hits, "using-brother references a scripts/ path "
+                         "an install cannot open:\n  " + "\n  ".join(hits))
+
+    def test_the_launcher_ships_executable(self):
+        """The door runs "<plugin root>/runtime/brother-run" directly, so a
+        launcher without its executable bit is a launcher that does not
+        start. scripts/bundle_runtime.py sets the bit when it writes the
+        file (os.chmod 0o755); its --check compares bytes and would not
+        notice the bit lost, so this does."""
+        launcher = os.path.join(RUNTIME_DIR, "brother-run")
+        self.assertTrue(os.path.isfile(launcher), "the launcher does not ship")
+        self.assertTrue(os.access(launcher, os.X_OK), "the shipped launcher "
+                        "%s is not executable" % launcher)
+
+    def schema_named_where_it_ships(self, name):
+        text = "\n".join(line for _n, line in
+                         self.numbered(os.path.join(USING_BROTHER_REFS_DIR, name)))
+        self.assertIn("`runtime/outcome-contract-v1.json`", text, "references/"
+                      "%s does not name the schema where it ships" % name)
+        self.assertTrue(
+            os.path.isfile(os.path.join(RUNTIME_DIR, "outcome-contract-v1.json")),
+            "the schema references/%s names does not ship (no "
+            "bundle/runtime/outcome-contract-v1.json)" % name)
+
+    def test_the_intake_reference_names_the_schema_where_it_ships(self):
+        """references/intake.md named the contract schema only at
+        docs/schema/outcome-contract-v1.json, which no install carries; it
+        ships at runtime/outcome-contract-v1.json."""
+        self.schema_named_where_it_ships("intake.md")
+
+    def test_the_router_reference_names_the_schema_where_it_ships(self):
+        """references/router-details.md carried the same docs/schema/ only
+        mention and was corrected with intake.md, but nothing read it: the
+        review of 2026-10-06 reverted it and every test stayed green."""
+        self.schema_named_where_it_ships("router-details.md")
+
     def test_the_maintainer_document_holds_the_cut_block(self):
         """The block was MOVED, not deleted: losing it is its own defect."""
         # MOVED 2026-09-10, and the move is the point. The 2026-09-10
@@ -143,6 +296,12 @@ class ShippedSurfaceIsPortable(unittest.TestCase):
         # allowlist entry carries.
         doc = os.path.join(REPO_ROOT, "docs", "maintainer",
                            "MAINTAINER-CLOSING-CEREMONY.md")
+        # docs/maintainer is never exported, so in the public tree there is no document to judge. The hub's
+        # edition marker (tracked in the hub, a hard exclude of every export) tells the two apart: where it is
+        # present the document MUST exist, where it is absent this case has nothing to read and says so.
+        if not os.path.exists(os.path.join(REPO_ROOT, ".brother-edition")):
+            self.skipTest("public export: docs/maintainer is not shipped here, so there is no maintainer "
+                          "document to judge; the hub tree, which carries .brother-edition, runs this case")
         self.assertTrue(os.path.exists(doc), "maintainer document missing: " + doc)
         try:
             with io.open(doc, encoding="utf-8") as fh:

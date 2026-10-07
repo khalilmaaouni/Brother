@@ -216,7 +216,7 @@ def build_probe_steps(repo_root, tmp_home):
         },
         {
             "name": "codex_plugin_marketplace_add",
-            "source": "scripts/brother_install.py:254",
+            "source": "scripts/brother_install.py ensure_marketplace()",
             "not_probed": True,
             "reason": ("compiled binary (the app-bundled codex CLI); this "
                        "repository cannot show its HTTP client honors "

@@ -54,4 +54,4 @@ will do if you say nothing.
 ## Invoking it on purpose
 
 This skill is meant to arrive on its own, which is the whole point of it.
-Invoke as /brothersbe:design. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.
+Invoke as /brother:brothersbe-design. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.

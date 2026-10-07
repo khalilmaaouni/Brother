@@ -540,7 +540,13 @@ class CodexTrustCommentTests(unittest.TestCase):
         ]) + "\n"
         doctor = _load("doctor_for_d3_toml_test", DOCTOR)
         count = doctor._count_trust_entries_by_toml(block)
-        self.assertEqual(count, 1)
+        if doctor.tomllib is None:
+            # Python 3.9 and 3.10 ship no tomllib: the contract there is
+            # None (the caller falls back to the line scan, asserted by the
+            # test below), never an AttributeError on the None placeholder.
+            self.assertIsNone(count)
+        else:
+            self.assertEqual(count, 1)
 
     def test_commented_block_does_not_inflate_line_scan_count(self):
         block = "\n".join([
@@ -1143,6 +1149,262 @@ class InstalledPluginNoGitTests(unittest.TestCase):
                 status = line.split("Vault", 1)[1].strip()
                 self.assertEqual(status, "NO-DATA")
         self.assertTrue(vault_line_found, out)
+
+
+# ---------------------------------------------------------------------------
+# --fix (2026-09-10). The surface is deliberately narrow: apply only what is
+# safe, local and reversible, print one command for everything else, and
+# never claim a repair was verified. These tests drive the real command as a
+# subprocess against a throwaway HOME and BROTHERME_CONFIG, the same way
+# every test above drives --status, plus two in-process tests that load
+# doctor.py by path where the fixture needs a branch a real machine cannot
+# reach (a fifteen-check install with nothing failing).
+# ---------------------------------------------------------------------------
+
+DOCTOR_MODULE = None
+
+
+def _doctor_module():
+    """doctor.py loaded by file path, once, for the two structural tests
+    below. Loading it runs no check and touches no config directory: the
+    module body only defines things. Mirrors this file's own _load and
+    doctor.py's own _load_top_level_module rather than putting its
+    directory on sys.path."""
+    global DOCTOR_MODULE
+    if DOCTOR_MODULE is None:
+        DOCTOR_MODULE = _load("doctor_for_fix_tests", DOCTOR)
+    return DOCTOR_MODULE
+
+
+def _run_fix(env_overrides, extra_args=(), cwd=None):
+    """`doctor.py --fix` as a real subprocess under an isolated environment,
+    the same shape and reasoning as _run_status above."""
+    env = {"PATH": os.environ.get("PATH", ""),
+          "PYTHONDONTWRITEBYTECODE": "1"}
+    env.update(env_overrides)
+    r = subprocess.run(
+        ["python3", "-B", DOCTOR, "--fix"] + list(extra_args),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        universal_newlines=True, timeout=300, env=env, cwd=cwd)
+    return r.returncode, r.stdout
+
+
+class FixRefusesIncompatibleFlags(unittest.TestCase):
+    """--fix prints an action report, not a check report, so combining it
+    with a flag that changes the check report is a usage error and not a
+    silently ignored word. Mirrors the guard --status already carries for
+    --json and --strict."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="doc-fix-flags-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.env = {"HOME": self.tmp,
+                   "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "claude"),
+                   "BROTHERME_CONFIG": os.path.join(self.tmp, "config.json")}
+
+    def test_fix_with_status_is_exit_2(self):
+        rc, out = _run_fix(self.env, ["--status"])
+        self.assertEqual(rc, 2, out)
+        self.assertIn("--fix cannot be combined", out)
+
+    def test_fix_with_json_is_exit_2(self):
+        rc, out = _run_fix(self.env, ["--json"])
+        self.assertEqual(rc, 2, out)
+        self.assertIn("--fix cannot be combined", out)
+
+    def test_fix_with_strict_is_exit_2(self):
+        rc, out = _run_fix(self.env, ["--strict"])
+        self.assertEqual(rc, 2, out)
+        self.assertIn("--fix cannot be combined", out)
+
+
+class FixAppliesTheOneSafeRemedy(unittest.TestCase):
+    """The vault directory: the only remedy in doctor.py that carries an
+    apply at all. Driven end to end through the real command, then driven a
+    SECOND time against the state the first run left, which is the whole
+    idempotence claim."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="doc-fix-vault-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.vault = os.path.join(self.tmp, "MyVault")
+        self.config = os.path.join(self.tmp, "config.json")
+        with io.open(self.config, "w", encoding="utf-8") as fh:
+            json.dump({"setup_complete": True, "vault_path": self.vault}, fh)
+        self.env = {"HOME": self.tmp,
+                   "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "claude"),
+                   "BROTHERME_CONFIG": self.config}
+
+    def test_missing_vault_is_created_then_left_alone(self):
+        self.assertFalse(os.path.isdir(self.vault))
+
+        rc, out = _run_fix(self.env)
+        self.assertNotEqual(rc, 0, out)  # something had to be done, so the
+        # repair is unverified until the next run; that is the exit rule.
+        self.assertIn("APPLIED", out)
+        self.assertIn("vault", out)
+        self.assertTrue(os.path.isdir(self.vault), out)
+        # Reversibility is not a claim, it is a printed instruction.
+        self.assertIn("delete that directory", out)
+        after_first = _snapshot(self.vault)
+        self.assertTrue(after_first, "the template copied nothing at all")
+
+        rc2, out2 = _run_fix(self.env)
+        self.assertNotIn("APPLIED", out2)
+        self.assertEqual(after_first, _snapshot(self.vault),
+                        "the second --fix changed the vault it had already "
+                        "created:\n%s" % out2)
+
+    def test_a_vault_that_already_exists_is_never_touched(self):
+        os.makedirs(self.vault)
+        keep = os.path.join(self.vault, "my-real-note.md")
+        with io.open(keep, "w", encoding="utf-8") as fh:
+            fh.write("work nobody may lose\n")
+        before = _snapshot(self.vault)
+
+        rc, out = _run_fix(self.env)
+        self.assertEqual(before, _snapshot(self.vault),
+                        "--fix wrote into an existing vault:\n%s" % out)
+
+
+class FixNeverAppliesAHumanOnlyRemedy(unittest.TestCase):
+    """The discipline, asserted structurally rather than trusted from a
+    comment: a remedy whose fix would install software, change a permission,
+    grant consent on the operator's behalf, or make a tamper detector agree
+    with the tamper carries NO apply, so --fix can only ever print it."""
+
+    def setUp(self):
+        self.doctor = _doctor_module()
+        self.tmp = tempfile.mkdtemp(prefix="doc-fix-human-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    @contextlib.contextmanager
+    def _config(self, payload):
+        path = os.path.join(self.tmp, "config.json")
+        if payload is not None:
+            with io.open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+        old = os.environ.get("BROTHERME_CONFIG")
+        os.environ["BROTHERME_CONFIG"] = path
+        try:
+            yield
+        finally:
+            if old is None:
+                os.environ.pop("BROTHERME_CONFIG", None)
+            else:
+                os.environ["BROTHERME_CONFIG"] = old
+
+    def test_an_unreadable_config_is_printed_never_reconfigured_for_you(self):
+        # Not "setup_complete": False: main() reads a fresh, never-initialized
+        # config as SKIP (the ordinary shape of a brand new install), and a
+        # SKIP is never a --fix target. FAIL here is a config that EXISTS and
+        # cannot be parsed, which is real breakage --fix must still not
+        # silently paper over by re-running setup on the operator's behalf.
+        path = os.path.join(self.tmp, "config.json")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        old = os.environ.get("BROTHERME_CONFIG")
+        os.environ["BROTHERME_CONFIG"] = path
+        try:
+            result = self.doctor.check_consent()
+        finally:
+            if old is None:
+                os.environ.pop("BROTHERME_CONFIG", None)
+            else:
+                os.environ["BROTHERME_CONFIG"] = old
+        self.assertEqual(result.status, self.doctor.STATUS_FAIL)
+        self.assertIsNotNone(result.remedy)
+        self.assertIsNone(result.remedy.apply,
+                         "a tool that reconfigures consent for the operator "
+                         "is the thing setup.py exists to refuse")
+        self.assertIn("setup.py", result.remedy.command)
+
+    def test_a_never_initialized_install_is_skip_not_a_fix_target(self):
+        # The companion fact to the test above: the SKIP branch (no config,
+        # or one explicitly not consented) carries no remedy at all, because
+        # --fix only ever acts on STATUS_FAIL rows.
+        with self._config({"setup_complete": False}):
+            result = self.doctor.check_consent()
+        self.assertEqual(result.status, self.doctor.STATUS_SKIP)
+        self.assertIsNone(result.remedy)
+
+    def test_an_unwritable_vault_is_printed_never_chmodded(self):
+        vault = os.path.join(self.tmp, "locked-vault")
+        os.makedirs(vault)
+        os.chmod(vault, 0o500)
+        self.addCleanup(os.chmod, vault, 0o700)
+        if os.access(vault, os.W_OK):
+            self.skipTest("this account can write a mode 500 directory "
+                          "(root, or a filesystem ignoring the mode), so "
+                          "the unwritable branch cannot be reached here")
+        with self._config({"setup_complete": True, "vault_path": vault}):
+            result = self.doctor.check_vault(
+                os.path.dirname(os.path.dirname(DOCTOR)))
+        self.assertEqual(result.status, self.doctor.STATUS_FAIL)
+        self.assertIsNone(result.remedy.apply,
+                         "changing a permission is on the never list")
+        self.assertIn("chmod", result.remedy.command)
+
+    def test_the_vault_remedy_refuses_a_directory_that_exists(self):
+        vault = os.path.join(self.tmp, "already-here")
+        os.makedirs(vault)
+        apply = self.doctor._apply_vault_from_template(
+            os.path.dirname(os.path.dirname(DOCTOR)), vault)
+        changed, detail = apply()
+        self.assertFalse(changed)
+        self.assertIn("already exists", detail)
+
+
+class FixOnAHealthyInstallDoesNothing(unittest.TestCase):
+    """A fifteen-check install with nothing failing is not a state a
+    fixture can build here (check 1 alone needs a real wired fence and a
+    real plugin loader), so this drives main_fix in process against a
+    check list that has no failures, which is the only fact the claim
+    depends on."""
+
+    def setUp(self):
+        self.doctor = _doctor_module()
+
+    def test_no_failing_check_means_no_action_and_exit_zero(self):
+        d = self.doctor
+        healthy = [d.CheckResult("consent", "setup has been completed",
+                                d.STATUS_PASS, "PASS: fine"),
+                  d.CheckResult("store", "project store health",
+                               d.STATUS_SKIP, "SKIP: no store here")]
+        real = d.run_all_checks
+        d.run_all_checks = lambda _path: healthy
+        buf = io.StringIO()
+        real_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            rc = d.main_fix("/nowhere/settings.json")
+        finally:
+            sys.stdout = real_stdout
+            d.run_all_checks = real
+        out = buf.getvalue()
+        self.assertEqual(rc, d.EXIT_OK, out)
+        self.assertIn("Nothing to do", out)
+        self.assertNotIn("APPLIED", out)
+        self.assertNotIn("NEEDS YOU", out)
+
+
+class FixSaysWhatItWillNeverDo(unittest.TestCase):
+    """The refusal list is printed on every --fix run, healthy or not: a
+    promise a user has to read the source to find is not a promise they
+    can hold the tool to."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="doc-fix-promise-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.env = {"HOME": self.tmp,
+                   "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "claude"),
+                   "BROTHERME_CONFIG": os.path.join(self.tmp, "config.json")}
+
+    def test_every_run_prints_the_never_list(self):
+        rc, out = _run_fix(self.env)
+        for promise in ("install software", "change permissions",
+                        "touch a credential", "push"):
+            self.assertIn(promise, out)
 
 
 if __name__ == "__main__":

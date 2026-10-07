@@ -1,0 +1,9 @@
+{
+  "toolCall": {
+    "name": "run_command",
+    "args": {
+      "CommandLine": "ls -la"
+    }
+  },
+  "stepIdx": 1
+}

@@ -61,7 +61,11 @@ WHAT IT DOES, in order:
      the 15 minute load average (gate_timeout), never a fixed 120 seconds,
      and a gate that runs out of that time reads NO-DATA, naming the load
      and the seconds, never FAIL: a check that could not finish has not
-     failed the tree.
+     failed the tree. Every gate is launched in the world gate_world
+     describes, its cwd inside the candidate tree it checks and never the
+     hub root; a world that cannot be built (absent, the hub, still marked
+     half built) is gate_refusal's one NO-DATA line at exit 2, never a
+     verdict (T1.3).
 
   4. Prints every gate's own verdict, and the count of paths it copied
      (what it WOULD export), whether or not the gates cleared.
@@ -114,6 +118,7 @@ WHAT IT DOES, in order:
 Python 3, standard library only. No network beyond git's own fetch/push.
 """
 import argparse
+import collections.abc
 import difflib
 import glob
 import importlib.util
@@ -125,11 +130,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import typing
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import edition_guard  # noqa: E402
+from git_location_guard import GIT_LOCATION_VARS  # noqa: E402
 
 # J064, wave-1 Jev seam ("Gate/CI/PR log-line classification"): optional,
 # fail-open, same discipline as every other jev_checks/jev_seam import in
@@ -347,10 +354,108 @@ def gate_timeout(load15=None, cores=None, floor=None, cap=None):
     return min(cap, int(floor * scale))
 
 
+def _git_env(env=None):
+    """`env` (or this process's environment) without the git location
+    variables, so cwd alone decides which repository every git command
+    here touches. Measured 2026-09-30: building the export tree with
+    GIT_DIR inherited (as it is inside any git hook, pre-push included) made
+    checksums.sh read the hub's index instead of the export tree ("FAILED to
+    regenerate products/brothersbe/CHECKSUMS.sha256", the stale manifest
+    shipped) and made the export's own `git init` reinitialize the HUB's
+    repository as bare (core.bare true), breaking every worktree."""
+    clean = dict(os.environ if env is None else env)
+    for name in GIT_LOCATION_VARS:
+        clean.pop(name, None)
+    return clean
+
+
+#: T1.4 (docs/plan/specs/T1.md, RQ-08 and RQ-09): the git variables a git
+#: hook hands every process it starts. Any one of them left in a gate's
+#: environment makes that gate's git read the repository the hook ran in
+#: (the hub) instead of the clone the gate names. Exactly these six, in this
+#: order; every one is also in GIT_LOCATION_VARS, which _run strips again.
+HOOK_GIT_VARS: typing.Tuple[str, ...] = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
+
+def hook_safe_env(env: typing.Mapping[str, str]) -> typing.Dict[str, str]:
+    """A copy of env with every hook inherited git variable removed, so a
+    sweep launched from a git hook reads the clone it names and not the
+    repository the hook ran in.
+
+    Removed by NAME, never by value: a variable whose value is empty, names
+    a bare repository, or already names the clone itself is removed all the
+    same, because empty is not absent and a value is not a reason to keep
+    a name. Every other name keeps its value. Always a NEW dict, `env` is
+    never changed in place, so two hooks firing at once each get their own
+    copy. Raises ValueError, never returns a mapping, for an env that is
+    not one of str names to str values (None, a str, a list, a bool, a
+    number, a non-str name or value): a launch environment that cannot be
+    read is never a safe one."""
+    if not isinstance(env, collections.abc.Mapping):
+        raise ValueError("hook_safe_env: env must be a mapping of str names "
+                         "to str values; got a %s" % type(env).__name__)
+    try:
+        items = list(env.items())
+    except Exception as exc:  # noqa: BLE001 re-raised as ValueError below
+        raise ValueError("hook_safe_env: env could not be read (%s: %s)"
+                         % (type(exc).__name__, exc))
+    clean = {}
+    for name, value in items:
+        if not isinstance(name, str) or not isinstance(value, str):
+            raise ValueError("hook_safe_env: env must map str names to str "
+                             "values; got a %s name holding a %s"
+                             % (type(name).__name__, type(value).__name__))
+        if name in HOOK_GIT_VARS:
+            continue
+        clean[name] = value
+    return clean
+
+
+def env_refusal(env: typing.Mapping[str, str]) -> typing.Optional[str]:
+    """The NO-DATA reason when env still carries a hook git variable after
+    stripping, or None when it carries none.
+
+    The assertion that runs after hook_safe_env: a caller that hands a gate
+    the raw hook environment, or a strip that missed a name, is refused
+    here instead of silently probing the hub. Checked by name, so a
+    surviving variable refuses whatever its value, an empty one included.
+    An env that cannot be read (not a mapping, a non-str name or value)
+    is a NO-DATA reason too, never None: only an env known clean is None."""
+    if not isinstance(env, collections.abc.Mapping):
+        return ("NO-DATA: the gate environment is a %s, not a mapping of "
+                "names to values, so it cannot be shown free of the hook "
+                "git variables" % type(env).__name__)
+    try:
+        items = list(env.items())
+    except Exception as exc:  # noqa: BLE001 an unreadable env is NO-DATA
+        return ("NO-DATA: the gate environment could not be read (%s), so "
+                "it cannot be shown free of the hook git variables"
+                % type(exc).__name__)
+    for name, value in items:
+        if not isinstance(name, str) or not isinstance(value, str):
+            return ("NO-DATA: the gate environment holds a %s name with a "
+                    "%s value, so it cannot be shown free of the hook git "
+                    "variables" % (type(name).__name__, type(value).__name__))
+    survivors = [name for name in HOOK_GIT_VARS if name in env]
+    if survivors:
+        return ("NO-DATA: the gate environment still carries %s after "
+                "stripping, so the sweep would read the repository the hook "
+                "ran in, not the clone it names; refused rather than run"
+                % ", ".join(survivors))
+    return None
+
+
 def _run(cmd, cwd, env=None, timeout=120):
     try:
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                               env=env, timeout=timeout)
+                               env=_git_env(env), timeout=timeout)
     except subprocess.TimeoutExpired:
         class _TimedOut:
             returncode = 2  # this estate's NO-DATA exit code
@@ -394,7 +499,7 @@ def hub_head_rev(root=ROOT):
     built from `root` right now is cut from. None when this checkout has
     no readable git history, NO-DATA rather than a crash."""
     proc = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env=_git_env())
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
@@ -462,7 +567,7 @@ def _tracked_files_under(root, rel):
     because someone force-added them in the hub; ls-files reports them
     same as any other tracked path)."""
     proc = subprocess.run(["git", "-C", root, "ls-files", "-z", "--", rel],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env=_git_env())
     if proc.returncode != 0 or not proc.stdout:
         return []
     return [p for p in proc.stdout.split("\0") if p]
@@ -486,11 +591,20 @@ def build_export_tree(dest, allowlist, root=ROOT):
         if not tracked:
             continue
         for tracked_rel in tracked:
+            src = os.path.join(root, tracked_rel)
             dst = os.path.join(dest, tracked_rel)
             parent = os.path.dirname(dst)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            shutil.copy2(os.path.join(root, tracked_rel), dst)
+            if os.path.islink(src):
+                # A tracked symlink ships as the same link, never as a copy
+                # of its target: bundle/.antigravity-plugin/skills points at
+                # ../skills (2026-09-30), and copy2 on a link to a directory
+                # raises "Is a directory", which read as NO-DATA at the
+                # pre-push gate. The link text is what git tracks.
+                os.symlink(os.readlink(src), dst)
+            else:
+                shutil.copy2(src, dst)
         copied.append(rel)
     # The denylist is an INPUT of the tree being built, exactly as the
     # allowlist is, so it is read from `root` and never from whatever this
@@ -913,7 +1027,21 @@ def run_gate(cmd, cwd, name, env=None, timeout=None, load15=None):
     has not certified it, and the verdict line says so as NO-DATA, naming
     the load and the seconds, never FAIL. `timeout` and `load15` are read
     at call time when left None (load15 falls back to os.getloadavg()
-    inside gate_timeout, guarded there for platforms without it)."""
+    inside gate_timeout, guarded there for platforms without it).
+
+    T1.4: the gate is handed hook_safe_env's copy of `env` (this process's
+    own environment when None), never `env` itself, so a sweep launched
+    from a git hook reads the clone it names and not the hub the hook ran
+    in. env_refusal then checks that copy before anything launches: an env
+    that still carries a hook git variable, or cannot be read at all, is
+    one NO-DATA line at exit 2 and the gate never starts."""
+    try:
+        gate_env = hook_safe_env(os.environ if env is None else env)
+    except ValueError as exc:
+        return False, "%s: exit %d, NO-DATA: %s" % (name, EXIT_NODATA, exc)
+    leftover = env_refusal(gate_env)
+    if leftover is not None:
+        return False, "%s: exit %d, %s" % (name, EXIT_NODATA, leftover)
     if load15 is None:
         try:
             load15 = os.getloadavg()[2]
@@ -921,7 +1049,7 @@ def run_gate(cmd, cwd, name, env=None, timeout=None, load15=None):
             load15 = None
     if timeout is None:
         timeout = gate_timeout(load15=load15)
-    proc = _run(cmd, cwd, env=env, timeout=timeout)
+    proc = _run(cmd, cwd, env=gate_env, timeout=timeout)
     text = ((proc.stdout or "") + (proc.stderr or "")).strip()
     verdict = text.splitlines()[-1] if text else "(no output)"
     if proc.returncode == 2 and verdict.startswith("NO-DATA: timed out"):
@@ -934,6 +1062,185 @@ def run_gate(cmd, cwd, name, env=None, timeout=None, load15=None):
                         GATE_TIMEOUT_CAP_SECONDS))
     return proc.returncode == 0, "%s: exit %s, %s" % (
         name, proc.returncode, verdict)
+
+
+#: T1.3 (docs/plan/specs/T1.md, RQ-06 and RQ-07). A candidate tree carries
+#: this EMPTY directory at its top while it is being built (_claim_world).
+#: os.mkdir is the one exclusive create every platform gives, so of two
+#: exports racing over one directory exactly one claims it; and git never
+#: tracks an empty directory, so the marker can never ride into the orphan
+#: commit the gates scan. A tree that still carries it, or sits below a
+#: directory that does, is half built by a racing export or was left by a
+#: crashed earlier run, and gate_world refuses it rather than reusing it.
+GATE_WORLD_MARKER = ".brother-gate-world-building"
+
+#: A gate name: one lowercase identifier, optionally one space and the
+#: subject it checks ("battery_inventory products/brothersbe"). No verdict
+#: word (PASS, FAIL, NO-DATA) can open it and no control character or line
+#: break can sit in it, so a refusal line built from it is one line that
+#: can never start like a pass.
+GATE_NAME_RE = re.compile(
+    r"\A[a-z][a-z0-9_]*(?: [^\x00-\x1f\x7f-\x9f\u2028\u2029]+)?\Z")
+
+
+def gate_world(tree_root, gate_name):
+    """The launch description for one gate: cwd always inside tree_root and
+    never the hub root, because a check run in a different world than its
+    judge proves nothing.
+
+    Returns {"gate", "tree_root", "cwd"}, every value a str. cwd is the
+    RESOLVED tree_root itself (symlinks followed), so the directory checked
+    here is the directory the gate is launched in. Raises ValueError, never
+    returns a world, when the world cannot be built: a gate name or a tree
+    path that is not a string of the right shape (None, a bool, a number, a
+    list, bytes, a relative path, which would resolve against wherever this
+    process happens to stand); a tree that does not exist yet; the hub root,
+    or any directory holding it; a tree carrying the hub's own boundary
+    (HARD_EXCLUDE: editions/ or .brother-edition, which an export never
+    carries), so a second checkout of the hub is refused too; and a tree
+    still carrying GATE_WORLD_MARKER, on itself or on any directory above
+    it. The caller turns the ValueError into gate_refusal, NO-DATA, exit 2.
+
+    Read from disk on EVERY call, never cached: a gate that already ran in
+    this process is described and run again, because a verdict remembered
+    from an earlier call is a check run in a different world."""
+    if not isinstance(gate_name, str) or not GATE_NAME_RE.match(gate_name):
+        raise ValueError("gate_world: a gate name is one lowercase name, "
+                         "optionally followed by its subject; got a %s "
+                         "that is not one" % type(gate_name).__name__)
+    if (not isinstance(tree_root, str) or not tree_root.strip()
+            or "\x00" in tree_root or not os.path.isabs(tree_root)):
+        raise ValueError("%s: the candidate tree must be an absolute path; "
+                         "got a %s that is not one, so there is no world "
+                         "to run the gate in"
+                         % (gate_name, type(tree_root).__name__))
+    real = os.path.realpath(tree_root)
+    if not os.path.isdir(real):
+        raise ValueError("%s: the candidate tree %s does not exist yet, so "
+                         "there is no world to run the gate in"
+                         % (gate_name, tree_root))
+    hub = os.path.realpath(ROOT)
+    if real == hub or hub.startswith(real.rstrip(os.sep) + os.sep):
+        raise ValueError("%s: %s is the hub root or holds it; a gate runs in "
+                         "the candidate export tree, never in the hub"
+                         % (gate_name, tree_root))
+    for boundary in sorted(HARD_EXCLUDE):
+        if os.path.lexists(os.path.join(real, boundary)):
+            raise ValueError("%s: %s carries %s, the hub's own boundary that "
+                             "an export never carries, so it is a hub and "
+                             "never a candidate export tree"
+                             % (gate_name, tree_root, boundary))
+    probe = real
+    while True:
+        marker = os.path.join(probe, GATE_WORLD_MARKER)
+        if os.path.lexists(marker):
+            raise ValueError("%s: %s is still marked %s: a racing export is "
+                             "building it or a crashed earlier run left it "
+                             "half built, so it is refused rather than read "
+                             "or reused" % (gate_name, tree_root, marker))
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    return {"gate": gate_name, "tree_root": real, "cwd": real}
+
+
+def gate_refusal(gate_name, reason):
+    """The refusal a gate returns when its world cannot be built: exit 2 and
+    one NO-DATA line naming the gate and the reason.
+
+    The line has run_gate's own shape ("<gate>: exit 2, NO-DATA: <reason>"),
+    so every reader of gate lines reads it the way it reads a gate that ran
+    and reported NO-DATA. Never raises, because it IS the refusal path: a
+    gate name that is not one (GATE_NAME_RE) is replaced by a placeholder
+    naming its type, and a reason that is not a non-empty string by one
+    saying none was given. Line breaks and control characters in the
+    reason are folded into single spaces, so the refusal is always exactly
+    one line. Returns (EXIT_NODATA, line); never EXIT_OK, never a PASS."""
+    if isinstance(gate_name, str) and GATE_NAME_RE.match(gate_name):
+        name = gate_name
+    else:
+        name = "unnamed gate (a %s, not a gate name)" % type(gate_name).__name__
+    text = ""
+    if isinstance(reason, str):
+        text = " ".join("".join(c if c.isprintable() else " "
+                                for c in reason).split())
+    if not text:
+        text = ("the gate's world could not be built and no reason was "
+                "given (a %s)" % type(reason).__name__)
+    return EXIT_NODATA, "%s: exit %d, NO-DATA: %s" % (name, EXIT_NODATA, text)
+
+
+def _world_for(tree_root, gate_name):
+    """(gate_world's description, None), or (None, gate_refusal's line)
+    when the world cannot be built: the one place a caller turns the
+    ValueError into the NO-DATA line it returns instead of a verdict."""
+    try:
+        return gate_world(tree_root, gate_name), None
+    except ValueError as exc:
+        return None, gate_refusal(gate_name, str(exc))[1]
+
+
+def _missing_gate_program(cmd, cwd):
+    """The program a gate's argv names that is not there, or None: the
+    binary (cmd[0], looked up on PATH unless absolute) and, when cmd[1] is
+    a .py or .sh script, that script relative to the gate's cwd. A gate
+    whose program is missing refuses at NO-DATA before anything launches,
+    never a crash and never an exit that reads like a finding."""
+    if not cmd or not isinstance(cmd[0], str) or not cmd[0]:
+        return "(no program named)"
+    if shutil.which(cmd[0]) is None:
+        return cmd[0]
+    if (len(cmd) > 1 and isinstance(cmd[1], str)
+            and cmd[1].endswith((".py", ".sh"))
+            and not os.path.isfile(os.path.join(cwd, cmd[1]))):
+        return cmd[1]
+    return None
+
+
+def _gate_in_world(cmd, tree_root, name, env=None):
+    """run_gate, launched only in the world gate_world describes for
+    `tree_root`: (ok, verdict_line), the gate_refusal line in place of a
+    verdict when the world cannot be built or its program is missing."""
+    world, refused = _world_for(tree_root, name)
+    if refused:
+        return False, refused
+    missing = _missing_gate_program(cmd, world["cwd"])
+    if missing:
+        return False, gate_refusal(
+            name, "its program %s is not there, so %s could not run in its "
+            "world %s" % (missing, name, world["cwd"]))[1]
+    return run_gate(cmd, world["cwd"], name, env=env)
+
+
+def _claim_world(tree_root, gate_name):
+    """Mark `tree_root` half built (GATE_WORLD_MARKER) before anything is
+    copied into it, and return the marker's path for _release_world. Raises
+    ValueError when gate_world refuses the tree, and when another export
+    claimed it first: of two exports racing over one directory, the loser
+    refuses rather than building into, or reading, a half built tree."""
+    world = gate_world(tree_root, gate_name)
+    marker = os.path.join(world["tree_root"], GATE_WORLD_MARKER)
+    try:
+        os.mkdir(marker)
+    except FileExistsError:
+        raise ValueError("%s: %s was claimed by another export first; the "
+                         "loser refuses rather than reading a half built "
+                         "tree" % (gate_name, tree_root))
+    except OSError as exc:
+        raise ValueError("%s: %s could not be marked as being built (%s)"
+                         % (gate_name, tree_root, exc))
+    return marker
+
+
+def _release_world(marker):
+    """Remove the marker _claim_world made, once the tree is fully built. A
+    marker that cannot be removed stays, and every gate then refuses that
+    tree at NO-DATA naming it: never a pass over a tree not known whole."""
+    try:
+        os.rmdir(marker)
+    except OSError:
+        pass  # sbe: allow-silent the marker that stays makes gate_world refuse every gate at NO-DATA, naming it
 
 
 def build_identity_check_dir(identity_dir, allowlist, remote, branch, root=ROOT):
@@ -1190,6 +1497,36 @@ def wants_required_fast(args):
                 or (args.push and not args.skip_required_fast))
 
 
+def pair_halves_missing(tree_dir):
+    """Every client parity pair (scripts/client_parity.py PAIRS and
+    ANTIGRAVITY_PAIRS) whose NON-codex half is in `tree_dir` while its codex
+    half is not, as "codex -> other" strings. Empty means every pair present
+    is whole.
+
+    WHY, measured 2026-09-30: commit b68959637 allowlisted the five
+    Antigravity plugin files because the exported install guide sends a
+    reader to them, and never the plugin/.codex-plugin/plugin.json that
+    ANTIGRAVITY_PAIRS bound them to at the time (that plugin/ manifest is
+    deleted by OP1.c, 2026-10-04; the pair now binds the bundle manifests).
+    run_gates only runs client_parity over
+    the candidate tree when docs/codex is in it, so the half pair shipped
+    silently until the hermetic pre-push check ran test_client_parity.py
+    on the export tree and refused a push that had merely touched the
+    parity table. This check reads the BUILT tree, the same tree a public
+    reader gets, and it runs whether or not docs/codex is in it."""
+    try:
+        import client_parity  # noqa: E402  beside this file under scripts/
+    except ImportError:
+        return ["NO-DATA: scripts/client_parity.py is not importable, so the pairs could not be read"]
+    missing = []
+    pairs = list(client_parity.ANTIGRAVITY_PAIRS.items()) + list(client_parity.PAIRS.items())
+    for codex_rel, other_rel in pairs:
+        if (os.path.exists(os.path.join(tree_dir, other_rel))
+                and not os.path.exists(os.path.join(tree_dir, codex_rel))):
+            missing.append("%s -> %s" % (codex_rel, other_rel))
+    return sorted(set(missing))
+
+
 def run_gates(export_dir, identity_dir, baseline_dir=None):
     """cleanse.sh and private_terms_scan.py against the CANDIDATE EXPORT
     TREE (the orphan commit in `export_dir`); identity_guard.py against its
@@ -1214,21 +1551,32 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
     ships one (BATTERY_GLOB): a battery whose SUITES names a file the
     export withholds refuses to start, and that refusal belongs here, at
     export time, never on a public reader's screen. Returns (all_ok,
-    [verdict lines])."""
+    [verdict lines]).
+
+    T1.3: every subprocess gate is launched through _gate_in_world, so its
+    cwd is the world gate_world describes, inside the candidate tree it
+    checks and never the hub root, and a world that cannot be built (or a
+    gate program that is not there) is a gate_refusal line, NO-DATA, exit
+    2. A candidate tree that cannot be built at all gets ONLY that refusal
+    and no verdict: the in-process checks below would read a missing or
+    half built tree as zero findings and print PASS for it."""
+    _, refused = _world_for(export_dir, "candidate_tree")
+    if refused:
+        return False, [refused]
     terms_file = (os.environ.get("BROTHER_PRIVATE_TERMS")
                   or DEFAULT_TERMS_FILE)
     gate_env = dict(os.environ)
     gate_env["BROTHER_PRIVATE_TERMS"] = terms_file
     export_cleanse = os.path.join(export_dir, "scripts", "cleanse.sh")
     checks = []
+    refusals = []
     if os.path.isfile(export_cleanse):
         checks.append(("cleanse", ["bash", export_cleanse], export_dir))
     else:
-        checks.append(("cleanse", [
-            "bash", "-c",
-            "echo 'NO-DATA: scripts/cleanse.sh is not in the candidate "
-            "export tree (scripts/ is not allowlisted), so cleanse could "
-            "not run against it'; exit 2"], export_dir))
+        refusals.append(gate_refusal(
+            "cleanse", "scripts/cleanse.sh is not in the candidate export "
+            "tree (scripts/ is not allowlisted), so cleanse could not run "
+            "against it")[1])
     checks.append(("identity_guard",
                     [sys.executable, os.path.join(ROOT, "scripts",
                                                    "identity_guard.py")],
@@ -1261,10 +1609,10 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
                         "--check-only"],
                        product_dir))
 
-    all_ok = True
-    lines = []
-    for name, cmd, cwd in checks:
-        ok, verdict = run_gate(cmd, cwd, name, env=gate_env)
+    all_ok = not refusals
+    lines = list(refusals)
+    for name, cmd, tree in checks:
+        ok, verdict = _gate_in_world(cmd, tree, name, env=gate_env)
         lines.append(verdict)
         all_ok = all_ok and ok
     if not batteries:
@@ -1277,6 +1625,18 @@ def run_gates(export_dir, identity_dir, baseline_dir=None):
     secrets_ok, secrets_lines = check_secrets(export_dir, baseline_dir)
     lines.extend(secrets_lines)
     all_ok = all_ok and secrets_ok
+
+    # A parity pair whose codex half the export drops is a defect of the
+    # export, not of the parity table: refused here, at export time.
+    halves = pair_halves_missing(export_dir)
+    if halves:
+        all_ok = False
+        lines.append("FAIL client_parity_pairs: the candidate tree carries the non-codex "
+                     "half of %d pair(s) without the codex half: %s"
+                     % (len(halves), "; ".join(halves)))
+    else:
+        lines.append("PASS client_parity_pairs: every client parity pair present in the "
+                     "candidate tree is whole")
 
     # J064: recorded only, never a vote, fired AFTER all_ok/lines are fully
     # computed above -- never before, never read back into either. Same
@@ -1428,6 +1788,30 @@ def wait_for_required_fast(pr_ref, repo=REQUIRED_CHECK_REPO, cwd=None,
         sleep(REQUIRED_CHECK_POLL_SECONDS)
 
 
+#: How long a pull request whose merge call failed is watched for MERGED.
+MERGE_STATE_POLLS = 6
+MERGE_STATE_POLL_SECONDS = 10
+
+
+def pull_request_state(pr_ref, cwd, run=None, sleep=None):
+    """The pull request's state as the host reports it: "MERGED", "OPEN",
+    "CLOSED", or None when it cannot be read. Polled for up to a minute,
+    because "merge already in progress" means exactly that. Anything but a
+    clean MERGED answer leaves the caller refusing, as before."""
+    run = run or _run
+    sleep = sleep or time.sleep
+    state = None
+    for attempt in range(MERGE_STATE_POLLS):
+        proc = run([GH_BIN, "pr", "view", pr_ref, "--json", "state",
+                    "-q", ".state"], cwd)
+        state = (proc.stdout or "").strip() if proc.returncode == 0 else None
+        if state in ("MERGED", "CLOSED") or state is None:
+            return state
+        if attempt + 1 < MERGE_STATE_POLLS:
+            sleep(MERGE_STATE_POLL_SECONDS)
+    return state
+
+
 def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                    bootstrap=False, run=None, require_signed=False,
                    wait_sleep=None, wait_clock=None):
@@ -1450,7 +1834,8 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     with any branch, `branch` itself included, still refuses bootstrap and
     takes the pull request route like everything else.
 
-    With `tag`, tag_time_checks runs over the built export tree before the
+    With `tag`, a tag of that name already on `remote` refuses first, and
+    tag_time_checks runs over the built export tree before the
     commit, and any finding refuses the whole push: nothing pushed, nothing
     opened, nothing merged, nothing tagged. The tag is cut from the MERGED
     tip of `branch`, fetched back after the merge, never from the local
@@ -1527,6 +1912,30 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                 return EXIT_REFUSED, lines
 
         if tag:
+            # AN EXISTING TAG REFUSES HERE, before anything is stamped,
+            # built or pushed. The tag push below is rejected only when the
+            # re-created tag object DIFFERS from the one on the remote; a
+            # rerun inside the same second (same name, message, target and
+            # tagger time) builds a byte-identical object, git answers
+            # "Everything up-to-date" with exit 0, and the run reported
+            # TAGGED for a tag it never made (measured 2026-09-26: 3 of 3
+            # with GIT_COMMITTER_DATE pinned). An unreadable answer refuses
+            # too: an unknown is never read as "no tag".
+            listed = run(["git", "ls-remote", "--tags", remote,
+                          "refs/tags/%s" % tag], d)
+            if listed.returncode != 0:
+                lines.append("REFUSED: could not check %s for an existing "
+                              "%s (%s); nothing was pushed and nothing was "
+                              "tagged" % (remote, tag,
+                                          (listed.stderr or "").strip()))
+                return EXIT_REFUSED, lines
+            if (listed.stdout or "").strip():
+                lines.append("REFUSED: %s already exists on %s; an existing "
+                              "tag is never moved, this exporter never "
+                              "--force pushes, and nothing was pushed or "
+                              "tagged" % (tag, remote))
+                return EXIT_REFUSED, lines
+
             # E6.1a, release time: stamp the hub revision this release is
             # cut from into its own release record, in the hub's own
             # working tree, BEFORE the copy below carries it into the
@@ -1570,92 +1979,123 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                               "and nothing was tagged")
                 return EXIT_REFUSED, lines
         status = run(["git", "status", "--porcelain"], d)
-        if not (status.stdout or "").strip():
+        already_merged = not (status.stdout or "").strip()
+        if already_merged:
             lines.append("nothing to push: the export tree already "
                           "matches %s's current tip" % branch)
-            return EXIT_OK, lines
-        author = "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL)
-        run(["git", "commit", "-q", "--author", author, "-m",
-              COMMIT_MESSAGE], d)
+            if not tag:
+                return EXIT_OK, lines
+            # MERGED BUT NEVER TAGGED. Measured 2026-09-20 on the 1.0.21
+            # cut: the release pull request merged, `gh pr merge` answered
+            # "Merge already in progress" with exit 1, and the run ended
+            # with the release on the branch and no tag. A rerun lands
+            # here. The proof that the branch's tip IS this release is the
+            # line above (this tree, rebuilt on top of that tip, leaves
+            # nothing to commit) and the tag-time checks that just passed
+            # on it, so the tag block below runs; an existing tag of the
+            # same name already refused near the top, never moves.
+            lines.append("RESUME: %s is asked for and %s's tip already is "
+                          "this export, so only the tag remains"
+                          % (tag, branch))
+        else:
+            author = "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL)
+            run(["git", "commit", "-q", "--author", author, "-m",
+                  COMMIT_MESSAGE], d)
 
         env = dict(os.environ)
         env[edition_guard.EXPORT_ENV] = edition_guard.EXPORT_MARK
         lines.append("%s=%s set for this push, the exporter's own marked "
                       "invocation" % (edition_guard.EXPORT_ENV,
                                        edition_guard.EXPORT_MARK))
-        head = run(["git", "rev-parse", "HEAD"], d)
-        export_rev = (head.stdout or "").strip()
-        # bootstrap writes the branch itself, because an empty repository
-        # has no protected branch to open a pull request against; every
-        # other export writes its own branch and asks for a merge.
-        target = branch if bootstrap else release_branch_name(tag, export_rev)
-        push = run(["git", "push", remote, "HEAD:refs/heads/%s" % target],
-                    d, env=env)
-        if (push.stdout or "").strip():
-            lines.append((push.stdout or "").strip())
-        if (push.stderr or "").strip():
-            lines.append((push.stderr or "").strip())
-        if push.returncode != 0:
-            lines.append("REFUSED: the push itself was rejected by the "
-                          "remote (likely not a fast-forward, or a "
-                          "connectivity problem). This exporter never "
-                          "--force pushes.")
-            return EXIT_REFUSED, lines
-        lines.append("PUSHED: one commit appended to %s %s" % (remote, target))
+        if not already_merged:
+            head = run(["git", "rev-parse", "HEAD"], d)
+            export_rev = (head.stdout or "").strip()
+            # bootstrap writes the branch itself, because an empty repository
+            # has no protected branch to open a pull request against; every
+            # other export writes its own branch and asks for a merge.
+            target = branch if bootstrap else release_branch_name(tag, export_rev)
+            push = run(["git", "push", remote, "HEAD:refs/heads/%s" % target],
+                        d, env=env)
+            if (push.stdout or "").strip():
+                lines.append((push.stdout or "").strip())
+            if (push.stderr or "").strip():
+                lines.append((push.stderr or "").strip())
+            if push.returncode != 0:
+                lines.append("REFUSED: the push itself was rejected by the "
+                              "remote (likely not a fast-forward, or a "
+                              "connectivity problem). This exporter never "
+                              "--force pushes.")
+                return EXIT_REFUSED, lines
+            lines.append("PUSHED: one commit appended to %s %s" % (remote, target))
 
-        if not bootstrap:
-            # THE ONLY ROUTE TO MAIN (row E67, ruleset of row E64): the
-            # public repository requires a pull request on main and grants
-            # no bypass, so a direct push is refused with GH013. gh opens
-            # the request from the branch just pushed and merges it; both
-            # run from `d`, whose origin is the remote, so gh resolves the
-            # repository the same way it does for a person standing in a
-            # clone. A failure at either step refuses: the branch stays on
-            # the remote, unmerged and untagged, for a human to look at.
-            title = ("export: Brother %s" % tag.lstrip("v") if tag
-                     else COMMIT_MESSAGE)
-            body = ("Opened by scripts/export_public.py, the single route "
-                    "from the private hub to this repository. The commit "
-                    "on %s is the allowlisted export tree, already cleared "
-                    "by every gate the exporter runs." % target)
-            pr = run([GH_BIN, "pr", "create", "--base", branch, "--head",
-                      target, "--title", title, "--body", body], d, env=env)
-            pr_out = ((pr.stdout or "") + (pr.stderr or "")).strip()
-            if pr.returncode != 0:
-                lines.append("REFUSED: could not open a pull request for %s "
-                              "(gh exit %s, %s); the branch is pushed and "
-                              "nothing was merged or tagged"
-                              % (target, pr.returncode,
-                                 pr_out.splitlines()[-1] if pr_out
-                                 else "(no output)"))
-                return EXIT_REFUSED, lines
-            urls = [l.strip() for l in pr_out.splitlines()
-                    if l.strip().startswith("http")]
-            pr_ref = urls[-1] if urls else target
-            lines.append("PULL-REQUEST: %s" % pr_ref)
-            # Ruleset 22191180: main requires the required-fast check and
-            # grants no bypass, so this waits for it to CONCLUDE rather
-            # than let `gh pr merge` below race a check still pending or
-            # merge past one that already failed. FAIL and NO-DATA alike
-            # refuse without merging and without closing the pull request:
-            # the evidence stays open for a human to read.
-            wait_code, wait_lines = wait_for_required_fast(
-                pr_ref, cwd=d, run=run, sleep=wait_sleep, clock=wait_clock)
-            lines.extend(wait_lines)
-            if wait_code != EXIT_OK:
-                return wait_code, lines
-            merge = run([GH_BIN, "pr", "merge", pr_ref, "--merge",
-                          "--delete-branch"], d, env=env)
-            merge_out = ((merge.stdout or "") + (merge.stderr or "")).strip()
-            if merge.returncode != 0:
-                lines.append("REFUSED: the pull request %s was opened but "
-                              "not merged (gh exit %s, %s); nothing was "
-                              "tagged"
-                              % (pr_ref, merge.returncode,
-                                 merge_out.splitlines()[-1] if merge_out
-                                 else "(no output)"))
-                return EXIT_REFUSED, lines
-            lines.append("MERGED: %s into %s" % (pr_ref, branch))
+            if not bootstrap:
+                # THE ONLY ROUTE TO MAIN (row E67, ruleset of row E64): the
+                # public repository requires a pull request on main and grants
+                # no bypass, so a direct push is refused with GH013. gh opens
+                # the request from the branch just pushed and merges it; both
+                # run from `d`, whose origin is the remote, so gh resolves the
+                # repository the same way it does for a person standing in a
+                # clone. A failure at either step refuses: the branch stays on
+                # the remote, unmerged and untagged, for a human to look at.
+                title = ("export: Brother %s" % tag.lstrip("v") if tag
+                         else COMMIT_MESSAGE)
+                body = ("Opened by scripts/export_public.py, the single route "
+                        "from the private hub to this repository. The commit "
+                        "on %s is the allowlisted export tree, already cleared "
+                        "by every gate the exporter runs." % target)
+                pr = run([GH_BIN, "pr", "create", "--base", branch, "--head",
+                          target, "--title", title, "--body", body], d, env=env)
+                pr_out = ((pr.stdout or "") + (pr.stderr or "")).strip()
+                if pr.returncode != 0:
+                    lines.append("REFUSED: could not open a pull request for %s "
+                                  "(gh exit %s, %s); the branch is pushed and "
+                                  "nothing was merged or tagged"
+                                  % (target, pr.returncode,
+                                     pr_out.splitlines()[-1] if pr_out
+                                     else "(no output)"))
+                    return EXIT_REFUSED, lines
+                urls = [l.strip() for l in pr_out.splitlines()
+                        if l.strip().startswith("http")]
+                pr_ref = urls[-1] if urls else target
+                lines.append("PULL-REQUEST: %s" % pr_ref)
+                # Ruleset 22191180: main requires the required-fast check and
+                # grants no bypass, so this waits for it to CONCLUDE rather
+                # than let `gh pr merge` below race a check still pending or
+                # merge past one that already failed. FAIL and NO-DATA alike
+                # refuse without merging and without closing the pull request:
+                # the evidence stays open for a human to read.
+                wait_code, wait_lines = wait_for_required_fast(
+                    pr_ref, cwd=d, run=run, sleep=wait_sleep, clock=wait_clock)
+                lines.extend(wait_lines)
+                if wait_code != EXIT_OK:
+                    return wait_code, lines
+                merge = run([GH_BIN, "pr", "merge", pr_ref, "--merge",
+                              "--delete-branch"], d, env=env)
+                merge_out = ((merge.stdout or "") + (merge.stderr or "")).strip()
+                if merge.returncode != 0 and pull_request_state(
+                        pr_ref, d, run, wait_sleep) == "MERGED":
+                    # The exit code is not the merge. Measured 2026-09-20 on
+                    # the 1.0.21 cut: gh exited 1 with "GraphQL: Merge
+                    # already in progress (mergePullRequest)" while the pull
+                    # request was merging; it read MERGED seconds later and
+                    # the run had already ended with nothing tagged. The pull
+                    # request's own state decides, read from the host.
+                    lines.append("gh pr merge exited %s (%s) but the pull "
+                                  "request's own state reads MERGED; "
+                                  "continuing. The branch %s was not deleted "
+                                  "by that call."
+                                  % (merge.returncode,
+                                     merge_out.splitlines()[-1] if merge_out
+                                     else "(no output)", target))
+                elif merge.returncode != 0:
+                    lines.append("REFUSED: the pull request %s was opened but "
+                                  "not merged (gh exit %s, %s); nothing was "
+                                  "tagged"
+                                  % (pr_ref, merge.returncode,
+                                     merge_out.splitlines()[-1] if merge_out
+                                     else "(no output)"))
+                    return EXIT_REFUSED, lines
+                lines.append("MERGED: %s into %s" % (pr_ref, branch))
 
         if tag:
             # Release identity (productization directive A4, founder-ordered
@@ -1667,6 +2107,25 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
             # MERGE produced on the far side, fetched back here, never at
             # the local commit: a merge commit is what a reader clones, and
             # a tag on anything else names a tree nobody can check out.
+            #
+            # The existing tag is read from the remote first. The tag push
+            # below rejects a DIFFERENT tag object, but a rerun inside the
+            # same second tags the same commit with the same message and
+            # tagger second, so the object is byte identical, that push is
+            # a no-op, and the rerun reported success: measured 2026-09-26,
+            # test_g2 failed 2 of 2 with GIT_COMMITTER_DATE pinned.
+            has_tag = run(["git", "ls-remote", "--tags", remote,
+                           "refs/tags/%s" % tag], d)
+            if has_tag.returncode != 0:
+                lines.append("REFUSED: could not check %s for an existing "
+                              "tag %s (%s); no tag was pushed"
+                              % (remote, tag, (has_tag.stderr or "").strip()))
+                return EXIT_REFUSED, lines
+            if (has_tag.stdout or "").strip():
+                lines.append("REFUSED: %s already exists on %s; an existing "
+                              "tag is never moved, this exporter never "
+                              "--force pushes" % (tag, remote))
+                return EXIT_REFUSED, lines
             if bootstrap:
                 target_rev = branch
             else:
@@ -1729,14 +2188,32 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                     "%s, only the tag itself was never created or pushed"
                     % (tag, (peeled.stderr or "").strip(), landed))
                 return EXIT_REFUSED, lines
-            tag_push = run(["git", "push", remote, "refs/tags/%s" % tag],
-                            d, env=env)
+            tag_push = run(["git", "push", "--porcelain", remote,
+                            "refs/tags/%s" % tag], d, env=env)
             if (tag_push.stderr or "").strip():
                 lines.append((tag_push.stderr or "").strip())
             if tag_push.returncode != 0:
                 lines.append("REFUSED: the tag push was rejected; an "
                              "existing %s is never moved, this exporter "
                              "never --force pushes" % tag)
+                return EXIT_REFUSED, lines
+            # EXIT 0 IS NOT A CREATED TAG. A second actor can push a
+            # byte-identical tag between the listing near the top and this
+            # push; git then reports "=" (up to date) and exits 0. Only the
+            # porcelain "*" (new ref) flag proves THIS push made the tag, and
+            # a missing status line is an unknown, which refuses.
+            flags = [row.split("\t", 1)[0]
+                     for row in (tag_push.stdout or "").splitlines()
+                     if "\trefs/tags/%s:" % tag in row]
+            if flags != ["*"]:
+                landed = ("the first commit of %s" % branch if bootstrap
+                          else "pushed and merged into %s" % branch)
+                lines.append(
+                    "REFUSED: the tag push exited 0 but did not report %s as "
+                    "newly created (porcelain status %s: \"=\" means an "
+                    "identical tag was already there), so this run tagged "
+                    "nothing; the export was already %s"
+                    % (tag, flags or "missing", landed))
                 return EXIT_REFUSED, lines
             # The "(local commit <sha>)" clause is parsed back out by
             # cut.py's _local_tagged_commit; both sides are kept in sync by
@@ -1825,7 +2302,10 @@ def check_readiness_gate(export_dir):
     if not os.path.isfile(gate_path):
         return False, ["NO-DATA: the export tree carries no %s, so its own "
                        "readiness could not be read" % READINESS_GATE_REL]
-    proc = _run(["python3", READINESS_GATE_REL], export_dir, timeout=1800)
+    world, refused = _world_for(export_dir, "readiness")
+    if refused:
+        return False, [refused]
+    proc = _run(["python3", READINESS_GATE_REL], world["cwd"], timeout=1800)
     text = ((proc.stdout or "") + (proc.stderr or "")).strip()
     verdicts = [l.strip() for l in text.splitlines()
                 if l.strip().startswith("GATE:")]
@@ -1909,7 +2389,10 @@ def check_required_fast(export_dir):
     # The budget now scales with load like every other gate here, with a floor
     # matched to the measurement rather than to the 60 seconds of CPU the
     # scaling rule assumes, and the existing 1800 s cap still bounds it.
-    proc = _run(["sh", script], export_dir,
+    world, refused = _world_for(export_dir, "required_fast")
+    if refused:
+        return False, [refused]
+    proc = _run(["sh", script], world["cwd"],
                 timeout=gate_timeout(floor=REQUIRED_FAST_FLOOR_SECONDS))
     text = ((proc.stdout or "") + (proc.stderr or "")).strip()
     summary = re.search(r"^pass\s+(\d+)\s+fail\s+(\d+)\s+no-data\s+(\d+)",
@@ -2025,9 +2508,12 @@ def check_readme_prove_commands(export_dir):
         return False, ["NO-DATA: the export tree's README.md names no "
                        "command of the shape python3 scripts/test_*.py, so "
                        "nothing it claims was proven on the export tree"]
+    world, refused = _world_for(export_dir, "readme_prove")
+    if refused:
+        return False, [refused]
     lines = []
     for command in commands:
-        proc = _run(command.split(), export_dir, timeout=1800)
+        proc = _run(command.split(), world["cwd"], timeout=1800)
         lines.append("prove: %s exit %s" % (command, proc.returncode))
         if proc.returncode != 0:
             text = ((proc.stdout or "") + (proc.stderr or "")).strip()
@@ -2196,7 +2682,13 @@ def tag_time_checks(export_dir, version):
         # wrapped grew. A wrapper smaller than the thing it wraps returns
         # NO-DATA, and NO-DATA is never a pass, so the export refuses and
         # nothing publishes. Same budget rule as check_required_fast.
-        proc = _run(["bash", verifier], product_dir,
+        world, refused = _world_for(product_dir, "verify_install products/%s"
+                                    % name)
+        if refused:
+            lines.append(refused)
+            ok = False
+            continue
+        proc = _run(["bash", verifier], world["cwd"],
                     timeout=gate_timeout(floor=REQUIRED_FAST_FLOOR_SECONDS))
         text = ((proc.stdout or "") + (proc.stderr or "")).strip()
         last = text.splitlines()[-1] if text else "(no output)"
@@ -2335,6 +2827,18 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix="brother-export-") as export_dir, \
          tempfile.TemporaryDirectory(prefix="brother-export-identity-") as identity_dir, \
          tempfile.TemporaryDirectory(prefix="brother-export-baseline-") as baseline_tmp:
+        # T1.3: both gate worlds carry GATE_WORLD_MARKER while they are
+        # built and lose it only once whole, so a racing export refuses
+        # rather than reading them half built, and a crash mid build leaves
+        # them refused by their own marker rather than reusable.
+        markers = []
+        for world_name, tree in (("candidate_tree", export_dir),
+                                 ("identity_tree", identity_dir)):
+            try:
+                markers.append(_claim_world(tree, world_name))
+            except ValueError as exc:
+                print(gate_refusal(world_name, str(exc))[1])
+                return EXIT_NODATA
         copied, committed = build_orphan_commit(export_dir, allowlist,
                                                  args.root)
         print("candidate export tree: %d root path(s) copied (%s)"
@@ -2346,6 +2850,8 @@ def main(argv=None):
 
         build_identity_check_dir(identity_dir, allowlist, args.remote,
                                   args.branch, args.root)
+        for marker in markers:
+            _release_world(marker)
         has_baseline = build_baseline_dir(baseline_tmp, args.remote,
                                            args.branch)
         baseline_dir = baseline_tmp if has_baseline else None

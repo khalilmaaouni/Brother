@@ -57,6 +57,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bundle_runtime  # noqa: E402  KNOWN_HOSTS and host_manifest_dirs, the one host manifest discovery (OP1.c)
+
 
 def repo_root():
     return Path(__file__).resolve().parent.parent
@@ -68,13 +71,27 @@ CURSOR_MARKETPLACE_REL = ".cursor-plugin/marketplace.json"
 #: Every file --write may touch apart from the source itself, named once so
 #: the transactional snapshot in run_write and umbrella_carriers cannot
 #: disagree about what a bump covers.
-CARRIER_FILES_REL = (
-    "bundle/.claude-plugin/plugin.json",
-    "bundle/.codex-plugin/plugin.json",
-    "bundle/.cursor-plugin/plugin.json",
+#: The bundle entries are derived from bundle_runtime.KNOWN_HOSTS, never
+#: hand kept (OP1.c, docs/plan/specs/OP1.md 5.2): a host is added there.
+BUNDLE_MANIFEST_NAME = bundle_runtime.PLUGIN_MANIFEST_NAME
+CARRIER_FILES_REL = tuple(
+    "bundle/%s/%s" % (host, BUNDLE_MANIFEST_NAME) for host in bundle_runtime.KNOWN_HOSTS
+) + (
     "docs/VERSIONING.md",
     CURSOR_MARKETPLACE_REL,
 )
+
+
+def host_manifests(root):
+    """Every plugin.json under a `bundle/` directory whose name ends in
+    "-plugin", dotted or not, as sorted Paths: the one discovery of
+    docs/plan/specs/OP1.md 5.2 (bundle_runtime.host_manifest_dirs, a listing
+    of the entries, never a shell glob). An unlistable or empty bundle is []
+    and run_check reports NO-DATA for it."""
+    root = Path(root)
+    bundle_dir = root / "bundle"
+    return [bundle_dir / name / BUNDLE_MANIFEST_NAME
+            for name in bundle_runtime.host_manifest_dirs(str(bundle_dir))]
 
 
 def detect_indent(text):
@@ -152,9 +169,12 @@ def umbrella_carriers(root):
 
         carriers.append(Carrier(rel + ":version", get, set_))
 
-    bundle_json_carrier("bundle/.claude-plugin/plugin.json")
-    bundle_json_carrier("bundle/.codex-plugin/plugin.json")
-    bundle_json_carrier("bundle/.cursor-plugin/plugin.json")
+    # Every KNOWN_HOSTS manifest (a missing one is DRIFT, carrier=missing)
+    # plus every host directory discovered under bundle/ (a fifth host nobody
+    # listed is still read; run_check refuses it until it is in KNOWN_HOSTS).
+    discovered = [p.parent.name for p in host_manifests(root)]
+    for host in sorted(set(bundle_runtime.KNOWN_HOSTS) | set(discovered)):
+        bundle_json_carrier("bundle/%s/%s" % (host, BUNDLE_MANIFEST_NAME))
 
     versioning_path = root / "docs" / "VERSIONING.md"
     pattern = re.compile(r"Current version: ([0-9]+\.[0-9]+\.[0-9]+)\.")
@@ -220,7 +240,23 @@ def marketplace_ref_carriers(root):
 
         return Carrier("marketplace:%s.source.ref" % plugin_name, get, set_)
 
-    for name in ("brother", "brothermode", "brothersbe"):
+    # brother alone is required: from 1.1.0 retire_catalogs removes brothermode and brothersbe before the bump
+    # runs, and requiring them refused every 1.1.0 cut (cut --check, 2026-10-05). An entry still listed is
+    # bumped by the loop below.
+    names = ["brother"]
+    # Every other entry that pins a ref is a carrier too. The fixed list alone never bumped
+    # brotherds, whose ref stayed at v1.0.13 (a tag with no products/brotherds) while the brother
+    # bundle depends on it, so the public install line failed for every fresh user (2026-09-28).
+    if path.is_file():
+        try:
+            doc, _, _ = load_json_preserving(path)
+        except (OSError, ValueError):  # sbe: allow-silent the three named carriers above still report the unreadable file on their own get()
+            doc = {}
+        for plugin in doc.get("plugins", []):
+            src = plugin.get("source")
+            if isinstance(src, dict) and "ref" in src and plugin.get("name") not in names:
+                names.append(plugin["name"])
+    for name in names:
         carriers.append(make(name))
     return carriers
 
@@ -406,6 +442,13 @@ def run_check(root):
         print("NO-DATA: %s is missing or unreadable, cannot check drift" % MARKETPLACE_REL)
         return 2
 
+    manifests = host_manifests(root)
+    if not manifests:
+        print("NO-DATA: no host manifest directory found under bundle/ "
+              "(a directory ending in -plugin holding %s), cannot check "
+              "drift" % BUNDLE_MANIFEST_NAME)
+        return 2
+
     umbrella = umbrella_carriers(root) + marketplace_ref_carriers(root) + [
         marketplace_metadata_carrier(root),
         marketplace_brother_version_carrier(root),
@@ -418,6 +461,12 @@ def run_check(root):
             print("NO-DATA: %s" % label)
 
     failed = False
+    for path in manifests:
+        if path.parent.name not in bundle_runtime.KNOWN_HOSTS:
+            print("DRIFT: bundle/%s: host manifest directory not listed in "
+                  "bundle_runtime.KNOWN_HOSTS (a host is added on purpose, "
+                  "with scripts/client_parity.py)" % path.parent.name)
+            failed = True
     for carrier in umbrella:
         want = ("v" + version) if carrier.label.endswith(".source.ref") else version
         got, exists = carrier.get()
@@ -459,6 +508,7 @@ def run_write(root, version):
     # holds a half bump: some carriers at the new version, others at the
     # old one, which only a later --check would notice.
     touched = [src_path] + [root / rel for rel in CARRIER_FILES_REL]
+    touched += [p for p in host_manifests(root) if p not in touched]
     snapshot = {}
     for path in touched:
         try:

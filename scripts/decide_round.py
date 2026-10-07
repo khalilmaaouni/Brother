@@ -37,6 +37,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402
 import decide  # noqa: E402
 NODATA = "NO-DATA"
 E = html.escape
@@ -123,6 +124,12 @@ def main(argv=None):
         print("%s: the round could not be read: %s" % (NODATA, exc),
               file=sys.stderr)
         return 2
+    # Every decision in the round is redacted here, once, with the round's
+    # own title: decide.render below receives text that is already clean.
+    spec, why = decide.redact_spec(spec)
+    if spec is None:
+        print(why, file=sys.stderr)
+        return 2
     body, note = render(spec)
     if body is None:
         print(note, file=sys.stderr)
@@ -133,21 +140,13 @@ def main(argv=None):
     # ONE stamp for the round. decide.py stamped once per decision as it went;
     # rewriting it here means the sentinel names the page the founder actually
     # reads rather than the last fragment rendered.
-    try:
-        # OVERRIDABLE SO A TEST DOES NOT WRITE THE REAL ONE. Without this the
-        # suite overwrites the founder's live intake stamp with a temp path,
-        # which is a side effect on machine state from running tests, and it
-        # can leave the gate pointing at a page nobody will ever open.
-        sentinel = os.environ.get(
-            "BROTHER_DECISION_SENTINEL",
-            os.path.expanduser("~/.claude/last-decision-screen.json"))
-        with open(sentinel, "w", encoding="utf-8") as fh:
-            json.dump({"path": os.path.abspath(out),
-                       "title": spec.get("title", ""),
-                       "written_at_epoch": int(time.time())}, fh)
-    except OSError as exc:
-        print("decide_round: could not stamp the intake sentinel: %s" % exc,
-              file=sys.stderr)
+    # OVERRIDABLE SO A TEST DOES NOT WRITE THE REAL ONE, via
+    # BROTHER_DECISION_SENTINEL, which the shared writer honours. The path
+    # itself is the gate's per session file; this used to be the pre
+    # 2026-09-15 global name, which the gate stopped reading.
+    if brother_paths.stamp_decision_screen(out, spec.get("title", "")) is None:
+        print("decide_round: could not stamp the intake sentinel at %s"
+              % brother_paths.decision_sentinel_path(), file=sys.stderr)
     print("wrote %s: %d decision(s)" % (out, len(spec.get("decisions") or [])))
     if note:
         print(note)

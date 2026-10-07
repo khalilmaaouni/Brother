@@ -611,6 +611,82 @@ def _parse_float_arg(value, flag, default):
         return default
 
 
+# What printing one follow-up line is, described to the autonomy dial: one
+# named target, no contract change, nothing crossing a boundary, undone by
+# ignoring it. That is the A0 shape; the live dial can still add ceremony.
+FOLLOW_UP_OBSERVABLES = {
+    "single_file_or_named_target": True,
+    "contract_change": "none",
+    "crosses_boundary": False,
+    "reversible_under_hour": True,
+}
+
+
+def due_lines(run_dir, now_utc, quiet=None):
+    """RL4.c: the follow-up obligations due in this run, one printed line
+    each, in journal order. followup_obligation is imported lazily, so a
+    missing module is one 'FOLLOW-UP NO-DATA: module missing' line rather
+    than a failed hook. An empty run_dir is [] (no run, nothing due: the
+    hook runs outside runs most of the time); a run directory with no
+    journal recorded nothing and is [] too.
+
+    For every folded obligation, reconcile; on 'notify', ask autonomy_gate
+    with FOLLOW_UP_OBSERVABLES. An answer other than execute_then_check
+    prints the line prefixed 'HELD ' and appends no notified row, so the
+    next session asks again; otherwise followup_obligation.notify appends
+    the row and the rendered line is returned. The row is what keeps a
+    restarted session quiet; two sessions racing can both print once, and
+    the fold shows both rows.
+
+    NO SECOND WRITER, NO SEND: the only write is notify's journal.append.
+    Unknown input (a run_dir, now_utc or quiet that does not parse, a
+    missing run directory, an obligation reconcile calls malformed) is a
+    NO-DATA line, never silence and never a print of something not due."""
+    try:
+        import followup_obligation as fo
+    except ImportError:
+        return ["FOLLOW-UP NO-DATA: module missing"]
+    if run_dir is None or run_dir == "":
+        return []
+    if not isinstance(run_dir, str):
+        return ["FOLLOW-UP NO-DATA: run_dir is not a string"]
+    run_dir = run_dir.strip()
+    if not run_dir:
+        return []
+    if not os.path.isdir(run_dir):
+        return ["FOLLOW-UP NO-DATA: run directory %r does not exist"
+                % run_dir]
+    if fo._moment(now_utc) is None:
+        return ["FOLLOW-UP NO-DATA: now_utc %r is not ISO 8601 with a UTC "
+                "offset" % (now_utc,)]
+    if fo._quiet_windows(quiet) is None:
+        return ["FOLLOW-UP NO-DATA: quiet windows do not parse"]
+    folded = fo.read_obligations(run_dir)
+    if folded is None:
+        return []
+    lines = []
+    for oid, record in folded.items():
+        if not isinstance(record, dict):
+            continue
+        verdict, reason = fo.reconcile(record, now_utc, quiet)
+        if verdict != "notify":
+            if reason == "malformed":
+                lines.append("FOLLOW-UP NO-DATA: %s does not reconcile"
+                             % oid[:12])
+            continue
+        line = fo.render_line(oid, record)
+        if autonomy_gate(dict(FOLLOW_UP_OBSERVABLES)) != "execute_then_check":
+            lines.append("HELD " + line)
+            continue
+        verdict, reason = fo.notify(run_dir, oid, now_utc, quiet)
+        if verdict == "notified":
+            lines.append(line)
+        elif reason == "unwritten":
+            lines.append("FOLLOW-UP NO-DATA: %s notified row not written; "
+                         "not printed" % oid[:12])
+    return lines
+
+
 def main(argv):
     stale_hours = STALE_HOURS
     for i, arg in enumerate(argv):
@@ -660,6 +736,17 @@ def main(argv):
             # than starved. A run that covered everything wraps to itself.
             if tasks_for_triage:
                 save_triage_offset((offset + ran[0]) % len(tasks_for_triage))
+            # RL4.c: follow-ups due in this run. Never stalls the session
+            # and never changes the exit code the run would have returned.
+            try:
+                import journal
+                utc_now = datetime.now(timezone.utc).isoformat()
+                for line in due_lines(journal.run_dir_from_env(), utc_now,
+                                      None):
+                    print("task-watchdog: %s" % line)
+            except Exception as exc:  # noqa: BLE001 the hook must not stall
+                print("task-watchdog: FOLLOW-UP NO-DATA: %s"
+                      % (" ".join(str(exc).split()) or type(exc).__name__))
             print("task-watchdog: %s" % format_ready_summary(
                 read_day_plan_rows()))
         return code

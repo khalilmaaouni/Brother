@@ -1295,6 +1295,106 @@ class TheScreenSurvivesABadPath(unittest.TestCase):
         self.assertTrue(os.path.isfile(path))
 
 
+#: Built by concatenation, as test_decide.py's own
+#: ASecretInTheSpecIsRedactedBeforeAnyWrite does, so no scanner reads a
+#: live-looking key in this file.
+SECRET = "gh" + "p_" + "A1b2" * 5
+
+
+class ASecretInARunNeverReachesItsScreens(unittest.TestCase):
+    """The person types the outcome and a model writes each unit's objective
+    and check command; every screen under screens/ quotes them. The screens
+    are the pages a person opens, forwards and screenshots, so write_screen
+    redacts the spec before either of its two writes. The record keeps the
+    exact command (the receipt contract in AGENTS.md), which is why the
+    receipt is asserted to still carry it: that is also what proves the
+    secret really went through this run, so an absent secret on the screens
+    means redaction and not a fixture that never carried one."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="receipt-door-secret-")
+        cls.repo = make_repo(cls.tmp)
+        decomposer = write_stub(cls.tmp, "decomposer.py", """
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps([
+                {"id": "S1", "objective": "run the migration with %s",
+                 "done_check": "test -f s1.txt # %s", "writes": ["s1.txt"],
+                 "deps": []},
+            ]))
+        """ % (SECRET, SECRET))
+        model = write_stub(cls.tmp, "writer_model.py", WRITER_MODEL)
+        env = dict(os.environ)
+        env["DOOR_MODEL_CMD"] = "%s %s" % (shlex.quote(sys.executable),
+                                           shlex.quote(decomposer))
+        env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable),
+                                             shlex.quote(model))
+        cls.proc = sh([sys.executable, BROTHER_RUN,
+                       "s1 exists, deploy key %s" % SECRET,
+                       "--cwd", cls.repo, "--runs-root", cls.tmp], env=env)
+        cls.out = cls.proc.stdout + cls.proc.stderr
+        runs = os.path.join(cls.tmp, "docs", "plan", "runs")
+        cls.run_dir = os.path.join(runs, sorted(os.listdir(runs))[0])
+        cls.screens = os.path.join(cls.run_dir, "screens")
+
+    def read(self, *parts):
+        with open(os.path.join(*parts), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_run_carried_the_secret_into_its_record(self):
+        receipt = self.read(self.run_dir, "receipt", "receipt.json")
+        self.assertIn(SECRET, receipt, self.out)
+
+    def test_no_screen_page_or_spec_carries_the_secret(self):
+        names = sorted(os.listdir(self.screens))
+        for want in ("acceptance-screen.html", "acceptance-screen.json",
+                     "release-screen.html", "release-screen.json",
+                     "delivery-receipt.html", "delivery-receipt.json"):
+            self.assertIn(want, names, self.out)
+        for name in names:
+            self.assertNotIn(SECRET, self.read(self.screens, name), name)
+
+    def test_the_secret_is_replaced_not_dropped(self):
+        page = self.read(self.screens, "acceptance-screen.html")
+        self.assertIn("[REDACTED]", page)
+        self.assertIn("run the migration with", page)
+
+
+class WriteScreenRedactsBeforeEitherWrite(unittest.TestCase):
+    """write_screen, driven directly: a secret in a key, a value and a
+    tuple (an in-process spec can hold one, as the delivery receipt's
+    `receipt_record` rides beside the page; json.dump writes it out as a
+    list), and a redactor that cannot load, which writes nothing at all."""
+
+    def spec(self):
+        spec = RD.acceptance_spec({"outcome": "o", "rows": []}, [])
+        spec["plain_summary"] = "token %s" % SECRET
+        spec["options"][0]["score_basis"] = {SECRET: "why"}
+        spec["receipt_record"] = {"command": ("run", SECRET)}
+        return spec
+
+    def test_neither_file_carries_the_secret(self):
+        tmp = tempfile.mkdtemp(prefix="screen-secret-")
+        path, problem = RD.write_screen(self.spec(),
+                                        os.path.join(tmp, "s.html"))
+        self.assertEqual(problem, "")
+        for name in ("s.html", "s.json"):
+            with open(os.path.join(tmp, name), encoding="utf-8") as fh:
+                self.assertNotIn(SECRET, fh.read(), name)
+
+    def test_no_redactor_means_no_screen_never_an_unredacted_one(self):
+        tmp = tempfile.mkdtemp(prefix="screen-noredact-")
+        why = "%s: the decision cannot be redacted" % RD.NODATA
+        with mock.patch.object(RD.decide, "redact_spec",
+                               return_value=(None, why)):
+            path, problem = RD.write_screen(self.spec(),
+                                            os.path.join(tmp, "s.html"))
+        self.assertIsNone(path)
+        self.assertEqual(problem, why)
+        self.assertEqual(os.listdir(tmp), [])
+
+
 # A "model" that refuses the unit whose objective carries REFUSE_ME (standing
 # in for a worker that never manages to satisfy that unit's check) and, for
 # everything else, behaves like the ordinary writer stub above: it writes
@@ -2577,6 +2677,31 @@ class TheHumanViewIsRenderedFromTheSameRecord(unittest.TestCase):
             self.assertIn("the receipt for this delivery", text)
             for _key, question in RD.RECEIPT_QUESTIONS:
                 self.assertIn(question, text)
+
+    def test_a_date_time_tag_in_the_engine_version_reaches_the_record_intact(self):
+        """2026-09-30. The test above failed on every checkout that could
+        reach the tag preflight/20260926-182529: the redactor's card pattern
+        read the tag's date-time as a card number, so the screen's JSON held
+        preflight/[REDACTED]-... while the run printed the real version. The
+        engine version is pinned here, so this fails the same way on any
+        checkout, tagged or not."""
+        describe = "preflight/20260926-182529-663-g78fc9ce00"
+        with tempfile.TemporaryDirectory() as run_dir:
+            record = self._seed(run_dir)
+            receipts = self._receipts(run_dir, record)
+            with mock.patch.dict(os.environ,
+                                 {journal.RUN_DIR_ENV_VAR: run_dir},
+                                 clear=False), \
+                    mock.patch.object(_br, "_harness_version",
+                                      return_value=describe):
+                path, view, _text = RD.render_receipt_screen(
+                    record, receipts, run_dir, log_path="/tmp/run.log")
+            with open(os.path.splitext(path)[0] + ".json",
+                      encoding="utf-8") as fh:
+                written = json.load(fh)
+            self.assertEqual(view["harness_version"], describe)
+            self.assertEqual(written["receipt_record"]["harness_version"],
+                             describe)
 #: The seeded diff E75's own done_check names: a middleware change, a
 #: generated file and a new dependency, plus a fourth file whose check
 #: proved nothing, so all four sections have something to say. Built as a
@@ -3412,7 +3537,10 @@ class JevSeamJ100SecondOpinion(unittest.TestCase):
         self.assertEqual(before, after)
 
     def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
-        expected = RD.revert_broke_check(self.STDERR)  # real config: off
+        # baseline under an explicit off config: never the live data/jev-seams.json,
+        # which may legitimately hold this seam in shadow (and would call out for real)
+        with mock.patch.object(jev_seam, "load_seams_config", return_value={}):
+            expected = RD.revert_broke_check(self.STDERR)
         ledger_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, ledger_dir, ignore_errors=True)
         cfg = {"modes": {"J100": "shadow"}}
@@ -3623,6 +3751,72 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
                          "an off-mode call must never touch the filesystem "
                          "once jev_seam's config cache is warm")
         self.assertEqual(outputs, {False})
+
+
+def setUpModule():
+    # Test-owned disk premise: worker admission reads this host's free
+    # disk, so a full disk would otherwise read as a failing suite.
+    from hermetic_worker_env import worker_environment
+    _disk = worker_environment()
+    _disk.__enter__()
+    unittest.addModuleCleanup(_disk.__exit__, None, None, None)
+    # Finding 31 (loop audit 2026-09-26), same source and fixture as
+    # test_board_status.py and test_export_public.py: unmocked calls read the
+    # tracked data/jev-seams.json, where J030, J063, J064, J102 and J117 sit in
+    # shadow, and jev_decide resolves the machine's real bridge
+    # (~/.claude/bin/or_ask.py) at import. A spy on jev_seam.consult counted 8
+    # calls (J063 3, J102 3, J117 2), all in child processes, reaching a live
+    # shadow entry in one run of this module under an empty HOME. Pin an
+    # all-off seams config and a bridge path that does not exist, so only a
+    # case that patches its own config and runner calls out.
+    #
+    # Child processes this module launches re-import jev_seam and read the
+    # tracked config again, out of reach of the patches below, so the one
+    # bridge override a child does read is pinned too: a child's shadow call
+    # then ends as NO_DATA at launch instead of reaching the real bridge.
+    import shutil
+    from unittest import mock
+    import jev_decide
+    import jev_seam
+    root = tempfile.mkdtemp(prefix="brother-jev-seams-test-")
+    unittest.addModuleCleanup(shutil.rmtree, root, ignore_errors=True)
+    seams = os.path.join(root, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    no_bridge = os.path.join(root, "no-bridge-in-tests")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH", no_bridge)):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # The processes these tests launch re-import jev_seam and read the
+    # tracked config afresh, out of reach of the patches above, and every
+    # consult, even an off one, writes attempt rows. So the children get
+    # BROTHER_JEV_SEAMS_OFF (the tracked file reads as every entry off), a
+    # temporary BROTHER_JEV_STATE_DIR (ledger and daily call budget) and a
+    # bridge command that cannot launch, quoted because the variable is
+    # parsed as a command line; this process gets the same ledger and
+    # budget paths, since its constants were fixed at import.
+    import shlex
+    import jev_checks
+    state = tempfile.mkdtemp(prefix="brother-jev-state-test-")
+    unittest.addModuleCleanup(shutil.rmtree, state, ignore_errors=True)
+    ledger = os.path.join(state, "ledger")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                      os.path.join(state, "jev-budget.json")),
+                    mock.patch.dict(os.environ, {
+                        "BROTHER_JEV_SEAMS_OFF": "1",
+                        "BROTHER_JEV_STATE_DIR": state,
+                        "BROTHER_DECISION_BRIDGE": shlex.quote(jev_decide.DEFAULT_BRIDGE_PATH)})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9's unittest runs the module cleanups above only when this
+    # hook exists (fixed in 3.10); without it the fixture root leaks per run.
+    pass
 
 
 if __name__ == "__main__":

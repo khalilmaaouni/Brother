@@ -620,6 +620,55 @@ ADVISE = "advise"
 ACT = "act"
 _VALID_MODES = (OFF, SHADOW, ADVISE, ACT)
 
+
+def quarantine_refusal_reason(entry, seams_config=None):
+    """Returns a refusal reason when this registry entry's question type is
+    quarantined, else None.
+
+    D3.4's quarantine guard for the direct seam path: consult() must call
+    this after the registry lookup succeeds and before any bridge call,
+    and write the terminal "quarantined" phase for a non None result.
+    None is returned only for an entry that carries a readable, non
+    quarantined question type. A question type that is not a string at
+    all (a hand edited registry, a caller built mapping, an unhashable
+    dict or list) is corrupt input and BLOCKS here, rather than reaching
+    a membership test that would raise TypeError; so does a missing or
+    malformed quarantine set, because the direct seam path has no other
+    guard between it and decide().
+    """
+    if not isinstance(entry, dict):
+        return "quarantine check needs a registry entry mapping, got %s" % (
+            type(entry).__name__,)
+    if "type" not in entry:
+        return "registry entry has no question type: refusing rather than guessing"
+    qtype = entry["type"]
+    if not isinstance(qtype, str):
+        return "question type must be a string, got %s" % (type(qtype).__name__,)
+    try:
+        quarantined = _calibration.QUARANTINED_QTYPES
+    except AttributeError:
+        return "quarantine set is missing or malformed: refusing every question type"
+    if not isinstance(quarantined, (frozenset, set)):
+        return "quarantine set is missing or malformed: refusing every question type"
+    if not quarantined:
+        return "quarantine set is empty: refusing every question type"
+    if qtype in quarantined:
+        return "quarantined qtype %r" % (qtype,)
+    return None
+
+
+def mint_attempt_id():
+    """Mints one fresh submission identity for a single consult() call.
+
+    uuid4, lowercase hex, exactly 32 characters: the shape
+    jev_calibration.append_submission() validates on the way in, so an id
+    this function mints and an id that module accepts share one shape by
+    construction. Standard library uuid only: no state, no ledger, no
+    network, no I/O. Two calls in the same process, or two processes
+    racing, never return the same string.
+    """
+    return uuid.uuid4().hex
+
 #: The repo root, resolved the IDENTICAL way jev_canary.py's own
 #: DEFAULT_RESET_MARKER contract resolves it (M1 fix, review 70268c3):
 #: repo root = dirname(dirname(abspath(<module's own __file__>))). Kept
@@ -638,6 +687,26 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: code that reads them -- unlike DEFAULT_LEDGER_DIR below, which is not.
 DEFAULT_SEAMS_CONFIG_PATH = os.path.join(_REPO_ROOT, "data", "jev-seams.json")
 DEFAULT_REGISTRY_PATH = os.path.join(_REPO_ROOT, "data", "jev-registry.json")
+
+#: BROTHER_JEV_SEAMS_OFF, a kill-only switch read ONCE, here, at import
+#: (finding 31, loop audit 2026-09-26). Any non-empty value, "0" and
+#: "false" included, makes load_seams_config() read the tracked
+#: data/jev-seams.json above as {} (every entry off); unset or exactly
+#: empty changes nothing. It exists so a test can reach the child
+#: processes it launches: a child re-imports this module and resolves the
+#: tracked config afresh, out of reach of any in-process patch, and a
+#: shadow entry there spends the machine's real call budget and writes its
+#: real ledger. It can only turn seams off, never on, so it cannot weaken
+#: the tracked file's own kill switch; an explicit, distinct config path
+#: and an explicit config dict are left alone, so a test that runs its own
+#: shadow config still does. Read at import, like BROTHER_JEV_STATE_DIR
+#: below: setting it later in a running process changes nothing, and a
+#: fresh interpreter picks it up. The tracked path is captured here,
+#: apart from the patchable DEFAULT_SEAMS_CONFIG_PATH, and compared as a
+#: real path, so a symlink to the tracked file or another spelling of it
+#: is still the tracked file.
+_SEAMS_OFF = os.environ.get("BROTHER_JEV_SEAMS_OFF", "") != ""
+_TRACKED_SEAMS_CONFIG_REALPATH = os.path.realpath(DEFAULT_SEAMS_CONFIG_PATH)
 
 #: The one machine-level root for Jev state that must outlive any single
 #: checkout (item 1, approved-with-nits review 2026-09-18): the
@@ -709,8 +778,16 @@ def load_seams_config(path=None):
     every OTHER caller reads from next. The cost of a deepcopy on a
     config this small is negligible next to the disk read it exists to
     avoid; see _CONFIG_CACHE_INTERVAL_S's own docstring for that
-    tradeoff."""
+    tradeoff.
+
+    BROTHER_JEV_SEAMS_OFF (see _SEAMS_OFF above): when set at import, the
+    tracked file reads as {} here, checked before the cache and never
+    cached, whether it is reached through the default or named
+    explicitly (loop_bridge and drift_gate pass the default path by
+    name)."""
     resolved = path or DEFAULT_SEAMS_CONFIG_PATH
+    if _SEAMS_OFF and os.path.realpath(resolved) == _TRACKED_SEAMS_CONFIG_REALPATH:
+        return {}
     now = time.monotonic()
     entry = _CONFIG_CACHE.get(resolved)
     if entry is not None and (now - entry["checked_at"]) < _CONFIG_CACHE_INTERVAL_S:
@@ -811,6 +888,71 @@ class SeamResult:
     reason: object
     audit: bool
     decision_id: object
+    attempt_id: str = ""
+
+
+def _attempt_at_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _append_submission_best_effort(attempts_path, attempt_id, parent_id, entry_id, mode_cfg):
+    rec = {
+        "schema": "attempt/v1",
+        "phase": "submitted",
+        "attempt_id": attempt_id,
+        "parent_id": parent_id,
+        "entry_id": entry_id,
+        # D3 section 5, the submission row's key: written before the
+        # registry lookup, so qtype and framing are not yet known and the
+        # model is empty until the bridge reports. count_attempt_population
+        # joins this row to its own terminal row's key.
+        "qtype": None,
+        "framing": None,
+        "model": "",
+        "mode": mode_cfg,
+        "at": _attempt_at_now(),
+    }
+    try:
+        os.makedirs(os.path.dirname(attempts_path), exist_ok=True)
+        _calibration.append_submission(attempts_path, rec)
+        return True
+    except Exception:
+        return False
+
+
+def _append_terminal_best_effort(attempts_path, attempt_id, parent_id, entry_id, mode_cfg, phase, **fields):
+    rec = {
+        "schema": "attempt/v1",
+        "phase": phase,
+        "attempt_id": attempt_id,
+        "parent_id": parent_id,
+        "entry_id": entry_id,
+        "mode": mode_cfg,
+        "at": _attempt_at_now(),
+        "family": fields.get("family", entry_id),
+        "qtype": fields.get("qtype"),
+        "framing": fields.get("framing"),
+        "model": fields.get("model", ""),
+        "answer": fields.get("answer"),
+        "prob": fields.get("prob"),
+        "confidence": fields.get("confidence"),
+        "cost": fields.get("cost", 0.0),
+        "reason": fields.get("reason"),
+        "audit": bool(fields.get("audit", False)),
+        "decision_id": fields.get("decision_id"),
+    }
+    try:
+        os.makedirs(os.path.dirname(attempts_path), exist_ok=True)
+        _calibration.append_terminal(attempts_path, rec)
+    except Exception:
+        pass
+
+
+def _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg, phase,
+                       answer, jev, reason, audit=False, decision_id=None, **fields):
+    _append_terminal_best_effort(attempts_path, attempt_id, parent_id, entry_id, mode_cfg, phase,
+                                 reason=reason, audit=audit, decision_id=decision_id, **fields)
+    return SeamResult(answer, jev, mode_cfg, reason, audit, decision_id, attempt_id)
 
 
 def _is_number(value):
@@ -1792,7 +1934,8 @@ class _JobBox(object):
 
 def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_class,
                    mode_cfg, current_answer, decisions_path, outcomes_path,
-                   promotions_path, seams_config, runner, rng, clock, record_breaker_here):
+                   promotions_path, seams_config, runner, rng, clock, record_breaker_here,
+                   attempts_path, attempt_id, parent_id):
     """Runs on its own daemon thread, spawned by consult(): the actual
     reach to Jev (decide(), the near-threshold reorder probe), the ledger
     write, and (for act) jev_cascade.route(). Ported near-verbatim from
@@ -1823,7 +1966,7 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
             _status, why = result
             box.api_failed = True
             box.result = SeamResult(current_answer, None, mode_cfg,
-                                     "NO-DATA: %s" % why, False, None)
+                                     "NO-DATA: %s" % why, False, None, attempt_id)
             return
         record = result[0]
 
@@ -1842,7 +1985,7 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
                         box.api_failed = True
                         box.result = SeamResult(
                             current_answer, None, mode_cfg,
-                            "NO-DATA: reordered probe failed: %s" % why2, False, None)
+                            "NO-DATA: reordered probe failed: %s" % why2, False, None, attempt_id)
                         return
                     record2 = result2[0]
                     if record2["answer"] != record["answer"]:
@@ -1850,7 +1993,7 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
                             current_answer, None, mode_cfg,
                             "NO-DATA: option-order disagreement near threshold (%r vs %r)"
                             % (record["answer"], record2["answer"]),
-                            False, None)
+                            False, None, attempt_id)
                         return
 
         # M3 fix (independent review, 2026-09-19): confidence/abstain/audit
@@ -1897,10 +2040,10 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
                 ledger_error = "local ledger write failed (not a Jev failure): %s" % exc
 
         if mode_cfg == SHADOW:
-            box.result = SeamResult(current_answer, record, SHADOW, ledger_error, audit, written_id)
+            box.result = SeamResult(current_answer, record, SHADOW, ledger_error, audit, written_id, attempt_id)
             return
         if mode_cfg == ADVISE:
-            box.result = SeamResult(current_answer, record, ADVISE, ledger_error, audit, written_id)
+            box.result = SeamResult(current_answer, record, ADVISE, ledger_error, audit, written_id, attempt_id)
             return
 
         # act. risk_class came from the registry entry, nowhere else.
@@ -1908,14 +2051,20 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
             box.result = SeamResult(
                 current_answer, record, ACT,
                 _combine_reasons(ledger_error, abstain_reason or "no usable confidence for cascade routing"),
-                audit, written_id)
+                audit, written_id, attempt_id)
             return
 
         calibration = _cascade.CalibrationHandle(decisions_path, outcomes_path,
                                                   promotions_path=promotions_path)
+        # D3.5: route() is framing strict and model aware, so the decision
+        # handed to it carries the framing the record was answered under
+        # (jev_decide's framing_hash); without it every act escalated
+        # "framing_required" once an attempts ledger sat beside the outcomes
+        # (D3.6), measured 2026-09-24 on five act mode tests.
         decision_obj = {
             "id": decision_id, "family": entry_id, "qtype": qtype,
             "confidence": confidence, "model": record.get("model"),
+            "framing": record.get("framing_hash"),
         }
         try:
             routed = _cascade.route(decision_obj, risk_class, calibration)
@@ -1925,16 +2074,16 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
             box.result = SeamResult(
                 current_answer, record, ACT,
                 _combine_reasons(ledger_error, "cascade routing raised %s: %s" % (type(exc).__name__, exc)),
-                audit, written_id)
+                audit, written_id, attempt_id)
             return
 
         if routed["outcome"] == "ACT":
-            box.result = SeamResult(record["answer"], record, ACT, ledger_error, audit, written_id)
+            box.result = SeamResult(record["answer"], record, ACT, ledger_error, audit, written_id, attempt_id)
         else:
             box.result = SeamResult(
                 current_answer, record, ACT,
                 _combine_reasons(ledger_error, routed.get("reason") or routed["outcome"]),
-                audit, written_id)
+                audit, written_id, attempt_id)
     except Exception as exc:  # noqa: BLE001 -- a surprise here must still let
         # the caller's box.event.wait() return rather than hang until its
         # own deadline for no visible reason; converted to a safe fallback.
@@ -1956,13 +2105,45 @@ def _run_seam_job(box, *, entry_id, state, question, qtype, decision_id, risk_cl
         # streak that exists to protect Jev's own call surface.
         box.result = SeamResult(current_answer, None, mode_cfg,
                                  "unexpected error in Jev seam worker (not a Jev failure): %s: %s"
-                                 % (type(exc).__name__, exc), False, None)
+                                 % (type(exc).__name__, exc), False, None, attempt_id)
     finally:
         if record_breaker_here:
             if box.api_failed:
                 _breaker_record_failure(seams_config, clock)
             else:
                 _breaker_record_success()
+        try:
+            _terminal_from_box = box.result
+            if _terminal_from_box is None:
+                _append_terminal_best_effort(
+                    attempts_path, attempt_id, parent_id, entry_id, mode_cfg,
+                    "no_data", reason="worker produced no result")
+            else:
+                _record = _terminal_from_box.jev
+                _reason = _terminal_from_box.reason
+                _phase = "answered"
+                if _record is None:
+                    _phase = "no_data"
+                elif _reason is not None and "option-order disagreement" in str(_reason):
+                    _phase = "near_threshold_disagreement"
+                elif _abstain_reason(qtype, _record) is not None:
+                    _phase = "abstain"
+                _append_terminal_best_effort(
+                    attempts_path, attempt_id, parent_id, entry_id,
+                    _terminal_from_box.mode, _phase,
+                    family=entry_id, qtype=qtype,
+                    framing=_record.get("framing_hash") if _record else None,
+                    model=(_record.get("model") if _record else "") or "",
+                    answer=(_record.get("answer") if _record else None),
+                    prob=(_record.get("probability") if _record else None),
+                    confidence=(_record.get("confidence") if _record else None),
+                    cost=(_record.get("cost_share", 0.0) if _record else 0.0),
+                    reason=_reason,
+                    audit=bool(_terminal_from_box.audit),
+                    decision_id=_terminal_from_box.decision_id,
+                )
+        except Exception:
+            pass
         box.event.set()
         _release_inflight()
 
@@ -1991,7 +2172,7 @@ def _fires_and_forgets(mode_cfg):
 
 
 def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_dir,
-            runner=None, rng=None, clock=None):
+            runner=None, rng=None, clock=None, parent_id=None):
     """See the module docstring. Never raises for any documented failure
     cause; always returns a SeamResult within _hard_deadline(seams_config)
     seconds of being called, regardless of how slow or hung the Jev
@@ -1999,8 +2180,15 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
     clock = clock if clock is not None else time.monotonic
 
     mode_cfg = _resolve_mode(seams_config, entry_id)
+    attempt_id = mint_attempt_id()
+    attempts_path = os.path.join(ledger_dir, "attempts.jsonl")
+    if not _append_submission_best_effort(attempts_path, attempt_id, parent_id, entry_id, mode_cfg):
+        return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                  "write_error", current_answer, None,
+                                  "submission write failed")
     if mode_cfg == OFF:
-        return SeamResult(current_answer, None, OFF, None, False, None)
+        return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, OFF,
+                                  "off_mode", current_answer, None, None)
 
     # A0.8 admission gates, in order, cheapest first: each is checked
     # BEFORE the registry lookup, mirroring OFF mode's own "nothing else
@@ -2015,7 +2203,8 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
     # the breaker permanently unable to probe again.
     breaker_reason, claimed_probe = _breaker_admission(seams_config, clock)
     if breaker_reason is not None:
-        return SeamResult(current_answer, None, OFF, breaker_reason, False, None)
+        return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, OFF,
+                                  "breaker_open", current_answer, None, breaker_reason)
 
     # m3 fix (independent re-review, 2026-09-19): the whole admission-gate
     # section below (canary, registry, promotions path, decision_id,
@@ -2064,21 +2253,23 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
             # Item 4 (A0.8): canary FAIL now means OFF, not shadow -- no call
             # at all, for every configured mode including shadow. Supersedes
             # the old rule 3 (canary forces shadow); see the module docstring.
-            return SeamResult(current_answer, None, OFF,
-                               "canary reset marker present at %s: mode forced to off (canary FAIL)"
-                               % canary_path, False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, OFF,
+                                      "canary_off", current_answer, None,
+                                      "canary reset marker present at %s: mode forced to off (canary FAIL)"
+                                      % canary_path)
 
         ok, question_or_reason = _registry.callable(registry, entry_id)
         if not ok:
-            return SeamResult(current_answer, None, mode_cfg, question_or_reason, False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                      "refused", current_answer, None, question_or_reason)
         question = question_or_reason
 
         try:
             entry = _registry.get(registry, entry_id)
         except _registry.RegistryError as exc:
-            return SeamResult(current_answer, None, mode_cfg,
-                               "registry entry vanished between callable() and get(): %s" % exc,
-                               False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                      "refused", current_answer, None,
+                                      "registry entry vanished between callable() and get(): %s" % exc)
         risk_class = entry.get("risk")
 
         # Item 7 (Muse G1 point 5 / A0.8 round 6, hardened in the BLOCK
@@ -2123,9 +2314,9 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
                 "cannot be" % (entry_id, mode_cfg, _reads_answer),
                 file=sys.stderr,
             )
-            return SeamResult(current_answer, None, OFF,
-                               "call_site_reads_answer is not the bool True: advise/act forced to off",
-                               False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, OFF,
+                                      "refused", current_answer, None,
+                                      "call_site_reads_answer is not the bool True: advise/act forced to off")
 
         decisions_path = os.path.join(ledger_dir, "decisions.jsonl")
         outcomes_path = os.path.join(ledger_dir, "outcomes.jsonl")
@@ -2140,7 +2331,8 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
         try:
             promotions_path = _promotions_path(seams_config, ledger_dir)
         except _UnsafePromotionsPath as exc:
-            return SeamResult(current_answer, None, mode_cfg, str(exc), False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                      "promotions_path_invalid", current_answer, None, str(exc))
 
         qtype = question["type"]
         decision_id = _decision_id(entry_id, state)
@@ -2157,10 +2349,10 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
         inflight_ok, inflight_count = _try_acquire_inflight(seams_config)
         if not inflight_ok:
             _record_drop(entry_id)
-            return SeamResult(current_answer, None, mode_cfg,
-                               "seam call dropped: %d calls already in flight (limit %d)"
-                               % (inflight_count, _max_inflight(seams_config)),
-                               False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                      "inflight_drop", current_answer, None,
+                                      "seam call dropped: %d calls already in flight (limit %d)"
+                                      % (inflight_count, _max_inflight(seams_config)))
         inflight_claimed = True  # the ONE slot guard's finally now owns releasing this
 
         # A0.8, budget: consumed only now, AFTER the inflight slot is secured
@@ -2168,7 +2360,8 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
         # earlier for registry/promotions/breaker reasons) never burns one.
         budget_ok, budget_deny_reason = _consume_budget_slot(seams_config)
         if not budget_ok:
-            return SeamResult(current_answer, None, OFF, budget_deny_reason, False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, OFF,
+                                      "budget_exhausted", current_answer, None, budget_deny_reason)
 
         record_breaker_here = _fires_and_forgets(mode_cfg)  # shadow only, see its own docstring
         box = _JobBox()
@@ -2181,6 +2374,7 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
                 outcomes_path=outcomes_path, promotions_path=promotions_path,
                 seams_config=seams_config, runner=runner, rng=rng, clock=clock,
                 record_breaker_here=record_breaker_here,
+                attempts_path=attempts_path, attempt_id=attempt_id, parent_id=parent_id,
             ),
             daemon=True,
             # Named for its own entry_id (item 3, A0.8 round 6) so
@@ -2200,15 +2394,16 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
             # still counts as spent: budget stays spent, matching the actual
             # attempt this represents; the worker simply never got to run
             # it).
-            return SeamResult(current_answer, None, mode_cfg,
-                               "could not start the Jev seam worker: %s: %s" % (type(exc).__name__, exc),
-                               False, None)
+            return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                      "thread_start_failed", current_answer, None,
+                                      "could not start the Jev seam worker: %s: %s" % (type(exc).__name__, exc))
 
         handed_off = True  # worker owns the inflight slot (and, for shadow, the probe claim) from here
     except Exception as exc:  # noqa: BLE001 -- m3: consult() must never raise.
-        return SeamResult(current_answer, None, mode_cfg,
-                           "NO-DATA: unexpected error before the Jev call: %s: %s"
-                           % (type(exc).__name__, exc), False, None)
+        return _pre_dispatch_exit(attempt_id, attempts_path, parent_id, entry_id, mode_cfg,
+                                  "no_data", current_answer, None,
+                                  "NO-DATA: unexpected error before the Jev call: %s: %s"
+                                  % (type(exc).__name__, exc))
     finally:
         if not handed_off:
             if inflight_claimed:
@@ -2236,7 +2431,7 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
         # docstring): a caller that genuinely needs this call's eventual
         # id must read the ledger itself once the worker has landed, not
         # trust a value handed back before the write.
-        return SeamResult(current_answer, None, mode_cfg, "%s: submitted" % mode_cfg, False, None)
+        return SeamResult(current_answer, None, mode_cfg, "%s: submitted" % mode_cfg, False, None, attempt_id)
 
     # advise and act both wait, bounded by the hard deadline: advise so it
     # can expose Jev's answer for display (M3 fix, independent review
@@ -2255,7 +2450,7 @@ def consult(entry_id, state, current_answer, *, seams_config, registry, ledger_d
         return SeamResult(current_answer, None, mode_cfg,
                            "NO-DATA: timed out after %.3fs waiting for Jev "
                            "(call continues in the background)" % deadline,
-                           False, None)
+                           False, None, attempt_id)
 
     if box.api_failed:
         _breaker_record_failure(seams_config, clock)

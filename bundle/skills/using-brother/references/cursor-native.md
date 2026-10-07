@@ -37,9 +37,10 @@ and `list`, never a write that claims a result).
 
 ## Declaring them
 
-`bundle/.cursor-plugin/plugin.json` lists `"agents": ["./agents/"]`
+`.cursor-plugin/plugin.json` under the plugin root lists `"agents": ["./agents/"]`
 alongside the existing `skills` and `commands` entries so Cursor's plugin
-loader can find them. `scripts/cursor_plugin_install.py validate` checks
+loader can find them. A maintainer's check, not shipped with the plugin:
+in a checkout of the Brother repository, `scripts/cursor_plugin_install.py validate` checks
 that all three files exist, that each carries exactly `name` and
 `description` frontmatter, and that no shipped agent or rule names an
 outside model vendor.

@@ -308,6 +308,22 @@ def credential_hit(text):
     return False, None
 
 
+def credential_where(text):
+    """WHERE the credential shape matched: (pattern index, view name, offset, length), or None. Never the text.
+    2026-09-24: a landing gate quarantined the only READY build of the day on "class=credential-shape" from a selftest
+    capture that passes in three sandboxes; the class alone could not be reproduced. The index and offset name the
+    rule and the place without printing the value. Fails toward None: an unloadable telemetry module says nothing."""
+    telemetry = _load_sibling("bm_telemetry")
+    if telemetry is None or not hasattr(telemetry, "SECRET_PATTERNS"):
+        return None
+    for view_name, view in (("raw", text), ("normalized", _normalized_view(text))):
+        for i, pat in enumerate(telemetry.SECRET_PATTERNS):
+            m = pat.search(view)
+            if m:
+                return i, view_name, m.start(), m.end() - m.start()
+    return None
+
+
 def deny_list_hit(text, deny_list_path):
     """(hit, no_data_reason) against --deny-list, reusing bm_private_scan.py's
     own term loader and byte matcher (never a second regex builder). Takes
@@ -342,7 +358,9 @@ def hard_gate(text, deny_list_path):
     if no_data:
         return False, no_data
     if hit:
-        return False, "class=credential-shape"
+        where = credential_where(text)
+        return False, ("class=credential-shape" if where is None else
+                       "class=credential-shape pattern=%d view=%s offset=%d length=%d" % where)
     if deny_list_path:
         hit, no_data = deny_list_hit(text, deny_list_path)
         if no_data:
@@ -655,7 +673,9 @@ def _admit_one(src, args, ids_mod, distill_mod, taken_ids, existing_titles):
             if no_data:
                 return False, "REJECT %s: %s" % (src, no_data)
             if hit:
-                return False, "REJECT %s: class=credential-shape" % src
+                where = credential_where(dtext)
+                return False, ("REJECT %s: class=credential-shape" % src if where is None else
+                               "REJECT %s: class=credential-shape pattern=%d view=%s offset=%d length=%d" % ((src,) + where))
 
     # MUTATION SEAM, never set in production: BM_VAULT_DISABLE_DENYLIST_GATE
     # turns off the deny-list hard-refusal for this admit call entirely.

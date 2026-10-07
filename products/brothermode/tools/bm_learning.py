@@ -442,11 +442,80 @@ def safe_display(text, limit=200):
     structural: a newline or a carriage return inside a rule's action can forge
     what looks like an entire additional rule block in injected context or in a
     list of results. Stripping removes the capability; escaping only makes it
-    visible."""
-    flat = _WS.sub(" ", _CONTROL.sub("", text or "")).strip()
+    visible.
+
+    Widened 2026-09-26 past C0: a C1 control (U+009B is an 8-bit CSI, which a
+    terminal honours like ESC [ and can move the cursor over the line above),
+    a format character (U+202E reorders a rendered line) and a lone surrogate
+    (print raises on it) are stripped too. _CONTROL itself is left alone,
+    because storage_key shares it and a stored lookup key must not change
+    shape under rules already on disk."""
+    flat = _WS.sub(" ", _drop_invisible(_CONTROL.sub("", text or ""))).strip()
     if len(flat) <= limit:
         return flat
     return flat[:limit - 3].rstrip() + "..."
+
+
+def _drop_invisible(text):
+    """text without control, format or surrogate characters, whitespace kept
+    (safe_display's own whitespace rule turns that into single spaces)."""
+    if text.isascii():
+        return text
+    return "".join(ch for ch in text if ch.isspace()
+                   or unicodedata.category(ch) not in ("Cc", "Cf", "Cs"))
+
+
+# Every boundary str.splitlines() splits on. A parser reading a report with
+# splitlines, a CI log viewer and a terminal all agree a line ends at each of
+# these, so each is a way for one value to open a second report line.
+_LINE_BREAKS = re.compile("[\n\r\x0b\x0c\x1c\x1d\x1e\x85  ]+")
+
+
+def one_line(text):
+    """The WHOLE formatted report line, made one line with nothing hidden.
+
+    The print choke point for every BrotherMode tool: a line is formatted
+    first, then passed through here as a whole, so no interpolated value (a
+    note path, a store row, an exception message, a model's answer) can open a
+    second line and forge a NO-DATA, a verdict or a path under the real one.
+    tools/test_bm_print_choke_point.py refuses any print, and any
+    sys.stdout.write or sys.stderr.write, that skips it.
+
+    A run of line breaks becomes a visible two-character escape between
+    spaces; every other control, format or surrogate character becomes its
+    visible escape; a tab becomes a space. Unlike safe_display, nothing is
+    stripped, collapsed or capped: indentation and column padding are part of
+    a report line, a long path is still that path, and a reader should SEE
+    that a value carried a break or a cursor escape rather than lose it. The
+    same rule as BrotherSBE's one_line, built here rather than imported, per
+    the ADR that neither product runs the other's tools."""
+    out = []
+    for ch in _LINE_BREAKS.sub(" \\\\n ", "%s" % (text,)):
+        if ch == "\t":
+            ch = " "
+        elif ((not ch.isascii() or not ch.isprintable())
+                and unicodedata.category(ch) in ("Cc", "Cf", "Cs")):
+            n = ord(ch)
+            ch = ("\\x%02x" % n if n <= 0xFF else
+                  "\\u%04x" % n if n <= 0xFFFF else "\\U%08x" % n)
+        out.append(ch)
+    return "".join(out)
+
+
+def say(line, file=None):
+    """Print one report line through one_line(): the one print a tool owns.
+
+    file is print's own argument (None is the current sys.stdout). A console
+    that cannot encode a character (a Windows code page, an ASCII locale) gets
+    that character as a visible escape instead of a UnicodeEncodeError: a line
+    that never printed is a check that vanished."""
+    try:
+        print(one_line(line), file=file)
+    except UnicodeEncodeError:
+        stream = sys.stdout if file is None else file
+        enc = getattr(stream, "encoding", None) or "utf-8"
+        stream.write(one_line(line).encode(enc, "backslashreplace").decode(enc, "replace")
+                     + "\n")
 
 
 # The dash characters the project's copy rule forbids (I7 of

@@ -7,7 +7,7 @@ brief that a test would have caught. Each test here guards a claim the project
 makes about itself: secrets are redacted, sensitive files are owner-only, project
 identity does not collide, and the autosave captures untracked work non-invasively.
 """
-import ast, contextlib, glob, io, os, json, re, shutil, sqlite3, stat, sys, tempfile, time, subprocess, importlib.util
+import ast, contextlib, glob, io, os, json, re, shlex, shutil, sqlite3, stat, sys, tempfile, time, subprocess, importlib.util
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -1231,8 +1231,6 @@ class TestProjectSecurityClaims(unittest.TestCase):
         tools = os.path.join(root, "tools")
         banned = ("urllib", "http", "socket", "requests", "ftplib", "smtplib",
                   "telnetlib", "xmlrpc", "subprocess", "asyncio")
-        pattern = re.compile(
-            r"^\s*(?:import|from)\s+(%s)\b" % "|".join(banned))
         offenders = []
         # ONE named exception, and it is documented in SECURITY.md rather than
         # hidden here: bm_autosave.py drives git, which is an external binary, so
@@ -1420,8 +1418,14 @@ class TestProjectSecurityClaims(unittest.TestCase):
                    # to where a checkout starts, and reimplementing that
                    # discovery to dodge an import would be the worse trade.
                    # Granted by the founder on 2026-08-23 after the gate
-                   # refused the merge commit. SECURITY.md carries the same
-                   # sentence rather than leaving this table its only record.
+                   # refused the merge commit. It also runs an advisory
+                   # record-distance row (2026-09-28) when
+                   # scripts/record_distance.py is present, adding `git
+                   # remote`, `symbolic-ref --short HEAD` and `rev-list
+                   # --left-right --count` against a local remote-tracking
+                   # ref, still local reads, no fetch, no push. SECURITY.md
+                   # carries the same sentence rather than leaving this
+                   # table its only record.
                    "bm_reconcile.py": {"subprocess"},
                    # Cursor compatibility mode: bm_cursor.py runs git
                    # worktree and founder done-checks; bm_cursor_hook.py
@@ -1584,15 +1588,84 @@ class TestProjectSecurityClaims(unittest.TestCase):
                    # fetch: it either runs a local script and reads its exit
                    # code, or the path is absent and evidence FAILS without
                    # ever spawning anything.
-                   "bm_vault_contradiction.py": {"subprocess"}}
+                   "bm_vault_contradiction.py": {"subprocess"},
+                   # THREE MORE, 2026-09-26, each READ before it was allowed
+                   # rather than added to clear a red gate: they landed
+                   # between 2026-09-13 and 2026-09-19 and this gate stayed
+                   # red on hub/main for them until now.
+                   #
+                   # bm_handover.py runs ONE local git question, `git log -1
+                   # --format=%ai -- <rel>`, with cwd at the project root and
+                   # a 30 second timeout, to date the freshest board file; an
+                   # OSError, a timeout or a nonzero exit returns None. No
+                   # remote, no push, no fetch.
+                   "bm_handover.py": {"subprocess"},
+                   # bm_stall.py is the only entry in this table that names
+                   # socket, and it opens none: it calls socket.gethostname()
+                   # once, a local uname-backed syscall (never gethostbyname
+                   # or getfqdn, which would be DNS), to compare against the
+                   # host scripts/cut.py stamps on a release fence. It keeps
+                   # the same call cut.py makes on purpose, so on a readable
+                   # host the two agree; on failure they differ by design
+                   # (cut.py stamps "unknown-host", this returns ""), so an
+                   # unreadable host never matches a genuine tag.
+                   "bm_stall.py": {"socket"},
+                   # bm_vault_pack.py runs ONE local git question, `git -C
+                   # <vault> rev-parse HEAD`, to stamp which vault revision a
+                   # pack was built from. A local ref read: no remote, no
+                   # push, no fetch.
+                   "bm_vault_pack.py": {"subprocess"}}
+        # Exact dotted names, not top-level packages, for the one file that
+        # imports a parsing-only submodule of a banned package (2026-09-30,
+        # the inherited red on hub main 78fc9ce00). bm_vault_web_ui.py
+        # (L3b-01) imports urllib.parse and calls only urlparse on a URL the
+        # caller typed; it never imports urllib.request, opens no socket and
+        # makes no request. Allowing all of urllib would let a later edit
+        # add urllib.request to this file unseen, so the admission is the
+        # exact submodule: a bare `import urllib`, `urllib.request`, or any
+        # other member stays an offender here, and SECURITY.md carries the
+        # same sentence.
+        allowed_exact = {"bm_vault_web_ui.py": {"urllib.parse"}}
         for n in sorted(os.listdir(tools)):
             if not n.endswith(".py") or n.startswith("test_"):
                 continue
-            for i, line in enumerate(
-                    io.open(os.path.join(tools, n), encoding="utf-8"), 1):
-                m = pattern.match(line)
-                if m and m.group(1) not in allowed.get(n, ()):
-                    offenders.append("%s:%d imports %s" % (n, i, m.group(1)))
+            # Read imports the way the interpreter does, not line by line. A
+            # line regex saw only the FIRST name after `import`, so a tool
+            # written in this repository's own idiom (`import json, socket`)
+            # passed while the claim went false: measured 2026-09-26, that
+            # mutation, an aliased one and a literal
+            # importlib.import_module("socket") all survived the regex. A
+            # file that does not parse is an offender, never clean. A
+            # computed module name is out of reach of any static read.
+            with io.open(os.path.join(tools, n), encoding="utf-8") as fh:
+                src = fh.read()
+            try:
+                tree = ast.parse(src, filename=n)
+            except SyntaxError as e:
+                offenders.append("%s:%s does not parse (%s)" % (n, e.lineno, e.msg))
+                continue
+            hits = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""] if node.level == 0 else []
+                elif (isinstance(node, ast.Call) and node.args
+                      and isinstance(node.args[0], ast.Constant)
+                      and isinstance(node.args[0].value, str)
+                      and getattr(node.func, "attr",
+                                  getattr(node.func, "id", None))
+                      in ("import_module", "__import__")):
+                    names = [node.args[0].value]
+                else:
+                    continue
+                for name in names:
+                    top = name.split(".")[0]
+                    if (top in banned and top not in allowed.get(n, ())
+                            and name not in allowed_exact.get(n, ())):
+                        hits.append((node.lineno, top))
+            offenders.extend("%s:%d imports %s" % (n, i, top)
+                             for i, top in sorted(hits))
         self.assertEqual(
             offenders, [],
             "SECURITY.md claims BrotherMode makes no network calls and that the "
@@ -1922,23 +1995,33 @@ class TestPreWriteGate(unittest.TestCase):
 
     def _assert_matches_manifest(self, actual, manifest):
         """Shared by test_no_unreviewed_write_sites and the adversarial test
-        below, so the adversarial test exercises the REAL gate, not a copy."""
+        below, so the adversarial test exercises the REAL gate, not a copy.
+
+        Collects EVERY mismatch, then fails once naming all of them. It
+        used to assert per key, so the first mismatch alphabetically hid
+        the rest and each fix revealed the next one only on the next run."""
         self.assertTrue(actual, "the write-site scanner found nothing; it is broken")
+        problems = []
         for key in sorted(manifest):
-            self.assertIn(key, actual,
-                          "%s is in the reviewed inventory but no longer writes any "
-                          "file. If it was renamed or its writes moved, update "
-                          "tools/write_sites.json to match." % key)
+            if key not in actual:
+                problems.append(
+                    "%s is in the reviewed inventory but no longer writes any "
+                    "file. If it was renamed or its writes moved, update "
+                    "tools/write_sites.json to match." % key)
         for key, count in sorted(actual.items()):
-            self.assertIn(key, manifest,
-                          "%s writes files but is not in the reviewed inventory. "
-                          "Review whether every text it writes passes through "
-                          "redaction, then add it to tools/write_sites.json." % key)
-            self.assertEqual(
-                count, manifest[key],
-                "%s has %d write sites but %d were reviewed. A write site was "
-                "added or removed: confirm it redacts user or model text, then "
-                "update tools/write_sites.json." % (key, count, manifest[key]))
+            if key not in manifest:
+                problems.append(
+                    "%s writes files but is not in the reviewed inventory. "
+                    "Review whether every text it writes passes through "
+                    "redaction, then add it to tools/write_sites.json." % key)
+            elif count != manifest[key]:
+                problems.append(
+                    "%s has %d write sites but %d were reviewed. A write site was "
+                    "added or removed: confirm it redacts user or model text, then "
+                    "update tools/write_sites.json." % (key, count, manifest[key]))
+        if problems:
+            self.fail("%d write-site mismatch(es):\n%s" % (
+                len(problems), "\n".join("- " + p for p in problems)))
 
     def test_no_unreviewed_write_sites(self):
         manifest_path = os.path.join(HERE, "write_sites.json")
@@ -1948,6 +2031,34 @@ class TestPreWriteGate(unittest.TestCase):
             manifest = json.load(fh)["reviewed"]
         actual = self._sites()
         self._assert_matches_manifest(actual, manifest)
+
+    def test_every_mismatch_is_named_in_one_run(self):
+        """The gate used to stop at its first mismatch, alphabetically, so
+        one red hid every drift behind it: measured 2026-09-26 on hub/main
+        at 5ceb6bcfb, a run named only tools/bm_device_lease.py while
+        tools/bm_vault.py and tools/brother_paths.py sat unseen behind it.
+        One key per mismatch kind, ordered so a stop-at-first loop names
+        only the gone key: all three must appear in the ONE failure, and
+        the key that matches must not."""
+        actual = {"tools/a_unreviewed.py": 1, "tools/b_drifted.py": 3,
+                  "tools/d_clean.py": 2}
+        manifest = {"tools/b_drifted.py": 2, "tools/c_gone.py": 4,
+                    "tools/d_clean.py": 2}
+        with self.assertRaises(AssertionError) as ctx:
+            self._assert_matches_manifest(actual, manifest)
+        msg = str(ctx.exception)
+        self.assertIn("3 write-site mismatch(es)", msg)
+        self.assertIn("tools/a_unreviewed.py writes files but is not in the "
+                      "reviewed inventory", msg)
+        self.assertIn("tools/b_drifted.py has 3 write sites but 2 were "
+                      "reviewed", msg)
+        self.assertIn("tools/c_gone.py is in the reviewed inventory but no "
+                      "longer writes", msg)
+        self.assertNotIn("tools/d_clean.py", msg)
+        # A matching inventory still passes: the collector must not turn
+        # into a gate that can only fail.
+        self._assert_matches_manifest({"tools/d_clean.py": 2},
+                                      {"tools/d_clean.py": 2})
 
     def test_widened_scope_catches_a_smuggled_site(self):
         """C-04 adversarial test. Pre-widening, os.replace and any directory
@@ -4703,8 +4814,9 @@ class TestLoop12RedactionIsLinearInInputSize(unittest.TestCase):
     A wall-clock budget is a blunt instrument, so this asserts the SHAPE: four
     times the input must not take anything like sixteen times the work."""
 
-    def _time(self, text, samples=5):
-        """Minimum of several samples, not one (C-11, 2026-08-04).
+    def _time(self, small_text, large_text, samples=5):
+        """Minimum of several samples per size, taken in INTERLEAVED rounds
+        (C-11, 2026-08-04; interleaved 2026-09-04). Returns (small, large).
 
         A single wall-clock sample is exposed to one bad scheduling stall
         landing on it alone, and that is exactly what happened: CI run
@@ -4717,17 +4829,34 @@ class TestLoop12RedactionIsLinearInInputSize(unittest.TestCase):
         noise can only ADD latency to a sample, never remove it, so the
         minimum converges on the true unloaded cost. Five samples means a
         stall would have to land on every draw at one size and none at the
-        other to move the ratio. Both call sites in this class share this
-        helper, so both are fixed here rather than twice."""
-        import time
-        best = None
+        other to move the ratio.
+
+        INTERLEAVED 2026-09-04. That is exactly what a stall then did. With
+        the five samples of one size run back to back, the whole block at
+        32000 letters lasted about 15 ms, and a stall longer than the block
+        (a CPU frequency step, another process holding the core) landed on
+        every sample in it while the earlier block at 8000 saw none of it:
+        measured 0.0016s against 0.0399s, a 24.7x ratio, code under test
+        unchanged. The minimum cannot drop a stall that covers every draw.
+        Sampling in rounds (small, large, small, large, ...) puts any stall
+        on both sizes or on neither, which is the property the ratio was
+        always assumed to have. The clock is perf_counter, the monotonic
+        high-resolution clock meant for this, not the wall clock. Every
+        call site in this class and in the sibling class below routes
+        through this one helper, so the fix lands once."""
+        best_small = best_large = None
         for _ in range(samples):
-            start = time.time()
-            bm.redact(text)
-            elapsed = time.time() - start
-            if best is None or elapsed < best:
-                best = elapsed
-        return best
+            start = time.perf_counter()
+            bm.redact(small_text)
+            small = time.perf_counter() - start
+            start = time.perf_counter()
+            bm.redact(large_text)
+            large = time.perf_counter() - start
+            if best_small is None or small < best_small:
+                best_small = small
+            if best_large is None or large < best_large:
+                best_large = large
+        return best_small, best_large
 
     def test_quadratic_blowup_is_gone(self):
         # FIXED 2026-07-31. This test carried BOTH failure modes at once, which
@@ -4771,12 +4900,24 @@ class TestLoop12RedactionIsLinearInInputSize(unittest.TestCase):
         # test_calibrated_reinjecting_the_unbounded_pattern_reproduces_the_blowup
         # below, which uses underscores because they are the character that
         # clears the lookbehind at every offset.
-        small = max(self._time("x " + "B" * 8000), 0.001)
-        large = self._time("x " + "B" * 32000)
+        #
+        # RECALIBRATED 2026-09-04, sizes 8000/32000 to 32000/128000. On this
+        # machine redact() over 8000 letters costs about 0.75 ms, which is
+        # UNDER the 0.001 floor below, so the floor was the denominator of
+        # the ratio and the "small" timing was never a measurement at all:
+        # linear read as 2.7x (large over floor) instead of the 4x it is.
+        # A ratio whose denominator is a constant measures the machine's
+        # absolute speed, the exact thing this class exists not to do. At
+        # 32000 letters the cost is about 2.7 ms and at 128000 about 11 ms,
+        # 4.0x measured, so both legs are real timings and the floor is back
+        # to guarding against a zero denominator only. Total cost of the
+        # five interleaved rounds is about 70 ms.
+        small, large = self._time("x " + "B" * 32000, "x " + "B" * 128000)
+        small = max(small, 0.001)
         self.assertLess(large / small, 8.0,
-                        "redact() scaling looks superlinear: 8000 chars took "
-                        "%.4fs, 32000 took %.4fs, a %.1fx ratio where linear is "
-                        "about 4x and quadratic about 16x"
+                        "redact() scaling looks superlinear: 32000 chars took "
+                        "%.4fs, 128000 took %.4fs, a %.1fx ratio where linear "
+                        "is about 4x and quadratic about 16x"
                         % (small, large, large / small))
 
     def test_a_run_of_underscores_does_not_blow_up_either(self):
@@ -4826,8 +4967,8 @@ class TestLoop12RedactionIsLinearInInputSize(unittest.TestCase):
         # against the 4.1x this bounded pattern gives. The 15.6x recorded
         # three paragraphs up was measured on underscores as well, which is
         # why the two figures agree.
-        small = max(self._time("_" * 8000), 0.001)
-        large = self._time("_" * 32000)
+        small, large = self._time("_" * 8000, "_" * 32000)
+        small = max(small, 0.001)
         self.assertLess(large / small, 8.0,
                         "redact() on an underscore run looks superlinear: 8000 "
                         "chars took %.4fs, 32000 took %.4fs, a %.1fx ratio "
@@ -4883,8 +5024,8 @@ class TestLoop12RedactionIsLinearInInputSize(unittest.TestCase):
         reinjected[8] = unbounded
         bm.SECRET_PATTERNS = reinjected
         try:
-            small = max(self._time("_" * 1000), 0.001)
-            large = self._time("_" * 4000)
+            small, large = self._time("_" * 1000, "_" * 4000)
+            small = max(small, 0.001)
         finally:
             bm.SECRET_PATTERNS = original
         self.assertGreaterEqual(
@@ -6542,7 +6683,7 @@ class TestM1InstallShapeDoctorCheck(unittest.TestCase):
                 json.dump({"hooks": {"PreToolUse": [{
                     "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                     "hooks": [{"type": "command",
-                               "command": "python3 " + fence,
+                               "command": "python3 " + shlex.quote(fence),
                                "timeout": 10}]}]}}, fh)
             r = self._run_doctor(home, project, settings)
             checks = self._checks(r.stdout)
@@ -6644,7 +6785,7 @@ class TestM17FenceLivenessAgainstRealStore(unittest.TestCase):
             with io.open(settings, "w", encoding="utf-8") as fh:
                 json.dump({"hooks": {"PreToolUse": [{
                     "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-                    "hooks": [{"type": "command", "command": "python3 " + fence,
+                    "hooks": [{"type": "command", "command": "python3 " + shlex.quote(fence),
                               "timeout": 10}]}]}}, fh)
             r = self._run_doctor(home, project, settings)
             checks = self._checks(r.stdout)
@@ -6689,7 +6830,7 @@ class TestM17FenceLivenessAgainstRealStore(unittest.TestCase):
             with io.open(settings, "w", encoding="utf-8") as fh:
                 json.dump({"hooks": {"PreToolUse": [{
                     "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-                    "hooks": [{"type": "command", "command": "python3 " + fence,
+                    "hooks": [{"type": "command", "command": "python3 " + shlex.quote(fence),
                               "timeout": 10}]}]}}, fh)
             # ONLY DIFFERENCE from the root-run test above: doctor's cwd is
             # a subdirectory of the project, not the project root itself.
@@ -6716,7 +6857,7 @@ class TestM17FenceLivenessAgainstRealStore(unittest.TestCase):
         with io.open(settings, "w", encoding="utf-8") as fh:
             json.dump({"hooks": {"PreToolUse": [{
                 "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-                "hooks": [{"type": "command", "command": "python3 " + fence,
+                "hooks": [{"type": "command", "command": "python3 " + shlex.quote(fence),
                           "timeout": 10}]}]}}, fh)
         return fence
 
@@ -6817,7 +6958,8 @@ class TestM17FenceLivenessAgainstRealStore(unittest.TestCase):
                 json.dump({"hooks": {"PreToolUse": [{
                     "matcher": "Edit|Write|MultiEdit|NotebookEdit",
                     "hooks": [{"type": "command",
-                              "command": shim_path + " " + fence,
+                              "command": shlex.quote(shim_path) + " "
+                                         + shlex.quote(fence),
                               "timeout": 10}]}]}}, fh)
             r = self._run_doctor(home, project, settings)
             checks = self._checks(r.stdout)
@@ -6933,7 +7075,7 @@ class TestM20WiredHookRedirectionShellSemantics(unittest.TestCase):
             os.makedirs(project)
             _tools_dir, fence = self._tools_dir_with_stub_fence(tmp)
             sink = os.path.join(tmp, "swallowed.log")
-            command = "python3 %s > %s" % (fence, sink)
+            command = "python3 %s > %s" % (shlex.quote(fence), shlex.quote(sink))
             settings = os.path.join(tmp, "settings.json")
             with io.open(settings, "w", encoding="utf-8") as fh:
                 json.dump({"hooks": {"PreToolUse": [{
@@ -7044,7 +7186,7 @@ class TestM25BlockedWriteSimulationLeavesNoBytecodeCache(unittest.TestCase):
             with io.open(settings, "w", encoding="utf-8") as fh:
                 json.dump({"hooks": {"PreToolUse": [{
                     "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-                    "hooks": [{"type": "command", "command": "python3 " + fence,
+                    "hooks": [{"type": "command", "command": "python3 " + shlex.quote(fence),
                               "timeout": 10}]}]}}, fh)
             r = subprocess.run(
                 [sys.executable, self.DOCTOR, "--settings", settings, "--json"],
@@ -7392,7 +7534,7 @@ class TestM1MigrateInstallScript(unittest.TestCase):
                 json.dump({"hooks": {"PreToolUse": [{
                     "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                     "hooks": [{"type": "command",
-                              "command": "python3 " + fence,
+                              "command": "python3 " + shlex.quote(fence),
                               "timeout": 10}]}]}}, fh)
             r = self._run("--home", home)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -7907,20 +8049,10 @@ class TestLoop11SecretScanHardening(unittest.TestCase):
                 + " password=hunter2 "
                 + ("some ordinary sentence about the work. " * (units * 8)))
 
-    def _time(self, text, samples=5):
-        """Minimum of five samples, the same estimator and for the same
-        reason as TestLoop12RedactionIsLinearInInputSize._time above (C-11,
-        2026-08-04): noise can only ADD latency to a sample, never remove it,
-        so the minimum converges on the true unloaded cost."""
-        import time
-        best = None
-        for _ in range(samples):
-            start = time.time()
-            bm.redact(text)
-            elapsed = time.time() - start
-            if best is None or elapsed < best:
-                best = elapsed
-        return best
+    # The same estimator, for the same reasons, as the sibling class above:
+    # minimum of five INTERLEAVED samples per size, returning (small, large).
+    # One implementation, so a fix to the estimator lands in both classes.
+    _time = TestLoop12RedactionIsLinearInInputSize._time
 
     def test_redaction_of_a_large_input_stays_linear(self):
         """PERFORMANCE SHAPE. The key=value pattern was quadratic once (an
@@ -7952,8 +8084,8 @@ class TestLoop11SecretScanHardening(unittest.TestCase):
             self.assertNotIn("hunter2", self._redact(blob),
                              "a secret in a %d KB input was not redacted"
                              % (len(blob) // 1024))
-        small = max(self._time(small_blob), 0.001)
-        large = self._time(large_blob)
+        small, large = self._time(small_blob, large_blob)
+        small = max(small, 0.001)
         self.assertLess(large / small, 8.0,
                         "redact() scaling looks superlinear on the workstream "
                         "D blob: %d KB took %.4fs, %d KB took %.4fs, a %.1fx "
@@ -7988,8 +8120,8 @@ class TestLoop11SecretScanHardening(unittest.TestCase):
         reinjected[8] = unbounded
         bm.SECRET_PATTERNS = reinjected
         try:
-            small = max(self._time(self._large_blob(4)), 0.001)
-            large = self._time(self._large_blob(16))
+            small, large = self._time(self._large_blob(4), self._large_blob(16))
+            small = max(small, 0.001)
         finally:
             bm.SECRET_PATTERNS = original
         self.assertGreaterEqual(
@@ -8004,6 +8136,37 @@ class TestLoop11SecretScanHardening(unittest.TestCase):
         # every later redaction test in this process pass or fail for reasons
         # unrelated to the code under test.
         self.assertIn("{0,40}", bm.SECRET_PATTERNS[8].pattern)
+
+
+class TestCardPatternMatchesCardsNotDateTimes(unittest.TestCase):
+    """2026-09-30. The card pattern was (?:\\d[ -]?){13,16}, a separator
+    allowed between any two digits, so the date-time in a tag such as
+    preflight/20260926-182529 read as a card and was masked: every receipt
+    screen written from a checkout that could reach that tag stored a
+    different engine version than the run printed. Both directions are
+    pinned: the printed card layouts are still masked, date-time and
+    all-digit identifier shapes are left alone."""
+
+    CARDS = ("4111111111111111", "4222222222222", "4111 1111 1111 1111",
+             "4111-1111-1111-1111", "5555 5555-5555 4444",
+             "378282246310005", "3782 822463 10005", "3056-930902-5904",
+             "4222 222 222 222", "1354 12345 612345")
+    NOT_CARDS = ("preflight/20260926-182529-663-g78fc9ce00",
+                 "preflight/20260926-182529", "20260926-182529",
+                 "verify-601-2-20260928-164703",
+                 "LOOP-DIGEST-20260929-000835", "20260926T074022",
+                 "11111111-2222-3333-4444-555555555555")
+
+    def test_every_printed_card_layout_is_masked(self):
+        for card in self.CARDS:
+            line = "paid with %s yesterday" % card
+            clean, n = bm.redact(line)
+            self.assertNotIn(card, clean, line)
+            self.assertEqual(n, 1, line)
+
+    def test_date_times_and_digit_identifiers_are_not_cards(self):
+        for text in self.NOT_CARDS:
+            self.assertEqual(bm.redact(text), (text, 0), text)
 
 
 class TestP17PackagingManifestMatchesTheRepository(unittest.TestCase):

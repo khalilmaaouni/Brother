@@ -3,7 +3,7 @@ name: brotherme-handover-pack
 description: "Generate the handover pages that let another person take this project over"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-handover-pack`.
+This is the Codex route for the existing Claude command `/brother:brotherme-handover-pack`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

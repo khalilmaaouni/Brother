@@ -28,6 +28,12 @@ that failed or read NO-DATA rather than passed. NO-DATA is never a pass
 here; it means a check could not exercise what it claims to, and gets
 reported as such, never counted as green.
 
+`REQUIRED_FAST_JOBS=4` runs its audited checks four at a time (the default since that mode passed its closing
+check, `scripts/donecheck_acc2.py`; `REQUIRED_FAST_JOBS=1` runs them one at a time), and the gate first waits for machine slots shared with every other gate and grader on the same machine
+(`scripts/heavy_slot.py`; `LOCAL_SLOTS` sets the pool, default half the
+cores; `BROTHER_HEAVY_SLOT=off` skips the wait). A wait past an hour runs
+anyway and says so, because a busy machine is not a verdict.
+
 README.md itself carries dozens of individual proof commands, each right
 next to the claim it proves, in the shape `Prove X with python3
 scripts/test_Y.py`. Run the one beside the claim you are touching before

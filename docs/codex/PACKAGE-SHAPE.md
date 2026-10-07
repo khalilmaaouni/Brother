@@ -52,7 +52,7 @@ bundle/
   codex-skills/<skill>/SKILL.md
   codex-skills/STRIPPED.json
   runtime/
-  hooks/union.json
+  hooks/hooks.json
 ```
 
 `bundle/skills/` is the skill directory the Codex manifest selects. The
@@ -122,11 +122,11 @@ Their remaining fields differ as follows:
 | Interface metadata | The `interface` object above. | No `interface` field. |
 | Product dependencies | No `dependencies` field. | `brothermode@^3.4.2` and `brothersbe@^3.7.0`. |
 | Host keyword | `codex` | `claude code` |
-| Hook declaration | No `hooks` field. | No `hooks` field in the umbrella manifest; product plugins supply their conventional `hooks/hooks.json`. |
+| Hook declaration | No `hooks` field. | No `hooks` field in the manifest; Claude Code loads the conventional `hooks/hooks.json` the bundle ships. |
 
-The generated `bundle/hooks/union.json` is deliberately not named
-`bundle/hooks/hooks.json`: Claude Code would otherwise load the combined
-hooks alongside the dependent products' hooks and duplicate execution.
+From 1.1.0 the generated hooks live at `bundle/hooks/hooks.json`, the name
+Claude Code loads by itself. The one plugin declares no dependent products,
+and `union.json` is the retired name.
 The Codex package validator's refusal of a `hooks` manifest field is a
 separate boundary. Codex's manual user hooks installer reads the product
 definitions and writes a chosen Codex home's `hooks.json`; package installation

@@ -776,9 +776,14 @@ def _push_targets(refspecs, start):
 
 
 def push_effect_reason(named, why, cmd_text):
-    """The refusal text. Same shape as refusal_reason above: what was read,
-    the command verbatim, then the numbered recovery lines, ending on the
-    same break-glass sentence and the same closing caveat."""
+    """The refusal text. Same shape as refusal_reason below: what was read,
+    the command verbatim, the numbered conditions that really unlock it, then
+    what a break-glass record does NOT do, and the closing caveat.
+
+    Only exits push_effect honors are listed. It used to offer a third, a
+    record in .sbe/break-glass.json, which nothing in this guard reads and
+    which the Stop reconciler, judging changed files, never matches to a
+    push: an operator who followed it was refused again (2026-09-26)."""
     return (
         "BrotherSBE Bash write guard: this command pushes to %s, and %s.\n"
         "The command, verbatim:\n"
@@ -786,14 +791,17 @@ def push_effect_reason(named, why, cmd_text):
         "A push writes no file in the working tree, so none of this guard's "
         "path patterns can see it and no ownedPaths declaration could ever "
         "cover it. The effect is judged here instead.\n"
-        "Any of these lets the work proceed, and nothing else does:\n"
-        "  1. Push to a branch of its own and open a pull request, so the "
-        "checks that guard the default branch get to run.\n"
-        "  2. Run the push without the flag that switches off the pre-push "
-        "hooks, so those hooks actually run.\n"
-        "  3. If this is a deliberate, reviewed exception, record it in "
-        ".sbe/break-glass.json with a reason, an owner, an expiry and an "
-        "approver, which the Stop reconciler reads and names in its report.\n"
+        "This guard allows a push that meets both of these, and nothing else "
+        "unlocks it:\n"
+        "  1. It lands on a branch of its own, not the default branch (nor main "
+        "or master when the default cannot be resolved); open a pull request "
+        "from there, so the checks that guard the default branch get to run.\n"
+        "  2. It runs without the flag that switches off the pre-push hooks, "
+        "so those hooks actually run.\n"
+        "No record in .sbe/break-glass.json unlocks this push: this guard never "
+        "reads that file, and the Stop reconciler that does read it judges "
+        "changed files, never a push. A deliberate, reviewed exception is run "
+        "by a person by hand, not through this session's tools.\n"
         "This guard did NOT prove anything about the rest of the command."
         % (named, why, cmd_text[:400]))
 
@@ -1433,9 +1441,11 @@ def refusal_reason(rel, family, why, command, live_tasks):
         "writer --base $(git rev-parse HEAD) --verify <command> --owns %s\n"
         "  2. Make the change through Edit or Write instead, so the authority guard "
         "and the fence hook can judge it against the same declaration.\n"
-        "  3. If this is a deliberate, reviewed exception, record it in "
-        ".sbe/break-glass.json with a reason, an owner, an expiry and an approver, "
-        "which the Stop reconciler reads and names in its report.\n"
+        "No record in .sbe/break-glass.json unlocks this command: this guard never "
+        "reads that file. A valid record listing this path only lets the Stop "
+        "reconciler accept a change to it, so a deliberate, reviewed exception is "
+        "recorded there and made by a person by hand, not through this session's "
+        "tools.\n"
         "This guard did NOT prove anything about the rest of the command."
         % (rel, family, why, task_state, command[:400], rel))
 

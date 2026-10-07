@@ -32,6 +32,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -425,6 +426,12 @@ class RealRepositoryCliIsClean(unittest.TestCase):
     must be committed current, since nothing under it is hand edited."""
 
     def test_check_on_this_repository_is_green(self):
+        # A checkout property: an export shaped tree ships bundle/ and products/ without plugin/, so a fresh generation
+        # there cannot list the recorder it never had the source for, and the manifest reads stale by construction
+        # (2026-09-24, the hermetic check on the export tree). Skipped by name there, proven from a checkout.
+        src = os.path.join(os.path.dirname(HERE), "plugin", "runtime", "brother", "core", "dream_record.py")
+        if not os.path.isfile(src):
+            self.skipTest("the recorder source is not in this tree (export shape): %s" % src)
         proc = sh([sys.executable, os.path.join(HERE, "bundle_runtime.py"),
                   "--check"])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
@@ -521,9 +528,18 @@ class LauncherRunsOutsideAnyCheckout(unittest.TestCase):
         self.assertIn("--runs-root", out, out)
 
 
-class LauncherDefaultRunsRoot(unittest.TestCase):
-    """The launcher's own default_runs_root(), loaded from the generated
-    file so this proves the SHIPPED source, not a copy re-typed here."""
+class LauncherAddsNoRunsRootOfItsOwn(unittest.TestCase):
+    """The generated launcher, loaded from the generated file so this proves
+    the SHIPPED source, not a copy re-typed here.
+
+    Until 2026-10-06 the launcher computed a default runs root of its own
+    (BROTHER_RUNS_ROOT, then a writable git toplevel, then
+    ~/.claude/brother-run) and three cases here held it to that. The engine
+    run directly decided otherwise, so the two forms kept a run's records in
+    two places. The rule now lives in the engine alone
+    (brother_run.default_runs_root) and is proven for BOTH forms, as
+    processes, by scripts/test_runs_root_one_rule.py. What is held here is
+    the launcher's half: it passes the caller's arguments and nothing else."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-default-root-")
@@ -541,23 +557,27 @@ class LauncherDefaultRunsRoot(unittest.TestCase):
         self.mod = importlib.util.module_from_spec(spec)
         loader.exec_module(self.mod)
 
-    def test_env_override_wins_over_everything(self):
-        got = self.mod.default_runs_root(launcher_dir=self.runtime_dir,
-                                         env={"BROTHER_RUNS_ROOT": "/somewhere/named"})
-        self.assertEqual(got, "/somewhere/named")
+    def launched(self, args):
+        """The argv the launcher would start, with no process started."""
+        started = []
+        with mock.patch.object(self.mod.subprocess, "call",
+                               lambda argv: started.append(argv) or 0):
+            self.assertEqual(self.mod.main(list(args)), 0)
+        return started
 
-    def test_no_git_checkout_falls_back_to_a_per_user_state_dir(self):
-        # self.runtime_dir has no .git anywhere above it inside self.tmp, so
-        # this is the INSTALLED case: no writable checkout beside the
-        # launcher.
-        got = self.mod.default_runs_root(launcher_dir=self.runtime_dir, env={})
-        self.assertEqual(got, os.path.expanduser(
-            os.path.join("~", ".claude", "brother-run")))
+    def test_the_launcher_passes_the_callers_arguments_and_nothing_else(self):
+        args = ["--continue", "--cwd", "/some/target"]
+        self.assertEqual(self.launched(args),
+                         [[sys.executable, self.mod.BROTHER_RUN] + args])
 
-    def test_inside_a_writable_checkout_uses_its_toplevel(self):
-        repo = make_repo(self.tmp)
-        got = self.mod.default_runs_root(launcher_dir=repo, env={})
-        self.assertEqual(os.path.realpath(got), os.path.realpath(repo))
+    def test_an_explicit_runs_root_reaches_the_engine_untouched(self):
+        args = ["an outcome", "--runs-root", "/somewhere/named"]
+        self.assertEqual(self.launched(args),
+                         [[sys.executable, self.mod.BROTHER_RUN] + args])
+
+    def test_the_launcher_defines_no_default_of_its_own(self):
+        self.assertFalse(hasattr(self.mod, "default_runs_root"),
+                         "the launcher computes a runs root of its own again")
 
 
 class ShippedVerifierReadsTheManifestWithNoScriptsBesideIt(unittest.TestCase):
@@ -702,7 +722,7 @@ class HookPackageFilesFollowSiblingPathJoins(unittest.TestCase):
 
 class HookCommandsSmokeRunClean(unittest.TestCase):
     """Every Stop, SessionStart, PreCompact and SessionEnd command in the
-    real, committed bundle/hooks/union.json (renamed 2026-09-13; see
+    real, committed bundle/hooks/hooks.json (see
     bundle_runtime.HOOKS_JSON_NAME), run from a temporary HOME and
     a temporary git repository with CLAUDE_PLUGIN_ROOT pointed at the real
     bundle/, fed an empty JSON payload on stdin exactly like a live hook
@@ -723,12 +743,11 @@ class HookCommandsSmokeRunClean(unittest.TestCase):
     def setUpClass(cls):
         repo_root = os.path.dirname(HERE)
         cls.bundle_dir = os.path.join(repo_root, "bundle")
-        # Renamed 2026-09-13 (bundle_runtime.HOOKS_JSON_NAME): this file must
-        # never be named "hooks.json" again, since that is the exact path
-        # Claude Code auto-loads from an installed plugin, and brother also
-        # depends on brothermode/brothersbe, which register these same
-        # events themselves -- a "hooks.json" here double-fires every one.
-        hooks_json = os.path.join(cls.bundle_dir, "hooks", "union.json")
+        # Since 2026-09-30 (bundle_runtime.HOOKS_JSON_NAME, the one-plugin
+        # ADR) this IS hooks.json, the path Claude Code auto-loads; every
+        # command runs through runtime/hooks/hook_guard.py, which under the
+        # temporary HOME below finds no old plugin and execs the command.
+        hooks_json = os.path.join(cls.bundle_dir, "hooks", BR.HOOKS_JSON_NAME)
         with open(hooks_json, encoding="utf-8") as fh:
             cls.hooks_doc = json.load(fh)
 
@@ -949,6 +968,288 @@ class HookMirrorFilesOutsideTheHooksJsonClosureAreStillTracked(unittest.TestCase
                              "mirror must fail --check, not pass silently: "
                              "%s" % problems)
         self.assertTrue(any("orphan_tool.py" in p for p in problems), problems)
+
+
+class GenerateHooksRemovesAMirrorWhoseSourceIsGone(unittest.TestCase):
+    """The write-side counterpart of the DRIFT class above: check_hooks()
+    already reports (read-only) when a mirrored tool's products/ source has
+    been deleted entirely (2026-09-11, F-mirror-drift), but generate_hooks()
+    had no code to actually remove that stale copy, so a regeneration could
+    never clear the drift check_hooks itself was reporting. Ported from PR
+    690 (2026-09-14)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-orphan-cleanup-")
+        self.products_dir = os.path.join(self.tmp, "products")
+        self.runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        self.product = "fakeprod4"
+        # check_hooks() reads the bundle manifest since the one-plugin ADR
+        # (an unreadable one blocks), so the temp bundle carries one; this
+        # class measures only the orphaned mirror.
+        manifest_dir = os.path.join(self.tmp, "bundle", ".claude-plugin")
+        os.makedirs(manifest_dir)
+        with open(os.path.join(manifest_dir, "plugin.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"name": "brother", "version": "1.1.0"}, fh)
+        tools_dir = os.path.join(self.products_dir, self.product, "tools")
+        hooks_dir = os.path.join(self.products_dir, self.product, "hooks")
+        os.makedirs(tools_dir)
+        os.makedirs(hooks_dir)
+        with open(os.path.join(hooks_dir, BR.PRODUCT_HOOKS_JSON_NAME), "w",
+                 encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{"hooks": [{
+                "type": "command",
+                "command": '$env:PY "${CLAUDE_PLUGIN_ROOT}/tools/fake_hook.py"',
+            }]}]}}, fh)
+        with open(os.path.join(tools_dir, "fake_hook.py"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("# a real hook tool, reached by hooks.json\n")
+        self.orphan_source = os.path.join(tools_dir, "gone_tool.py")
+        with open(self.orphan_source, "w", encoding="utf-8") as fh:
+            fh.write("VALUE = 1\n")
+        BR.generate_hooks(products=[self.product],
+                          products_dir=self.products_dir,
+                          runtime_dir=self.runtime_dir)
+        self.orphan_mirror = os.path.join(self.runtime_dir, "hooks",
+                                          self.product, "tools",
+                                          "gone_tool.py")
+        shutil.copyfile(self.orphan_source, self.orphan_mirror)
+        # Now delete the source entirely: this is the condition
+        # check_hooks() already detects read-only.
+        os.remove(self.orphan_source)
+
+    def test_check_hooks_reports_the_deleted_source_before_any_regen(self):
+        ok, problems = BR.check_hooks(products=[self.product],
+                                      products_dir=self.products_dir,
+                                      runtime_dir=self.runtime_dir)
+        self.assertFalse(ok, problems)
+        self.assertTrue(any("gone_tool.py" in p and "no longer exists" in p
+                           for p in problems), problems)
+
+    def test_generate_hooks_removes_the_stale_mirror_and_clears_the_drift(self):
+        self.assertTrue(os.path.isfile(self.orphan_mirror))
+        BR.generate_hooks(products=[self.product],
+                          products_dir=self.products_dir,
+                          runtime_dir=self.runtime_dir)
+        self.assertFalse(
+            os.path.isfile(self.orphan_mirror),
+            "gone_tool.py: generate_hooks() left a mirror copy in place "
+            "whose products/ source no longer exists anywhere")
+        ok, problems = BR.check_hooks(products=[self.product],
+                                      products_dir=self.products_dir,
+                                      runtime_dir=self.runtime_dir)
+        self.assertTrue(ok, problems)
+
+
+INSTALLED_RECORDING_PROBE = r"""
+import json, os, sys, tempfile
+sys.path.insert(0, os.getcwd())
+import dream_bridge
+recorder = dream_bridge.recorder()
+run_dir = tempfile.mkdtemp(prefix="installed-recording-")
+event_id = recorder.record_decision(run_dir, "probe", {"seen": 1}, ["a", "b"], "a", "v1")
+journal = recorder._journal()
+print(json.dumps({"recorder": recorder.__file__, "journal": journal.__file__,
+                  "journal_path": recorder.journal_path(), "event_id": event_id,
+                  "events": len(journal.read(run_dir))}))
+"""
+
+
+class InstalledRuntimeCanRecordLearningEvents(unittest.TestCase):
+    """REQ-BUNDLE: the recorder, its bridge and the journal ship in
+    bundle/runtime, and the INSTALLED copy can write an event with no
+    checkout beside it. Comparing bytes would not show a recorder that ships
+    and cannot find its journal, so this records a real decision."""
+
+    def setUp(self):
+        # An EXPORT shaped tree ships bundle/ and products/ and not plugin/, so the recorder's SOURCE is not beside
+        # scripts/ there and generate() cannot ship it from this tree (2026-09-24: the push gate's hermetic check ran
+        # this class on the export tree for the first time and read three latent reds). The installed copy is proven
+        # from a checkout; on a tree without the source this class says so and skips, which the gate reads as not
+        # failing, never as a pass of the property.
+        src = os.path.join(os.path.dirname(HERE), "plugin", "runtime", "brother", "core", "dream_record.py")
+        if not os.path.isfile(src):
+            self.skipTest("the recorder source is not in this tree (export shape): %s" % src)
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-recorder-")
+        self.runtime_dir = os.path.join(self.tmp, "installed", "runtime")
+        BR.generate(scripts_dir=HERE, runtime_dir=self.runtime_dir)
+
+    def tearDown(self):
+        if not getattr(self, "tmp", None): return
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_the_three_files_ship_and_are_in_the_manifest(self):
+        manifest = _manifest(os.path.join(self.runtime_dir, BR.MANIFEST_NAME))
+        listed = {entry["path"] for entry in manifest["files"]}
+        for name in ("dream_bridge.py", "dream_record.py", "journal.py"):
+            with self.subTest(name=name):
+                self.assertTrue(os.path.isfile(os.path.join(self.runtime_dir, name)))
+                self.assertIn(name, listed)
+
+    def test_the_installed_copy_records_a_decision_with_no_checkout_beside_it(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("BROTHER_DREAM_RECORD_PATH", "BROTHER_JOURNAL_PATH", "PYTHONPATH")
+               and not k.startswith("GIT_")}
+        proc = subprocess.run([sys.executable, "-B", "-c", INSTALLED_RECORDING_PROBE],
+                              cwd=self.runtime_dir, env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-600:])
+        seen = json.loads(proc.stdout.strip().splitlines()[-1])
+        installed = os.path.realpath(self.runtime_dir)
+        for key in ("recorder", "journal", "journal_path"):
+            self.assertTrue(os.path.realpath(seen[key]).startswith(installed + os.sep),
+                            "%s came from outside the installed copy: %s" % (key, seen[key]))
+        self.assertEqual(os.path.realpath(seen["journal"]), os.path.realpath(seen["journal_path"]),
+                         "the recorder reports one journal and loads another")
+        self.assertTrue(seen["event_id"])
+        self.assertEqual(seen["events"], 1)
+
+    def test_an_edited_installed_recorder_turns_check_red(self):
+        with open(os.path.join(self.runtime_dir, "dream_record.py"), "a", encoding="utf-8") as fh:
+            fh.write("\n# edited after install\n")
+        ok, problems, _closure = BR.check(scripts_dir=HERE, runtime_dir=self.runtime_dir)
+        self.assertFalse(ok)
+        self.assertTrue(any("dream_record.py" in p for p in problems), problems)
+
+
+class LoopMirror(unittest.TestCase):
+    """M3 (2026-09-24): scripts/loop rides in bundle/runtime/loop byte for byte with its own manifest."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="loop-mirror-"); self.scripts = os.path.join(self.d, "scripts"); self.runtime = os.path.join(self.d, "runtime")
+        os.makedirs(os.path.join(self.scripts, "loop")); os.makedirs(self.runtime)
+        for n, body in (("a.py", "print(1)\n"), ("b.sh", "echo b\n"), ("c.py.bak-old", "old\n")): open(os.path.join(self.scripts, "loop", n), "w").write(body)
+    def tearDown(self): shutil.rmtree(self.d, ignore_errors=True)
+    def test_generate_mirrors_every_tool_and_writes_the_manifest(self):
+        changed = BR.generate_loop(self.scripts, self.runtime)
+        self.assertEqual(sorted(changed), ["loop/LOOP-MANIFEST.json", "loop/a.py", "loop/b.sh"])
+        self.assertEqual(open(os.path.join(self.runtime, "loop", "a.py")).read(), "print(1)\n")
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "loop", "c.py.bak-old")))
+        self.assertEqual(BR.check_loop(self.scripts, self.runtime), [])
+    def test_check_names_a_changed_a_missing_and_an_extra_tool(self):
+        BR.generate_loop(self.scripts, self.runtime)
+        open(os.path.join(self.runtime, "loop", "a.py"), "w").write("print(2)\n"); os.remove(os.path.join(self.runtime, "loop", "b.sh")); open(os.path.join(self.runtime, "loop", "z.py"), "w").write("x")
+        p = BR.check_loop(self.scripts, self.runtime)
+        self.assertTrue(any("a.py: bundle copy does not match" in x for x in p), p); self.assertTrue(any("b.sh: missing" in x for x in p), p); self.assertTrue(any("z.py: in the bundle" in x for x in p), p)
+    def test_a_retired_tool_leaves_the_bundle_and_a_stale_manifest_is_named(self):
+        BR.generate_loop(self.scripts, self.runtime); os.remove(os.path.join(self.scripts, "loop", "b.sh"))
+        self.assertIn("loop/b.sh (removed)", BR.generate_loop(self.scripts, self.runtime))
+        open(os.path.join(self.scripts, "loop", "a.py"), "a").write("# more\n")
+        self.assertTrue(any("LOOP-MANIFEST.json: stale" in x for x in BR.check_loop(self.scripts, self.runtime)))
+    def test_no_loop_directory_is_nothing_to_mirror_and_no_problem(self):
+        shutil.rmtree(os.path.join(self.scripts, "loop"))
+        self.assertEqual(BR.generate_loop(self.scripts, self.runtime), []); self.assertEqual(BR.check_loop(self.scripts, self.runtime), [])
+
+
+def setUpModule():
+    # Test-owned disk premise: worker admission reads this host's free
+    # disk, so a full disk would otherwise read as a failing suite.
+    from hermetic_worker_env import worker_environment
+    _disk = worker_environment()
+    _disk.__enter__()
+    unittest.addModuleCleanup(_disk.__exit__, None, None, None)
+
+
+class OnePluginHooksRefuseDrift(unittest.TestCase):
+    """docs/architecture/ADR-ONE-PLUGIN-HOOKS.md (2026-09-30): the merged
+    hooks live at bundle/hooks/hooks.json, every command runs through the
+    double-fire guard, the retired union.json stays gone, and the manifest
+    carries no "dependencies". Generated into a temp bundle from the real
+    products/, then broken one way per test; check_hooks() must name each
+    break. Never touches the committed bundle."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-oneplugin-")
+        self.bundle = os.path.join(self.tmp, "bundle")
+        self.runtime = os.path.join(self.bundle, "runtime")
+        os.makedirs(os.path.join(self.bundle, ".claude-plugin"))
+        self.manifest = os.path.join(self.bundle, ".claude-plugin",
+                                     "plugin.json")
+        with open(self.manifest, "w", encoding="utf-8") as fh:
+            json.dump({"name": "brother", "version": "1.1.0"}, fh)
+        BR.generate_hooks(runtime_dir=self.runtime)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _check(self):
+        return BR.check_hooks(runtime_dir=self.runtime)
+
+    def test_fresh_generation_is_green_and_wrapped(self):
+        ok, problems = self._check()
+        self.assertTrue(ok, problems)
+        with open(os.path.join(self.bundle, "hooks", "hooks.json"),
+                  encoding="utf-8") as fh:
+            doc = json.load(fh)
+        commands = [h["command"] for groups in doc["hooks"].values()
+                    for g in groups for h in g["hooks"]]
+        self.assertTrue(commands)
+        for c in commands:
+            self.assertTrue(c.startswith(
+                'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py" '), c)
+
+    def test_matcher_reaches_the_guard_and_a_shell_active_matcher_is_refused(self):
+        c = BR._rewrite_plugin_root_command(
+            'python3 "${CLAUDE_PLUGIN_ROOT}/tools/x.py"', "brothermode",
+            "PreToolUse", "Edit|Bash")
+        self.assertIn(' brothermode PreToolUse "--matcher=Edit|Bash" python3 ', c)
+        for event in ("PreToolUse;touch PWNED;", "pretooluse", "", None):
+            with self.assertRaises(ValueError):
+                BR._rewrite_plugin_root_command("python3 x.py", "brothermode",
+                                                event, "Bash")
+        for bad in ('a"b', "$(x)", "`x`", "a\\b", None):
+            with self.assertRaises(ValueError):
+                BR._rewrite_plugin_root_command("python3 x.py", "brothermode",
+                                                "PreToolUse", bad)
+
+    def test_union_json_is_refused(self):
+        with open(os.path.join(self.bundle, "hooks", "union.json"), "w") as fh:
+            fh.write("{}")
+        ok, problems = self._check()
+        self.assertFalse(ok)
+        self.assertTrue(any("union.json" in p for p in problems), problems)
+
+    def test_missing_hooks_json_is_refused(self):
+        os.remove(os.path.join(self.bundle, "hooks", "hooks.json"))
+        ok, problems = self._check()
+        self.assertFalse(ok)
+        self.assertTrue(any("hooks/hooks.json: missing" in p
+                            for p in problems), problems)
+
+    def test_unwrapped_command_is_stale(self):
+        path = os.path.join(self.bundle, "hooks", "hooks.json")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        text = text.replace(
+            'python3 \\"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py\\" '
+            'brothermode ', '', 1)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        ok, problems = self._check()
+        self.assertFalse(ok)
+        self.assertTrue(any("hooks/hooks.json: stale" in p for p in problems),
+                        problems)
+
+    def test_tampered_guard_is_refused(self):
+        with open(os.path.join(self.runtime, "hooks", "hook_guard.py"),
+                  "a") as fh:
+            fh.write("\n# tampered\n")
+        ok, problems = self._check()
+        self.assertFalse(ok)
+        self.assertTrue(any("hook_guard.py" in p for p in problems), problems)
+
+    def test_dependencies_key_is_refused(self):
+        with open(self.manifest, "w", encoding="utf-8") as fh:
+            json.dump({"name": "brother", "version": "1.1.0",
+                       "dependencies": ["brothermode@^3.4.2"]}, fh)
+        ok, problems = self._check()
+        self.assertFalse(ok)
+        self.assertTrue(any("dependencies" in p for p in problems), problems)
+
+    def test_unreadable_manifest_blocks(self):
+        with open(self.manifest, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        ok, problems = self._check()
+        self.assertFalse(ok)
+        self.assertTrue(any("unreadable" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

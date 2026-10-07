@@ -1,0 +1,131 @@
+{
+  "generated_at_note": "produced by U0 inventory worker D, read-only sweep, no files moved",
+  "hooks": [
+    {
+      "path": "./bundle/hooks/union.json",
+      "host": "claude",
+      "product": "bundle",
+      "entries": 8,
+      "purpose": "Union of all Claude hook definitions"
+    },
+    {
+      "path": "./bundle/cursor-hooks/hooks.json",
+      "host": "cursor",
+      "product": "bundle",
+      "purpose": "Cursor IDE hooks registry"
+    },
+    {
+      "path": "./products/brothermode/hooks/hooks.json",
+      "host": "claude",
+      "product": "brothermode",
+      "entries": 10,
+      "purpose": "Brothermode Claude hooks (SessionStart, SessionEnd, Stop, PreCompact, PreToolUse, PostToolUse)"
+    },
+    {
+      "path": "./products/brothermode/hooks/cursor.hooks.json",
+      "host": "cursor",
+      "product": "brothermode",
+      "purpose": "Brothermode Cursor IDE hooks"
+    },
+    {
+      "path": "./products/brothersbe/hooks/hooks.json",
+      "host": "claude",
+      "product": "brothersbe",
+      "entries": 7,
+      "purpose": "Brothersbe Claude hook definitions"
+    },
+    {
+      "path": "./bundle/runtime/hooks/brothermode/tools",
+      "host": "runtime",
+      "product": "brothermode",
+      "file_count": 164,
+      "purpose": "Runtime hook implementations: autosave, bash_audit, connectors, controller, cursor, docs, fence_hook, handover, hookbench, learn, verify, vault, stall, and others"
+    }
+  ],
+  "scripts_dirs": [
+    {
+      "path": "./scripts",
+      "product": "root",
+      "item_count": 767,
+      "purpose": "Root-level utility and build scripts"
+    },
+    {
+      "path": "./products/brothermode/scripts",
+      "product": "brothermode",
+      "item_count": 28,
+      "purpose": "Brothermode-specific product scripts (test_all.py, doctor.py, checksums.sh, etc.)"
+    },
+    {
+      "path": "./products/brothersbe/scripts",
+      "product": "brothersbe",
+      "item_count": 13,
+      "purpose": "Brothersbe-specific product scripts"
+    },
+    {
+      "path": "./benchmarks/competitive/scripts",
+      "product": "benchmarks",
+      "item_count": 2,
+      "purpose": "Benchmark comparison scripts"
+    }
+  ],
+  "schema_dirs": [
+    {
+      "path": "./products/brothermode/schemas/interchange",
+      "product": "brothermode",
+      "schema_type": "interchange",
+      "item_count": 1,
+      "target_bucket": "schemas/interchange"
+    },
+    {
+      "path": "./products/brothersbe/contracts/examples",
+      "product": "brothersbe",
+      "schema_type": "examples",
+      "item_count": 1,
+      "target_bucket": "schemas/examples"
+    }
+  ],
+  "host_adapter_files": [
+    {
+      "path": "./.claude-plugin",
+      "host": "claude",
+      "product": "root",
+      "purpose": "Claude Code plugin manifest"
+    },
+    {
+      "path": "./.cursor-plugin",
+      "host": "cursor",
+      "product": "root",
+      "purpose": "Cursor IDE plugin manifest"
+    },
+    {
+      "path": "./bundle/.claude-plugin",
+      "host": "claude",
+      "product": "bundle",
+      "purpose": "Claude Code plugin manifest for hub export"
+    },
+    {
+      "path": "./bundle/.cursor-plugin",
+      "host": "cursor",
+      "product": "bundle",
+      "purpose": "Cursor IDE plugin manifest for hub export"
+    },
+    {
+      "path": "./bundle/.codex-plugin",
+      "host": "codex",
+      "product": "bundle",
+      "purpose": "OpenAI Codex plugin adapter for bundle"
+    },
+    {
+      "path": "./products/brothermode/.codex-plugin",
+      "host": "codex",
+      "product": "brothermode",
+      "purpose": "OpenAI Codex plugin for brothermode"
+    },
+    {
+      "path": "./products/brotherds/.codex-plugin",
+      "host": "codex",
+      "product": "brotherds",
+      "purpose": "OpenAI Codex plugin for brotherds"
+    }
+  ]
+}

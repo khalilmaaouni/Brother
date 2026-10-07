@@ -1,5 +1,5 @@
-"""Tests for scripts/git_worktree_guard.py. Drafted by DeepSeek V4.1 Flash; the
-git -C case was added in review."""
+"""Tests for scripts/git_worktree_guard.py. The git -C case was added in
+review."""
 import json
 import os
 import shutil
@@ -183,6 +183,40 @@ class GitWorktreeGuardTest(unittest.TestCase):
         repo = self.make_repo()
         result = run_guard(bash_payload('git -C %s worktree list' % repo, repo))
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+
+class RecursiveRmWithAWildcardIsRefused(unittest.TestCase):
+    """2026-09-20: a cleanup glob deleted a live run's work copies."""
+
+    def verdict(self, command):
+        return run_guard(bash_payload(command, tempfile.gettempdir())).returncode
+
+    def test_the_incident_command_is_refused_and_says_what_to_do(self):
+        proc = run_guard(bash_payload('rm -rf /var/folders/x/T/c0-parallel-* 2>/dev/null; true',
+                                      tempfile.gettempdir()))
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn('git_worktree_guard: REFUSED:', proc.stderr)
+        self.assertIn('ls -d /var/folders/x/T/c0-parallel-*', proc.stderr)
+
+    def test_every_spelling_of_recursive_is_caught(self):
+        for cmd in ('rm -r a*', 'rm -R a?', 'rm -fr "x[12]"', 'rm --recursive -f a*',
+                    'cd /x && rm -rf b*', 'ls | xargs rm -rf c*', 'kill 1; sleep 2; rm -rf d*',
+                    'if true; then rm -rf e*; fi', 'sudo rm -rf f*'):
+            self.assertEqual(self.verdict(cmd), 2, cmd)
+
+    def test_named_paths_variables_and_flat_globs_stay_allowed(self):
+        # R3.3/R9: "$D", "$H", *.log and a* moved from this allow list to the
+        # refuse list, because R9 refuses glob and expansion text with or
+        # without -r; only literal names and non operand text stay here.
+        for cmd in ('rm -rf /tmp/one-named-dir', 'echo rm -rf a*',
+                    'git rm -r --cached docs', 'grep -r "rm -rf x*" .'):
+            self.assertEqual(self.verdict(cmd), 0, cmd)
+
+    def test_a_wildcard_after_the_rm_has_ended_is_not_its_operand(self):
+        self.assertEqual(self.verdict('rm -rf /tmp/named && ls *.py'), 0)
+        self.assertEqual(self.verdict('rm -rf /tmp/named || ls *.py'), 0)
+        self.assertEqual(self.verdict('rm -rf /tmp/named | xargs ls b*'), 0)
 
 
 if __name__ == '__main__':

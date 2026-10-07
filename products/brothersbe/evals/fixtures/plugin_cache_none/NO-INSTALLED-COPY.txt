@@ -1,0 +1,7 @@
+A plugin cache root holding no installed copy of brothersbe.
+
+evals/replay_book.py points SBE_PLUGIN_CACHE_ROOT here so doctor's
+install-identity check answers the same on every machine: an installed copy
+is a subdirectory, and this directory has none, so the check reports NO-DATA
+("the plugin cache root has no installed copies"). Adding a subdirectory here
+changes what every book chapter that runs doctor records.

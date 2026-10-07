@@ -37,7 +37,7 @@ Write NO intake into the target repository first (no STATE.md, no `.sbe/`,
 no fence file): any such file dirties the tree and the engine refuses the run
 before the first claim. Full detail: the Codex smoke runbook in the Brother repository.
 
-1. **Make each unit's done check fail right now, before any work happens.**
+1. **Each unit's done check must fail BEFORE any work happens.**
    Confirm it exits nonzero. An already-passing check proves no change.
    Never write a bare-path check: a done check is judged on its RESULT,
    never on a missing file, because a check for a file that does not exist
@@ -55,11 +55,16 @@ before the first claim. Full detail: the Codex smoke runbook in the Brother repo
 
        MODEL_WORKER_CMD="python3 write_the_change.py" \
            python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" \
-           --cwd <repo> --plan plan.json \
+           --cwd <repo> --plan plan.json --contract contract.json \
            --runs-root "${CODEX_HOME:-$HOME/.codex}/brother/runs"
 
    (`--runs-root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/brother/runs"` under
-   Claude Code.) Both stay OUTSIDE the target repository (inside dirties the
+   Claude Code.) In a coding session a plan without its outcome contract is
+   refused (exit 2): write `contract.json` first (references/intake.md) and
+   check it with
+   `python3 "$BROTHER_PLUGIN_ROOT/runtime/contract_check.py" contract.json`.
+   The plan, the contract and the runs root stay OUTSIDE the
+   target repository (inside dirties the
    tree, and a read-only install cannot write it) and outside any temp
    directory (a receipt under $TMPDIR is gone at the next reboot). The five
    rules a plan must satisfy: references/router-details.md.
@@ -93,12 +98,6 @@ to accept.
 contracts, personal data, auth, a migration, a production path, or a figure
 reaching a decision. Absent evidence is NO-DATA, never a pass.
 
-**Claim verification, BrotherDS.** A decision-grade number is about to be
-stated; the claim registers BEFORE the outcome is known, then scores against
-reality. Experimental, in the bundle since 1.0.13; explicit ask only, never
-on a number in ordinary work; the receipt prints Vault context as NO-DATA
-in this release. Routing phrases: verify this claim, claim receipt, can I trust this number, score <claim id> <actual>, show my claims, show the claim ledger.
-
 ## Native mobile and creative work
 
 For an iPhone, iPad or SwiftUI outcome, load references/native-mobile.md.
@@ -111,6 +110,33 @@ For the three shipped Cursor agent personas (`brother-planner`,
 `brother-executor`, `brother-reviewer`), what each is allowed to do, and
 how Cursor's own Plan/Agent/Ask modes map onto them, load
 references/cursor-native.md.
+
+
+## The loop
+
+Maintainer tooling, not a supported public feature of 1.1.0, and no endurance claim is made for it: unattended delivery, from a plan of sub units to landed receipts, is the loop: a driver that runs passes until a deadline
+or a budget, lanes that brief a worker, grade the build in a sandbox, run adversary probes, repair, and land through the
+gates, a watch that names what needs a person, and a recorder that leaves every decision and outcome in a journal. The
+tools ship under `${CLAUDE_PLUGIN_ROOT}/runtime/loop/` (a Codex install reads `${BROTHER_PLUGIN_ROOT}/runtime/loop/`;
+on a clone install they are `scripts/loop/` at the checkout root). They are executed from a stamped copy the installer
+makes, never from the bundle in place, so a running loop keeps its own tools while a newer stamp is proven.
+
+Routing phrases: start a run until HH:MM, stop the loop, loop status, what did the loop land, why is nothing landing,
+resume the loop. The order of the verbs, and the one that runs before any of them:
+
+1. The canary. `python3 runtime/loop/loop_canary.py` from the checkout root replays landed builds through every judging
+   stage (grade, probes, spec gate, land apply, status word, checker hold) and must print WOULD LAND. A run may not start
+   on a canary that refuses; an unmeasured stage is named, never counted as a pass.
+2. The intake. `python3 runtime/loop/loop_intake.py prepare --deadline HH:MM --budget-usd N --words "<the owner's words>"`
+   records one budget for one run and refuses READY until the canary is green.
+3. The driver. `bash runtime/loop/loop_until.sh HH:MM` runs passes until the deadline; every pass prints PULSE and BUDGET
+   lines; `runtime/loop/loop_watch.py --log <the driver's log>` names the class that needs a hand; `runtime/loop/stop_loop.sh`
+   stops everything of the loop and nothing else.
+4. The report. `runtime/loop/loop_report.py --since-hours N` prints what landed, what it cost in both ledgers and the yield
+   of every stage, each figure naming its file. The journal of a run lives in the run directory the driver announces.
+
+Every number the loop reports is read from a ledger or a log. A run that ends with nothing landed says so, with the
+refusal classes that stopped it; it never rounds silence up to progress.
 
 ## More detail: verbs, boundaries, handback, closing
 

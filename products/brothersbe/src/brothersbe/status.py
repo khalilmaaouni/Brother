@@ -70,8 +70,10 @@ nothing about which check it was". A receipt whose recorded `exitCode` is
 nonzero is a MERGE BLOCKER whether or not it declares a kind: the run was made,
 it failed, and evidence of that failure already exists. A receipt whose own
 verify() is NO-DATA (advisory: a dirty tree at generation time, or no covered
-file) is neither a broken claim nor clean evidence, and is not otherwise pinned
-in a section; it is counted in the evidence scope note.
+file) is neither a broken claim nor clean evidence and clears nothing; it is
+counted in the evidence scope note, EXCEPT that one recording a failed run is a
+MERGE BLOCKER too: advisory says the receipt cannot prove a pass, never that
+the failure it records did not happen (persona L01-S4, 2026-09-11).
 
 LANE B-004: on the CR-06 discovered-dossier path, "clears an obligation" is
 scoped PER CHANGE, not read off one repository-wide set. The evidence store
@@ -484,12 +486,25 @@ def _declared_tier(raw_intake, computed_tier):
     return declared
 
 
+def _records_failure(receipt):
+    """True when a receipt's OWN recorded result is a failure, whatever
+    verify() says about how far the receipt can be trusted. Mirrors the rule
+    in products/brothermode/tools/bm_lead.py:972 `_failed_receipts` (copied,
+    not imported: no cross-product import): a failure when the receipt says
+    `"verdict": "FAIL"`, or, where it carries no verdict field at all, when
+    its recorded `exitCode` is a nonzero int."""
+    verdict = str(receipt.get("verdict") or "").strip().upper()
+    code = receipt.get("exitCode")
+    return verdict == "FAIL" or (not verdict and isinstance(code, int) and code != 0)
+
+
 def _scan_evidence(root, evidence_dir):
     """Every *.json under the evidence store, verified and classified.
 
     Returns a dict: `broken` (BROKEN CLAIMS items), `clean` (the receipts
-    that verify PASS with a zero exit code), `failing` (MERGE BLOCKERS items,
-    a verified receipt recording a nonzero exit code), `kindsCovered` (the
+    that verify PASS with a zero exit code), `failing` (MERGE BLOCKERS items:
+    a verified receipt recording a nonzero exit code, or an advisory NO-DATA
+    receipt that `_records_failure` says recorded a failed run), `kindsCovered` (the
     set of design/gate/score kinds ANY verified receipt, passing or failing,
     DECLARES), `kindless` (one sentence per verified receipt that declares no
     kind, so a reader is told that evidence exists and says nothing about
@@ -611,24 +626,42 @@ def _scan_evidence(root, evidence_dir):
                           "`sbe evidence run` to produce a fresh one",
             })
             continue
+        receipt = result["receipt"] or {}
+        covered_paths = [cf.get("path") for cf in (receipt.get("coveredFiles") or [])
+                        if isinstance(cf, dict) and cf.get("path")]
+        argv_text = " ".join(str(a) for a in (receipt.get("argv") or []))
         if verdict == "NO-DATA":
             # Advisory (a dirty tree at generation, or no covered file): not a
-            # broken claim, and not clean evidence either. Counted in the note
-            # only, per the module docstring, never silently dropped.
+            # broken claim, and never clean evidence, so it clears nothing and
+            # stays out of `receipts` and `kindsCovered`. But advisory judges
+            # whether the receipt can PROVE a pass, not whether the run it
+            # records failed. Persona L01-S4 (2026-09-11): a contract probe
+            # exited 1 on a dirty tree, this branch dropped it before reading
+            # its exit code, and status said "nothing blocking here".
+            if _records_failure(receipt):
+                failing.append({
+                    "finding": "receipt %s records a failed run (exit code %s) for `%s`; it "
+                              "is advisory (verify NO-DATA: %s), so it proves nothing "
+                              "passed, and the failure it records still stands"
+                              % (rel, receipt.get("exitCode"),
+                                 argv_text or "(argv not recorded)",
+                                 "; ".join(result["reasons"])),
+                    "remedy": "fix the underlying failure and re-run through `sbe evidence "
+                             "run` on a clean, committed tree to produce a new receipt; "
+                             "see %s" % rel,
+                    "path": rel,
+                    "coveredFiles": covered_paths,
+                })
             continue
-        receipt = result["receipt"] or {}
         kinds = _receipt_kinds(receipt)
         kinds_covered |= kinds
         gap = evidence_mod.kind_declaration_gap(receipt)
         if gap:
             kindless.append("receipt %s declares no check kind: %s" % (rel, gap))
-        covered_paths = [cf.get("path") for cf in (receipt.get("coveredFiles") or [])
-                        if isinstance(cf, dict) and cf.get("path")]
         receipts.append({"path": rel, "runId": receipt.get("runId"), "kinds": kinds,
                          "coveredFiles": covered_paths})
         trust = result["trust"]
         exit_code = receipt.get("exitCode")
-        argv_text = " ".join(str(a) for a in (receipt.get("argv") or []))
         kinds_text = (", ".join(sorted(kinds)) if kinds
                       else "none declared, so it clears no obligation")
         if exit_code == 0:

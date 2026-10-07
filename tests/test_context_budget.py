@@ -20,6 +20,18 @@ rather than on the product, and drifts stale the moment the installed version
 moves; a tree path runs the same on any checkout. An absent leaf (a broken or
 partial checkout) is still NO-DATA and skips, naming the path it looked for.
 NO-DATA is not a pass and it is not a block.
+
+WHAT IS ACTUALLY ALWAYS LOADED, decided 2026-09-26 by owner delegation after
+the Brother check had been red since 2026-09-12 (6,498 bytes against 6,000).
+A host loads a skill's frontmatter (name, description) for discovery and reads
+its body only when the skill is invoked; no session start hook in this
+repository injects bundle/skills/using-brother/SKILL.md (the hooks print each
+product's DIGEST.md, a separate surface). So the Brother check caps the
+FRONTMATTER, measured at 633 bytes that day, at 900 (633 plus a third,
+rounded up). The leaf and combined checks below stay whole-file SIZE
+policies: they bound how much text a skill carries, not what every session
+pays. Flip condition: a captured host startup prompt that contains this
+skill's body before invocation makes the frontmatter premise wrong.
 """
 import pathlib
 import unittest
@@ -30,7 +42,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Brother 3,319 actual against 6,000; the two leaves 14,094 and 17,233 against
 # 20,000 each; combined 34,646 actual against 46,000. The headroom is roughly a
 # third, enough for real growth and not enough to hide a doubling.
-BUDGET_BROTHER = 6000
+# 2026-09-26: the Brother figure now caps the frontmatter only (see the module
+# docstring): 633 measured, 900 allowed, the same third of headroom.
+BUDGET_BROTHER_FRONTMATTER = 900
 BUDGET_LEAF = 20000
 BUDGET_COMBINED = 46000
 
@@ -60,15 +74,22 @@ class TestBrotherOwnSurface(unittest.TestCase):
             "puts it there" % BROTHER_SKILL,
         )
 
-    def test_within_budget(self):
-        n = size_of(BROTHER_SKILL)
-        if n is None:
+    def test_frontmatter_within_budget(self):
+        if size_of(BROTHER_SKILL) is None:
             self.skipTest("NO-DATA: no bootstrap skill at %s" % BROTHER_SKILL)
+        parts = BROTHER_SKILL.read_bytes().split(b"---\n", 2)
+        # A skill without a leading frontmatter block is not discoverable at
+        # all, so a malformed file fails here rather than measuring nothing.
+        self.assertEqual(
+            (len(parts), parts[0]), (3, b""),
+            "%s does not open with a --- frontmatter block" % BROTHER_SKILL)
+        n = len(b"---\n" + parts[1] + b"---\n")
         self.assertLessEqual(
-            n, BUDGET_BROTHER,
-            "Brother's always-loaded surface is %d bytes against a budget of %d. "
-            "Every session pays this before anyone asks a question. Either cut "
-            "it or raise the budget in a change that says why." % (n, BUDGET_BROTHER),
+            n, BUDGET_BROTHER_FRONTMATTER,
+            "Brother's discovery frontmatter is %d bytes against a budget of %d. "
+            "Every session loads it before anyone asks a question. Either cut "
+            "it or raise the budget in a change that says why."
+            % (n, BUDGET_BROTHER_FRONTMATTER),
         )
 
 
@@ -84,7 +105,8 @@ class TestLeafSurfaces(unittest.TestCase):
             checked += 1
             self.assertLessEqual(
                 n, BUDGET_LEAF,
-                "%s injects %d bytes against a budget of %d" % (name, n, BUDGET_LEAF),
+                "%s carries %d bytes against a size budget of %d"
+                % (name, n, BUDGET_LEAF),
             )
         if checked == 0:
             self.skipTest(
@@ -94,7 +116,8 @@ class TestLeafSurfaces(unittest.TestCase):
 
 
 class TestCombinedSurface(unittest.TestCase):
-    """What a merged Brother would inject on every turn, once code actually moves."""
+    """How much skill text Brother and both leaves carry together, as a size
+    policy; what every session pays is the frontmatter check above."""
 
     def test_combined_within_budget(self):
         sizes = {"brother": size_of(BROTHER_SKILL)}
@@ -109,7 +132,7 @@ class TestCombinedSurface(unittest.TestCase):
         total = sum(sizes.values())
         self.assertLessEqual(
             total, BUDGET_COMBINED,
-            "the combined always-loaded surface is %d bytes against a budget of "
+            "the combined skill text is %d bytes against a size budget of "
             "%d. Breakdown: %s" % (
                 total, BUDGET_COMBINED,
                 ", ".join("%s %d" % (k, v) for k, v in sorted(sizes.items()))),

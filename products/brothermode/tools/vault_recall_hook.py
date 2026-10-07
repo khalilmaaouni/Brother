@@ -211,7 +211,42 @@ def _served_and_withheld_titles(out):
     return served, withheld
 
 
-def _cap_served(out, records, max_served):
+#: At most this many applies_to anchors per note are read for ranking: a note
+#: listing more is still recalled, it just cannot buy promotion by volume.
+ANCHOR_RANK_MAX = 16
+
+
+def _names_file(anchor, touched):
+    """True when an applies_to anchor IS the touched file: the same
+    repo-relative path once a leading "./" is dropped. No suffix match (a root
+    README.md anchor must not name docs/README.md), no I/O."""
+    a, t = anchor.strip(), (touched or "").strip()
+    a = a[2:] if a.startswith("./") else a
+    t = t[2:] if t.startswith("./") else t
+    return bool(t) and a == t
+
+
+def _anchored_to(record, touched, tree):
+    """True when this recalled lesson declares an applies_to anchor that is
+    the touched file AND that path is a file under `tree`. Path-shaped
+    anchors only and one stat each: never a grep (the anchor check in
+    _lesson_state already ran its own, and a second one doubled the hook's
+    time). A stale or policy-conflict lesson, or one a human explicitly did
+    not approve, is never promoted. Never raises: an unreadable note reads as
+    not anchored."""
+    if not record or record.get("state") in ("stale", "policy-conflict", "no-data"):
+        return False
+    try:
+        applies_to, _lv, _nt, human_approved = _read_note_frontmatter(record.get("path") or "")
+        if human_approved is False:
+            return False
+        return any(_names_file(a, touched) and os.path.isfile(os.path.join(tree, a))
+                   for a in applies_to[:ANCHOR_RANK_MAX])
+    except Exception:  # sbe: allow-silent a broken read only loses the promotion, never the lesson
+        return False
+
+
+def _cap_served(out, records, max_served, touched=None, tree=None):
     """(out2, records2, dropped). D3 (2026-09-10, THE HARD TWO fix): bounds
     how many SERVED note blocks (already ranked by bm_vault.py's own RRF ->
     authority sort -> context rank, and already narrowed by lesson_states
@@ -224,11 +259,22 @@ def _cap_served(out, records, max_served):
     entry per ordinary block, in that same order (lesson_states' own
     contract), so it is trimmed in lockstep: nothing downstream (the heat
     counter, read-audit, the journal bridge) ever processes a note this
-    function just cut from `out`."""
+    function just cut from `out`.
+
+    2026-10-04 (owner order, anchored lessons first): when `touched` (the
+    edited file's repo-relative path) is given, ordinary blocks are first
+    stably reordered so a lesson _anchored_to that file comes before every
+    other one, then the cut runs. Withheld blocks keep their slots; within
+    each group the tool's own rank order is kept. This is the one place the
+    shown order is decided, so the promotion lives here and nowhere else."""
     lines = out.split("\n")
     starts = [i for i, line in enumerate(lines) if _NOTE_START_RE.match(line)]
     if not starts:
         return out, records, 0
+    if touched:
+        out, records = _anchored_first(lines, starts, records, touched, tree or os.getcwd())
+        lines = out.split("\n")
+        starts = [i for i, line in enumerate(lines) if _NOTE_START_RE.match(line)]
     kept_lines = []
     kept_records = []
     prev = 0
@@ -254,6 +300,33 @@ def _cap_served(out, records, max_served):
         prev = end
     kept_lines.extend(lines[prev:])
     return "\n".join(kept_lines), kept_records, dropped
+
+def _anchored_first(lines, starts, records, touched, tree):
+    """(out, records) with ordinary blocks stably reordered, anchored ones
+    first. Returns the input unchanged when the records do not pair one to
+    one with the ordinary blocks (an unknown shape is never reshuffled)."""
+    segs = []
+    for k, idx in enumerate(starts):
+        end = _block_end(lines, idx, starts[k + 1] if k + 1 < len(starts) else None)
+        segs.append((idx, end, _block_is_withheld(lines[idx:end])))
+    ordinary = [s for s in segs if not s[2]]
+    if len(ordinary) != len(records):
+        return "\n".join(lines), records
+    pairs = list(zip(ordinary, records))
+    pairs.sort(key=lambda p: 0 if _anchored_to(p[1], touched, tree) else 1)
+    it = iter(pairs)
+    out_lines = lines[:starts[0]]
+    new_records = []
+    for idx, end, withheld in segs:
+        if withheld:
+            out_lines.extend(lines[idx:end])
+        else:
+            (o_idx, o_end, _w), rec = next(it)
+            out_lines.extend(lines[o_idx:o_end])
+            new_records.append(rec)
+    out_lines.extend(lines[segs[-1][1]:])
+    return "\n".join(out_lines), new_records
+
 
 #: Floor, not a filter: these catch the cheap, common shapes of "content
 #: pretending to be a directive to the agent reading it". The frame above is
@@ -907,8 +980,32 @@ def _tools_root():
     return ""
 
 
+def _tool_path(root):
+    """Where the index is, for a configured root. <root>/tools/bm_vault.py is
+    the layout every rung names. The one plugin ships this hook at
+    <root>/runtime/hooks/brothermode/tools/ beside bm_vault.py and carries no
+    <root>/tools, so under the plugin root Claude Code exports that path named
+    a file that does not exist and recall was off in every such install
+    (found 2026-10-06). When the named file is absent AND this file sits
+    inside the configured root, the index beside this file is the installed
+    one. A root this file is NOT inside never borrows it: that would be the
+    guessed checkout ruling D01 forbids. No root stays "", unconfigured."""
+    if not root:
+        return ""
+    named = os.path.join(root, "tools", "bm_vault.py")
+    if os.path.exists(named):
+        return named
+    beside = os.path.join(HERE, "bm_vault.py")
+    try:
+        real_root = os.path.realpath(root)
+        inside = os.path.commonpath([real_root, os.path.realpath(HERE)]) == real_root
+    except ValueError:  # different drives, or a relative path mixed with an absolute one
+        inside = False
+    return beside if inside and os.path.exists(beside) else named
+
+
 _ROOT = _tools_root()
-TOOL = os.path.join(_ROOT, "tools", "bm_vault.py") if _ROOT else ""
+TOOL = _tool_path(_ROOT)
 SEEN = os.path.join(_config_dir(), ".vault_recall_seen")
 
 # E57 mechanism 1, borrowed. Source page: https://github.com/MemTensor/MemOS,
@@ -1618,6 +1715,16 @@ def cmd_check():
                 % CONFIG_PATH)
         return 0
     if not os.path.exists(TOOL):
+        # A configured root that holds no index is OFF, and off is said once per
+        # session exactly like the unconfigured case above. It returned 0 in
+        # silence until 2026-10-06, which is how a whole install shape went
+        # without recall and nobody was told. Still never a blocked edit.
+        key = session + ":__tool_missing__"
+        if key not in _seen():
+            _mark_seen(key)
+            sys.stderr.write(
+                "NO-DATA vault recall: no index tool at %s; point-of-need memory "
+                "is OFF until then.\n" % TOOL)
         return 0
     # Once per session, on stderr beside the unconfigured refusal above: the index's age,
     # whether or not anything is recalled below. A stale index is only fixable by someone
@@ -1741,7 +1848,8 @@ def cmd_check():
     # SAME total bm_vault.py (or the earlier "more matched" parse) already
     # reported -- never a second, possibly disagreeing count.
     pre_served, pre_withheld = _served_and_withheld_titles(out)
-    out, records, dropped_by_cap = _cap_served(out, records, RECALL_INJECT_MAX)
+    out, records, dropped_by_cap = _cap_served(out, records, RECALL_INJECT_MAX,
+                                               touched=context, tree=tree)
     if dropped_by_cap:
         total_matched = (_shown + _cut) if showing_line else (len(pre_served) + pre_withheld)
         showing_line = "Vault: showing %d of %d matched\n" % (

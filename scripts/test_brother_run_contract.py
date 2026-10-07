@@ -250,5 +250,14 @@ class AnInstalledRuntimeCarriesTheSchemaItChecksAgainst(unittest.TestCase):
         self.assertIn("PASS", out, out)
 
 
+def setUpModule():
+    # Test-owned disk premise: worker admission reads this host's free
+    # disk, so a full disk would otherwise read as a failing suite.
+    from hermetic_worker_env import worker_environment
+    _disk = worker_environment()
+    _disk.__enter__()
+    unittest.addModuleCleanup(_disk.__exit__, None, None, None)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

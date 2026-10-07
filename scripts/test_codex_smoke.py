@@ -55,6 +55,13 @@ import brother_paths  # noqa: E402
 import brother_run  # noqa: E402
 import codex_skills  # noqa: E402
 import codex_smoke  # noqa: E402
+from hermetic_worker_env import worker_environment  # noqa: E402
+
+
+def setUpModule():
+    fixture = worker_environment()
+    fixture.__enter__()
+    unittest.addModuleCleanup(fixture.__exit__, None, None, None)
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -635,4 +642,3 @@ class TheSkillAndRunbookCarryTheThreeRules(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

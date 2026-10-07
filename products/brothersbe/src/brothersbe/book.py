@@ -228,7 +228,7 @@ def render_guided_commands(root):
                     description = line.split(":", 1)[1].strip().strip("'\"")
                     break
         first = description.split(". ")[0].strip()
-        rows.append((_code("/brothersbe:%s" % name),
+        rows.append((_code("/brother:brothersbe-%s" % name),
                      esc(first or "(no description declared)")))
     html = _table(("Command", "When to reach for it"), rows)
     if not html:

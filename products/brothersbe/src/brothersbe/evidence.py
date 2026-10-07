@@ -1428,6 +1428,9 @@ def _check_commit(receipt, cwd, path=None, exclude_dirs=None, git_cache=None):
                                              git_cache=git_cache)
     if carried:
         return None, carried_note, None
+    if carried_note:
+        return ("headCommit %s is not the current head %s, and this receipt is not carried "
+                "forward: %s" % (str(claimed)[:12], current[:12], carried_note), None, None)
     return ("headCommit %s is not the current head %s: this receipt is evidence for a commit "
             "that is no longer checked out, and the code it covered has moved"
             % (str(claimed)[:12], current[:12]), None, None)
@@ -1464,6 +1467,14 @@ def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None, git_cach
     a statement at all."""
     if not claimed or not current:
         return False, None
+    # A RECEIPT MINTED ON A DIRTY TREE IS NEVER CARRIED. The run may have seen
+    # code that exists at no commit, and a receipt records how many paths were
+    # uncommitted, never which, so nothing ties it to the commit it names.
+    # Only an explicit False carries: a receipt that never recorded the answer
+    # is an absence, and an absence never upgrades a verdict.
+    if receipt.get("workingTreeDirty") is not False:
+        return False, ("it was minted on a working tree that was dirty or not recorded as "
+                       "clean, so it may describe code that exists at no commit")
     root = _repo_top_level(cwd, git_cache=git_cache)
     if root is None:
         return False, None
@@ -1501,6 +1512,7 @@ def _carried_forward(receipt, cwd, claimed, current, exclude_dirs=None, git_cach
                   "file(s) this receipt covers changed between them, so it still describes "
                   "those files; it says nothing about code it never covered"
                   % (claimed[:12], current[:12], len(covered)))
+
 
 
 def _under_excluded(rel, exclude_dirs):
@@ -1808,10 +1820,10 @@ def save_verify_cache(cache_path, cache):
             try:
                 os.unlink(tmp_path)
             except OSError:
-                pass
+                pass  # sbe: allow-silent cleanup of the temp file on the failure path only; the original error is re-raised on the next line, so nothing is swallowed
             raise
     except OSError:
-        pass
+        pass  # sbe: allow-silent a speedup-only cache: the old file stays because os.replace never ran, and every entry is keyed on receipt stat, HEAD and covered-file fingerprint, so a stale one re-verifies instead of answering
 
 
 def _receipt_stat_key(path):
@@ -1821,7 +1833,7 @@ def _receipt_stat_key(path):
     try:
         st = os.stat(path)
     except OSError:
-        return None
+        return None  # sbe: allow-silent None is the documented no-key value; verify_cached reads it as a cache miss and re-verifies the receipt fresh, so no verdict is dropped
     return [st.st_mtime_ns, st.st_size]
 
 

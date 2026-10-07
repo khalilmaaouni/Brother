@@ -1,0 +1,360 @@
+{
+  "generated_at_note": "produced by U0 inventory worker B, read-only sweep, no files moved",
+  "products": {
+    "brothermode": {
+      "exists": true,
+      "total_files": 1477,
+      "subdirs": [
+        {
+          "subpath": "agents",
+          "file_count": 5,
+          "purpose": "Agent implementations and definitions",
+          "target_domain_path": "plugin/agents",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "benchmark",
+          "file_count": 4,
+          "purpose": "Benchmark and performance test suites",
+          "target_domain_path": "tests/mode/benchmarks",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "brotherme",
+          "file_count": 3,
+          "purpose": "BrotherMe skill and runtime components",
+          "target_domain_path": "plugin/runtime/brother/mode",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "commands",
+          "file_count": 15,
+          "purpose": "CLI command definitions",
+          "target_domain_path": "plugin/commands/mode-*",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "docs",
+          "file_count": 989,
+          "purpose": "Documentation and guides",
+          "target_domain_path": "docs/mode",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "evidence",
+          "file_count": 9,
+          "purpose": "Evidence and audit logs",
+          "target_domain_path": "docs/evidence",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "hooks",
+          "file_count": 2,
+          "purpose": "Plugin hooks and lifecycle handlers",
+          "target_domain_path": "plugin/hooks",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "mcp",
+          "file_count": 2,
+          "purpose": "Model Context Protocol implementations",
+          "target_domain_path": "plugin/mcp/brother-mode",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "project-template",
+          "file_count": 14,
+          "purpose": "Project template scaffolding",
+          "target_domain_path": "docs/mode/templates",
+          "migration_action": "WRAP TEMPORARILY",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "references",
+          "file_count": 27,
+          "purpose": "Reference materials and specifications",
+          "target_domain_path": "docs/mode/references",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "schema",
+          "file_count": 5,
+          "purpose": "Schema and data model definitions",
+          "target_domain_path": "plugin/runtime/brother/mode/schema",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "schemas",
+          "file_count": 6,
+          "purpose": "Schema and data model definitions",
+          "target_domain_path": "plugin/runtime/brother/mode/schemas",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "scripts",
+          "file_count": 28,
+          "purpose": "Utility and helper scripts",
+          "target_domain_path": "scripts/mode",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "skills",
+          "file_count": 19,
+          "purpose": "Skill definitions and implementations",
+          "target_domain_path": "plugin/skills/mode-*",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "tools",
+          "file_count": 301,
+          "purpose": "Tool implementations and utilities",
+          "target_domain_path": "plugin/runtime/brother/mode/tools",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "vault-template",
+          "file_count": 12,
+          "purpose": "Memory vault template",
+          "target_domain_path": "docs/mode/vault",
+          "migration_action": "WRAP TEMPORARILY",
+          "stateful_or_versioned": false
+        }
+      ]
+    },
+    "brothersbe": {
+      "exists": true,
+      "total_files": 836,
+      "subdirs": [
+        {
+          "subpath": "agents",
+          "file_count": 8,
+          "purpose": "Agent implementations and definitions",
+          "target_domain_path": "plugin/agents",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "benchmarks",
+          "file_count": 13,
+          "purpose": "Benchmark and performance test suites",
+          "target_domain_path": "tests/assurance/benchmarks",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "bin",
+          "file_count": 1,
+          "purpose": "Executable scripts and CLI tools",
+          "target_domain_path": "scripts/assurance",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "ci",
+          "file_count": 1,
+          "purpose": "Continuous integration and deployment workflows",
+          "target_domain_path": "docs/assurance/ci",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "contracts",
+          "file_count": 2,
+          "purpose": "Data contracts and schema definitions",
+          "target_domain_path": "plugin/runtime/brother/assurance/contracts",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "design",
+          "file_count": 70,
+          "purpose": "Design specifications and UI definitions",
+          "target_domain_path": "docs/assurance/design",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "docs",
+          "file_count": 311,
+          "purpose": "Documentation and guides",
+          "target_domain_path": "docs/assurance",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "evals",
+          "file_count": 6,
+          "purpose": "Evaluation and test suites",
+          "target_domain_path": "tests/assurance/evals",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "evidence",
+          "file_count": 58,
+          "purpose": "Evidence and audit logs",
+          "target_domain_path": "docs/evidence",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "hooks",
+          "file_count": 1,
+          "purpose": "Plugin hooks and lifecycle handlers",
+          "target_domain_path": "plugin/hooks",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "memory-template",
+          "file_count": 11,
+          "purpose": "Memory and state management templates",
+          "target_domain_path": "docs/assurance/memory",
+          "migration_action": "WRAP TEMPORARILY",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "program",
+          "file_count": 18,
+          "purpose": "Core program and runtime implementation",
+          "target_domain_path": "plugin/runtime/brother/assurance",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "references",
+          "file_count": 18,
+          "purpose": "Reference materials and specifications",
+          "target_domain_path": "docs/assurance/references",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "release-control",
+          "file_count": 49,
+          "purpose": "Release management and versioning",
+          "target_domain_path": "docs/assurance/release",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "scripts",
+          "file_count": 13,
+          "purpose": "Utility and helper scripts",
+          "target_domain_path": "scripts/assurance",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "skills",
+          "file_count": 15,
+          "purpose": "Skill definitions and implementations",
+          "target_domain_path": "plugin/skills/assurance-*",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "src",
+          "file_count": 32,
+          "purpose": "Source code implementation",
+          "target_domain_path": "plugin/runtime/brother/assurance",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "tables",
+          "file_count": 1,
+          "purpose": "Data tables and configuration",
+          "target_domain_path": "plugin/runtime/brother/assurance/tables",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "templates",
+          "file_count": 12,
+          "purpose": "Template files and scaffolding",
+          "target_domain_path": "docs/assurance/templates",
+          "migration_action": "WRAP TEMPORARILY",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "tools",
+          "file_count": 142,
+          "purpose": "Tool implementations and utilities",
+          "target_domain_path": "plugin/runtime/brother/assurance/tools",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        }
+      ]
+    },
+    "brotherds": {
+      "exists": true,
+      "total_files": 115,
+      "subdirs": [
+        {
+          "subpath": "docs",
+          "file_count": 18,
+          "purpose": "Documentation and guides",
+          "target_domain_path": "docs/data",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "examples",
+          "file_count": 25,
+          "purpose": "Example code and configurations",
+          "target_domain_path": "docs/data/examples",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "research",
+          "file_count": 8,
+          "purpose": "Research notes and explorations",
+          "target_domain_path": "docs/data/research",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "skills",
+          "file_count": 1,
+          "purpose": "Skill definitions and implementations",
+          "target_domain_path": "plugin/skills/data-*",
+          "migration_action": "MOVE",
+          "stateful_or_versioned": false
+        },
+        {
+          "subpath": "tests",
+          "file_count": 30,
+          "purpose": "Test suites and test utilities",
+          "target_domain_path": "tests/data",
+          "migration_action": "MERGE",
+          "stateful_or_versioned": false
+        }
+      ]
+    }
+  },
+  "nested_state_roots_found": [
+    "products/brothersbe/.brothersbe",
+    "products/brothersbe/.sbe",
+    "products/brothersbe/design/release-blockers/.sbe",
+    "products/brothersbe/design/field-book/.sbe",
+    "products/brothersbe/design/lifecycle-blockers/.sbe",
+    "products/brothersbe/design/team-operating-model/.sbe",
+    "products/brothersbe/design/final-release-program/.sbe"
+  ]
+}

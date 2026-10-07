@@ -74,11 +74,160 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 
 import fault_barrier
 import journal
 
 NODATA = "NO-DATA"
+
+
+class HistoryLoss(Exception):
+    """Raised when a write would lose attempt history.
+
+    The attempt history is append-only: an attempt once recorded is never
+    removed, and a terminal field once set is never changed. A writer that
+    would violate that is refused at the source, before os.replace, rather
+    than allowed to erase the record of what actually ran."""
+
+
+#: Top-level keys that belong to the store's own bookkeeping, never to a
+#: unit. acquire() refuses a unit id drawn from this set so a unit cannot
+#: shadow the history it is itself recorded in.
+RESERVED_TOP_LEVEL = frozenset(("schema", "attempts", "unit_attempts"))
+
+#: The fields an attempt record grows exactly once, when it terminates.
+#: Once any of these is present on a record a later write may neither
+#: change nor remove it; _assert_append_only enforces that.
+ATTEMPT_TERMINAL_FIELDS = frozenset(
+    ("state", "released_at", "evidence", "usage", "executed_lane",
+     "lane_divergence"))
+
+
+def _assert_append_only(old, new):
+    """Refuse a write that would lose attempt history.
+
+    `old` is what is on disk, `new` is what is about to replace it; both
+    must be mappings, and a missing store reads as {}. Every attempt that
+    `old` recorded must still be in `new`, at the same position, with its
+    identity fields and its terminal fields unchanged. Recorded attempts
+    may only be added to, which is the whole point of the table.
+
+    A key in the attempts table whose value is not a list is not attempt
+    history (a store written by another tool, or a stray key), so it is
+    left alone rather than guessed at."""
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        raise HistoryLoss("the append-only check needs two mappings")
+    old_attempts = old.get("attempts")
+    if old_attempts is None:
+        return
+    if not isinstance(old_attempts, dict):
+        raise HistoryLoss("the recorded attempt table is not a mapping")
+    new_attempts = new.get("attempts")
+    if not isinstance(new_attempts, dict):
+        raise HistoryLoss("a write would drop the attempt table entirely")
+    for unit_id, old_list in old_attempts.items():
+        if not isinstance(old_list, list):
+            continue
+        if unit_id not in new_attempts:
+            raise HistoryLoss(
+                "a write would drop every attempt recorded for %s" % unit_id)
+        new_list = new_attempts[unit_id]
+        if not isinstance(new_list, list):
+            raise HistoryLoss(
+                "a write would replace the attempt history of %s" % unit_id)
+        if len(new_list) < len(old_list):
+            raise HistoryLoss(
+                "a write would shorten the attempt history of %s" % unit_id)
+        for position, old_rec in enumerate(old_list):
+            new_rec = new_list[position]
+            if not isinstance(old_rec, dict) or not isinstance(new_rec, dict):
+                raise HistoryLoss(
+                    "attempt %d of %s is not a record" % (position, unit_id))
+            for field in ("attempt", "attempt_id", "parent_attempt_id"):
+                if field in old_rec and new_rec.get(field) != old_rec[field]:
+                    raise HistoryLoss(
+                        "a write would rewrite %s of attempt %d of %s"
+                        % (field, position, unit_id))
+            for field in ATTEMPT_TERMINAL_FIELDS:
+                if field in old_rec and new_rec.get(field) != old_rec[field]:
+                    raise HistoryLoss(
+                        "a write would rewrite terminal %s of attempt %d of %s"
+                        % (field, position, unit_id))
+
+
+def _history_table(data):
+    """The attempts mapping of a store, or {} when it has none yet.
+
+    A store written before this sub unit existed simply has no table; the
+    first attempt recorded for it creates one. That is a normal first
+    write, not an error, so this never raises."""
+    table = data.get("attempts") if isinstance(data, dict) else None
+    return table if isinstance(table, dict) else {}
+
+
+def _unit_attempt_table(data):
+    table = data.get("unit_attempts") if isinstance(data, dict) else None
+    return table if isinstance(table, dict) else {}
+
+
+def history(path, unit_id, clock=None):
+    """(records, problem). Every attempt recorded for one unit, oldest
+    first, as a tuple of copies made from the store.
+
+    An empty tuple with an empty problem is NO-DATA: this unit has no
+    recorded attempts, which is a fact about the store, not an error. A
+    store that cannot be read at all is ((), problem) with the problem
+    named."""
+    if not isinstance(unit_id, str) or not unit_id:
+        return (), "history needs a non-empty string unit id"
+    data, problem = _read(path)
+    if data is None:
+        return (), problem
+    records = _history_table(data).get(unit_id)
+    if not isinstance(records, list):
+        return (), ""
+    return tuple(dict(r) for r in records if isinstance(r, dict)), ""
+
+
+def head(path, unit_id, clock=None):
+    """(record, problem). The most recent attempt recorded for one unit,
+    with a "live" flag saying whether that attempt is still the unit's
+    current, unexpired claim.
+
+    (None, NODATA) when the unit has no recorded attempt: absent is
+    reported as NO-DATA, never guessed into a record."""
+    if not isinstance(unit_id, str) or not unit_id:
+        return None, "head needs a non-empty string unit id"
+    data, problem = _read(path)
+    if data is None:
+        return None, problem
+    records = _history_table(data).get(unit_id)
+    if not isinstance(records, list) or not records:
+        return None, NODATA
+    latest = records[-1]
+    if not isinstance(latest, dict):
+        return None, NODATA
+    out = dict(latest)
+    held = data.get(unit_id)
+    out["live"] = bool(isinstance(held, dict)
+                       and held.get("attempt_id") == out.get("attempt_id")
+                       and live(held, _now(clock)))
+    return out, ""
+
+
+def attempt_ids(path, unit_id):
+    """Every attempt id recorded for one unit, oldest first."""
+    if not isinstance(unit_id, str) or not unit_id:
+        return ()
+    data, problem = _read(path)
+    if data is None:
+        return ()
+    records = _history_table(data).get(unit_id)
+    if not isinstance(records, list):
+        return ()
+    return tuple(r["attempt_id"] for r in records
+                 if isinstance(r, dict) and isinstance(r.get("attempt_id"), str))
 
 
 def _fault_barrier(name):
@@ -142,7 +291,19 @@ def _write(path, data):
 
     A claim that is written but not on disk when the power goes is exactly the
     case this whole module exists to survive, so the durability is not
-    decorative."""
+    decorative.
+
+    D1.1: before os.replace the write is compared against what is on disk
+    right now by _assert_append_only, at the one door every mutator in
+    this module goes through, so a bug that would silently drop an
+    attempt is stopped here rather than discovered later from a history
+    that no longer has the attempt in it. A store that cannot be read is
+    refused outright, never written over."""
+    old, problem = _read(path)
+    if old is None:
+        raise HistoryLoss(
+            "refusing to write over an unreadable claim store: %s" % problem)
+    _assert_append_only(old, data)
     d = os.path.dirname(os.path.abspath(path)) or "."
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".claims-", suffix=".tmp")
@@ -448,9 +609,34 @@ def live(claim, now):
 
 
 def acquire(path, unit_id, owner, work_id="", ttl=None,
-            clock=None, attempt=None):
-    """(claim, problem). Exclusive. Never returns a claim somebody else holds."""
+            clock=None, attempt=None, *, parent_attempt_id=None,
+            ready_set_fingerprint=None, advised_lane=None, content_class=None,
+            content_class_source="undeclared-default", checker=None,
+            dependency_parents=None, prior_failure_note=None):
+    """(claim, problem). Exclusive. Never returns a claim somebody else holds.
+
+    D1.1: an accepted acquire also records an APPEND-ONLY attempt. Every
+    attempt gets its own attempt_id and an entry in the store's attempt
+    history, so a unit's run history survives every later take instead of
+    being overwritten by the newest claim. The keyword-only arguments are
+    what the dispatch path already knows when it takes the claim; they are
+    recorded on the attempt, not merely passed through."""
     _fault_barrier("before_claim")
+    if not isinstance(unit_id, str) or not unit_id:
+        return None, "acquire needs a non-empty string unit id"
+    if unit_id in RESERVED_TOP_LEVEL:
+        return None, ("unit id %s is reserved for the store's own "
+                      "bookkeeping" % unit_id)
+    if ("/" in unit_id or "\\" in unit_id or unit_id in (".", "..")
+            or os.sep in unit_id or unit_id != os.path.basename(unit_id)):
+        return None, ("unit id %s is refused: it names a path rather than a "
+                      "unit, so it can never become a store key" % unit_id)
+    if not isinstance(owner, str) or not owner:
+        return None, "acquire needs a non-empty string owner"
+    if isinstance(attempt, bool):
+        return None, "acquire needs an integer attempt, or None"
+    if parent_attempt_id is not None and not isinstance(parent_attempt_id, str):
+        return None, "parent_attempt_id must be a string, or None"
     ttl = effective_ttl(ttl)
     now = _now(clock)
     try:
@@ -458,6 +644,11 @@ def acquire(path, unit_id, owner, work_id="", ttl=None,
             data, problem = _read(path)
             if data is None:
                 return None, problem
+            if unit_id in data and not isinstance(data.get(unit_id), dict):
+                return None, ("the stored entry for %s is not a claim object, "
+                              "it is %s, so it is refused rather than read as "
+                              "an empty store"
+                              % (unit_id, type(data.get(unit_id)).__name__))
             held = data.get(unit_id)
             if held and live(held, now) and held.get("owner") != owner:
                 return None, ("unit %s is claimed by %s until %.0fs from now. A "
@@ -466,13 +657,46 @@ def acquire(path, unit_id, owner, work_id="", ttl=None,
                                  float(held["expires_at"]) - now))
             n = int(attempt if attempt is not None
                     else (held.get("attempt", 0) + 1 if held else 1))
+            attempt_id = uuid.uuid4().hex
             claim = {"unit_id": unit_id, "owner": owner, "work_id": work_id,
-                     "attempt": n, "worker_id": "%s/%s/%d" % (owner, unit_id, n),
+                     "attempt": n, "attempt_id": attempt_id,
+                     "worker_id": "%s/%s/%d" % (owner, unit_id, n),
                      "pid": os.getpid(), "hostname": _hostname(), "claimed_at": now,
                      "expires_at": now + float(ttl), "state": "claimed",
+                     "parent_attempt_id": parent_attempt_id,
+                     "ready_set_fingerprint": ready_set_fingerprint,
+                     "advised_lane": advised_lane,
+                     "content_class": content_class,
+                     "content_class_source": content_class_source,
+                     "checker": checker,
+                     "dependency_parents": (list(dependency_parents)
+                                            if dependency_parents is not None
+                                            else None),
+                     "prior_failure_note": prior_failure_note,
                      "reclaimed_from": (held.get("owner")
                                         if held and not live(held, now)
                                         and held.get("owner") != owner else None)}
+            attempts = _history_table(data)
+            records = attempts.get(unit_id)
+            records = list(records) if isinstance(records, list) else []
+            records.append({
+                "attempt": n, "attempt_id": attempt_id,
+                "parent_attempt_id": parent_attempt_id, "owner": owner,
+                "work_id": work_id, "started_at": now,
+                "ready_set_fingerprint": ready_set_fingerprint,
+                "advised_lane": advised_lane, "content_class": content_class,
+                "content_class_source": content_class_source,
+                "checker": checker,
+                "dependency_parents": (list(dependency_parents)
+                                       if dependency_parents is not None
+                                       else None),
+                "prior_failure_note": prior_failure_note})
+            attempts[unit_id] = records
+            unit_attempts = _unit_attempt_table(data)
+            unit_attempts[unit_id] = attempt_id
+            data["attempts"] = attempts
+            data["unit_attempts"] = unit_attempts
+            data.setdefault("schema", {"version": 1})
             data[unit_id] = claim
             _write(path, data)
             run_dir = _run_dir(path)
@@ -483,6 +707,9 @@ def acquire(path, unit_id, owner, work_id="", ttl=None,
                                     "reclaimed_from":
                                         claim["reclaimed_from"]})
             return claim, ""
+    except HistoryLoss as exc:
+        return None, ("the claim store history would have been lost: %s"
+                      % exc)
     except (TimeoutError, OSError) as exc:
         return None, "could not take the claim store lock: %s" % exc
 
@@ -519,12 +746,16 @@ def renew(path, unit_id, owner, ttl=None, clock=None):
                            payload={"owner": owner, "ttl": ttl,
                                     "expires_at": held["expires_at"]})
             return held, ""
+    except HistoryLoss as exc:
+        return None, ("the claim store history would have been lost: %s"
+                      % exc)
     except (TimeoutError, OSError) as exc:
         return None, "could not take the claim store lock: %s" % exc
 
 
 def release(path, unit_id, owner, state="done", clock=None, evidence=None,
-            attempt=None):
+            attempt=None, *, executed_lane=None, usage=None,
+            lane_divergence=None):
     """Close a claim with the state it ended in. Never deletes the record.
 
     The record is the only durable evidence that this unit was run, by whom, on
@@ -543,7 +774,18 @@ def release(path, unit_id, owner, state="done", clock=None, evidence=None,
     close the record belonging to the attempt that REPLACED it. A caller
     that names the attempt it holds is refused when the claim has since
     moved to a different one. Omitted (None), a caller keeps today's
-    owner-only behaviour."""
+    owner-only behaviour.
+
+    D1.1: the attempt record this release closes is given the same terminal
+    fields the claim itself gets, so the append-only history ends with the
+    same state the current claim does. A field the caller did not supply is
+    left absent on both, never invented."""
+    if not isinstance(unit_id, str) or not unit_id:
+        return None, "release needs a non-empty string unit id"
+    if not isinstance(owner, str) or not owner:
+        return None, "release needs a non-empty string owner"
+    if isinstance(attempt, bool):
+        return None, "release needs an integer attempt, or None"
     try:
         with _Lock(path, clock=clock):
             data, problem = _read(path)
@@ -564,6 +806,33 @@ def release(path, unit_id, owner, state="done", clock=None, evidence=None,
             held["expires_at"] = 0
             if evidence is not None:
                 held["evidence"] = evidence
+            if usage is not None:
+                held["usage"] = usage
+            if executed_lane is not None:
+                held["executed_lane"] = executed_lane
+            if lane_divergence is not None:
+                held["lane_divergence"] = lane_divergence
+            attempts = _history_table(data)
+            records = attempts.get(unit_id)
+            if isinstance(records, list):
+                for record in records:
+                    if not isinstance(record, dict):
+                        continue
+                    if (held.get("attempt_id") is not None
+                            and record.get("attempt_id")
+                            != held.get("attempt_id")):
+                        continue
+                    record["state"] = state
+                    record["released_at"] = held["released_at"]
+                    if evidence is not None:
+                        record["evidence"] = evidence
+                    if usage is not None:
+                        record["usage"] = usage
+                    if executed_lane is not None:
+                        record["executed_lane"] = executed_lane
+                    if lane_divergence is not None:
+                        record["lane_divergence"] = lane_divergence
+            data["attempts"] = attempts
             data[unit_id] = held
             _write(path, data)
             run_dir = _run_dir(path)
@@ -578,6 +847,9 @@ def release(path, unit_id, owner, state="done", clock=None, evidence=None,
                                     "check_exit": evidence.get("exit_code")
                                     if isinstance(evidence, dict) else None})
             return held, ""
+    except HistoryLoss as exc:
+        return None, ("the claim store history would have been lost: %s"
+                      % exc)
     except (TimeoutError, OSError) as exc:
         return None, "could not take the claim store lock: %s" % exc
 

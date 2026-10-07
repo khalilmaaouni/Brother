@@ -28,7 +28,17 @@ import json
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import brother_state  # noqa: E402
+
+#: WHERE THE STORE LIVES is the one rule every tool that keeps records beside itself uses (brother_state.state_root).
+#: This was the parent of this file's own folder. In a development checkout that is the repository, and it still is.
+#: In an installed plugin it was the plugin root, which the host replaces on update (measured 2026-10-06: the command
+#: the intake reference gives an installed session wrote <plugin root>/docs/decisions/annotations.json), so a
+#: correction "kept from then on" was kept until the next update. An install now keeps it per user. decide.py reads
+#: the store through this same name, so the reader and the writer cannot disagree.
+ROOT = brother_state.state_root(HERE)[0]
 STORE_REL = os.path.join("docs", "decisions", "annotations.json")
 
 NODATA = "NO-DATA"

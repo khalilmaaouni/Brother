@@ -22,8 +22,9 @@ once the SAME value has been recorded 3 or more times (promoted). A hand
 written "correct: <key>: <value>" line always wins over both of those, for
 that key, however many times it was otherwise recorded.
 
-Python 3.9, standard library only, no network, no import of bm_profile.py or
-any other brothermode tool.
+Python 3.9, standard library plus this product's own sbe_checks (for say(),
+the one print a report tool owns, since the start skill parses these lines),
+no network, no import of bm_profile.py or any other brothermode tool.
 
 Usage:
     python3 tools/bm_profile_reader.py read --project <slug>
@@ -33,6 +34,9 @@ import argparse
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sbe_checks import say  # noqa: E402  (path setup has to come first)
 
 # Same default as bm_profile.py's own DEFAULT_VAULT: both products read one
 # shared file, so the resolved path must agree without either importing the
@@ -156,14 +160,14 @@ def cmd_read(args):
         print("NO-DATA: pass --profile, or --vault and --project")
         return 3
     if not os.path.isfile(path):
-        print("NO-DATA: no profile at %s" % path)
+        say("NO-DATA: no profile at %s" % path)
         return 3
     data = read(path)
     if not data:
-        print("no promoted or recorded facts yet at %s" % path)
+        say("no promoted or recorded facts yet at %s" % path)
         return 0
     for k in sorted(data):
-        print("%s: %s" % (k, data[k]))
+        say("%s: %s" % (k, data[k]))
     return 0
 
 
@@ -174,9 +178,9 @@ def cmd_promoted(args):
         return 3
     value = promoted(path, args.key)
     if value is None:
-        print("NO-DATA: %s is not promoted" % args.key)
+        say("NO-DATA: %s is not promoted" % args.key)
         return 3
-    print(value)
+    say(value)
     return 0
 
 

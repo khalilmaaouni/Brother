@@ -3,7 +3,7 @@ name: brotherme-decisions
 description: "Show the decisions waiting on you, highest stakes first, each with a recommended option"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-decisions`.
+This is the Codex route for the existing Claude command `/brother:brotherme-decisions`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

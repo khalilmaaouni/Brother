@@ -14,6 +14,9 @@ import unittest
 from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The shipped intake population (docs/plan/examples) is not in the public export (finding 31, 2026-09-26).
+needs_population = unittest.skipUnless(os.path.isdir(os.path.join(REPO_ROOT, 'docs', 'plan', 'examples')),
+                                       'the intake population docs/plan/examples is not shipped here')
 SCRIPTS_DIR = os.path.join(REPO_ROOT, 'scripts')
 SCORER = os.path.join(SCRIPTS_DIR, 'intake_score.py')
 
@@ -759,12 +762,14 @@ class DiagramGate(unittest.TestCase):
             os.unlink(path)
         self.assertEqual(code, 1, out)
 
+    @needs_population
     def test_the_shipped_population_passes_today(self):
         """Guards the records this repository actually ships. If this ever goes
         red, a record entered the repository without its diagram."""
         code, out = self.gate()
         self.assertEqual(code, 0, out)
 
+    @needs_population
     def test_the_default_population_can_actually_go_red(self):
         """AUDIT FIX. The test above is vacuous on its own: it would pass if
         run_gate were replaced by `return 0`. Plant a bare record INSIDE the real
@@ -830,6 +835,7 @@ class DiagramGate(unittest.TestCase):
             os.unlink(path)
         self.assertEqual(code, 0, out)
 
+    @needs_population
     def test_the_population_match_is_case_insensitive(self):
         """AUDIT FINDING. The glob was case-sensitive while the fence match was
         not, so renaming a file to lower case was a one-word bypass."""
@@ -843,6 +849,7 @@ class DiagramGate(unittest.TestCase):
             os.unlink(planted)
         self.assertEqual(code, 1, out)
 
+    @needs_population
     def test_the_default_population_is_repo_anchored_not_cwd_anchored(self):
         """Run from anywhere, gate the same records. A cwd-relative glob would
         silently read nothing and, before the NO-DATA split, report a pass."""
@@ -944,6 +951,7 @@ class WeightedOptionsGate(unittest.TestCase):
         self.assertIn('FAIL', out)
         self.assertIn(os.path.basename(path), out)
 
+    @needs_population
     def test_the_shipped_population_now_PASSES_under_the_flag(self):
         """INVERTED 2026-08-29, and the inversion is the point.
 
@@ -975,6 +983,7 @@ class WeightedOptionsGate(unittest.TestCase):
             os.unlink(path)
         self.assertEqual(code, 1, out)
 
+    @needs_population
     def test_the_shipped_population_passes_without_the_flag_too(self):
         """The diagram half must not have been broken by the weights half."""
         code, out = self.gate()
@@ -1668,6 +1677,48 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
                          "once jev_seam's config cache is warm")
         self.assertEqual(prompt_outputs, {True})
         self.assertEqual(record_lengths, {len(first_record)})
+
+
+def setUpModule():
+    # Finding 31 (loop audit 2026-09-26): this module ran against two things
+    # it never supplied. (1) jev_decide's outside content gate reads its
+    # forbidden-terms list from HOME and fails closed when missing, so under
+    # an empty HOME (the pre-push gate's hermetic run) every shadow case went
+    # red, and under the real HOME it borrowed the machine's own list. (2)
+    # Unmocked calls read the tracked data/jev-seams.json, where a seam can
+    # legitimately sit in shadow, so a plain render invoked the machine's
+    # real bridge (~/.claude/bin/or_ask.py, resolved at import); measured
+    # under a fixture HOME it exited 44 five times and opened the breaker,
+    # refusing every later shadow case. Supply both as fixtures: an all-off seams
+    # config and a bridge path that does not exist, so only a case that
+    # patches its own config and runner ever calls out. A fixture HOME, not
+    # only a patched constant, because a child process resolves the terms
+    # list from its own HOME (the way test_jev_seam.py does it).
+    import shutil
+    import coe_outside_gate
+    import jev_decide
+    home = tempfile.mkdtemp(prefix="brother-g1-home-test-")
+    unittest.addModuleCleanup(shutil.rmtree, home, ignore_errors=True)
+    os.makedirs(os.path.join(home, ".claude"))
+    terms = os.path.join(home, ".claude", "coe-outside-gate-terms.json")
+    with open(terms, "w", encoding="utf-8") as fh:
+        json.dump({"vendor-fixture": ["ACMEWIDGET"]}, fh)
+    seams = os.path.join(home, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    for patcher in (mock.patch.object(coe_outside_gate, "DEFAULT_TERMS_PATH", terms),
+                    mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH",
+                                      os.path.join(home, "no-bridge-in-tests")),
+                    mock.patch.dict(os.environ, {"HOME": home})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9's unittest runs the module cleanups above only when this
+    # hook exists (fixed in 3.10); without it the fixture HOME leaks per run.
+    pass
 
 
 if __name__ == '__main__':

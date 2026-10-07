@@ -1,6 +1,6 @@
 ---
 name: start
-description: "Use as the single entry point when someone wants to begin or resume work and does not know, or does not care, which command comes next. Detects existing state, resumes it when found, and otherwise asks for the outcome in plain language and routes into the next step. Invoke as /brothersbe:start."
+description: "Use as the single entry point when someone wants to begin or resume work and does not know, or does not care, which command comes next. Detects existing state, resumes it when found, and otherwise asks for the outcome in plain language and routes into the next step. Invoke as /brother:brothersbe-start."
 ---
 
 Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
@@ -19,7 +19,7 @@ Run these two commands, in order, and read the JSON before responding:
    values: `PASS`, `SETUP`, or `FAIL`.
 
    `SETUP` means nothing is broken: this is the ordinary shape of a brand new project. The
-   marketplace path never runs `sbe init`, so a beginner's very first `/brothersbe:start`
+   marketplace path never runs `sbe init`, so a beginner's very first `/brother:brothersbe-start`
    usually lands here, with the `project-init` check reading `SETUP`. Greet it as a
    welcome, never as a repair: say, in plain language, that this is a new project and one
    step sets up the small workspace BrotherSBE writes its evidence into (a `.brothersbe/`
@@ -30,7 +30,7 @@ Run these two commands, in order, and read the JSON before responding:
      b. Ask one plain question: set this up now? This stays a question even though
         `.brothersbe/` is the tool's own scaffold rather than the developer's files,
         because every write-capable skill in this plugin holds to one consent register
-        (see `/brothersbe:adopt`: dry run by default, `--apply` reserved for an explicit
+        (see `/brother:brothersbe-adopt`: dry run by default, `--apply` reserved for an explicit
         yes), and one rule everywhere beats a silent exception for the softest case.
      c. On yes, run `"${CLAUDE_PLUGIN_ROOT}/bin/sbe" init . --apply`, confirm in one line
         what it wrote, then re-run `sbe doctor --json` once to confirm `project-init` now
@@ -43,7 +43,7 @@ Run these two commands, in order, and read the JSON before responding:
    `FAIL` means at least one `checks[]` entry reads `FAIL`: real breakage, never the fresh
    install shape. Name which one, by its `name` and `detail`, and stop there rather than
    reading status at all. When the failing check is `tools` or `plugin-manifest`, name
-   `/brothersbe:adopt` as the next stop too: those two are what "not correctly installed"
+   `/brother:brothersbe-adopt` as the next stop too: those two are what "not correctly installed"
    looks like in this output.
 2. `"${CLAUDE_PLUGIN_ROOT}/bin/sbe" status --json`. Read `scope.storesInspected`: every field
    `null`, including `dossiers`, means nothing was found anywhere this run looked, so this is
@@ -68,7 +68,7 @@ One entry, no menu. Detect from the ask itself which kind of user this is and op
 matching path. NEVER ask the user to self-classify, never show a mode picker, and never say
 the words role, level, persona, or mode to the user.
 
-BEFORE THE FIRST QUESTION, read this person's vault profile for this project: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_profile_reader.py" read --project <id>` (a Codex install exports `${BROTHER_PLUGIN_ROOT}` instead, same rule as the plugin-root note at the top of this file; a clone install runs the same command from the checkout root; the vault root defaults to the founder's own vault or the `BROTHERMODE_VAULT` environment variable when it is set). `NO-DATA` means no profile exists yet, the ordinary case for a person's first project here: say nothing about it and continue exactly as the next paragraph describes. When it reads back a `role`, a `level`, or a promoted `preference:` line, skip the question that fact would have settled and say one plain line naming what was skipped and why, so the person can correct it: "I am assuming <fact>, from your last session here. Say so if that is wrong." Never invent a profile line, never claim one exists when the command reported `NO-DATA`, and never say the words profile, role, level, persona, or mode to the user. This is BrotherSBE's own reader, `tools/bm_profile_reader.py`: per `docs/adr/2026-08-12-where-the-shared-machinery-lives.md`, it reads the SAME file BrotherMode's `start` skill writes with its own `tools/bm_profile.py`, and never calls that tool.
+BEFORE THE FIRST QUESTION, read this person's vault profile for this project: run `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_profile_reader.py" read --project <id>` (a Codex install exports `${BROTHER_PLUGIN_ROOT}` instead, same rule as the plugin-root note at the top of this file; a clone install runs the same command from the checkout root; the vault root defaults to the founder's own vault or the `BROTHERMODE_VAULT` environment variable when it is set). `NO-DATA` means no profile exists yet, the ordinary case for a person's first project here: say nothing about it and continue exactly as the next paragraph describes. When it reads back a `role`, a `level`, or a promoted `preference:` line, skip the question that fact would have settled and say one plain line naming what was skipped and why, so the person can correct it: "I am assuming <fact>, from your last session here. Say so if that is wrong." Never invent a profile line, never claim one exists when the command reported `NO-DATA`, and never say the words profile, role, level, persona, or mode to the user. This is BrotherSBE's own reader, `tools/bm_profile_reader.py`: per `docs/adr/2026-08-12-where-the-shared-machinery-lives.md`, it reads the SAME file BrotherMode's `start` skill writes with BrotherMode's own profile writer, a tool of that other plugin which does not ship here, and never calls that tool.
 
 Read the level, in this order of trust:
 
@@ -91,7 +91,7 @@ time." Switching renderings is one utterance, never a restart.
 
 ### The developer path
 
-Route to `/brothersbe:kickoff` with the ask as the objective. Kickoff reads the repo first
+Route to `/brother:brothersbe-kickoff` with the ask as the objective. Kickoff reads the repo first
 and presents assumptions to correct, not questions to answer; the target is an accepted
 plan in 3 turns or fewer on a known repo. The tier and the ceremony are computed there; the
 user never picks them.
@@ -110,7 +110,7 @@ questions each. Target: an accepted plan in 8 turns or fewer.
 
 Close discovery by playing the understanding back as outcomes in the user's own words: what
 will be different when this is done, what could go wrong, what it costs. Never as file
-paths. Then route to `/brothersbe:kickoff` with that understanding as the objective; kickoff
+paths. Then route to `/brother:brothersbe-kickoff` with that understanding as the objective; kickoff
 builds the same intake record the developer path builds.
 
 ### One record, two renderings

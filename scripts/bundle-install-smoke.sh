@@ -2,8 +2,9 @@
 # The one-install proof for the Brother bundle, P4 of the execution grid.
 #
 # It answers ONE question the umbrella's whole Stage 0 argument rests on:
-# does `claude plugin install brother@brother` actually deliver BOTH leaves,
-# or does the bundle manifest declare dependencies the host never resolves?
+# does `claude plugin install brother@brother` deliver the ONE plugin, brother,
+# at the version the marketplace promises, with none of the retired plugins
+# (brothermode, brothersbe, brotherds) pulled in beside it?
 #
 # That question is measured here rather than assumed, because the README, the
 # marketplace and the bundle manifest all describe a one-command install and
@@ -30,18 +31,6 @@ fail() { say "FAILED: $*"; exit 1; }
 # name here and the composed verdict at the bottom refuses.
 NODATA_STAGES=""
 nodata() { NODATA_STAGES="$NODATA_STAGES $1"; say "NO-DATA: $2"; }
-
-# A LEAF EXCLUDED AS NOT YET PUBLISHED is a DIFFERENT thing from the NODATA
-# STAGES above, and it is kept in its own bucket on purpose. A stage in
-# NODATA_STAGES means this proof measured nothing about a question it was
-# supposed to answer, so the run cannot compose into a PASSED sentence. A
-# leaf that cannot be fetched from GitHub because its path was exported
-# after the last tag is not that: everything else this script proves still
-# stands, the leaf is named honestly as NO-DATA, and it is left out of every
-# assertion that would otherwise need it, never counted as a pass and never
-# turned into a reason to fail the whole run.
-EXCLUDED_LEAVES=""
-excluded_leaf() { EXCLUDED_LEAVES="$EXCLUDED_LEAVES $1"; say "NO-DATA: $2"; }
 
 command -v claude >/dev/null 2>&1 || {
   say "BLOCKED: no claude binary on PATH; this proof needs a real client"
@@ -82,57 +71,24 @@ else
   say "promises read from: this tree"
 fi
 
-# THE LEAVES ARE READ GENERICALLY, never typed by name, so a leaf added later
-# (like brotherds) is picked up automatically. A "leaf" here is any
-# marketplace entry sourced as a git-subdir under products/; the bundle's own
-# entry (source path "bundle") is not a leaf, it is the thing being installed.
-LEAVES_FILE="$WORK/leaves.txt"
-python3 -c "
+# THE ONE PLUGIN'S PROMISE, read from the same manifest as the install: the
+# version the marketplace's brother entry carries. It is compared below with
+# what `claude plugin list` reports after the install, so a catalog that
+# advertises one version and delivers another is caught (the 2026-08-24
+# shape). A manifest with no single brother entry, or one with no version,
+# stops the run: there is then nothing this proof can hold the install to.
+# The per leaf probe that stood here until 2026-10-06 (every products/ leaf
+# fetched at its tag from GitHub) is gone: a marketplace that lists only
+# brother would abort on it (docs/plan/specs/OP1.md, OP1.f).
+BVER=$(python3 -c "
 import json,sys
 d=json.load(open(sys.argv[1]))
-for p in d['plugins']:
-    src = p.get('source') or {}
-    path = src.get('path','')
-    if src.get('source') == 'git-subdir' and path.startswith('products/'):
-        print('%s\t%s\t%s\t%s\t%s' % (p['name'], p['version'], src.get('url',''), src.get('ref',''), path))
-" "$MANIFEST" > "$LEAVES_FILE" || fail "could not read the umbrella's promised leaves from $MANIFEST"
-[ -s "$LEAVES_FILE" ] || fail "no products/ leaves found in $MANIFEST; nothing to prove"
-
-# EACH LEAF IS PROBED BEFORE ANYTHING ELSE ASSUMES IT IS INSTALLABLE. A
-# leaf's install source is ALWAYS the published GitHub repo at a tag, in BOTH
-# path mode and --github mode: only the MARKETPLACE add differs between the
-# two modes, never a plugin's own git-subdir source. So a leaf whose path was
-# only just exported into this tree (brotherds ahead of its first tag) cannot
-# be installed from a clean client in either mode, and no local edit changes
-# that: the leaf is UNPROVABLE here, not broken. Proof it is unprovable is
-# cheap and needs no full clone: `git ls-remote` proves the ref exists at
-# all, and only if it does, a single-tag shallow fetch plus `ls-tree` proves
-# the declared path exists inside that ref.
-: > "$WORK/leaves-published.txt"
-while IFS="$(printf '\t')" read -r LNAME LVER LURL LREF LPATH; do
-  [ -n "$LNAME" ] || continue
-
-  if ! git ls-remote --exit-code "$LURL" "refs/tags/$LREF" >/dev/null 2>&1; then
-    excluded_leaf "$LNAME" \
-      "$LNAME not yet published at $LREF (tag not found on $LURL); provable only by the post-publish run (--github) after the cut"
-    continue
-  fi
-
-  PROBE_DIR="$WORK/probe-$LNAME"
-  mkdir -p "$PROBE_DIR"
-  if git init -q "$PROBE_DIR" >/dev/null 2>&1 \
-     && git -C "$PROBE_DIR" fetch -q --depth 1 "$LURL" "refs/tags/$LREF" >/dev/null 2>&1 \
-     && git -C "$PROBE_DIR" ls-tree --name-only FETCH_HEAD "$LPATH" 2>/dev/null | grep -q .
-  then
-    printf '%s\t%s\n' "$LNAME" "$LVER" >> "$WORK/leaves-published.txt"
-    say "umbrella promises $LNAME $LVER"
-  else
-    excluded_leaf "$LNAME" \
-      "$LNAME not yet published at $LREF ($LPATH not found in that tag); provable only by the post-publish run (--github) after the cut"
-  fi
-done < "$LEAVES_FILE"
-
-[ -s "$WORK/leaves-published.txt" ] || fail "every leaf the manifest names is unprovable at its ref; nothing left to install-test"
+found=[p for p in d.get('plugins',[]) if isinstance(p,dict) and p.get('name')=='brother']
+if len(found)!=1 or not isinstance(found[0].get('version'),str) or not found[0]['version']:
+    sys.exit(1)
+print(found[0]['version'])
+" "$MANIFEST") || fail "the manifest at $MANIFEST names no single brother entry with a version; nothing to prove"
+say "umbrella promises brother $BVER"
 
 claude plugin marketplace add "$SRC" >"$WORK/add.log" 2>&1 || {
   cat "$WORK/add.log"; fail "marketplace add"; }
@@ -146,30 +102,28 @@ grep -q "Successfully installed plugin" "$WORK/install.log" || {
 
 claude plugin list >"$WORK/list.log" 2>&1 || fail "plugin list"
 
-# THE ACTUAL QUESTION. The bundle ships no code of its own; it exists only to
-# pull every PUBLISHED leaf in one command. If the host does not resolve its
-# declared dependencies, the one-install claim is false and every surface
-# repeating it is wrong, so this is reported as a FAIL rather than softened.
-# A leaf excluded above as unprovable is never asserted here: it was never
-# claimed installable in the first place.
-MISSING=""
-while IFS="$(printf '\t')" read -r LNAME LVER; do
-  [ -n "$LNAME" ] || continue
-  grep -q "$LNAME@" "$WORK/list.log" || MISSING="$MISSING $LNAME"
-done < "$WORK/leaves-published.txt"
-
-if [ -n "$MISSING" ]; then
+# THE ACTUAL QUESTION, ONE PLUGIN. Since 1.1.0 the bundle carries the whole
+# product and declares no dependency (docs/plan/specs/OP1.md). What the leaf
+# probe used to prove survives as two assertions that need no per leaf
+# network fetch:
+#   1. `claude plugin list` shows brother@brother at the promised version and
+#      none of the retired names brothermode@, brothersbe@, brotherds@.
+#   2. no products/*/.claude-plugin/marketplace.json exists anywhere in the
+#      installed tree (the product catalogs are deleted at the cut, and an
+#      install that still carries one shipped the wrong tree).
+grep -q "brother@brother" "$WORK/list.log" || {
   cat "$WORK/list.log"
-  say "the bundle installed but the host did not resolve:$MISSING"
-  fail "one-install is not true: brother@brother does not deliver every published leaf"
-fi
-
-while IFS="$(printf '\t')" read -r LNAME LVER; do
-  [ -n "$LNAME" ] || continue
-  grep -q "Version: $LVER" "$WORK/list.log" || {
+  fail "one plugin is not true: the installed list does not show brother@brother"; }
+grep -q "Version: $BVER" "$WORK/list.log" || {
+  cat "$WORK/list.log"
+  fail "brother resolved to a version the umbrella does not promise ($BVER)"; }
+for OLD in brothermode@ brothersbe@ brotherds@; do
+  grep -q "$OLD" "$WORK/list.log" && {
     cat "$WORK/list.log"
-    fail "$LNAME resolved to a version the umbrella does not promise ($LVER)"; }
-done < "$WORK/leaves-published.txt"
+    fail "one plugin is not true: the install pulled in a retired plugin ($OLD)"; }
+done
+STRAY=$(find "$CLAUDE_CONFIG_DIR" -path '*/products/*/.claude-plugin/marketplace.json' 2>/dev/null | head -1)
+[ -z "$STRAY" ] || fail "the installed tree still carries a product catalog: $STRAY"
 
 # EVERY capability the bundle ships must be proven to REGISTER, not merely to
 # exist on disk. Written after 2026-08-28, when a new commands/brother.md was
@@ -232,28 +186,14 @@ fi
 # It compares NAMES and not just a count. A count passes when one entry is
 # renamed and another added, which is precisely the drift an install check
 # should catch.
-#
-# A leaf excluded above (not yet published) is passed to check_installed_
-# surface.py via --skip, one flag per excluded name: the manifest ships its
-# entries, but a clean install cannot describe a leaf that cannot be fetched,
-# so it is left out of the comparison by name rather than either asserted or
-# silently dropped.
 if [ -f "$ROOT/bundle/MANIFEST.json" ]; then
-  SKIP_ARGS=""
   for PLUGIN in $(python3 -c "import json;print(' '.join(json.load(open('$ROOT/bundle/MANIFEST.json'))['shipped_plugins']))"); do
-    case " $EXCLUDED_LEAVES " in
-      *" $PLUGIN "*)
-        say "NO-DATA: $PLUGIN excluded from the installed-surface comparison, not installable before publish"
-        SKIP_ARGS="$SKIP_ARGS --skip $PLUGIN"
-        continue
-        ;;
-    esac
     claude plugin details "$PLUGIN" >"$WORK/details-$PLUGIN.log" 2>&1 || {
       cat "$WORK/details-$PLUGIN.log"
       fail "the manifest ships $PLUGIN but a clean install cannot describe it"; }
   done
   MANIFEST_VERDICT=$(python3 "$ROOT/scripts/check_installed_surface.py" \
-      --manifest "$ROOT/bundle/MANIFEST.json" --details-dir "$WORK" $SKIP_ARGS 2>&1) || {
+      --manifest "$ROOT/bundle/MANIFEST.json" --details-dir "$WORK" 2>&1) || {
     echo "$MANIFEST_VERDICT"
     fail "the installed surface does not match bundle/MANIFEST.json"; }
   say "$MANIFEST_VERDICT"
@@ -326,15 +266,9 @@ if [ -n "$NODATA_STAGES" ]; then
 fi
 
 # THE CAVEAT this script has always carried (registration proves discovery,
-# never behaviour), plus, when any leaf was excluded above, the fact that
-# this run proved less than every leaf the manifest names. Neither is
-# softened into the word PASSED without saying so.
+# never behaviour) is never softened into the word PASSED without saying so.
 CAVEATS=""
 [ -n "${caveat_run:-}" ] && CAVEATS="$CAVEATS (discovery only: presence of $PROVEN entries asserted, behaviour not)"
-if [ -n "$EXCLUDED_LEAVES" ]; then
-  CAVEATS="$CAVEATS (excluded, not yet publishable, never proven and never counted as a pass:$EXCLUDED_LEAVES)"
-fi
 
-WANT_SUMMARY=$(awk -F'\t' '{printf "%s%s %s", (NR>1?", ":""), $1, $2}' "$WORK/leaves-published.txt")
-say "PASSED: one command installed the bundle plus $WANT_SUMMARY, uninstall clean$CAVEATS"
+say "PASSED: one command installed the one plugin brother@brother $BVER, no retired plugin beside it, uninstall clean$CAVEATS"
 exit 0

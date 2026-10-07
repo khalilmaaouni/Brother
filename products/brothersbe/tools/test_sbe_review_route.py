@@ -1574,5 +1574,47 @@ class J055NeverChangesTheRoutedResult(RouteFixture):
         self.assertEqual(result["primaryReviewer"], "qa-reviewer", result)
 
 
+class TestJevMountNeverResolvesAgainstTheWorkingDirectory(unittest.TestCase):
+    """`_jevpath.mount()` once passed each candidate through abspath() inside
+    a try that skipped on any exception. With HOME unresolved, expanduser
+    leaves `~/Brother/scripts` relative, and abspath() joined it to the
+    caller's working directory, so a `jev_seam.py` under `./~/Brother/scripts`
+    was mounted and imported. A relative candidate names no checkout and is
+    skipped now, and a deleted working directory no longer reaches a call
+    that can raise."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "src"))
+        try:
+            from brothersbe import _jevpath
+        finally:
+            sys.path.pop(0)
+        self.mod = _jevpath
+        self.real_candidates = _jevpath._CANDIDATES
+        self.real_path = list(sys.path)
+        self.real_cwd = os.getcwd()
+
+    def tearDown(self):
+        self.mod._CANDIDATES = self.real_candidates
+        sys.path[:] = self.real_path
+        os.chdir(self.real_cwd)
+
+    def test_a_relative_candidate_is_skipped_not_joined_to_the_cwd(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "~/Brother/scripts/jev_seam.py", "")
+            os.chdir(d)
+            self.mod._CANDIDATES = ("~/Brother/scripts",)
+            self.assertFalse(self.mod.mount())
+            self.assertEqual(sys.path, self.real_path)
+            os.chdir(self.real_cwd)
+
+    def test_a_deleted_working_directory_answers_false_rather_than_raising(self):
+        gone = tempfile.mkdtemp()
+        os.chdir(gone)
+        os.rmdir(gone)
+        self.mod._CANDIDATES = ("~/Brother/scripts", "/nonexistent-sbe-probe/scripts")
+        self.assertFalse(self.mod.mount())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

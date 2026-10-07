@@ -185,9 +185,14 @@ GREEN_EXPORT_PUBLIC_OUT = (
     "TAGGED: v%s points at the merged tip (local commit %s) on main\n"
     % (VERSION, VERSION, GREEN_TAGGED_COMMIT))
 
+#: CV1.e: the question names the full HEAD the chain left, so GREEN answers
+#: a 40 hex HEAD; a runner without one is refused before the question.
+GREEN_HEAD = "e" * 40
+
 GREEN = {
     "next_cut.py": (0, "next cut weekday: Friday\nnext cut version: %s\n"
                        % VERSION),
+    "git rev-parse HEAD": (0, GREEN_HEAD + "\n"),
     "bm_store dump": (0, _dump(["docs/plan/x.md"])),
     "bm_store claim": (0, CLAIM_OK),
     "bm_store park": (0, "parked: ok\n"),
@@ -203,6 +208,8 @@ GREEN = {
                           "this tree\n"),
     "release_invariant.py": (0, "release-invariant: identity chain "
                                 "holds\n"),
+    "donecheck_u8.py": (0, "DONE        exactly one plugin, named brother\n"),
+    "retire_catalogs.py": (0, "retire_catalogs: already in end state\n"),
     "export_public.py": (0, GREEN_EXPORT_PUBLIC_OUT),
     "reproduce_export.py": (0, "reproduce-export: PASS\n"),
     "gh release create": (0, "https://github.com/khalilmaaouni/Brother/"
@@ -212,12 +219,20 @@ GREEN = {
 }
 
 
-def _main(argv, runner, answer="y", root="/fake/root", terms_file=None):
+def _main(argv, runner, answer="y", root="/fake/root", terms_file=None,
+          bare=False):
     """cut.main with the bm_store loader and the prompt both faked; the
     loader cache is cleared so each test decides what loads. terms_file
     defaults to a real, empty, throwaway list so a --release-notes-file
     test never reads this machine's actual ~/.brothersbe-private-names."""
     asked = []
+    # A real cut with no release notes file is refused (2026-09-20). Every
+    # test that is about something else opts out the way an operator
+    # would; `bare=True` leaves argv alone for the tests about that rule.
+    if not bare and "--check" not in argv \
+            and "--release-notes-file" not in argv \
+            and "--no-release-page" not in argv:
+        argv = list(argv) + ["--no-release-page", "a test about something else"]
 
     def ask(prompt):
         asked.append(prompt)
@@ -290,6 +305,39 @@ class CheckModeClaimsNothingAndWritesNothing(unittest.TestCase):
         self.assertLess(r.calls.index("cut_v1.0.0.sh"),
                         r.calls.index("required_fast.sh"))
 
+    def test_catalogs_not_in_the_one_plugin_end_state_refuse_the_cut(self):
+        """F10 (architecture review 2026-09-30): U8 retires the brothermode,
+        brothersbe and brotherds marketplace entries AT the 1.1.0 cut, but
+        no cut step read the catalogs, so a cut could ship four plugins
+        while the plan said one. The chain now runs scripts/donecheck_u8.py
+        on the rehearsed tree, after release_invariant and before anything
+        irreversible: a red U8 reads NOT READY under --check and refuses a
+        real cut before export_public.py."""
+        red = {"donecheck_u8.py": (1, "NOT DONE    3 entr(y/ies) still to "
+                                       "retire: brothermode, brothersbe, "
+                                       "brotherds\n")}
+        r = Runner(dict(GREEN, **red))
+        code, _ = _main(["--check"], r)
+        self.assertEqual(code, C.EXIT_REFUSED, r.calls)
+        self.assertIn("donecheck_u8.py", r.calls)
+        self.assertLess(r.calls.index("release_invariant.py"),
+                        r.calls.index("donecheck_u8.py"))
+        u8 = [c for c in r.cmds if _key(c) == "donecheck_u8.py"][0]
+        rehearsal = [c for c in r.cmds if c[:3] == ["git", "worktree", "add"]][0][4]
+        # H1: the step hands the check the rehearsed TREE, so the check
+        # enumerates every catalog in it; a single catalog path (any of the
+        # five) would let the others ship unread.
+        self.assertEqual(u8[-1], rehearsal, u8)
+        r = Runner(dict(GREEN, **red))
+        code, _ = _main([], r)
+        self.assertEqual(code, C.EXIT_REFUSED, r.calls)
+        self.assertIn("donecheck_u8.py", r.calls)
+        self.assertNotIn("export_public.py", r.calls)
+        r = Runner(GREEN)
+        code, _ = _main(["--check"], r)
+        self.assertEqual(code, C.EXIT_OK, r.calls)
+        self.assertIn("donecheck_u8.py", r.calls)
+
     def test_a_failed_rehearsal_reads_not_ready_and_still_cleans_up(self):
         r = Runner(dict(GREEN, **{"release_invariant.py": (1, "FAIL\n")}))
         code, _ = _main(["--check"], r)
@@ -309,6 +357,115 @@ class CheckModeClaimsNothingAndWritesNothing(unittest.TestCase):
         r = Runner(dict(GREEN, **{"required_fast.sh": (1, FAST_RED)}))
         code, _ = _main(["--check"], r)
         self.assertEqual(code, C.EXIT_REFUSED)
+
+    def test_an_expired_declared_exception_reads_not_ready_in_check(self):
+        """2026-09-20, the 1.0.21 cut: two exceptions expired the day before
+        and the refusal arrived 41 minutes in. The audit is read first."""
+        r = Runner(dict(GREEN, **{"battery_exception_audit.py":
+                                  (1, "EXPIRED release-note-perturb\n")}))
+        code, _ = _main(["--check"], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertLess(r.calls.index("battery_exception_audit.py"),
+                        r.calls.index("cut_v1.0.0.sh"))
+
+    def test_an_expired_exception_stops_a_real_cut_before_any_long_step(self):
+        r = Runner(dict(GREEN, **{"battery_exception_audit.py":
+                                  (1, "EXPIRED release-note-perturb\n")}))
+        code, _ = _main(["--yes"], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        for never in ("cut_v1.0.0.sh", "required_fast.sh",
+                      "export_public.py"):
+            self.assertNotIn(never, r.calls)
+
+    def test_an_unreadable_exceptions_file_blocks_like_an_expired_one(self):
+        for code_in in (2, 127):
+            r = Runner(dict(GREEN, **{"battery_exception_audit.py":
+                                      (code_in, "NO-DATA\n")}))
+            code, _ = _main(["--yes"], r)
+            self.assertEqual(code, C.EXIT_REFUSED, code_in)
+            self.assertNotIn("cut_v1.0.0.sh", r.calls)
+
+    def test_a_real_cut_with_no_release_notes_file_is_refused_at_second_one(self):
+        """2026-09-20, the 1.0.21 cut: tagged publicly, no Release page, the
+        previous version still shown as latest. Nothing is claimed, run or
+        asked before the refusal."""
+        r = Runner(GREEN)
+        code, asked = _main(["--yes"], r, bare=True)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertEqual(r.calls, [], "something ran before the refusal")
+        self.assertEqual(asked, [])
+
+    def test_an_empty_reason_is_not_a_reason(self):
+        r = Runner(GREEN)
+        code, _ = _main(["--yes", "--no-release-page", "  "], r, bare=True)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertEqual(r.calls, [])
+
+    def test_a_stated_reason_lets_the_cut_proceed_and_check_never_needs_one(self):
+        r = Runner(GREEN)
+        code, _ = _main(["--yes", "--no-release-page", "tag only, page follows by hand"],
+                        r, bare=True)
+        self.assertEqual(code, C.EXIT_OK)
+        self.assertIn("cut_v1.0.0.sh", r.calls)
+        code, _ = _main(["--check"], Runner(GREEN), bare=True)
+        self.assertEqual(code, C.EXIT_OK)
+
+    def test_a_refusing_preflight_stops_a_real_cut_before_any_long_step(self):
+        """2026-09-20: six refusals of the 1.0.21 cut, each behind the 84
+        minute chain or on the public runner. The preflight is asked first,
+        and NO-DATA (2) or a missing script (127) blocks like a refusal."""
+        for code_in in (1, 2, 127):
+            r = Runner(dict(GREEN, **{"cut_preflight.py":
+                                      (code_in, "cut-preflight: REFUSED\n")}))
+            code, _ = _main(["--yes"], r)
+            self.assertEqual(code, C.EXIT_REFUSED, code_in)
+            for never in ("cut_v1.0.0.sh", "required_fast.sh",
+                          "export_public.py"):
+                self.assertNotIn(never, r.calls)
+
+    def test_the_preflight_is_told_the_version_and_runs_in_check_too(self):
+        r = Runner(dict(GREEN, **{"cut_preflight.py":
+                                  (1, "cut-preflight: REFUSED\n")}))
+        code, _ = _main(["--check"], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertLess(r.calls.index("cut_preflight.py"),
+                        r.calls.index("cut_v1.0.0.sh"))
+        cmd = r.cmds[r.calls.index("cut_preflight.py")]
+        self.assertEqual(cmd[cmd.index("--version") + 1], VERSION)
+        self.assertNotIn("--no-virgin-gate", cmd)
+
+    def test_a_changed_plugin_with_no_bump_stops_the_cut_after_the_bump(self):
+        """2026-09-20: 1.0.21 shipped 24 and 12 changed product files under
+        unchanged plugin versions and the updater said "already at the
+        latest". The gate reads the BUMPED tree, before the minutes long gate
+        and before anything is pushed; NO-DATA (2) and a missing script (127)
+        block like a refusal."""
+        for code_in in (1, 2, 127):
+            r = Runner(dict(GREEN, **{"plugin_bump_gate.py":
+                                      (code_in, "REFUSED  plugin-bumps\n")}))
+            code, _ = _main(["--yes"], r)
+            self.assertEqual(code, C.EXIT_REFUSED, code_in)
+            self.assertLess(r.calls.index("cut_v1.0.0.sh"),
+                            r.calls.index("plugin_bump_gate.py"))
+            for never in ("required_fast.sh", "export_public.py"):
+                self.assertNotIn(never, r.calls)
+            cmd = r.cmds[r.calls.index("plugin_bump_gate.py")]
+            self.assertEqual(cmd[cmd.index("--version") + 1], VERSION)
+
+    def test_the_plugin_bump_gate_is_rehearsed_by_check_in_the_rehearsal_tree(self):
+        r = Runner(dict(GREEN, **{"plugin_bump_gate.py":
+                                  (1, "REFUSED  plugin-bumps\n")}))
+        code, _ = _main(["--check"], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        i = r.calls.index("plugin_bump_gate.py")
+        self.assertEqual(r.cwds[i], r.cwds[r.calls.index("cut_v1.0.0.sh")])
+        self.assertTrue(r.cmds[i][1].startswith(r.cwds[i]))
+
+    def test_a_cheaper_refusal_spares_the_minutes_long_preflight(self):
+        r = Runner(dict(GREEN, **{"git status --porcelain":
+                                  (0, " M README.md\n")}))
+        _main(["--yes"], r)
+        self.assertNotIn("cut_preflight.py", r.calls)
 
     def test_a_conflict_still_reads_every_other_step_in_check_mode(self):
         # A readiness report carries everything to clear at once; only a
@@ -660,7 +817,8 @@ class TheFenceIsReleasedOnEveryExit(unittest.TestCase):
         del C._BM_STORE_CACHE[:]
         with mock.patch.object(C, "_load_bm_store",
                                return_value=(None, None, "absent")):
-            code = C.main(["--yes"], root="/fake", runner=r, ask=None)
+            code = C.main(["--yes", "--no-release-page", "a test about something else"], root="/fake", runner=r,
+                          ask=None)
         del C._BM_STORE_CACHE[:]
         self.assertEqual(code, C.EXIT_NODATA)
         self.assertNotIn("required_fast.sh", r.calls)
@@ -672,9 +830,12 @@ class TheGreenPathRunsTheChainInOrderAndCompletes(unittest.TestCase):
         code, asked = _main(["--yes"], r)
         self.assertEqual(code, C.EXIT_OK, r.calls)
         self.assertEqual(asked, [])
+        # CV1.e: the second git status is pre_push_recheck, after the
+        # answer and immediately before the push.
         wanted = ["bm_store claim", "bm_store dump", "git status --porcelain",
                   "cut_v1.0.0.sh", "required_fast.sh", "refresh_cut.py",
-                  "release_invariant.py", "export_public.py",
+                  "release_invariant.py", "git status --porcelain",
+                  "export_public.py",
                   "reproduce_export.py", "bm_store complete"]
         seen = [c for c in r.calls if c in wanted]
         self.assertEqual(seen, wanted, r.calls)
@@ -940,7 +1101,8 @@ class TheApproveQuestionWorksWithoutAKeyboard(unittest.TestCase):
                                return_value=(FakeBmStore, BM_PATH, None)), \
              mock.patch.object(C, "release_paths",
                                return_value=["scripts/", "bundle/"]):
-            code = C.main([], root="/fake/root", runner=r, ask=no_keyboard)
+            code = C.main(["--no-release-page", "a test about something else"], root="/fake/root", runner=r,
+                          ask=no_keyboard)
         self.assertEqual(code, C.EXIT_OK)
         self.assertNotIn("export_public.py", r.calls)
 
@@ -981,6 +1143,10 @@ class TheApproveQuestionWorksWithoutAKeyboard(unittest.TestCase):
         self.assertNotIn("bm_store claim", r.calls)
 
     def test_a_no_in_the_file_declines_through_the_real_cut(self):
+        # CV1.e (owner ruling 2026-10-03, decision 5): a real cut takes no
+        # --answer-file, so this argv no longer names one; the decline path
+        # stays covered through the scripted file_asker based `ask`, and
+        # the refusal of the same argv WITH --answer-file is proven below.
         path = self._tmp()
         r = Runner(GREEN)
 
@@ -995,11 +1161,43 @@ class TheApproveQuestionWorksWithoutAKeyboard(unittest.TestCase):
                                return_value=(FakeBmStore, BM_PATH, None)), \
              mock.patch.object(C, "release_paths",
                                return_value=["scripts/", "bundle/"]):
-            code = C.main(["--answer-file", path], root="/fake/root",
+            code = C.main(["--no-release-page", "a test about something else"],
+                          root="/fake/root",
                           runner=r, ask=founder_says_no)
         self.assertEqual(code, C.EXIT_OK)
         self.assertNotIn("export_public.py", r.calls)
         self.assertIn("bm_store park", r.calls)
+
+    def test_the_same_real_cut_with_an_answer_file_is_refused(self):
+        path = self._tmp()
+        r = Runner(GREEN)
+        asked = []
+        del C._BM_STORE_CACHE[:]
+        with mock.patch.object(C, "_load_bm_store",
+                               return_value=(FakeBmStore, BM_PATH, None)), \
+             mock.patch.object(C, "release_paths",
+                               return_value=["scripts/", "bundle/"]):
+            code = C.main(["--answer-file", path, "--no-release-page", "a test about something else"],
+                          root="/fake/root",
+                          runner=r, ask=asked.append)
+        self.assertEqual(code, C.EXIT_NODATA)
+        self.assertEqual(r.calls, [])
+        self.assertEqual(asked, [])
+        self.assertFalse(os.path.exists(path))
+
+
+class TheTestsNeverWriteTheRealEvidenceFolder(unittest.TestCase):
+    """CV1.e: a refused push writes a stop record that blocks every later
+    real cut; setUpModule points the evidence folder at a throwaway one, and
+    this proves it, so no scripted push failure here reaches the real one."""
+
+    def test_the_evidence_folder_is_the_module_s_throwaway_one(self):
+        real = os.path.join(os.path.expanduser("~"), ".claude", "evidence",
+                            "cut")
+        self.assertNotEqual(os.path.abspath(C.CR.evidence_dir()),
+                            os.path.abspath(real))
+        self.assertTrue(C.CR.evidence_dir().startswith(EVIDENCE_TMP),
+                        C.CR.evidence_dir())
 
 class TheStoreIsReadFromTheCheckoutThatOwnsIt(unittest.TestCase):
     """2026-09-17: run from ~/Brother-wt/cut-1019 the fence scan read
@@ -1208,8 +1406,10 @@ class ARealStoreCutLifecycle(unittest.TestCase):
     stubbed. The cut's run identity must carry claim through release."""
 
     EXPENSIVE = ("cut_v1.0.0.sh", "required_fast.sh", "refresh_cut.py",
-                 "release_invariant.py", "export_public.py",
-                 "reproduce_export.py")
+                 "release_invariant.py", "donecheck_u8.py",
+                 "retire_catalogs.py", "export_public.py", "reproduce_export.py",
+                 "battery_exception_audit.py", "cut_preflight.py",
+                 "plugin_bump_gate.py")
     PATHS = ["scripts/", "docs/releases/"]
     SESSION_VARS = ("BM_FENCE_SESSION_ID", "CLAUDE_SESSION_ID",
                     "CLAUDE_CODE_SESSION_ID")
@@ -1243,8 +1443,13 @@ class ARealStoreCutLifecycle(unittest.TestCase):
             "required_fast.sh": (0, FAST_OK),
             "refresh_cut.py": (0, "CLEAR\n"),
             "release_invariant.py": (0, "release-invariant: holds\n"),
+            "donecheck_u8.py": (0, "DONE        exactly one plugin, named brother\n"),
+            "retire_catalogs.py": (0, "retire_catalogs: already in end state\n"),
             "export_public.py": (0, "pushed\n"),
             "reproduce_export.py": (0, "reproduce-export: PASS\n"),
+            "battery_exception_audit.py": (0, "OK: 0 exception(s)\n"),
+            "cut_preflight.py": (0, "cut-preflight: CLEAR\n"),
+            "plugin_bump_gate.py": (0, "OK       plugin-bumps\n"),
         }
 
     def store(self, *args):
@@ -2449,6 +2654,87 @@ class J064GateLineShadowNeverChangesRequiredFast(unittest.TestCase):
             self.assertEqual(ok, baseline_ok)
             self.assertEqual(lines, baseline_lines)
 
+def setUpModule():
+    # Finding 31 (loop audit 2026-09-26), same fixture as test_board_status.py:
+    # unmocked production calls read the tracked data/jev-seams.json, where
+    # J030, J063, J064, J102 and J117 sit in shadow, and jev_decide resolves
+    # the machine's real bridge (~/.claude/bin/or_ask.py) at import. A spy on
+    # jev_seam.consult counted 152 calls (all J064) reaching a live shadow
+    # entry in one run of this module on hub main under an empty HOME. Pin an
+    # all-off seams config and a bridge path that does not exist, so only a
+    # case that patches its own config and runner calls out.
+    import shutil
+    from unittest import mock
+    import jev_decide
+    import jev_seam
+    root = tempfile.mkdtemp(prefix="brother-jev-seams-test-")
+    unittest.addModuleCleanup(shutil.rmtree, root, ignore_errors=True)
+    seams = os.path.join(root, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    no_bridge = os.path.join(root, "no-bridge-in-tests")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH", no_bridge)):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # The processes these tests launch re-import jev_seam and read the
+    # tracked config afresh, out of reach of the patches above, and every
+    # consult, even an off one, writes attempt rows. So the children get
+    # BROTHER_JEV_SEAMS_OFF (the tracked file reads as every entry off), a
+    # temporary BROTHER_JEV_STATE_DIR (ledger and daily call budget) and a
+    # bridge command that cannot launch, quoted because the variable is
+    # parsed as a command line; this process gets the same ledger and
+    # budget paths, since its constants were fixed at import.
+    import shlex
+    import jev_checks
+    state = tempfile.mkdtemp(prefix="brother-jev-state-test-")
+    unittest.addModuleCleanup(shutil.rmtree, state, ignore_errors=True)
+    ledger = os.path.join(state, "ledger")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                      os.path.join(state, "jev-budget.json")),
+                    mock.patch.dict(os.environ, {
+                        "BROTHER_JEV_SEAMS_OFF": "1",
+                        "BROTHER_JEV_STATE_DIR": state,
+                        "BROTHER_DECISION_BRIDGE": shlex.quote(jev_decide.DEFAULT_BRIDGE_PATH)})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # CV1.a (2026-10-03): a real cut now passes cut_gates before its fence
+    # (an explicit --version is refused until CV1.e, and the tag state is read
+    # through git), and CV1.e reads the terminal through _stdin_is_tty. Both
+    # are proven in test_cv1_cut_rehearsed.py; the scripted chains here are
+    # about the chain, so the gates pass and a person is at the terminal, and
+    # an explicit version still never runs next_cut.py.
+    # CV1.e also reads the covering rehearsal record before the question
+    # and again before the push (proven in test_cv1_cut_rehearsed.py), and a
+    # refused push files a stop record: the record lookup answers one fixed
+    # path, and the evidence folder is a throwaway one, so no test here ever
+    # writes into the real ~/.claude/evidence/cut.
+    os.makedirs(EVIDENCE_TMP, exist_ok=True)
+    unittest.addModuleCleanup(shutil.rmtree, EVIDENCE_TMP, ignore_errors=True)
+    for patcher in (mock.patch.object(C, "cut_gates", return_value=""),
+                    mock.patch.object(C, "_stdin_is_tty", return_value=True,
+                                      create=True),
+                    mock.patch.object(C.CR, "covering_record",
+                                      return_value=(FAKE_REHEARSAL, "")),
+                    mock.patch.object(C.CR, "evidence_dir",
+                                      return_value=EVIDENCE_TMP)):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+#: CV1.e: the throwaway evidence folder and the fixed rehearsal record path
+#: setUpModule hands the whole module.
+EVIDENCE_TMP = os.path.join(tempfile.gettempdir(),
+                            "cut-test-evidence-%d" % os.getpid())
+FAKE_REHEARSAL = os.path.join(EVIDENCE_TMP, "rehearsal-test-READY.json")
+
+
+def tearDownModule():
+    # Python 3.9's unittest runs the module cleanups above only when this
+    # hook exists (fixed in 3.10); without it the fixture roots leak per run.
+    pass
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,8 +41,18 @@ Four independent actions, any combination in one invocation:
                            whose status or type falls outside the
                            controlled vocabulary is REFUSED and never
                            written; every other lesson in the batch still
-                           writes. No wikilinks are ever emitted, so the
-                           broken-outgoing-link rule holds trivially.
+                           writes. No wikilinks are ever emitted in a
+                           note, so the broken-outgoing-link rule holds
+                           trivially. A failure lesson must carry
+                           applies_to (a list of repo paths, written into
+                           frontmatter) or exactly "none (process lesson)";
+                           without either it is REFUSED. Each written
+                           failure appends one line, "- [[slug]] DATE.
+                           AREA: ... SYMPTOM: ... FIX: ...", to
+                           DIR/Failures-Index.md under a dated section,
+                           append only (an existing line is never edited,
+                           a slug already listed is not repeated). No index
+                           in DIR is FLAGGED (exit 1), never created.
   --emit-handover PATH     write the human START-HERE markdown: priority
                            first (uncommitted work, open sbe tasks, the
                            day-plan ready set, open pull requests), then
@@ -61,7 +71,9 @@ open(emit_handover_path, "w", encoding="utf-8") plus f.write(markdown) at
 line 534. emit_pattern_notes() (line 330) writes NOTHING itself: it
 delegates every pattern note's actual write to pattern_note.write() (see
 scripts/pattern_note.py), the sole producer of that file, so the vault's
-one-writer-per-note-kind rule holds.
+one-writer-per-note-kind rule holds. append_failures_index() appends the
+Failures-Index lines through open(index_path, "a") and never rewrites the
+file.
 """
 
 import json
@@ -83,6 +95,10 @@ import pattern_note
 ALLOWED_STATUS = {"open", "closed", "standing"}
 ALLOWED_TYPE = {"failure", "finding", "decision", "session-log", "overview",
                 "index", "reference"}
+#: The one spelling that lets a failure lesson carry no file anchor: a process
+#: lesson about how work is run, not about a file. Anything else is refused.
+PROCESS_WAIVER = "none (process lesson)"
+INDEX_NAME = "Failures-Index.md"
 GH_FIELDS = "number,title,headRefName,url"
 
 
@@ -240,6 +256,77 @@ def _slugify(name):
     return s.strip("-")
 
 
+def _anchors(lesson, name, note_type):
+    """The lesson's applies_to: a list of anchor strings, the PROCESS_WAIVER
+    string, or [] when absent on a non-failure. Raises ValueError for a
+    failure with no anchor and no waiver, a non-list value, or an anchor the
+    one-line frontmatter list cannot hold (empty, a comma, a bracket, a
+    newline)."""
+    raw = lesson.get("applies_to")
+    if raw == PROCESS_WAIVER:
+        return PROCESS_WAIVER
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raise ValueError("lesson %r has applies_to %r: give a list of paths "
+                         "or exactly %r" % (name, raw, PROCESS_WAIVER))
+    out = []
+    for a in raw:
+        if not isinstance(a, str) or not a.strip() or re.search(r"[,\[\]\n]", a):
+            raise ValueError("lesson %r has an unusable applies_to anchor %r"
+                             % (name, a))
+        out.append(a.strip())
+    if note_type == "failure" and not out:
+        raise ValueError("failure lesson %r has no applies_to anchor; name the "
+                         "file(s) it applies to, or say applies_to: %r"
+                         % (name, PROCESS_WAIVER))
+    return out
+
+
+def _one_line(text):
+    return re.sub(r"\s+", " ", (text or "").strip()).rstrip(".")
+
+
+def failure_index_line(lesson, slug, created):
+    """The detailed Failures-Index line for one failure lesson:
+    - [[slug]] DATE. AREA: ... SYMPTOM: ... FIX: ...
+    AREA falls back to the anchors, FIX to how_to_apply; an empty part says
+    "unstated" rather than vanishing."""
+    anchors = lesson.get("applies_to")
+    anchor_text = ", ".join(anchors) if isinstance(anchors, list) else ""
+    area = _one_line(lesson.get("area")) or anchor_text or "unstated"
+    symptom = _one_line(lesson.get("symptom")) or "unstated"
+    fix = _one_line(lesson.get("fix") or lesson.get("how_to_apply")) or "unstated"
+    return "- [[%s]] %s. AREA: %s. SYMPTOM: %s. FIX: %s." % (
+        slug, created, area, symptom, fix)
+
+
+def append_failures_index(index_path, entries, today):
+    """Append-only: adds each (slug, line) whose [[slug]] is not already in
+    the index, under a "## Handover ceremony DATE" section (reused when it is
+    already the file's last section). Never rewrites an existing byte.
+    Returns the number of lines appended, or None when the index file does
+    not exist (NO-DATA: this tool never creates an index in a guessed place)."""
+    if not entries:
+        return 0
+    if not os.path.isfile(index_path):
+        return None
+    with open(index_path, encoding="utf-8") as f:
+        existing = f.read()
+    new = [line for slug, line in entries if "[[%s]]" % slug not in existing]
+    if not new:
+        return 0
+    header = "## Handover ceremony %s" % today
+    headings = [l for l in existing.splitlines() if l.startswith("## ")]
+    chunk = "" if existing.endswith("\n") or not existing else "\n"
+    if not headings or headings[-1] != header:
+        chunk += "\n%s\n" % header
+    chunk += "".join(line + "\n" for line in new)
+    with open(index_path, "a", encoding="utf-8") as f:
+        f.write(chunk)
+    return len(new)
+
+
 def build_vault_note(lesson, project="brother", today=None):
     """One lesson to (filename, content). Raises ValueError, naming the
     reason, for anything the vault gate would refuse: no usable name, or a
@@ -270,6 +357,7 @@ def build_vault_note(lesson, project="brother", today=None):
     verified_by = (lesson.get("verified_by")
                   or lesson.get("what_happened") or "").strip()
     symptom = (lesson.get("symptom") or "").strip()
+    anchors = _anchors(lesson, name, note_type)
 
     front = [
         "---",
@@ -282,6 +370,13 @@ def build_vault_note(lesson, project="brother", today=None):
     ]
     if note_type == "failure" and symptom:
         front.append("symptom: \"%s\"" % symptom.replace('"', "'"))
+    if anchors == PROCESS_WAIVER:
+        # An empty list, never the waiver text: the recall hook would read
+        # "none (process lesson)" as a command anchor that fails to resolve.
+        front.append("applies_to: []")
+        front.append("anchor_waiver: \"%s\"" % PROCESS_WAIVER)
+    elif anchors:
+        front.append("applies_to: [%s]" % ", ".join(anchors))
     front.append("---")
 
     body = ["", "# %s" % name, ""]
@@ -301,10 +396,13 @@ def build_vault_note(lesson, project="brother", today=None):
 
 def emit_vault_notes(dir_path, lessons, project="brother", today=None):
     """Writes one file per lesson that passes build_vault_note; a refused
-    lesson is named in the return, never written. Returns
-    (written_paths, refused_reasons)."""
+    lesson is named in the return, never written. Each written failure also
+    appends one detailed line to DIR/Failures-Index.md (append_failures_index).
+    Returns (written_paths, refused_reasons, index_appended), index_appended
+    None when DIR holds no Failures-Index.md and a failure needed a line."""
     os.makedirs(dir_path, exist_ok=True)
-    written, refused = [], []
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    written, refused, index_entries = [], [], []
     seen = set()
     for lesson in lessons:
         try:
@@ -323,7 +421,12 @@ def emit_vault_notes(dir_path, lessons, project="brother", today=None):
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         written.append(path)
-    return written, refused
+        if (lesson.get("type") or "failure").strip() == "failure":
+            index_entries.append((filename[:-3], failure_index_line(
+                lesson, filename[:-3], lesson.get("created") or today)))
+    appended = append_failures_index(
+        os.path.join(dir_path, INDEX_NAME), index_entries, today)
+    return written, refused, appended
 
 
 # ---------------------------------------------------------------------------
@@ -526,13 +629,19 @@ def main(argv):
         codes.append(2 if state_has_error(state) else 0)
 
     if emit_vault_dir:
-        written, refused = emit_vault_notes(
+        written, refused, appended = emit_vault_notes(
             emit_vault_dir, lessons, project=project)
         print("handover-ceremony: wrote %d vault note(s) to %s, %d refused"
              % (len(written), emit_vault_dir, len(refused)))
         for reason in refused:
             print("handover-ceremony: REFUSED: %s" % reason)
-        codes.append(1 if refused else 0)
+        if appended is None:
+            print("handover-ceremony: FLAGGED: no %s in %s; failure index "
+                  "line(s) not appended" % (INDEX_NAME, emit_vault_dir))
+        else:
+            print("handover-ceremony: appended %d line(s) to %s"
+                  % (appended, os.path.join(emit_vault_dir, INDEX_NAME)))
+        codes.append(1 if refused or appended is None else 0)
 
     if emit_handover_path:
         state = collect_state(repos, limit_state_path=limit_state_path)

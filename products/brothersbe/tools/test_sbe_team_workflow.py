@@ -2,7 +2,7 @@
 """LT-103: end-to-end team execution fixtures. Run: python3 tools/test_sbe_team_workflow.py
 
 Spec of record: docs/plans/2026-08-04-lean-team-rebase.md (the LT-101/102/103
-chain, vertical slice 1, /brothersbe:work) plus docs/specs/2026-07-30-sbe-work-
+chain, vertical slice 1, /brother:brothersbe-work) plus docs/specs/2026-07-30-sbe-work-
 lifecycle.md, which tools/test_sbe_work.py and tools/test_sbe_work_brief.py
 already exercise piece by piece. This file proves the WHOLE chain together,
 in one scratch repository per test, driving the real `sbe work` and `sbe

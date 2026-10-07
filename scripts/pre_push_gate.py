@@ -45,6 +45,7 @@ keeps confusing, and a push is exactly where confusing them is expensive.
 Python 3, standard library only. No network beyond git's own fetch.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -57,8 +58,97 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import edition_guard  # noqa: E402
 
+# ONE TABLE OF WHAT A CREDENTIAL LOOKS LIKE (FX-07). scripts/loop/secret_scan.py
+# is the single definition the commit gate and this gate both read, so the two
+# can never drift apart again. It is loaded by EXPLICIT PATH, never by putting
+# scripts/loop at the front of sys.path: six module basenames exist in both
+# scripts/ and scripts/loop/ (grade_build.py among them), so a front path entry
+# would shadow the scripts/ module for every other consumer of this file
+# (export_public, cut_preflight, preserve_wip and their tests). A load failure
+# PROPAGATES: the hook then exits non zero, which is a refusal, never a clean
+# pass, and export_public already turns an import failure into NO-DATA.
+_SECRET_SCAN_PATH = os.path.join(HERE, "loop", "secret_scan.py")
+if not os.path.isfile(_SECRET_SCAN_PATH):
+    raise ImportError(
+        "the shared secret table is not installed beside this gate: %s"
+        % _SECRET_SCAN_PATH)
+_spec = importlib.util.spec_from_file_location("secret_scan",
+                                               _SECRET_SCAN_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError("the shared secret table could not be loaded: %s"
+                      % _SECRET_SCAN_PATH)
+S = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(S)
+if "secret_scan" not in sys.modules:
+    sys.modules["secret_scan"] = S
 BLOCK, WARN, OK, NODATA = "BLOCK", "WARN", "OK", "NO-DATA"
 EXIT_OK, EXIT_BLOCKED, EXIT_NODATA = 0, 1, 2
+
+
+# FX-07.3 HOSTILE INPUT GUARD. One validation every entry point routes
+# through, so a hostile argument is refused the same way everywhere instead of
+# reaching a raw interpreter exception deeper down. Measured: a bool, a
+# generator or a NaN handed in as the pre-push ref lines came back as
+# AttributeError (no attribute 'splitlines'), and None handed in as a checkout
+# came back as TypeError out of the first file probe. NO-DATA is never a pass,
+# so every refusal below stops the push.
+class HostileInputError(ValueError):
+    """A public entry point of this gate was handed something it cannot use.
+
+    The gate's own error, so a caller sees a deliberate refusal rather than a
+    raw interpreter exception or a value it could mistake for a verdict.
+    """
+
+
+def _usable_path(value):
+    """True when value is a checkout path this gate can hand to git."""
+    return isinstance(value, str) or isinstance(value, os.PathLike)
+
+
+def _usable_stdin(value):
+    """None is git handing the hook no ref lines at all; only text is text."""
+    return value is None or isinstance(value, str)
+
+
+def _usable_range(rng):
+    """True when rng is a non empty list of revision strings."""
+    if not isinstance(rng, (list, tuple)) or not rng:
+        return False
+    for part in rng:
+        if not isinstance(part, str) or not part:
+            return False
+    return True
+
+
+def _hostile_input(family, cwd, stdin_text):
+    """A non empty NO-DATA finding list when cwd or stdin_text cannot be used,
+    else None. Every caller returns the list unchanged."""
+    if not _usable_path(cwd):
+        return [(NODATA, family,
+                 "the checkout this gate was pointed at is not a path it can "
+                 "read (%s), so nothing was scanned. That is not a pass"
+                 % type(cwd).__name__)]
+    if not _usable_stdin(stdin_text):
+        return [(NODATA, family,
+                 "the ref lines this gate was handed are not text (%s), so "
+                 "nothing was scanned. That is not a pass"
+                 % type(stdin_text).__name__)]
+    return None
+
+
+class _RefusingParser(argparse.ArgumentParser):
+    """An argument this gate cannot use is refused with the gate's own error.
+
+    argparse's own refusal for an unknown flag is an exit code, and an exit
+    code handed back to a caller reads as an ordinary return: a control that
+    prevents beats a check that reports, so the refusal is raised instead.
+    The usage text still goes to stderr first, exactly as argparse prints it.
+    """
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        raise HostileInputError(
+            "the arguments handed to this gate are not usable: %s" % message)
 
 #: Patterns that must never leave this machine. Shapes rather than bare words:
 #: a loose "sk-" matches the middle of "task-id", which produced four false
@@ -73,12 +163,12 @@ EXIT_OK, EXIT_BLOCKED, EXIT_NODATA = 0, 1, 2
 #: mask-, ask-, ...) without narrowing what a real key looks like: a key
 #: preceded by whitespace, "=", ":", a quote or the start of a line still
 #: matches, since \b holds at every one of those boundaries.
-SECRET_SHAPES = (
-    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"ghp_[A-Za-z0-9]{36}"),
-    re.compile(r"BEGIN [A-Z ]*PRIVATE KEY"),
-)
+#: Today's push table is the shared module's STRICT table: the SAME four
+#: patterns, in the SAME order, so every consumer that iterates it
+#: (export_public.py, cut_preflight.py, preserve_wip.py, and the tests that
+#: pin it) sees no change. STRICT is the rule for text that is only CONTEXT or
+#: REMOVED; the union over the ADDED text is read beside it in _scan_range.
+SECRET_SHAPES = S.STRICT
 #: Values that match a SECRET_SHAPE but are public by construction: the one
 #: entry is the example access key id AWS prints in its own documentation,
 #: which the products' credential-detection fixtures, a changelog and a
@@ -96,15 +186,13 @@ SECRET_SHAPES = (
 #: scanner hit and solved by keeping its list outside every repository);
 #: here the fix is cheaper, since the value only needs to not read as one
 #: unbroken token on disk.
-KNOWN_PUBLIC_EXAMPLE_VALUES = ("AKIA" + "IOSFODNN7" + "EXAMPLE",)
-
-
-def strip_public_examples(text):
-    """The text with every KNOWN_PUBLIC_EXAMPLE_VALUES entry removed, so the
-    shape search that follows cannot match a documented example."""
-    for example in KNOWN_PUBLIC_EXAMPLE_VALUES:
-        text = text.replace(example, "")
-    return text
+#: The value allowlist and its strip live in the shared module now, moved
+#: verbatim from this file: one definition, so the commit gate, this gate and
+#: export_public.py cannot drift apart. These public names keep today's
+#: content for the other consumers, and the strip refuses anything that is
+#: not text instead of answering as though it had found nothing.
+KNOWN_PUBLIC_EXAMPLE_VALUES = S.KNOWN_PUBLIC_EXAMPLE_VALUES
+strip_public_examples = S.strip_public_examples
 #: A SCANNER MUST NOT CONTAIN WHAT IT FORBIDS, which is the same trap the
 #: private-terms scanner hit this morning and solved by keeping its list outside
 #: every repository. The first version of this file wrote the attribution
@@ -394,6 +482,9 @@ def check_correctness(cwd=ROOT, runner=None, stdin_text=None):
     push from a detached-HEAD worktree report NO-DATA and land unscanned. With
     no ref lines there is no push in flight, and only then does the checked
     out branch stand in."""
+    verdict = _hostile_input("correctness", cwd, stdin_text)
+    if verdict is not None:
+        return verdict
     updates = _pushed_updates(stdin_text)
     if updates:
         ranges, problems = _ranges_from_updates(updates, cwd, runner)
@@ -449,7 +540,23 @@ def check_correctness(cwd=ROOT, runner=None, stdin_text=None):
 
 def _scan_range(rng, shown, cwd=ROOT, runner=None):
     """The four families over one outgoing range. Every caller supplies the
-    range; this function never decides what is outgoing."""
+    range; this function never decides what is outgoing.
+
+    Hostile input is REFUSED here, as NO-DATA, before a single git call: a
+    range that is not a non empty list of revision strings, a label that is
+    not text, or a checkout that is not a path, is never quietly treated as an
+    empty, clean scan."""
+    if not isinstance(shown, str):
+        return [(NODATA, "correctness",
+                 "the outgoing range has no label this gate can print, so "
+                 "nothing was scanned. That is not a pass")]
+    if not _usable_range(rng):
+        return [(NODATA, "correctness",
+                 "the outgoing range %s is not a list of revision strings, so "
+                 "nothing was scanned. That is not a pass" % shown)]
+    verdict = _hostile_input("correctness", cwd, None)
+    if verdict is not None:
+        return verdict
     # D9, founder-approved 2026-08-31 in the question UI (record:
     # docs/decisions/2026-08-31-scanner-scope-after-subtree-imports.html).
     # Commits reachable from the imported product tips in
@@ -541,12 +648,23 @@ def _scan_range(rng, shown, cwd=ROOT, runner=None):
                  "That is not a pass" % shown)]
     text = strip_public_examples(diff.stdout or "")
     out = []
-    hits = [p.pattern for p in SECRET_SHAPES if p.search(text)]
-    if hits:
+    # TWO SCOPES, ONE TABLE (FX-07). The ADDED text of the range is read by the
+    # shared union, the same rule the commit gate applies, so a value one gate
+    # refuses is refused by both. The WHOLE patch log is read beside it by the
+    # strict table, which keeps context and removed lines refused exactly as
+    # before. A refusal NAMES the matched families and never prints a matched
+    # value: the name tells the repair round which fixture to assemble, and
+    # printing the value would put it in a terminal, a log and a transcript.
+    added = S.added_text(text)
+    names = set(S.families(added))
+    for _strict_name, _strict_pattern in S.STRICT_FAMILIES:
+        if _strict_pattern.search(text):
+            names.add(_strict_name)
+    if names:
         out.append((BLOCK, "correctness",
-                    "%d secret-shaped value(s) in the outgoing range. The "
-                    "pattern is not printed here, because printing it puts it "
-                    "in a terminal and a transcript" % len(hits)))
+                    "%d secret shape famil(y/ies) in the outgoing range: %s. "
+                    "No value is printed" % (len(names),
+                                             ", ".join(sorted(names)))))
     if ATTRIBUTION.search(text):
         out.append((BLOCK, "correctness",
                     "an attribution trailer is in the outgoing range"))
@@ -604,7 +722,7 @@ def check_drift(cwd=ROOT, runner=None):
         cmd, capture_output=True, text=True, cwd=cwd, timeout=budget))
     started = time.monotonic()
     try:
-        proc = runner([sys.executable, script])
+        proc = runner([sys.executable, "-I", script])   # isolated: no script directory ahead of the stdlib (D13 review 17)
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - started
         return [(NODATA, "drift",
@@ -654,12 +772,27 @@ def check_docs_current(cwd=ROOT, runner=None):
     except OSError:
         same_tree = False
     if not same_tree:
-        return [(NODATA, "docs-current",
-                 "cwd is not this repository's own checkout; nothing to check")]
+        if not os.path.isfile(os.path.join(cwd, "scripts", "system_doc.py")):
+            return [(NODATA, "docs-current",
+                     "cwd is not this repository's own checkout; nothing to check")]
+        # A checkout that carries the generator IS checked, with THIS tree's generator code over THAT checkout's files
+        # (D13, 2026-10-02): the lander runs this gate from a frozen copy of the base commit against the landing tree, so
+        # the code that regenerates is reviewed code and the files it reads are the ones about to be pushed. The checkout's
+        # own scripts/system_doc.py is never run here; it only has to exist for the checkout to count as one.
+        try:
+            import system_doc
+            diff = system_doc.compute_system_doc_diff(cwd)
+        except Exception as exc:  # noqa: BLE001
+            return [(NODATA, "docs-current",
+                     "could not regenerate SYSTEM.md for %s: %s" % (cwd, exc))]
+        if not diff:
+            return [(OK, "docs-current", "SYSTEM.md still describes the code")]
+        return [(BLOCK, "docs-current",
+                 "SYSTEM.md is stale: %s" % diff.strip().splitlines()[-1][:160])]
     runner = runner or (lambda cmd, **kw: subprocess.run(
         cmd, capture_output=True, text=True, cwd=cwd, timeout=30))
     try:
-        proc = runner([sys.executable, script, "--check"])
+        proc = runner([sys.executable, "-I", script, "--check"])   # isolated, as above
     except Exception as exc:  # noqa: BLE001
         return [(NODATA, "docs-current", "could not run system_doc.py --check: %s" % exc)]
     if proc.returncode == 0:
@@ -667,6 +800,57 @@ def check_docs_current(cwd=ROOT, runner=None):
     return [(BLOCK, "docs-current",
              "SYSTEM.md is stale: %s"
              % (proc.stdout or proc.stderr or "").strip().splitlines()[-1][:160])]
+
+
+def _outgoing_ranges(cwd=ROOT, runner=None, stdin_text=None):
+    """The revision arguments naming what this push sends: git's own ref
+    lines when there are any, the checked out branch otherwise. None when it
+    cannot be said (a detached head with no ref lines pushes nothing)."""
+    updates = _pushed_updates(stdin_text)
+    if updates:
+        return [rng for rng, _ in _ranges_from_updates(updates, cwd, runner)[0]]
+    branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd, runner)
+    name = (branch.stdout or "").strip() if branch is not None \
+        and branch.returncode == 0 else ""
+    if not name or name == "HEAD":
+        return None
+    probe = _git(["rev-parse", "--verify", "--quiet", "origin/%s" % name],
+                 cwd, runner)
+    if probe and (probe.stdout or "").strip():
+        return [["origin/%s..%s" % (name, name)]]
+    return [[name, "--not", "--remotes"]]
+
+
+def check_hermetic_tests(cwd=ROOT, runner=None, stdin_text=None):
+    """A changed scripts/ test is run where the public runner runs it, BEFORE
+    the push. Measured 2026-09-20: three of the six refusals of the 1.0.21
+    cut were tests green on their author's machine and red on an export
+    shaped tree or under an empty HOME, met 128 and 150 minutes into a cut.
+    hermetic_test_check.py names the rest. It costs the export build plus
+    the touched tests' own run time, and nothing when no such test is
+    touched. A red BLOCKS: a test that cannot pass on the public runner has
+    no legitimate reason to be pushed."""
+    try:
+        import hermetic_test_check as hermetic
+    except ImportError as exc:
+        return [(NODATA, "hermetic", "hermetic_test_check.py not loadable: %s" % exc)]
+    ranges = _outgoing_ranges(cwd, runner, stdin_text)
+    if ranges is None:
+        return [(OK, "hermetic", "no outgoing range, so no changed test to run")]
+    paths = set()
+    for rng in ranges:
+        proc = _git(["log", "--format=", "--name-only", "--diff-filter=AM"]
+                    + list(rng), cwd, runner)
+        if proc is None or proc.returncode != 0:
+            return [(NODATA, "hermetic", "the outgoing file list could not be "
+                                         "read, so no changed test was run. "
+                                         "That is not a pass")]
+        paths.update(l.strip() for l in (proc.stdout or "").splitlines())
+    level = {hermetic.OK: OK, hermetic.REFUSED: BLOCK, hermetic.NODATA: NODATA}
+    return [(level[v], "hermetic", "%s: %s" % (name, detail))
+            # sorted: a list in a stable order (2026-09-28: R1.4's tests_for accepts only a list or tuple, so the set
+            # this built crashed the gate and refused a whole landing batch, innocent builds included)
+            for v, name, detail in hermetic.check(cwd, hermetic.tests_for(sorted(paths), cwd))]
 
 
 def check_remote_rules(cwd=ROOT, runner=None):
@@ -734,21 +918,88 @@ def check_remote_rules(cwd=ROOT, runner=None):
     return [(OK, "remote-rules", "main requires a check and Actions can run it")]
 
 
+# FX-07.3 HOSTILE INPUT GUARD for the checks whose bodies fall in a region of
+# this file this build does not see, so it may not edit them. The guard is
+# ADDITIVE and DELEGATES: a call with a checkout path and text or absent ref
+# lines reaches the function underneath unchanged, and a call with a hostile
+# checkout or hostile ref lines is answered with NO-DATA, which refuses the
+# push. Forwarding is EXACT: the wrapper passes the arguments it was given, so
+# no default is invented here, and a keyword call is forwarded as a keyword
+# call.
+_check_collision_unguarded = check_collision
+_check_handback_unguarded = check_handback
+_check_docs_current_unguarded = check_docs_current
+_check_hermetic_tests_unguarded = check_hermetic_tests
+
+
+def _first_cwd(args, kwargs):
+    """The checkout a positional call put first, or a keyword's cwd."""
+    if "cwd" in kwargs:
+        return kwargs["cwd"]
+    return args[0] if args else ROOT
+
+
+def _ref_lines(args, kwargs):
+    """The ref lines a positional call put third, or a keyword's."""
+    if "stdin_text" in kwargs:
+        return kwargs["stdin_text"]
+    return args[2] if len(args) > 2 else None
+
+
+def check_collision(*args, **kwargs):
+    verdict = _hostile_input("collision", _first_cwd(args, kwargs),
+                             _ref_lines(args, kwargs))
+    if verdict is not None:
+        return verdict
+    return _check_collision_unguarded(*args, **kwargs)
+
+
+def check_handback(*args, **kwargs):
+    verdict = _hostile_input("handback", _first_cwd(args, kwargs),
+                             _ref_lines(args, kwargs))
+    if verdict is not None:
+        return verdict
+    return _check_handback_unguarded(*args, **kwargs)
+
+
+def check_docs_current(*args, **kwargs):
+    verdict = _hostile_input("docs", _first_cwd(args, kwargs), None)
+    if verdict is not None:
+        return verdict
+    return _check_docs_current_unguarded(*args, **kwargs)
+
+
+def check_hermetic_tests(*args, **kwargs):
+    verdict = _hostile_input("correctness", _first_cwd(args, kwargs),
+                             _ref_lines(args, kwargs))
+    if verdict is not None:
+        return verdict
+    return _check_hermetic_tests_unguarded(*args, **kwargs)
+
+
 def gate(cwd=ROOT, runner=None, stdin_text=None, remote_url=None, env=None):
-    """Every finding, worst first."""
+    """Every finding, worst first.
+
+    Hostile input is REFUSED here too, as NO-DATA, before any check runs: a
+    checkout that is not a path, or ref lines that are not text, must never
+    come back as a clean push."""
+    verdict = _hostile_input("correctness", cwd, stdin_text)
+    if verdict is not None:
+        return verdict
     found = (check_handback(cwd, runner, stdin_text)
              + check_collision(cwd, runner, stdin_text)
              + check_correctness(cwd, runner, stdin_text)
              + check_edition(cwd, remote_url, env)
              + check_remote_rules(cwd, runner) + check_drift(cwd, runner)
-             + check_docs_current(cwd, runner))
+             + check_docs_current(cwd, runner)
+             + check_hermetic_tests(cwd, runner, stdin_text))
     rank = {BLOCK: 0, NODATA: 1, WARN: 2, OK: 3}
     found.sort(key=lambda f: rank.get(f[0], 9))
     return found
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = _RefusingParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cwd", default=ROOT)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--remote-name", default="",
@@ -758,7 +1009,22 @@ def main(argv=None):
     ap.add_argument("--remote-url", default="",
                      help="git's pre-push $2: the remote URL this push "
                           "targets, fed to the edition guard")
-    args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    # FX-07.3: an argv this gate cannot use is REFUSED with the gate's own
+    # error. A returned exit code was measured to read as an ordinary return to
+    # an external probe, and a refusal that can be mistaken for a pass is not a
+    # control. argparse's own answer for a help request is kept below.
+    if argv is not None and (not isinstance(argv, (list, tuple))
+                             or any(not isinstance(a, str) for a in argv)):
+        print("pre-push: NO-DATA, the argv this gate was handed is not a "
+              "list of strings, so nothing was checked", file=sys.stderr)
+        raise HostileInputError(
+            "the argv this gate was handed is not a list of strings")
+    try:
+        args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    except SystemExit as exc:
+        if exc.code in (None, 0):
+            return EXIT_OK
+        raise
 
     # git's pre-push hook feeds ref updates on stdin. Read them when present
     # (a real hook invocation, or a test piping them in); an interactive

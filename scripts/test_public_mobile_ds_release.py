@@ -14,7 +14,18 @@ class PublicRelease(unittest.TestCase):
             export_public.build_export_tree(folder, allow, root=str(root))
             for name in required:
                 self.assertTrue((pathlib.Path(folder)/name).is_file(), name)
-            self.assertFalse((pathlib.Path(folder)/"products/brotherds/research").exists())
+            # Only research notes the allowlist names one by one may export; the rest of that
+            # folder is private working material. (This asserted "no folder at all" until two
+            # notes were allowlisted on purpose; no gate ran it, so nobody saw it go stale.)
+            allowed = sorted(a for a in allow if a.startswith("products/brotherds/research/"))
+            # Pinned on purpose: publishing another research note is a decision, so it must turn this red.
+            self.assertEqual(allowed, ["products/brotherds/research/C1-mdm-data-science-best-practice-2026-09-12.md",
+                                       "products/brotherds/research/C2-harness-and-market-practice-2026-09-12.md"])
+            research = pathlib.Path(folder)/"products/brotherds/research"
+            shipped = sorted(str(p.relative_to(folder)) for p in research.rglob("*") if p.is_file())
+            self.assertEqual(shipped, allowed)
+            private = sorted(str(p.relative_to(root)) for p in (root/"products/brotherds/research").glob("*") if p.is_file())
+            self.assertTrue(set(private) - set(shipped), "the private notes this test protects are gone: rewrite it")
 
 if __name__ == "__main__":
     unittest.main()

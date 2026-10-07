@@ -1486,6 +1486,39 @@ Full text: `tools/sbe_gate.py` (`_current_head`, `_commit_problem`,
 (`_check_commit`), `evals/run_evals.py` (the commit-binding cases),
 `tools/test_sbe_receipt_shapes.py` (the `--require-headcommit` cases).
 
+## A carried receipt is only as strong as what it lists as covered
+
+A committed receipt bound to an older commit is still evidence when that
+commit is an ancestor of HEAD and no file in its `coveredFiles` changed
+between them (`src/brothersbe/evidence.py`, `_carried_forward`, row E83).
+One refusal now sits in front of that rule: a receipt whose own
+`workingTreeDirty` is not `false` is never carried, because the run may have
+seen code that exists at no commit and a receipt records how many paths were
+uncommitted, never which. A receipt that does not record the field at all is
+not carried either: an absence never upgrades a verdict. Pinned by
+`evals/run_evals.py`'s
+`a-carried-receipt-minted-on-a-dirty-tree-is-refused` and
+`a-carried-receipt-that-never-recorded-a-clean-tree-is-refused`, beside the control
+`a-clean-receipt-whose-covered-files-are-unchanged-is-carried`.
+
+The procedure that follows from it: mint on a clean tree pinned at the
+commit the receipts will name, with `--out` outside the tree, then copy the
+receipts in and commit them once. Minting several receipts into the tree
+itself stamps every receipt after the first as dirty. Receipts bound to a
+commit also fix the merge shape: a branch carrying them reaches main through a
+merge commit, never a squash or rebase merge, because either rewrites the
+commit id every carried receipt names. Nothing enforces that shape today.
+
+THE CEILING, left open by the owner's ruling of 2026-09-26: coverage is the minter's own declaration, and most receipts in this
+repository cover only their dossier's `08-behaviour.md`. Such a receipt is
+carried past every later edit to the test script its command ran and to the
+product code that script exercises, because neither is in its coverage. A
+stricter rule (refuse to carry a receipt whose recorded `argv` names a
+tracked file it does not cover) was written on 2026-09-04 and not landed: it
+would close script edits only, not edits to the code under test, at the cost
+of a re-mint after every edit to one of 22 test scripts. Carrying proves the
+covered files are unchanged; it never proves the command would still pass.
+
 ## check-update follows a linked worktree, not a broken one
 
 `tools/sbe_telemetry.py::_resolve_git_dirs` follows a linked worktree's

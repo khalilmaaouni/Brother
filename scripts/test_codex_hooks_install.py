@@ -10,15 +10,26 @@ without it, which is worse than being narrow on purpose.
 import io
 import json
 import os
+import pwd
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import codex_hooks_install as chi  # noqa: E402
+
+# The account's own home, read before any test mocks getuid, and never "~":
+# the push gate runs this file under a throwaway HOME, where "~" is not it.
+REAL_UID = os.getuid()
+ACCOUNT = pwd.getpwuid(REAL_UID).pw_dir
+ACCOUNT_CODEX = os.path.join(ACCOUNT, ".codex")
+# The firmlink alias of the data volume: the same folder as the path it
+# wraps (device and inode agree) under a realpath that does not.
+FIRMLINK = "/System/Volumes/Data"
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -86,13 +97,16 @@ class TestTranslation(unittest.TestCase):
     def test_both_products_merge_into_one_document(self):
         # 18 to 19 on 2026-09-05 (LL-1): brothermode's PostToolUse Bash
         # group gained a second entry, tools/attempt_hook.py, beside
-        # bm_bash_audit.py post.
+        # bm_bash_audit.py post. 19 to 23: the BrotherMode canary
+        # (bm_brother_canary.py, SessionStart and PostToolUse, 2026-09-15)
+        # and the M1.1 clock guard (bm_clock_guard.py, PreToolUse and Stop)
+        # each wire two events.
         built = chi.build([BROTHERMODE, BROTHERSBE])
         self.assertEqual(built["problems"], [])
         commands = [hook["command"]
                     for blocks in built["document"]["hooks"].values()
                     for block in blocks for hook in block["hooks"]]
-        self.assertEqual(len(commands), 19, commands)
+        self.assertEqual(len(commands), 23, commands)
         self.assertTrue(any("bm_fence_hook.py" in c for c in commands))
         self.assertTrue(any("sbe_fence_hook.py" in c for c in commands))
 
@@ -107,14 +121,14 @@ class TestHomeResolution(unittest.TestCase):
     def test_the_real_codex_home_is_refused_by_default(self):
         """A hooks file can refuse every edit on a machine, so writing the
         founder's own Codex home is never the default."""
-        resolved = chi.resolve_home(os.path.join("~", ".codex"), False)
+        resolved = chi.resolve_home(ACCOUNT_CODEX, False)
         self.assertIsNone(resolved["path"])
         self.assertIn("refusing to write", resolved["problem"])
 
     def test_the_real_codex_home_is_allowed_when_meant(self):
         """The positive control: without it, a refusal that fired for every
         path would satisfy the test above."""
-        resolved = chi.resolve_home(os.path.join("~", ".codex"), True)
+        resolved = chi.resolve_home(ACCOUNT_CODEX, True)
         self.assertIsNotNone(resolved["path"])
         self.assertIsNone(resolved["problem"])
 
@@ -143,6 +157,113 @@ class TestHomeResolution(unittest.TestCase):
                 os.environ["CODEX_HOME"] = saved
         self.assertIsNone(resolved["path"])
         self.assertIn("CODEX_HOME", resolved["problem"])
+
+
+class TestCodexHomeIdentity(unittest.TestCase):
+    """The real Codex home is decided by identity, never by the spelling of
+    a string derived from $HOME (2026-10-04: a throwaway HOME's .codex was
+    refused as the real one, and a different-case spelling of the real one
+    was accepted)."""
+
+    def assert_refused_as_real(self, got):
+        self.assertIsNone(got["path"], got)
+        self.assertIn("the real Codex home", got["problem"])
+
+    def test_a_throwaway_home_s_own_codex_dir_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex = os.path.join(tmp, ".codex")
+            os.makedirs(codex)
+            with mock.patch.dict(os.environ, {"HOME": tmp, "CODEX_HOME": codex}):
+                for named in (codex, os.path.join("~", ".codex"), None):
+                    got = chi.resolve_home(named, False)
+                    self.assertEqual(got["path"], os.path.realpath(codex), (named, got))
+
+    def test_the_account_s_codex_is_refused_whatever_its_spelling(self):
+        spelled = ACCOUNT_CODEX.swapcase()   # the same folder: this volume is case insensitive
+        self.assertNotEqual(spelled, ACCOUNT_CODEX)
+        self.assert_refused_as_real(chi.resolve_home(spelled, False))
+        with mock.patch.dict(os.environ, {"HOME": ACCOUNT.swapcase()}):
+            self.assert_refused_as_real(chi.resolve_home(os.path.join("~", ".codex"), False))
+        with mock.patch.dict(os.environ, {"CODEX_HOME": spelled}):
+            self.assert_refused_as_real(chi.resolve_home(None, False))
+        # the positive control: the same spelling, meant
+        self.assertIsNone(chi.resolve_home(spelled, True)["problem"])
+
+    def test_a_symlink_to_the_account_s_codex_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            link = os.path.join(tmp, "codex-link")
+            os.symlink(ACCOUNT_CODEX, link)
+            self.assert_refused_as_real(chi.resolve_home(link, False))
+
+    def test_a_real_home_that_does_not_exist_yet_is_matched_casefolded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            account = os.path.join(tmp, "acct")
+            os.makedirs(account)
+            with mock.patch.object(chi, "account_home", return_value=account):
+                self.assert_refused_as_real(
+                    chi.resolve_home(os.path.join(tmp, "ACCT", ".CODEX"), False))
+                other = chi.resolve_home(os.path.join(account, "other"), False)
+                self.assertEqual(other["path"], os.path.realpath(os.path.join(account, "other")))
+
+    def test_identity_beats_spelling_for_a_home_that_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            account = os.path.join(tmp, "acct")
+            codex = os.path.join(account, ".codex")
+            os.makedirs(codex)
+            alias = FIRMLINK + os.path.realpath(codex)
+            if not os.path.isdir(alias):
+                self.skipTest("NO-DATA: no firmlink alias for %s on this volume" % codex)
+            self.assertNotEqual(os.path.realpath(alias), os.path.realpath(codex))
+            with mock.patch.object(chi, "account_home", return_value=account):
+                self.assert_refused_as_real(chi.resolve_home(alias, False))
+
+    def test_the_firmlink_spelling_of_a_real_home_that_does_not_exist_yet_is_refused(self):
+        """realpath does not see through the firmlink, so a casefolded
+        realpath compare accepted /System/Volumes/Data/<home>/.codex before
+        ~/.codex existed and created the real one; the nearest existing
+        ancestor is compared by identity instead."""
+        with tempfile.TemporaryDirectory() as tmp:
+            account = os.path.join(tmp, "acct")
+            os.makedirs(account)
+            alias_home = FIRMLINK + os.path.realpath(account)
+            if not os.path.isdir(alias_home):
+                self.skipTest("NO-DATA: no firmlink alias for %s on this volume" % account)
+            alias = os.path.join(alias_home, ".codex")
+            self.assertFalse(os.path.exists(alias))
+            with mock.patch.object(chi, "account_home", return_value=account):
+                self.assert_refused_as_real(chi.resolve_home(alias, False))
+                with mock.patch.dict(os.environ, {"HOME": alias_home}):
+                    self.assert_refused_as_real(chi.resolve_home(os.path.join("~", ".codex"), False))
+                # a throwaway's not-yet-existing .codex is still its own
+                with mock.patch.dict(os.environ, {"HOME": tmp}):
+                    got = chi.resolve_home(os.path.join("~", ".codex"), False)
+                    self.assertEqual(got["path"], os.path.realpath(os.path.join(tmp, ".codex")), got)
+
+    def test_under_sudo_the_invoking_user_s_codex_is_protected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(os, "getuid", return_value=0), \
+                    mock.patch.dict(os.environ, {"SUDO_UID": str(REAL_UID)}):
+                self.assertEqual(chi.account_home(), ACCOUNT)
+                self.assert_refused_as_real(chi.resolve_home(ACCOUNT_CODEX, False))
+                got = chi.resolve_home(os.path.join(tmp, ".codex"), False)
+                self.assertEqual(got["path"], os.path.realpath(os.path.join(tmp, ".codex")))
+
+    def test_uid_zero_without_sudo_uid_refuses_every_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(os, "getuid", return_value=0), mock.patch.dict(os.environ):
+                os.environ.pop("SUDO_UID", None)
+                self.assertIsNone(chi.account_home())
+                got = chi.resolve_home(os.path.join(tmp, ".codex"), True)
+        self.assertIsNone(got["path"], got)
+        self.assertIn("account's home could not be read", got["problem"])
+
+    def test_an_unreadable_account_home_refuses_rather_than_guessing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(pwd, "getpwuid", side_effect=KeyError(REAL_UID)):
+                self.assertIsNone(chi.account_home())
+                got = chi.resolve_home(os.path.join(tmp, ".codex"), True)
+        self.assertIsNone(got["path"], got)
+        self.assertIn("account's home could not be read", got["problem"])
 
 
 class TestCheckAndTrust(unittest.TestCase):
@@ -303,7 +424,7 @@ class TestUninstall(unittest.TestCase):
         self._write_installed(with_foreign=True)
         code, output = self._run()
         self.assertEqual(code, 0, output)
-        self.assertIn("removed 19 Brother hook command(s)", output)
+        self.assertIn("removed 23 Brother hook command(s)", output)
         with io.open(chi.hooks_json_path(self.tmp), encoding="utf-8") as handle:
             left = json.load(handle)
         remaining = [hook["command"] for blocks in left["hooks"].values()
@@ -351,7 +472,7 @@ class TestUninstall(unittest.TestCase):
         sys.stdout = buffer
         try:
             code = chi.main(["codex_hooks_install.py", "--uninstall",
-                             "--codex-home", os.path.join("~", ".codex")])
+                             "--codex-home", ACCOUNT_CODEX])
         finally:
             sys.stdout = saved
         self.assertEqual(code, 1)

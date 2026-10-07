@@ -1,0 +1,3442 @@
+[
+ {
+  "id": "J001",
+  "surface": "Intake/Brief",
+  "name": "Work-profile + tier classify",
+  "moment": "brothersbe kickoff, first turn of intake",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the raw ask text, classify it into exactly one work profile and note the assurance tier it implies; one literal sentence, no other judgment.",
+   "options": [
+    "build",
+    "fix",
+    "research",
+    "ops",
+    "migration",
+    "infra",
+    "unknown"
+   ]
+  },
+  "partner": "kickoff/SKILL.md's own LLM classify prompt today (free-text, unstructured) + tier matrix + founder confirm screen",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown or low confidence keeps the current free-text LLM classify as the answer; never silently overrides the founder confirm screen",
+  "frequency": "per intake unit",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/skills/kickoff/SKILL.md:21",
+  "sources": [
+   "invD01",
+   "D1",
+   "D4",
+   "M02"
+  ],
+  "value": "turns an unstructured LLM classify into a calibrated, cheap, typed call feeding the same tier matrix",
+  "wave": "W2",
+  "parity": true
+ },
+ {
+  "id": "J002",
+  "surface": "Intake/Brief",
+  "name": "Brief constraint/completeness check",
+  "moment": "draft brief review before dispatch",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the draft brief text, state whether it is missing a constraint needed for safe dispatch (who/what/done-looks-like/constraints). Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "required-field schema validator",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain (0.2-0.8) keeps the schema validator's verdict; never auto-clears a flagged gap",
+  "frequency": "per intake unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D2",
+   "M04"
+  ],
+  "value": "prompts a missing constraint before dispatch instead of discovering it mid-unit",
+  "wave": "W3"
+ },
+ {
+  "id": "J003",
+  "surface": "Intake/Brief",
+  "name": "Persona detection",
+  "moment": "after 2-3 turns of intake chat",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the transcript so far, classify which persona best describes who is speaking; one literal sentence.",
+   "options": [
+    "analyst",
+    "developer",
+    "team-lead",
+    "founder",
+    "mixed",
+    "unknown"
+   ]
+  },
+  "partner": "keyword rules + role labels / workspace invite",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown keeps the keyword-rule default persona; never re-tunes language on a guess",
+  "frequency": "per turn",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D3",
+   "M01"
+  ],
+  "value": "routes language and depth without a second founder click",
+  "wave": "W3"
+ },
+ {
+  "id": "J004",
+  "surface": "Intake/Brief",
+  "name": "Hidden founder decision detector",
+  "moment": "any turn of chat, intake or dispatch",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the last user turn, state whether it contains an irreversible founder decision made outside the decision screen. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "decision-screen firewall (only a decision-screen click counts as a real decision)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "abstain or low confidence still surfaces the turn for human review; never silently drops a possible hidden decision",
+  "frequency": "per turn",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D5",
+   "M05",
+   "D44"
+  ],
+  "value": "catches a founder decision made in ordinary chat before it escapes the decision-screen record",
+  "wave": "W3"
+ },
+ {
+  "id": "J005",
+  "surface": "Decision Screens",
+  "name": "Reversibility classification",
+  "moment": "before a decision reaches (or skips) the founder screen",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the proposed decision text, classify its reversibility; one literal sentence.",
+   "options": [
+    "reversible",
+    "hard-to-reverse",
+    "irreversible",
+    "unknown"
+   ]
+  },
+  "partner": "DECIDE FOR HIM policy table (class 1 vs class 2) + founder confirm",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or a disagreement with the policy table always resolves toward irreversible/class-2 (founder), never toward reversible/class-1",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D6",
+   "D16",
+   "M11"
+  ],
+  "value": "flags a decision the policy table may have mis-typed, before it auto-resolves as class 1",
+  "wave": "W3"
+ },
+ {
+  "id": "J006",
+  "surface": "Intake/Brief",
+  "name": "Acceptance-criterion testability check",
+  "moment": "per sentence in a draft brief",
+  "question": {
+   "type": "noul",
+   "instructions": "Given one sentence from the brief, state whether it is a testable acceptance criterion. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "BDD-style parser/checker",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain leaves the sentence unclassified for a human to judge; never silently drops it from the criteria list",
+  "frequency": "per turn",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D7"
+  ],
+  "value": "extracts testable criteria a founder can later verify against",
+  "wave": "W3"
+ },
+ {
+  "id": "J007",
+  "surface": "Intake/Brief",
+  "name": "Brief ambiguity / outcome-clarity score",
+  "moment": "draft brief or intake transcript",
+  "question": {
+   "type": "score",
+   "instructions": "Given the brief or intake transcript, rate how ambiguous the desired outcome is, 2=very clear ... 10=very ambiguous.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "missing-field count + clarifying-question count",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to treating the brief as ambiguous (safer: triggers one more clarifying pass) rather than clear",
+  "frequency": "per intake unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D8",
+   "M03"
+  ],
+  "value": "decides clarify-vs-dispatch without a founder having to read the whole transcript",
+  "wave": "W3"
+ },
+ {
+  "id": "J008",
+  "surface": "Intake/Brief",
+  "name": "Clarify-vs-proceed loop control",
+  "moment": "each intake turn",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the brief and intake history so far, decide the next intake move; one literal sentence.",
+   "options": [
+    "ask-clarifying-question",
+    "proceed-to-brief",
+    "escalate-human",
+    "unknown"
+   ]
+  },
+  "partner": "max-questions counter + stop rules",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defers to the deterministic max-questions counter's own default action",
+  "frequency": "per turn",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M06"
+  ],
+  "value": "cuts intake loops that would otherwise ask past the useful point",
+  "wave": "W3"
+ },
+ {
+  "id": "J009",
+  "surface": "Intake/Brief",
+  "name": "Next clarifying question topic",
+  "moment": "each intake turn needing more input",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the brief and intake history, choose which topic the next clarifying question should cover; one literal sentence.",
+   "options": [
+    "scope",
+    "user",
+    "data",
+    "security",
+    "deadline",
+    "unknown"
+   ]
+  },
+  "partner": "fixed question bank + persona",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown falls back to the question bank's default ordering",
+  "frequency": "per turn",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D9"
+  ],
+  "value": "speeds intake by asking the most useful next question first",
+  "wave": "W3"
+ },
+ {
+  "id": "J010",
+  "surface": "Intake/Brief",
+  "name": "Brief dispatch-readiness gate",
+  "moment": "before a brief is handed to the dispatch loop",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the draft brief, state whether it is ready to dispatch. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "required-field schema validator + founder signoff",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain or a disagreement with the schema validator blocks dispatch (safer default), never overrides a validator fail",
+  "frequency": "per intake unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D10"
+  ],
+  "value": "second check before a unit enters the dispatch loop underspecified",
+  "wave": "W3"
+ },
+ {
+  "id": "J011",
+  "surface": "Intake/Brief",
+  "name": "Project risk score at intake",
+  "moment": "intake, before assurance tier is fixed",
+  "question": {
+   "type": "score",
+   "instructions": "Given the brief, rate the project's overall risk, 2=trivial ... 10=severe.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "risk matrix (domain, reversibility, blast radius)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to the risk matrix's own conservative (higher-tier) reading",
+  "frequency": "per intake unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D11"
+  ],
+  "value": "feeds the assurance-tier decision with an early, cheap second read",
+  "wave": "W3"
+ },
+ {
+  "id": "J012",
+  "surface": "Intake/Brief",
+  "name": "Roadmap template / domain classify",
+  "moment": "seeding a new project's readiness roadmap",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the brief, classify which roadmap template and domain-sensitivity class fit; one literal sentence.",
+   "options": [
+    "web",
+    "data",
+    "migration",
+    "security",
+    "infra",
+    "payments",
+    "pii",
+    "safety",
+    "general",
+    "unknown"
+   ]
+  },
+  "partner": "repo-type detector + regex/secret scan + tier rules",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown falls back to the repo detector's own template guess and the stricter tier rule",
+  "frequency": "per intake unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D12",
+   "M07"
+  ],
+  "value": "seeds readiness rows and raises reviewer/tier requirements for sensitive domains",
+  "wave": "W3"
+ },
+ {
+  "id": "J013",
+  "surface": "Intake/Brief",
+  "name": "Jargon / glossary translation need",
+  "moment": "each user turn during intake",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the user's turn, state whether it contains a team-specific term that needs a glossary entry for the brief to stay plain-language. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "glossary lookup",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain leaves the term untranslated; never invents a glossary definition (Jev cannot write text)",
+  "frequency": "per turn",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M08"
+  ],
+  "value": "keeps the brief readable for a non-engineer founder",
+  "wave": "W3"
+ },
+ {
+  "id": "J014",
+  "surface": "Intake/Brief",
+  "name": "Front-door skill selection",
+  "moment": "a bare /brother-style request with no named skill",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the user's request text, choose which one named skill from the fixed catalogue applies, or none; one literal sentence.",
+   "options": [
+    "intake",
+    "review",
+    "status",
+    "handover",
+    "none-of-the-above",
+    "unknown"
+   ]
+  },
+  "partner": "front-door router's own keyword table",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown routes to the front door's own default catalogue entry (never a guessed skill)",
+  "frequency": "per request",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "C09"
+  ],
+  "value": "reduces front-door misroutes without hand-typing a namespace",
+  "wave": "W1",
+  "wave_note": "moved to W1 on the founder's parity order 2026-09-18 (parity with Superpowers and GSD)",
+  "parity": true
+ },
+ {
+  "id": "J015",
+  "surface": "Decision Screens",
+  "name": "Weighted-option ranking",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- ranking declared options by weighted score is the exact arithmetic decide.py already performs (score = mark * weight, computed never typed); Jev cannot do arithmetic and must not shadow decide.py's authority.",
+   "options": []
+  },
+  "partner": "decide.py score()/rank()",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- decide.py's computed ranking is always the answer",
+  "frequency": "per decision",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/decide.py",
+  "sources": [
+   "D13"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J016",
+  "surface": "Decision Screens",
+  "name": "Evidence confidence for an option",
+  "moment": "building a weighted decision screen",
+  "question": {
+   "type": "score",
+   "instructions": "Given the decision context and one option's cited evidence, rate confidence in that evidence, 2=very weak ... 10=very strong.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "evidence audit + source links",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown flags the option as weak-evidence by default, never strong",
+  "frequency": "per option",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D14"
+  ],
+  "value": "flags weak options before the founder has to click through sources himself",
+  "wave": "W3"
+ },
+ {
+  "id": "J017",
+  "surface": "Decision Screens",
+  "name": "Missing unknown/do-nothing option check",
+  "moment": "assembling a decision screen's option set",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the option set, state whether it omits an explicit unknown/do-nothing option. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "decision-screen schema (options list must include an escape hatch)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain treats the set as incomplete (safer: adds the missing option) rather than complete",
+  "frequency": "per decision",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D15"
+  ],
+  "value": "prevents a forced choice with no real escape hatch",
+  "wave": "W3"
+ },
+ {
+  "id": "J018",
+  "surface": "Decision Screens",
+  "name": "Missing viable option detect",
+  "moment": "assembling a decision screen's option set",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the options and the transcript that produced them, state whether a viable option is missing from the set. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "founder can always add an option by hand",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain leaves the option set as-is; the founder's own add-option path stays available regardless",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M10"
+  ],
+  "value": "avoids a false choice built from an incomplete option set",
+  "wave": "W3"
+ },
+ {
+  "id": "J019",
+  "surface": "Decision Screens",
+  "name": "Default action when founder is absent",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- choosing the substantive action (A/B/C) to take in the founder's absence is exercising his authority by proxy; only a fixed 'defer' policy is safe, and that is a configuration constant, not a per-instance judgment.",
+   "options": []
+  },
+  "partner": "founder-absence timeout policy",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- always defers, never auto-picks A/B/C",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D17"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J020",
+  "surface": "Decision Screens",
+  "name": "Decision urgency score",
+  "moment": "prioritizing which decision screens to surface first",
+  "question": {
+   "type": "score",
+   "instructions": "Given the decision text, rate how urgent it is, 2=no rush ... 10=blocking everything now.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "SLA timer on the decision record",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to the SLA timer's own age-based urgency",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D18"
+  ],
+  "value": "orders the decision queue when several screens are open at once",
+  "wave": "W3"
+ },
+ {
+  "id": "J021",
+  "surface": "Decision Screens",
+  "name": "Conflict with a prior logged decision",
+  "moment": "before a new decision screen is opened",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the proposed choice and the decision log, state whether it conflicts with a prior logged decision. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "decision-log diff",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain surfaces the possible conflict for human review rather than silently proceeding",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D19"
+  ],
+  "value": "prevents a founder from re-deciding something already settled, unnoticed",
+  "wave": "W3"
+ },
+ {
+  "id": "J022",
+  "surface": "Decision Screens",
+  "name": "Delegate-vs-founder triage",
+  "moment": "before the DECIDE FOR HIM mechanical path runs",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the decision's type, reversibility and the five required fields, propose who must decide; one literal sentence.",
+   "options": [
+    "delegate",
+    "founder",
+    "unknown"
+   ]
+  },
+  "partner": "DECIDE FOR HIM mechanical path (five fields + class-1/class-2 table); this call only proposes a label",
+  "role": "triage_or_rank",
+  "risk": "high",
+  "fail_direction": "unknown or low confidence routes to founder, never to delegate",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D20"
+  ],
+  "value": "pre-labels a decision for the mechanical path without ever substituting for it",
+  "wave": "W3"
+ },
+ {
+  "id": "J023",
+  "surface": "Decision Screens",
+  "name": "Option relevance filter",
+  "moment": "pruning a decision screen's ballot",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the decision context, classify one option as relevant, duplicate, unsafe/out-of-scope, or unknown; one literal sentence per option.",
+   "options": [
+    "relevant",
+    "duplicate",
+    "unsafe-out-of-scope",
+    "unknown"
+   ]
+  },
+  "partner": "orchestrator's own weight math + founder click",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown keeps the option on the ballot (never silently prunes on a guess)",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M09"
+  ],
+  "value": "prunes a bloated ballot before the founder has to read it",
+  "wave": "W3"
+ },
+ {
+  "id": "J024",
+  "surface": "Decision Screens",
+  "name": "Founder preference inference (pre-fill only)",
+  "moment": "chat before a decision screen is shown",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the chat before the screen, infer which option the founder appears to lean toward, for pre-fill only; one literal sentence.",
+   "options": [
+    "option-a",
+    "option-b",
+    "option-c",
+    "option-d",
+    "no-lean",
+    "unknown"
+   ]
+  },
+  "partner": "the actual vote/click on the decision screen always decides",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown or no-lean leaves the screen with no pre-fill; never substitutes for the founder's own click",
+  "frequency": "per decision",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M12"
+  ],
+  "value": "speeds the screen without ever moving real authority off the founder's click",
+  "wave": "W3"
+ },
+ {
+  "id": "J025",
+  "call_site_reads_answer": false,
+  "surface": "Readiness Roadmap",
+  "name": "Roadmap row status classify",
+  "moment": "every board render",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a roadmap row's evidence and test logs, classify its status; one literal sentence.",
+   "options": [
+    "ready",
+    "blocked",
+    "partial",
+    "stale",
+    "done",
+    "in-progress",
+    "unknown"
+   ]
+  },
+  "partner": "board_status.py's own DONE_WORDS/FLIGHT_WORDS keyword lists (deterministic, stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown keeps the keyword classifier's own verdict; a disagreement is flagged, never auto-corrected",
+  "frequency": "per row, every board render",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/board_status.py:562",
+  "sources": [
+   "invD46",
+   "D21",
+   "M13",
+   "D25"
+  ],
+  "value": "second-opinions the exact keyword list already flagged as rewritten twice this month for the same bug class",
+  "wave": "W1"
+ },
+ {
+  "id": "J026",
+  "surface": "Readiness Roadmap",
+  "name": "Row evidence-strength score",
+  "moment": "rendering a readiness roadmap",
+  "question": {
+   "type": "score",
+   "instructions": "Given a row's linked evidence, rate how strongly it supports the row's claim, 2=no real support ... 10=fully proven.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "link/hash/test-exit-code presence check",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to treating the row as under-evidenced, never fully proven",
+  "frequency": "per row",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D22",
+   "M14"
+  ],
+  "value": "prevents a false-done row from reading as ready",
+  "wave": "W3"
+ },
+ {
+  "id": "J027",
+  "surface": "Readiness Roadmap",
+  "name": "Row evidence staleness",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- staleness is a git-hash/timestamp comparison against current HEAD, a deterministic date/hash check with no ambiguity for a classifier to resolve.",
+   "options": []
+  },
+  "partner": "git hash + timestamp compare",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the hash/timestamp compare is always the answer",
+  "frequency": "per row",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D23"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J028",
+  "surface": "Readiness Roadmap",
+  "name": "Next readiness gate to run",
+  "moment": "sequencing a row's remaining checks",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a row's current state, choose which readiness gate should run next; one literal sentence.",
+   "options": [
+    "gate1",
+    "gate2",
+    "gate3",
+    "gate4",
+    "unknown"
+   ]
+  },
+  "partner": "dependency graph between gates",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown falls back to the dependency graph's own topological order",
+  "frequency": "per row",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D24"
+  ],
+  "value": "orders readiness work without a human re-deriving the dependency graph by hand",
+  "wave": "W3",
+  "parity": true
+ },
+ {
+  "id": "J029",
+  "surface": "Hooks/Drift",
+  "name": "Drift / complaint-language detection",
+  "moment": "progress-doc audits, transcript windows, and roadmap rows",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the current text against the brief or the prior 'decided' claim, classify whether it is on-track, scope-creep, a persona-shift, or stalled; one literal sentence.",
+   "options": [
+    "on-track",
+    "scope-creep",
+    "persona-shift",
+    "stalled",
+    "unknown"
+   ]
+  },
+  "partner": "record_drift.py's own regex first pass (decided-word scope check, reaffirmation check, complaint-language scan) stays the trigger",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown keeps the regex-first-pass verdict; never silently clears a fired drift flag",
+  "frequency": "per turn / per slop-gate audit / per roadmap row",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/record_drift.py:75 (also :102, :278)",
+  "sources": [
+   "invD39",
+   "invD40",
+   "invD41",
+   "D26",
+   "D43",
+   "M48"
+  ],
+  "value": "second-opinions the drift/complaint regexes already named as prone to matching discussion-of rather than commission-of",
+  "wave": "W2"
+ },
+ {
+  "id": "J030",
+  "surface": "Readiness Roadmap",
+  "name": "Row claim-vs-source support check",
+  "moment": "auditing a roadmap row's claim",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a row's claim and its quoted source, state whether the claim is supported by the source. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "human reads the source diff/log viewer",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain surfaces the row for human review, never clears an unsupported claim",
+  "frequency": "per row",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M15"
+  ],
+  "value": "11/12 measured accuracy on this exact check per muse's own note; catches a claim the source doesn't back",
+  "wave": "W1",
+  "wave_note": "moved to W1 by the orchestrator, 2026-09-18: strongest measured evidence (gate-line triage 100% batched n=14; claim check 11/12, 9/9 confident); flip if its shadow ledger falls below that rate"
+ },
+ {
+  "id": "J031",
+  "surface": "Readiness Roadmap",
+  "name": "Blocker severity classify",
+  "moment": "triaging a roadmap row's blocker text",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a blocker's text, classify its severity; one literal sentence.",
+   "options": [
+    "fatal",
+    "workaroundable",
+    "informational",
+    "unknown"
+   ]
+  },
+  "partner": "existence of a blocker ticket",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to fatal (safer: prioritizes it for unblock) rather than informational",
+  "frequency": "per row",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M17"
+  ],
+  "value": "prioritizes which blocker to clear first",
+  "wave": "W3"
+ },
+ {
+  "id": "J032",
+  "surface": "Dispatch Loop",
+  "name": "Work ordering / backlog priority",
+  "moment": "choosing what the dispatch loop pulls next",
+  "question": {
+   "type": "choice",
+   "instructions": "Given two units A and B (or a small set), decide which should go first; one literal sentence, pairwise or batched.",
+   "options": [
+    "a",
+    "b",
+    "parallel",
+    "either",
+    "unknown"
+   ]
+  },
+  "partner": "critical-path + dependency graph",
+  "role": "triage_or_rank",
+  "risk": "low",
+  "fail_direction": "unknown falls back to the dependency graph's own default order",
+  "frequency": "per backlog sweep / per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D33",
+   "M16",
+   "M62"
+  ],
+  "value": "orders dispatch throughput without a human re-deriving priority by hand",
+  "wave": "W3"
+ },
+ {
+  "id": "J033",
+  "surface": "Dispatch Loop",
+  "name": "Lane routing",
+  "moment": "a work unit entering the dispatch loop",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a unit's spec, route it to a lane; one literal sentence.",
+   "options": [
+    "draft",
+    "review",
+    "verify",
+    "blocked",
+    "needs-decompose",
+    "unknown"
+   ]
+  },
+  "partner": "lane_router.py's own task_class/risk_class table (deterministic, stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown keeps the table's own routed lane; never silently reroutes",
+  "frequency": "per unit",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/lane_router.py:237",
+  "sources": [
+   "invD09",
+   "D27",
+   "M18"
+  ],
+  "value": "second-opinions the lane table only when it is itself ambiguous",
+  "wave": "W2"
+ },
+ {
+  "id": "J034",
+  "surface": "Dispatch Loop",
+  "name": "Model tier selection for a unit",
+  "moment": "before a unit is dispatched to a writer",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a unit's brief, complexity and risk, choose the model tier that should write it; one literal sentence.",
+   "options": [
+    "cheap",
+    "mid",
+    "strong",
+    "verify-only",
+    "unknown"
+   ]
+  },
+  "partner": "token budget + past-failure history",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown routes to the stronger tier (safer, never the cheaper one on a guess)",
+  "frequency": "per unit",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D28",
+   "M19",
+   "C08"
+  ],
+  "value": "balances cost and quality without a human picking the tier by hand each time",
+  "wave": "W3"
+ },
+ {
+  "id": "J035",
+  "surface": "Dispatch Loop",
+  "name": "Worker / CI failure classification",
+  "moment": "a dispatched unit or worker fails",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the worker's stderr and exit state, classify the failure; one literal sentence. Only invoked when the deterministic token is absent from the note.",
+   "options": [
+    "rate-limit",
+    "overloaded",
+    "timeout",
+    "code-bug",
+    "env-flake",
+    "unrecoverable",
+    "unknown"
+   ]
+  },
+  "partner": "model_worker.py / orchestrator_replan.py's own regex token match stays primary; this only classifies notes with no token present",
+  "role": "triage_or_rank",
+  "risk": "medium",
+  "fail_direction": "no-token and low confidence stays classified as 'other' (the current safe default), never auto-promoted to a breaker-opening class",
+  "frequency": "per dispatched unit / per model call",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/loop_bridge.py:895-920 (wired here, shadow-only); scripts/model_worker.py:585 (the deterministic classify_failure() that writes the token this reads); scripts/orchestrator_replan.py:80 (downstream consumer, unchanged, different vocabulary)",
+  "sources": [
+   "invD10",
+   "invD11",
+   "surf6",
+   "C05",
+   "D29",
+   "M22"
+  ],
+  "value": "replaces a silent 'other' default that currently feeds the circuit breaker blind",
+  "wave": "W3"
+ },
+ {
+  "id": "J036",
+  "surface": "Dispatch Loop",
+  "name": "Circuit-breaker trip decision",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- the trip decision is driven entirely by queue-depth and error-rate counters (arithmetic); the breaker's own numeric threshold is both necessary and sufficient, and this is a safety control where a probabilistic overlay adds risk with no residual judgment left to add.",
+   "options": []
+  },
+  "partner": "queue-depth + error-rate counters",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the counter threshold is always the answer",
+  "frequency": "per sweep",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D30"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J037",
+  "surface": "Dispatch Loop",
+  "name": "Overload cause diagnosis",
+  "moment": "explaining why the circuit breaker tripped",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a queue-depth and latency snapshot, classify what the overload is due to; one literal sentence.",
+   "options": [
+    "too-many-claims",
+    "slow-verify",
+    "model-outage",
+    "unknown"
+   ]
+  },
+  "partner": "circuit-breaker's own counters (the trip itself stays their call, this only explains it)",
+  "role": "triage_or_rank",
+  "risk": "low",
+  "fail_direction": "unknown leaves the trip unexplained for a human to read the raw counters",
+  "frequency": "per turn",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M24"
+  ],
+  "value": "explains a trip in plain language instead of raw counter dumps",
+  "wave": "W3"
+ },
+ {
+  "id": "J038",
+  "surface": "Dispatch Loop",
+  "name": "Unit claimability",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- claimability is a lockfile-and-dependency-graph fact, deterministic and machine-checkable; per estate claiming law, only the claim store decides who holds a fence, never a probabilistic judge.",
+   "options": []
+  },
+  "partner": "lockfile + dependency graph",
+  "role": "MUST_NOT",
+  "risk": "medium",
+  "fail_direction": "n/a -- the claim store's own answer is always authoritative",
+  "frequency": "per unit",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D31"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J039",
+  "surface": "Dispatch Loop",
+  "name": "Overload-risk score",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "score",
+   "instructions": "MUST_NOT -- driven entirely by queue/error metrics (arithmetic); no qualitative judgment survives once the counters are read.",
+   "options": []
+  },
+  "partner": "queue + error metrics",
+  "role": "MUST_NOT",
+  "risk": "medium",
+  "fail_direction": "n/a -- the metrics are always the answer",
+  "frequency": "per sweep",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D32"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J040",
+  "surface": "Dispatch Loop",
+  "name": "Retry-vs-escalate decision",
+  "moment": "a dispatched unit's failure history",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the failure history for a unit, decide what happens next; one literal sentence.",
+   "options": [
+    "retry-same",
+    "retry-decomposed",
+    "escalate-human",
+    "unknown"
+   ]
+  },
+  "partner": "max-retries counter",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown escalates to human rather than retrying blind",
+  "frequency": "per failure",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D34",
+   "M23"
+  ],
+  "value": "stops a unit from spinning on the same failure indefinitely",
+  "wave": "W3"
+ },
+ {
+  "id": "J041",
+  "surface": "Dispatch Loop",
+  "name": "Worker stall detection",
+  "moment": "sweeping for stuck dispatched work",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a claim's age and last heartbeat, state whether the worker is stalled. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "heartbeat timestamps + fence files",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain leaves the unit as unresolved (a human/sweep decides), never clears a possible stall",
+  "frequency": "per sweep",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D35",
+   "D79",
+   "M49"
+  ],
+  "value": "drives the stall sweep's recovery pass",
+  "wave": "W3",
+  "parity": true
+ },
+ {
+  "id": "J042",
+  "surface": "Dispatch Loop",
+  "name": "Claim/fence reconcile resolution",
+  "moment": "sweeping for mismatched claims and fences",
+  "question": {
+   "type": "choice",
+   "instructions": "Given conflicting claims or fence state, propose how the mismatch should resolve; one literal sentence. The claim store's own answer always wins on conflict.",
+   "options": [
+    "keep",
+    "release",
+    "reassign",
+    "escalate",
+    "unknown"
+   ]
+  },
+  "partner": "fence files + locks + the claim store (resumed sessions must ask the store, never assume)",
+  "role": "triage_or_rank",
+  "risk": "medium",
+  "fail_direction": "unknown escalates to the claim store's own authoritative answer, never auto-reassigns",
+  "frequency": "per sweep",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D36",
+   "D80",
+   "M50"
+  ],
+  "value": "proposes a deterministic-looking merge without ever overriding the store",
+  "wave": "W3"
+ },
+ {
+  "id": "J043",
+  "surface": "Dispatch Loop",
+  "name": "Which checker / battery subset to run",
+  "moment": "before verifying a unit or cutting a release",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the unit type and diff (or release scope), choose the cheapest sufficient checker/battery; one literal sentence.",
+   "options": [
+    "unit-tests",
+    "lint-typecheck",
+    "migration-dryrun",
+    "secret-scan",
+    "evidence-audit",
+    "smoke",
+    "full-battery",
+    "unknown"
+   ]
+  },
+  "partner": "battery policy table keyed on changed files",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to the full battery (safer, never the lightest one on a guess)",
+  "frequency": "per unit / per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D37",
+   "D53",
+   "M31"
+  ],
+  "value": "saves compute by skipping unnecessary batteries without ever under-checking on a guess",
+  "wave": "W3"
+ },
+ {
+  "id": "J044",
+  "surface": "Dispatch Loop",
+  "name": "Pre-tool-call risk second opinion",
+  "moment": "before a shell command or file edit runs",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the planned tool-call text, classify its risk, as a second opinion beside the hard deterministic deny-list which keeps sole blocking authority.",
+   "options": [
+    "read-only",
+    "reversible-write",
+    "network-call",
+    "secret-access",
+    "destructive",
+    "unknown"
+   ]
+  },
+  "partner": "hard deterministic deny-lists / allowlists (sole blocking authority, never superseded)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or destructive-leaning confidence never auto-allows; only the deny-list can clear a block",
+  "frequency": "per tool call",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D38",
+   "M21",
+   "C07"
+  ],
+  "value": "adds a semantic second look beside pattern-based deny-lists, never replacing them",
+  "wave": "W3"
+ },
+ {
+  "id": "J045",
+  "surface": "Dispatch Loop",
+  "name": "Repeat-mistake tool-call guard",
+  "moment": "every Bash/Edit/Write pre- and post-tool-use",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a tool call already flagged by the trigger-word regex, re-score it; one literal sentence. The regex stays the trigger.",
+   "options": [
+    "matches-mistake",
+    "discusses-only",
+    "unrelated",
+    "unknown"
+   ]
+  },
+  "partner": "repeat_guard.py's own regex trigger-word match (stays first pass)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or low confidence stays BLOCKED (current behavior), never silently cleared",
+  "frequency": "every Bash/Edit/Write tool call",
+  "privacy": "needs_content_gate",
+  "anchor": "~/.claude/hooks/repeat_guard.py:140",
+  "sources": [
+   "invD42",
+   "surf1",
+   "C01",
+   "D39",
+   "D76",
+   "M47"
+  ],
+  "value": "cuts the measured false-block rate (4 false positives 2026-08-24) without weakening the guard on an unknown",
+  "wave": "W2",
+  "parity": true
+ },
+ {
+  "id": "J046",
+  "surface": "Dispatch Loop",
+  "name": "Cost-wall / burn-risk gating",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- answering 'would this exceed the cost wall' or scoring burn risk requires summing tokens/dollars against a ceiling, pure arithmetic; spend_guard.json's numeric ledger is sole authority and must never be bypassed or duplicated by a probabilistic estimate.",
+   "options": []
+  },
+  "partner": "spend_guard.py token/dollar ledger",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the ledger's own comparison is always the answer",
+  "frequency": "per tool call",
+  "privacy": "public_or_own_text",
+  "anchor": "~/.claude/hooks/spend_guard.py",
+  "sources": [
+   "D40",
+   "D77",
+   "M54"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J047",
+  "surface": "Dispatch Loop",
+  "name": "Disk-floor gating",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- disk-below-floor is a literal `df` number compared to a threshold; deterministic and countable, no residual judgment.",
+   "options": []
+  },
+  "partner": "disk_floor_gate.py's df reading",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the df reading is always the answer",
+  "frequency": "per tool call",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface (disk_floor_gate.py named in the surfaces must-not list)",
+  "sources": [
+   "D41",
+   "D78"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J048",
+  "surface": "Dispatch Loop",
+  "name": "Stop-hook keep-pulling-backlog classify",
+  "moment": "session Stop hook, every session end",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a plan row's text, second-opinion only the rows the WAIT_WORDS/BLOCKED_WORDS/READY_ROW regex cannot cleanly classify; one literal sentence.",
+   "options": [
+    "ready",
+    "blocked",
+    "waiting-on-founder",
+    "done",
+    "unknown"
+   ]
+  },
+  "partner": "keep_pulling_the_backlog.py's own keyword regex (stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown escalates to BLOCKED-session-continues (never reads as done)",
+  "frequency": "every session end",
+  "privacy": "needs_content_gate",
+  "anchor": "~/.claude/hooks/keep_pulling_the_backlog.py:76-99",
+  "sources": [
+   "surf2",
+   "C02",
+   "D42",
+   "M53"
+  ],
+  "value": "second-opinions a regex already rewritten twice this month for the same ownership/nearest-dir bug class",
+  "wave": "W2"
+ },
+ {
+  "id": "J049",
+  "surface": "Dispatch Loop",
+  "name": "Finding severity / disposition triage",
+  "moment": "triaging a review comment against a diff",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a review finding and the diff it cites, classify its severity/disposition; one literal sentence.",
+   "options": [
+    "blocker",
+    "major",
+    "nit",
+    "false-positive",
+    "unknown"
+   ]
+  },
+  "partner": "security/blocker keyword list (stays override authority)",
+  "role": "triage_or_rank",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to blocker (safer, never silently downgraded)",
+  "frequency": "per finding",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:752",
+  "sources": [
+   "D46",
+   "D48",
+   "M27"
+  ],
+  "value": "triages a flood of review findings without a human reading every one first",
+  "wave": "W2"
+ },
+ {
+  "id": "J050",
+  "surface": "Reviewer Routing",
+  "name": "Specialist reviewer routing",
+  "moment": "a diff or PR/unit needs a review pass",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a diff summary, choose the primary specialist reviewer; one literal sentence.",
+   "options": [
+    "backend",
+    "data",
+    "migration",
+    "security",
+    "qa",
+    "architecture",
+    "evidence-audit",
+    "multiple",
+    "unknown"
+   ]
+  },
+  "partner": "reviewroute.py's own file-path rules + mandatory security routing (stays override authority)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown routes to multiple reviewers (safer, never silently to none)",
+  "frequency": "per unit / per PR",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:752",
+  "sources": [
+   "invD17",
+   "D47",
+   "M26"
+  ],
+  "value": "hits the right specialist without a human reading the whole diff first",
+  "wave": "W2",
+  "parity": true
+ },
+ {
+  "id": "J051",
+  "surface": "Reviewer Routing",
+  "name": "Adversarial-review model-tier routing",
+  "moment": "a unit's checker field names neither/both review tiers",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a work unit's free-text checker field, choose which review tier applies when the word-boundary regex names neither or both; one literal sentence.",
+   "options": [
+    "opus-gate",
+    "muse-default",
+    "ambiguous",
+    "unknown"
+   ]
+  },
+  "partner": "lane_router.py's own word-boundary regex (stays primary, cheap and precise)",
+  "role": "triage_or_rank",
+  "risk": "medium",
+  "fail_direction": "ambiguous/unknown routes to the more expensive/safer lane (Opus), never silently to the cheap one",
+  "frequency": "per unit needing review",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/lane_router.py:133",
+  "sources": [
+   "invD08",
+   "surf4",
+   "C04"
+  ],
+  "value": "avoids the misroute pattern that cost 44 subagents and 99.4% of a session's tokens once",
+  "wave": "W2"
+ },
+ {
+  "id": "J052",
+  "surface": "Dispatch Loop",
+  "name": "Migration-content-in-diff detector",
+  "moment": "reviewing a PR/diff for migration risk",
+  "question": {
+   "type": "noul",
+   "instructions": "Given added diff lines, state whether they contain migration content. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "reviewroute.py's own regex detector (stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain routes to the migration reviewer anyway (safer default)",
+  "frequency": "per PR/diff review",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:563",
+  "sources": [
+   "invD12"
+  ],
+  "value": "second-opinions the migration-content regex before it silently under- or over-routes",
+  "wave": "W2"
+ },
+ {
+  "id": "J053",
+  "surface": "Dispatch Loop",
+  "name": "Embedded-SQL-in-diff detector",
+  "moment": "reviewing a PR/diff for embedded SQL",
+  "question": {
+   "type": "noul",
+   "instructions": "Given added diff lines, state whether they contain embedded SQL. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "reviewroute.py's own regex detector (stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain routes to the data reviewer anyway (safer default)",
+  "frequency": "per PR/diff review",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:579",
+  "sources": [
+   "invD13"
+  ],
+  "value": "second-opinions the SQL-detection regex before it silently misses a variant",
+  "wave": "W2"
+ },
+ {
+  "id": "J054",
+  "surface": "Dispatch Loop",
+  "name": "Doc-control-promise language detector",
+  "moment": "reviewing removed doc lines in a diff",
+  "question": {
+   "type": "noul",
+   "instructions": "Given removed doc lines, state whether they drop a 'control promise' (a stated guarantee the doc used to make). Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "reviewroute.py's own regex detector (stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain flags the removal for human review anyway (safer default)",
+  "frequency": "per PR/diff review",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:621",
+  "sources": [
+   "invD15"
+  ],
+  "value": "catches a quietly weakened control promise the regex alone might miss",
+  "wave": "W2"
+ },
+ {
+  "id": "J055",
+  "surface": "Dispatch Loop",
+  "name": "Test-tampering (QA) hit detector",
+  "moment": "reviewing a test-only diff",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a test-only diff, state whether an assertion was removed or a skip was added to make a test pass without fixing the defect. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "reviewroute.py's own heuristic detector (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain flags the diff for human review anyway (safer default)",
+  "frequency": "per PR/diff review",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:647",
+  "sources": [
+   "invD16"
+  ],
+  "value": "second-opinions the exact pattern the estate's own 'a fix whose check cannot fail is not a fix' law warns about",
+  "wave": "W2"
+ },
+ {
+  "id": "J056",
+  "surface": "Dispatch Loop",
+  "name": "Review fast-path eligibility",
+  "moment": "deciding whether a low-risk diff skips full review",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a diff's selection and tier, state whether it is eligible for the low-risk fast path. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "reviewroute.py's own tier+selection heuristic (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain keeps the diff on the full-review path (safer default)",
+  "frequency": "per PR/diff review",
+  "privacy": "public_or_own_text",
+  "anchor": "products/brothersbe/src/brothersbe/reviewroute.py:507",
+  "sources": [
+   "invD18"
+  ],
+  "value": "second-opinions fast-path eligibility before a risky diff slips through on a heuristic",
+  "wave": "W1"
+ },
+ {
+  "id": "J057",
+  "surface": "Dispatch Loop",
+  "name": "Evidence-audit-needed flag",
+  "moment": "a claim is made in a unit or review",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a claim's text, state whether it needs a dedicated evidence audit. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "claim/source checker",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain routes the claim to audit anyway (safer default)",
+  "frequency": "per claim",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D49"
+  ],
+  "value": "flags a claim worth an evidence-auditor pass before it is folded in unread",
+  "wave": "W3"
+ },
+ {
+  "id": "J058",
+  "surface": "Dispatch Loop",
+  "name": "Architecture-review threshold",
+  "moment": "a PR changes structural boundaries",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a change's description, state whether it should trigger an architecture review. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "dependency graph (does the change cross a service/module boundary)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain triggers the review anyway (safer default)",
+  "frequency": "per PR",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D50"
+  ],
+  "value": "prevents architectural rot from a change nobody flagged for the architect",
+  "wave": "W3"
+ },
+ {
+  "id": "J059",
+  "surface": "Dispatch Loop",
+  "name": "Grade another model's draft",
+  "moment": "judging a cheap worker's output cheaply",
+  "question": {
+   "type": "score",
+   "instructions": "Given the spec and a draft diff, rate the draft's quality against the spec, 2=off-spec ... 10=spec-perfect.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "tests + reviewer vote (stays real gate)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to a low score (safer: routes for human/test check rather than passing on a guess)",
+  "frequency": "per draft",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D45",
+   "M29"
+  ],
+  "value": "judges cheap-tier drafts cheaply before spending a strong-tier review on them",
+  "wave": "W3"
+ },
+ {
+  "id": "J060",
+  "surface": "Reviewer Routing",
+  "name": "Review-finding validity check",
+  "moment": "a review comment cites specific lines",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a finding and the lines it cites, state whether the finding is supported by the cited code. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "show the cited lines to a human for final call",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain surfaces the finding for human review; never auto-dismisses it as unsupported",
+  "frequency": "per finding",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M28"
+  ],
+  "value": "suppresses a hallucinated finding before it wastes a fix cycle",
+  "wave": "W3"
+ },
+ {
+  "id": "J061",
+  "surface": "Reviewer Routing",
+  "name": "Re-review-needed check",
+  "moment": "after a fix diff addresses prior findings",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the fix diff and the prior findings list, state whether all blockers are addressed. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "finding checklist (each blocker item ticked)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain keeps the review loop open (safer default, never closes early)",
+  "frequency": "per unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M30"
+  ],
+  "value": "closes the review loop without a human re-reading every prior finding by hand",
+  "wave": "W3"
+ },
+ {
+  "id": "J062",
+  "surface": "Dispatch Loop",
+  "name": "Implementation-complexity score",
+  "moment": "sizing a unit before dispatch",
+  "question": {
+   "type": "score",
+   "instructions": "Given a unit's spec, rate its implementation complexity, 2=trivial ... 10=very complex.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "line/file budget",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to a higher complexity estimate (safer sizing)",
+  "frequency": "per unit",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M20"
+  ],
+  "value": "sizes a claim before a worker takes it, catching an under-scoped unit early",
+  "wave": "W3"
+ },
+ {
+  "id": "J063",
+  "surface": "Dispatch Loop",
+  "name": "Worker completion-claim validity",
+  "moment": "a worker reports a unit done",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the worker's claim and the actual worktree diff, state whether the claim matches the diff. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "git diff + tests (the orchestrator's own re-run in the main lane, per verification-before-completion discipline)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain keeps the claim unverified (never marks the unit done on a guess)",
+  "frequency": "per unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M25"
+  ],
+  "value": "catches a hallucinated-done claim before it is folded into the release",
+  "wave": "W1",
+  "wave_note": "moved to W1 on the founder's parity order 2026-09-18 (parity with Superpowers and GSD)",
+  "parity": true
+ },
+ {
+  "id": "J064",
+  "surface": "Gates/Batteries",
+  "name": "Gate/CI/PR log-line classification",
+  "moment": "release gate output, PR checks, CI failures",
+  "question": {
+   "type": "choice",
+   "instructions": "Given one gate/CI/PR log line or chunk, classify it, batched across the whole output; one literal sentence per line. The exit code always keeps authority.",
+   "options": [
+    "pass",
+    "fail-real",
+    "infra-flake",
+    "skip",
+    "needs-human",
+    "unknown"
+   ]
+  },
+  "partner": "the gate/CI/PR's own exit code (sole pass/fail authority, never overridden)",
+  "role": "triage_or_rank",
+  "risk": "high",
+  "fail_direction": "unknown or low confidence surfaces the line as needs-human, never silently marked pass",
+  "frequency": "per release / per PR / per gate line, batched",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D51",
+   "M32",
+   "C10",
+   "D52",
+   "M33",
+   "D82",
+   "M56",
+   "M55"
+  ],
+  "value": "measured 100% correct triage on a 14-line batch for $0.00002, parsing hundreds of log lines a human would otherwise read",
+  "wave": "W1",
+  "wave_note": "moved to W1 by the orchestrator, 2026-09-18: strongest measured evidence (gate-line triage 100% batched n=14; claim check 11/12, 9/9 confident); flip if its shadow ledger falls below that rate"
+ },
+ {
+  "id": "J065",
+  "surface": "Gates/Batteries",
+  "name": "Flaky-vs-real gate failure",
+  "moment": "a gate/test fails and history exists",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a failing test/gate log and its rerun history, state whether the failure is an infra flake. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "rerun on a clean worktree (the real determinant)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain treats the failure as real (safer: never waves away a possible genuine defect)",
+  "frequency": "per gate / per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D54",
+   "M34"
+  ],
+  "value": "avoids a false-red block without ever waving away a real defect on a guess",
+  "wave": "W3"
+ },
+ {
+  "id": "J066",
+  "surface": "Gates/Batteries",
+  "name": "Release readiness recommendation",
+  "moment": "before a release cut",
+  "question": {
+   "type": "choice",
+   "instructions": "Given all gate summaries, recommend a release action, as a second opinion only; the gate matrix (all green) keeps real authority.",
+   "options": [
+    "go",
+    "no-go",
+    "defer",
+    "unknown"
+   ]
+  },
+  "partner": "all-gates-green matrix (sole authority)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or any gate red defaults to no-go, never go",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D55",
+   "D56",
+   "M35"
+  ],
+  "value": "communicates release risk in plain language beside the gate matrix, never instead of it",
+  "wave": "W3"
+ },
+ {
+  "id": "J067",
+  "surface": "Gates/Batteries",
+  "name": "Gate result blocking-vs-advisory classify",
+  "moment": "triaging a finding from any gate",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a gate's finding, classify whether it is blocking or advisory; one literal sentence.",
+   "options": [
+    "blocking",
+    "advisory",
+    "unknown"
+   ]
+  },
+  "partner": "the gate's own policy table",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to blocking (safer, never silently advisory)",
+  "frequency": "per finding",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D57"
+  ],
+  "value": "second-opinions severity when the policy table itself is ambiguous",
+  "wave": "W3"
+ },
+ {
+  "id": "J068",
+  "surface": "Gates/Batteries",
+  "name": "Missing gate-evidence flag",
+  "moment": "assembling a release's evidence manifest",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the evidence manifest, state whether evidence is missing for a claimed gate. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "evidence manifest completeness check",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain flags the gate as incomplete (safer default)",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D58"
+  ],
+  "value": "catches a release receipt that quotes a gate with no real evidence behind it",
+  "wave": "W3"
+ },
+ {
+  "id": "J069",
+  "surface": "Release Cut",
+  "name": "Release cut approval",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- release cut approval is founder-only authority under the estate's own decision law (an act only he can perform: tag, Release); Jev cannot substitute for his signoff even as an advisory input feeding the approval gate.",
+   "options": []
+  },
+  "partner": "founder signoff + all gates green",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- founder signoff is always required",
+  "frequency": "per release",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D59"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J070",
+  "surface": "Release Cut",
+  "name": "Release channel selection",
+  "moment": "cutting a release",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the semver text and channel policy, choose the release channel; one literal sentence.",
+   "options": [
+    "stable",
+    "beta",
+    "canary",
+    "internal",
+    "unknown"
+   ]
+  },
+  "partner": "semver text + channel policy",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to the most restricted channel (internal), never stable",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D60"
+  ],
+  "value": "routes a release to the right rollout channel without a manual policy re-read",
+  "wave": "W3"
+ },
+ {
+  "id": "J071",
+  "surface": "Release Cut",
+  "name": "Changelog completeness check",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- 'does the changelog cover every merged PR' is a set-membership/coverage comparison against the PR list, deterministic and countable (the PR-list diff already answers it).",
+   "options": []
+  },
+  "partner": "PR list diff",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the PR-list diff is always the answer",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D61"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J072",
+  "surface": "Release Cut",
+  "name": "Semver bump classify",
+  "moment": "cutting a release with an API diff",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the API diff, classify whether this release is a major, minor, or patch bump; one literal sentence.",
+   "options": [
+    "major",
+    "minor",
+    "patch",
+    "unknown"
+   ]
+  },
+  "partner": "API diff tool (the mechanical breaking/additive/patch signal)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to major (safer: never under-bumps on a guess)",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D62"
+  ],
+  "value": "flags a breaking change the diff tool's own heuristics might under-call",
+  "wave": "W3"
+ },
+ {
+  "id": "J073",
+  "surface": "Release Cut",
+  "name": "Rollback trigger decision",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- rollback triggers off an error-rate SLO threshold, a numeric comparison; the SLO stays sole authority for an action this safety-critical, and a wrong rollback call has real cost.",
+   "options": []
+  },
+  "partner": "error-rate SLO",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the SLO threshold is always the answer",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D63"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J074",
+  "surface": "Release Cut",
+  "name": "Cross-host parity level proposal",
+  "moment": "GitHub/Bitbucket parity claim review",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a named-evidence summary, propose which parity level is evidence-supported, as a proposal only; the human/founder grants the level.",
+   "options": [
+    "l0",
+    "l1",
+    "l2",
+    "l3",
+    "l4",
+    "unknown"
+   ]
+  },
+  "partner": "named-evidence manifest (the human/founder grants the level, never Jev)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or thin evidence proposes the lowest supported level, never over-claims",
+  "frequency": "per release / per parity claim",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D64",
+   "D87",
+   "D88",
+   "D89",
+   "M60",
+   "M61"
+  ],
+  "value": "keeps a parity claim evidence-bound instead of aspirational, as a proposal the founder still grants",
+  "wave": "W3"
+ },
+ {
+  "id": "J075",
+  "surface": "Gates/Batteries",
+  "name": "Forecast-regime classify",
+  "moment": "forecasting near-term pass-rate trend",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a summary of recent pass rates, classify the regime; one literal sentence.",
+   "options": [
+    "stable",
+    "degraded",
+    "improving",
+    "unknown"
+   ]
+  },
+  "partner": "base-rate calculator (computes the underlying trend numbers; this only narrates the regime)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to degraded (safer forecasting posture)",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D86",
+   "M59"
+  ],
+  "value": "conditions a forecast narrative without doing the rate arithmetic itself",
+  "wave": "W3"
+ },
+ {
+  "id": "J076",
+  "surface": "Gates/Batteries",
+  "name": "Release-note over-claim check",
+  "moment": "drafting release notes against gate results",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a release-note draft and the gate report, state whether the notes over-claim relative to the gates. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "the gate report itself",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain flags the notes for human review anyway (safer default)",
+  "frequency": "per release",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M36"
+  ],
+  "value": "keeps release notes honest against what the gates actually showed",
+  "wave": "W3"
+ },
+ {
+  "id": "J077",
+  "surface": "Handover/Lessons",
+  "name": "Lesson worthiness",
+  "moment": "a failure-and-fix pair after a release",
+  "question": {
+   "type": "score",
+   "instructions": "Given a failure and its fix, rate how reusable it is as a vault lesson, 2=not reusable ... 10=highly reusable.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "dedup check + vault quota",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to a low score (filters noise rather than bloating the vault)",
+  "frequency": "per release",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D65",
+   "M37"
+  ],
+  "value": "filters noise before it becomes a permanent vault note",
+  "wave": "W3"
+ },
+ {
+  "id": "J078",
+  "surface": "Handover/Lessons",
+  "name": "Lesson type classify",
+  "moment": "filing a new vault lesson",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the lesson text, classify its type; one literal sentence.",
+   "options": [
+    "process",
+    "code",
+    "test",
+    "security",
+    "data",
+    "unknown"
+   ]
+  },
+  "partner": "fixed lesson taxonomy",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown files under a generic catch-all category rather than guessing wrong",
+  "frequency": "per lesson",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D66"
+  ],
+  "value": "routes a lesson to the right index without a human re-reading it to file it",
+  "wave": "W3"
+ },
+ {
+  "id": "J079",
+  "surface": "Handover/Lessons",
+  "name": "Handover risk score",
+  "moment": "closing a handover pack",
+  "question": {
+   "type": "score",
+   "instructions": "Given the open failures at handover time, rate the handover's risk, 2=clean ... 10=severe open risk.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "count of open failures",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to a higher risk score (safer transition posture)",
+  "frequency": "per handover",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D75"
+  ],
+  "value": "flags a risky handover before the next session inherits it blind",
+  "wave": "W3"
+ },
+ {
+  "id": "J080",
+  "surface": "Handover/Lessons",
+  "name": "Lesson novelty check",
+  "moment": "before filing a candidate vault lesson",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a candidate lesson and the top-3 vault hits for it, state whether it is already covered. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "embedding search + human approve",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain files the lesson anyway (safer: never silently drops a possibly-novel lesson)",
+  "frequency": "per release",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M38"
+  ],
+  "value": "stops vault bloat from re-filing an already-known lesson",
+  "wave": "W3"
+ },
+ {
+  "id": "J081",
+  "surface": "Handover/Lessons",
+  "name": "Handover-doc completeness check",
+  "moment": "closing a handover pack",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the handover doc, state whether it covers what-shipped, risks, and next steps. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "handover template's own required-section validator",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain blocks the handover as thin (safer default, never passes a possibly-thin handover)",
+  "frequency": "per release",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M39"
+  ],
+  "value": "blocks a thin handover before the next session inherits an incomplete picture",
+  "wave": "W3"
+ },
+ {
+  "id": "J082",
+  "surface": "Vault",
+  "name": "Vault note/claim duplicate & contradiction check",
+  "moment": "vault triage scan / note dedup",
+  "question": {
+   "type": "choice",
+   "instructions": "Given two paired notes or claims, classify their relationship; one literal sentence.",
+   "options": [
+    "duplicate",
+    "scoped-both-true",
+    "contradiction",
+    "unrelated",
+    "unknown"
+   ]
+  },
+  "partner": "bm_vault_triage.py's own dimension-equality compare (stays first pass) + embedding/hash + merge log",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown surfaces the pair for human triage, never auto-merges or auto-contradicts",
+  "frequency": "per vault triage scan / per note",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothermode/tools/bm_vault_triage.py:244",
+  "sources": [
+   "invD33",
+   "D67",
+   "M44",
+   "D71"
+  ],
+  "value": "reduces vault noise across roughly 1700 notes without a human reading every pair",
+  "wave": "W2"
+ },
+ {
+  "id": "J083",
+  "surface": "Vault",
+  "name": "Vault recall rerank",
+  "moment": "reranking recalled notes/rules for a unit",
+  "question": {
+   "type": "score",
+   "instructions": "Given a unit spec and one recalled note or rule, rate its relevance, batched across the recalled set, 2=irrelevant ... 10=highly relevant.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "bm_learning.py's own lexical-overlap (BM25-ish) ranking (stays the baseline signal)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown keeps the lexical ranking's own order",
+  "frequency": "per unit / per recall, batched",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothermode/tools/bm_learning.py:181",
+  "sources": [
+   "invD31",
+   "D68",
+   "M40"
+  ],
+  "value": "acts as a cheap reranker at roughly reranker parity, beside the existing lexical pass",
+  "wave": "W1",
+  "parity": true
+ },
+ {
+  "id": "J084",
+  "surface": "Vault",
+  "name": "Vault note authority level",
+  "moment": "trusting a vault note's claim",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a note and its cited evidence, classify its authority level; one literal sentence.",
+   "options": [
+    "authoritative",
+    "heuristic",
+    "anecdotal",
+    "deprecated",
+    "unknown"
+   ]
+  },
+  "partner": "named-evidence requirement for the authoritative label (stays sole gate on that label)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown defaults to heuristic (never auto-labeled authoritative on a guess)",
+  "frequency": "per note",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D69",
+   "M45"
+  ],
+  "value": "prevents lore drift by keeping the authoritative label evidence-gated",
+  "wave": "W3"
+ },
+ {
+  "id": "J085",
+  "surface": "Vault",
+  "name": "Vault index routing",
+  "moment": "filing a new vault note",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a note's text, choose which index it should route to; one literal sentence.",
+   "options": [
+    "backend",
+    "data",
+    "migration",
+    "security",
+    "qa",
+    "process",
+    "unknown"
+   ]
+  },
+  "partner": "tag rules + reviewer tag",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown files under a generic index rather than guessing wrong",
+  "frequency": "per note",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D70",
+   "M43"
+  ],
+  "value": "keeps recall precise by filing notes under the right index",
+  "wave": "W3"
+ },
+ {
+  "id": "J086",
+  "surface": "Vault",
+  "name": "Note evidence-strength score",
+  "moment": "trusting a vault note's claim",
+  "question": {
+   "type": "score",
+   "instructions": "Given a note's cited links/tests, rate its evidence strength, 2=no support ... 10=fully proven.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "presence of links/tests",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown defaults to a low score (never inflates an unsupported note)",
+  "frequency": "per note",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D72"
+  ],
+  "value": "supports the authority-level judgment with a finer-grained evidence read",
+  "wave": "W3"
+ },
+ {
+  "id": "J087",
+  "surface": "Vault",
+  "name": "Recall-set inclusion filter",
+  "moment": "assembling a unit's just-in-time context",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a candidate recalled note and the current unit, decide whether to include or exclude it from context, batched per hit; one literal sentence.",
+   "options": [
+    "include",
+    "exclude",
+    "unknown"
+   ]
+  },
+  "partner": "token budget + relevance cutoff (top-k)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown includes the candidate (safer: never silently drops possibly-useful context)",
+  "frequency": "per turn, batched",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "D73",
+   "M41"
+  ],
+  "value": "prunes context to the notes that are actually actionable now",
+  "wave": "W3"
+ },
+ {
+  "id": "J088",
+  "surface": "Vault",
+  "name": "Note staleness",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "noul",
+   "instructions": "MUST_NOT -- staleness is computed from note age against a horizon (date arithmetic); the toolkit inventory itself flags this function's date-math part MUST-NOT, and only the note-type part (kept as a separate entry) is a real judgment call.",
+   "options": []
+  },
+  "partner": "bm_vault_staleness.py's age_days horizon compare",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the date arithmetic is always the answer",
+  "frequency": "per staleness scan",
+  "privacy": "public_or_own_text",
+  "anchor": "products/brothermode/tools/bm_vault_staleness.py:153",
+  "sources": [
+   "invD36",
+   "D74"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J089",
+  "surface": "Vault",
+  "name": "Vault note type classify",
+  "moment": "filing or auditing a vault note",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a note's text, classify its type; one literal sentence.",
+   "options": [
+    "lesson",
+    "checklist",
+    "pattern",
+    "gotcha",
+    "decision-record",
+    "unknown"
+   ]
+  },
+  "partner": "bm_vault_staleness.py's own regex classification of note type from frontmatter (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown keeps the regex's own type guess",
+  "frequency": "per release / per staleness scan",
+  "privacy": "public_or_own_text",
+  "anchor": "products/brothermode/tools/bm_vault_staleness.py:84",
+  "sources": [
+   "invD35",
+   "M42"
+  ],
+  "value": "second-opinions note typing beside a low-risk regex already flagged as 'low risk' in the inventory",
+  "wave": "W1"
+ },
+ {
+  "id": "J090",
+  "surface": "Vault",
+  "name": "Pre-injection usefulness score",
+  "moment": "deciding whether to inject a vault note into context just-in-time",
+  "question": {
+   "type": "score",
+   "instructions": "Given a note and the current error/situation, rate how likely injecting it is to prevent a repeat, 2=unlikely ... 10=highly likely.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "repeat-mistake guard's own log of what it has already caught",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to injecting anyway (safer: never silently withholds a possibly-useful note)",
+  "frequency": "per tool call",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "M46"
+  ],
+  "value": "drives just-in-time recall beside the repeat-mistake guard, not instead of it",
+  "wave": "W3"
+ },
+ {
+  "id": "J091",
+  "surface": "Hooks/Drift",
+  "name": "Founder-decision-risk classify",
+  "moment": "classifying a decision's text once identified",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a decision's text, classify its risk framing; one literal sentence.",
+   "options": [
+    "red",
+    "amber",
+    "unknown"
+   ]
+  },
+  "partner": "fable_authority.py's own keyword list (stays first pass; GREEN is unreachable by design)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or low confidence defaults to RED, never GREEN (matches the PR-572 fix removing the green-on-no-match default)",
+  "frequency": "per founder-facing decision",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/fable_authority.py:193",
+  "sources": [
+   "invD06"
+  ],
+  "value": "second-opinions a classifier already found defaulting to green on no-match once",
+  "wave": "W3"
+ },
+ {
+  "id": "J092",
+  "surface": "Dispatch Loop",
+  "name": "Lane-decision cascade (existing live integration)",
+  "moment": "a dispatched unit's risk_class routes through the calibrated cascade",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a unit's risk_class and calibration family, decide ACT/lane, exactly as jev_cascade.py already does today; documented here for catalogue completeness.",
+   "options": [
+    "act",
+    "escalate",
+    "no-data",
+    "unknown"
+   ]
+  },
+  "partner": "jev_cascade.py's own confidence-gated cascade (risk_class == critical is hard-wired to never auto-act)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "no-data or low confidence escalates, never silently acts",
+  "frequency": "per dispatched unit",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/lane_router.py:178",
+  "sources": [
+   "invD07"
+  ],
+  "value": "documents the one family (decisions) already wired end-to-end, as the template for every other entry here",
+  "wave": "W1"
+ },
+ {
+  "id": "J093",
+  "surface": "Vault",
+  "name": "Learned-rule atomicity check",
+  "moment": "capturing a new learned rule",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a captured action's text, state whether it has an atomicity problem (bundles more than one rule). Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "bm_learning.py's own heuristic scan (stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain flags the capture for human review anyway (safer default)",
+  "frequency": "per learning capture",
+  "privacy": "needs_content_gate",
+  "anchor": "products/brothermode/tools/bm_learning.py:128",
+  "sources": [
+   "invD32"
+  ],
+  "value": "second-opinions a heuristic that decides whether a captured lesson is cleanly scoped",
+  "wave": "W2"
+ },
+ {
+  "id": "J094",
+  "call_site_reads_answer": false,
+  "surface": "Docs",
+  "name": "Docs-vs-code number materiality",
+  "moment": "a docs figure and a code figure disagree",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a docs-stated number and the code's real figure, state whether the mismatch is user-visible/material. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "export_public.py's own LINT_FIGURE_RE / README_PROVE_RE checks (stays first pass) + docs-number checker",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain treats the mismatch as material (safer: never silences a real drift on a guess)",
+  "frequency": "per release / per public export",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/export_public.py:198",
+  "sources": [
+   "invD28",
+   "D83",
+   "M51"
+  ],
+  "value": "silences trivial docs/code drift without ever silencing a real one",
+  "wave": "W1"
+ },
+ {
+  "id": "J095",
+  "call_site_reads_answer": false,
+  "surface": "Hooks/Drift",
+  "name": "Doc-assurance 'generated not authored' phrasing check",
+  "moment": "doc-assurance gate on SYSTEM.md-adjacent docs",
+  "question": {
+   "type": "noul",
+   "instructions": "Given doc text about editing SYSTEM.md, state whether it invites direct editing rather than the generated-file workflow. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "doc_assurance.py's own regex (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain keeps the regex's own verdict",
+  "frequency": "per doc-assurance gate run",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/doc_assurance.py:204",
+  "sources": [
+   "invD25"
+  ],
+  "value": "second-opinions a narrow phrasing regex at low risk and low cost",
+  "wave": "W1"
+ },
+ {
+  "id": "J096",
+  "call_site_reads_answer": false,
+  "surface": "Hooks/Drift",
+  "name": "Approval-prompt phrasing detector",
+  "moment": "intake_score gate on a doc's prose",
+  "question": {
+   "type": "choice",
+   "instructions": "Given an excerpt of an intake doc (2000 characters centered on the deterministic check's own approval-point candidate, never the document's first 2000 characters and never the whole record, and never asked per line, and never asked at all when the deterministic check finds no candidate), classify whether it contains an approval prompt; one literal sentence.",
+   "options": [
+    "is-approval-prompt",
+    "not-approval-prompt",
+    "unclear",
+    "unknown"
+   ]
+  },
+  "partner": "intake_score.py's own regex heuristic (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unclear/unknown keeps the regex's own verdict",
+  "frequency": "per intake doc",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/intake_score.py:615 (score_sequencing, one call per document)",
+  "sources": [
+   "invD05"
+  ],
+  "value": "second-opinions a low-risk phrasing heuristic already in production",
+  "wave": "W1"
+ },
+ {
+  "id": "J097",
+  "call_site_reads_answer": false,
+  "surface": "Dispatch Loop",
+  "name": "Mobile action risk classify",
+  "moment": "dispatching a mobile hybrid action",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a driver description string, classify the risk of the action; one literal sentence.",
+   "options": [
+    "low",
+    "medium",
+    "high",
+    "unknown"
+   ]
+  },
+  "partner": "mobile_hybrid_action_router.py's own heuristic (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown defaults to high risk (safer routing)",
+  "frequency": "per mobile action dispatch",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/mobile_hybrid_action_router.py:133",
+  "sources": [
+   "invD43"
+  ],
+  "value": "second-opinions a low-risk heuristic already in production",
+  "wave": "W1"
+ },
+ {
+  "id": "J098",
+  "call_site_reads_answer": false,
+  "surface": "Dispatch Loop",
+  "name": "Mobile driver selector match",
+  "moment": "dispatching a mobile hybrid action",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a driver description and requested tier, choose which driver should handle the action; one literal sentence.",
+   "options": [
+    "driver-a",
+    "driver-b",
+    "driver-c",
+    "unknown"
+   ]
+  },
+  "partner": "mobile_hybrid_action_router.py's own text-match selector (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown keeps the text-match selector's own choice",
+  "frequency": "per mobile action dispatch",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/mobile_hybrid_action_router.py:172",
+  "sources": [
+   "invD44"
+  ],
+  "value": "second-opinions driver selection at low risk and low cost",
+  "wave": "W1"
+ },
+ {
+  "id": "J099",
+  "surface": "Release Cut",
+  "name": "Receipt risk-trigger phrase scan",
+  "moment": "assembling a release receipt",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a unit's text, state whether it contains a risk-trigger phrase worth flagging on the receipt. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "receipt_door.py's own heuristic phrase scan (stays first pass)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain flags the unit anyway (safer default)",
+  "frequency": "per release receipt",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/receipt_door.py:237",
+  "sources": [
+   "invD47"
+  ],
+  "value": "second-opinions the risk-trigger scan before a receipt understates real risk",
+  "wave": "W2"
+ },
+ {
+  "id": "J100",
+  "call_site_reads_answer": false,
+  "surface": "Release Cut",
+  "name": "Revert-broke-something check",
+  "moment": "assembling a release receipt after a revert",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a revert's stderr text (an excerpt: the first 2000 characters only, any real home-directory path redacted to '~'), state whether the revert broke something else. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "receipt_door.py's own keyword judgment (stays first pass)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "abstain flags the revert for human review anyway (safer default)",
+  "frequency": "per release receipt",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/receipt_door.py:294",
+  "sources": [
+   "invD48"
+  ],
+  "value": "second-opinions a low-risk keyword check on revert stderr",
+  "wave": "W1"
+ },
+ {
+  "id": "J101",
+  "surface": "Hooks/Drift",
+  "name": "Privacy/secret near-miss disambiguation",
+  "moment": "a private-term or secret scan fires an ambiguous hit",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a diff/doc chunk already flagged by the deterministic regex/entropy scanner, classify whether the hit is a real near-miss or a false positive (e.g. 'hurry' vs 'a client'), batched; the scanner keeps sole block/clear authority and Jev only prioritizes for human review.",
+   "options": [
+    "real-near-miss",
+    "false-positive",
+    "unclear",
+    "unknown"
+   ]
+  },
+  "partner": "outgoing_scan.py / identity_guard.py / handover_pack_scan.py / doc_assurance.py's own deterministic regex scanners (sole gate, never superseded)",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "unknown or unclear stays flagged for human review; never auto-clears a hit",
+  "frequency": "every push / every handover pack close",
+  "privacy": "must_stay_on_machine",
+  "anchor": "scripts/outgoing_scan.py:125",
+  "sources": [
+   "invD20",
+   "invD21",
+   "invD22",
+   "invD27",
+   "M52"
+  ],
+  "value": "prioritizes ambiguous near-misses for a human instead of a human reading every regex hit; this call must run on-machine, never through an off-machine bridge, since the payload can itself be the sensitive text",
+  "wave": null,
+  "must_not_reason": "privacy and secret decisions are never delegated; the payload is itself the sensitive content (the content gate refused it on 2026-09-18)"
+ },
+ {
+  "id": "J102",
+  "surface": "Hooks/Drift",
+  "name": "Done-claim verification check",
+  "moment": "end of a turn claiming work is complete",
+  "question": {
+   "type": "noul",
+   "instructions": "Given the final message and whether it quotes a verifying command's output run after the last edit, state whether the done-claim lacks that verbatim quote. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "the orchestrator's own re-run of the check in the main lane (verification-before-completion discipline)",
+  "role": "second_opinion",
+  "risk": "high",
+  "fail_direction": "unknown or a missing quote flags the claim for the orchestrator; never lets an unverified done-claim pass silently",
+  "frequency": "end of every turn claiming done",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "C11"
+  ],
+  "value": "catches the exact recurring failure class this estate's own laws name (a claim made without a verifying command run after the last edit)",
+  "wave": "W1",
+  "wave_note": "moved to W1 on the founder's parity order 2026-09-18 (parity with Superpowers and GSD)",
+  "parity": true
+ },
+ {
+  "id": "J103",
+  "surface": "Gates/Batteries",
+  "name": "Mutation-survivor triage ranking",
+  "moment": "ranking code mutations by whether tests likely miss them",
+  "question": {
+   "type": "score",
+   "instructions": "Given a mutant and the tests that should catch it, rate how meaningful killing it would be, 2=vanity mutant ... 10=real gap. A 'caught' prediction never removes a mutation from the run.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "the mutation-testing tool's own report (the real kill/survive signal)",
+  "role": "triage_or_rank",
+  "risk": "medium",
+  "fail_direction": "unknown runs the mutant anyway (never silently skipped on a guess)",
+  "frequency": "per release / per mutation run",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "C12",
+   "D85",
+   "M58"
+  ],
+  "value": "runs likely survivors first without ever removing a mutation from the battery",
+  "wave": "W3"
+ },
+ {
+  "id": "J104",
+  "surface": "Gates/Batteries",
+  "name": "Test-failure-triage classify",
+  "moment": "a test fails in CI or locally",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the log tail and test names, classify the failure; one literal sentence.",
+   "options": [
+    "flaky",
+    "genuine-defect",
+    "environment-problem",
+    "wrong-test-expectation",
+    "unknown"
+   ]
+  },
+  "partner": "exit code + rerun on a clean worktree",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "unknown escalates rather than retrying once automatically",
+  "frequency": "per test / per unit",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "C13",
+   "D84",
+   "M57"
+  ],
+  "value": "decides whether a single retry is worth it, never spending a retry on a guess",
+  "wave": "W3",
+  "parity": true
+ },
+ {
+  "id": "J105",
+  "surface": "Dispatch Loop",
+  "name": "Agent looping/stalled detection",
+  "moment": "monitoring the last twenty tool calls of an agent turn",
+  "question": {
+   "type": "noul",
+   "instructions": "Given a summary of the last twenty tool calls, state whether the agent is looping or stalled without progress, as a warning beside counters of identical calls. Abstain band 0.2-0.8.",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "counters of identical/near-identical tool calls (the real trigger)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "abstain leaves the counter-based warning as the only signal (never silently clears a real stall)",
+  "frequency": "per turn / per sweep",
+  "privacy": "public_or_own_text",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "C14"
+  ],
+  "value": "adds a semantic warning beside the mechanical repeated-call counters, never replacing them",
+  "wave": "W3",
+  "parity": true
+ },
+ {
+  "id": "J106",
+  "surface": "Hooks/Drift",
+  "name": "Jev self-configuration (batching / question-type / option-order)",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- these ask Jev to decide how Jev itself should be called (batch vs split, which typed question fits, whether to randomize option order against its own documented option-order sensitivity); this is a fixed calling-convention/engineering decision, not a per-instance harness judgment, and letting the model tune its own calibration is a self-approval pattern.",
+   "options": []
+  },
+  "partner": "jev_decide.py / or_ask.py's own fixed calling convention",
+  "role": "MUST_NOT",
+  "risk": "medium",
+  "fail_direction": "n/a -- the calling convention is a code-level constant, not runtime output",
+  "frequency": "per call",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/jev_decide.py",
+  "sources": [
+   "D90",
+   "D91",
+   "D92"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J107",
+  "surface": "Hooks/Drift",
+  "name": "Secret/private-term sole-gate scanners",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- exact-pattern secret/credential detection (sk-, ghp_, AKIA, PRIVATE KEY, Bearer) and the canonical private-term scanner; a miss leaks a key or a client name, so these stay deterministic regex as sole gate, never a probabilistic classifier.",
+   "options": []
+  },
+  "partner": "outgoing_scan.py SECRET_PATTERNS / private_terms_scan.py / reviewroute.py _secret_like_hits",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the regex sole gate is always the answer",
+  "frequency": "every push / every PR review",
+  "privacy": "must_stay_on_machine",
+  "anchor": "scripts/outgoing_scan.py:26-36",
+  "sources": [
+   "invD14",
+   "invD19",
+   "invD23"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J108",
+  "surface": "Hooks/Drift",
+  "name": "Exact-string attribution/style scan",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- exact string match (Claude/Anthropic attribution) and exact dash/house-style regex; no ambiguity to adjudicate.",
+   "options": []
+  },
+  "partner": "doc_assurance.py ATTRIBUTION regex / check_house_style",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the exact-string match is always the answer",
+  "frequency": "doc-assurance gate / every push",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/doc_assurance.py:69",
+  "sources": [
+   "invD24",
+   "invD26"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J109",
+  "surface": "Hooks/Drift",
+  "name": "GitHub Actions cost/macOS-runner wall",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- spend/security hard wall on workflow YAML (macOS runner, unguarded automatic trigger); an ENFORCED cost control with its own passing test suite, never a probabilistic gate.",
+   "options": []
+  },
+  "partner": "~/.claude/hooks/github_cost_wall.py's own MACOS/AUTO_TRIGGER/PRIVATE_GUARD regexes",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the hard wall is always the answer",
+  "frequency": "every workflow write",
+  "privacy": "public_or_own_text",
+  "anchor": "~/.claude/hooks/github_cost_wall.py",
+  "sources": [
+   "invD29"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J110",
+  "surface": "Hooks/Drift",
+  "name": "Secret-scan disposition action",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- choosing block/redact/ignore for a detected secret is a security-action decision; the scanner's deterministic verdict must keep sole authority over disposition, per the estate's own 'never a sole secret/PII gate' exclusion.",
+   "options": []
+  },
+  "partner": "the deterministic scanner's own verdict",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- block is always the safe default action, never chosen by Jev",
+  "frequency": "every push",
+  "privacy": "must_stay_on_machine",
+  "anchor": "scripts/outgoing_scan.py:26-36",
+  "sources": [
+   "D81"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J111",
+  "surface": "Vault",
+  "name": "As-of date-membership / mechanical enum lookups",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- as-of code-list membership by date is date arithmetic; table-lookup severity/path-pattern/extension classifiers have no ambiguity for a probabilistic model to resolve.",
+   "options": []
+  },
+  "partner": "bm_vault_attributes.py / bm_vault_tiers.py / mobile_ownership_resolver.py / receipt_door.py's own deterministic lookups",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the deterministic lookup is always the answer",
+  "frequency": "per vault write / per artifact resolve / per release receipt",
+  "privacy": "public_or_own_text",
+  "anchor": "products/brothermode/tools/bm_vault_attributes.py:248",
+  "sources": [
+   "invD34",
+   "invD38",
+   "invD45",
+   "invD49"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J112",
+  "surface": "Hooks/Drift",
+  "name": "Security-benchmark ground-truth verdict",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- the gauntlet's planted/poisoned-content verdict IS the security benchmark's own ground truth; using a probabilistic judge to grade a security-benchmark result would let the thing under test grade itself.",
+   "options": []
+  },
+  "partner": "gauntlet_memory_poisoning.py's own classify()",
+  "role": "MUST_NOT",
+  "risk": "high",
+  "fail_direction": "n/a -- the benchmark's own recorded verdict is always the answer",
+  "frequency": "per gauntlet run (rare)",
+  "privacy": "must_stay_on_machine",
+  "anchor": "scripts/gauntlet_memory_poisoning.py:582",
+  "sources": [
+   "invD30"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J113",
+  "surface": "Vault",
+  "name": "Required-field presence/value schema check",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "choice",
+   "instructions": "MUST_NOT -- checking whether a vault note's required fields are present and correctly valued against a fixed schema is deterministic structural validation, not a judgment call.",
+   "options": []
+  },
+  "partner": "bm_vault_contract.py's own required-field schema",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the schema check is always the answer",
+  "frequency": "per vault write",
+  "privacy": "public_or_own_text",
+  "anchor": "products/brothermode/tools/bm_vault_contract.py:220",
+  "sources": [
+   "invD37"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J114",
+  "call_site_reads_answer": false,
+  "surface": "Hooks/Drift",
+  "name": "Intake-doc mechanical rubric second opinion",
+  "moment": "scoring an intake/decision record's dimensions",
+  "question": {
+   "type": "score",
+   "instructions": "Given an intake doc (excerpt: the Assumptions, persona and Options sections the mechanical rubric itself scores, capped at 4000 characters total, Options filled first and never the section truncated to make room, never the document's first 4000 characters and never the whole record), score the same rubric dimensions (grounded assumptions, weighted options, level adaptation) the mechanical rubric already scores, only to flag disagreement; the mechanical score keeps pass authority.",
+   "options": [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "unknown"
+   ]
+  },
+  "partner": "intake_score.py's own score_grounded_assumptions/score_options/score_weighted_options/score_level_adaptation (deterministic PASS decider, per the estate's 'deterministic graders verify' law)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown never overrides the mechanical score; a disagreement only adds a human-review flag",
+  "frequency": "per intake doc",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/intake_score.py:277 (score_grounded_assumptions), :449/516 (score_options/score_weighted_options), :656 (score_level_adaptation)",
+  "sources": [
+   "invD02",
+   "invD04",
+   "surf5",
+   "C06"
+  ],
+  "value": "lowest-risk, highest-fit candidate in the Jev-scored table (risk 0.52, fit 0.320 of 14 candidates); a rubric score reproducing the founder's own read is the exact pattern already proven in this estate's memory",
+  "wave": "W1"
+ },
+ {
+  "id": "J115",
+  "surface": "Hooks/Drift",
+  "name": "Intake-doc mermaid-diagram count",
+  "moment": "MUST_NOT",
+  "question": {
+   "type": "score",
+   "instructions": "MUST_NOT -- counting mermaid diagram blocks/shapes is arithmetic/counting, explicitly out of Jev's stated capability; the heuristic counter stays sole check.",
+   "options": []
+  },
+  "partner": "intake_score.py's own score_diagrams counter",
+  "role": "MUST_NOT",
+  "risk": "low",
+  "fail_direction": "n/a -- the counter is always the answer",
+  "frequency": "per intake doc",
+  "privacy": "public_or_own_text",
+  "anchor": "scripts/intake_score.py:355",
+  "sources": [
+   "invD03"
+  ],
+  "value": "kept in the catalogue for completeness; excluded by design",
+  "wave": null
+ },
+ {
+  "id": "J116",
+  "surface": "Hooks/Drift",
+  "name": "Drift-pattern confidence labeling (drift_gate.py, own mechanism)",
+  "moment": "Stop hook, every Brother session",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a drift-pattern match drift_gate.py's own regex already fired on, label it, only to set the finding's displayed confidence; nothing is suppressed.",
+   "options": [
+    "exhibits-drift",
+    "discusses-drift-only",
+    "unclear",
+    "unknown"
+   ]
+  },
+  "partner": "drift_gate.py's own detect() (stays the trigger)",
+  "role": "second_opinion",
+  "risk": "low",
+  "fail_direction": "unknown/unclear surfaces as LOW-confidence, never suppressed",
+  "frequency": "every Stop event, this repo's own sessions",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/drift_gate.py:detect() (2026-09-19: replaces the third-party claude-community/slop-gate plugin this entry originally named, whose real anchor sat in a plugin cache directory this estate does not own; two real defects measured against it, an evidence allowlist keyed on command names rather than real outcomes, and matching quoted/described text as a live claim, are fixed in the replacement, see drift_gate.py's own module docstring)",
+  "sources": [
+   "surf3",
+   "C03"
+  ],
+  "value": "cuts noisy drift findings (same false-positive class as repeat_guard) without ever hiding a real one",
+  "wave": "W2"
+ },
+ {
+  "id": "J117",
+  "surface": "Dispatch Loop",
+  "name": "Scope audit: change matches the unit's objective",
+  "moment": "after a unit's worker finishes, before integration",
+  "question": {
+   "type": "noul",
+   "instructions": "Is this changed file part of doing the unit's stated objective?",
+   "options": [
+    "true",
+    "false"
+   ]
+  },
+  "partner": "the deterministic declared-scope path check (loop_bridge scope audit, QUARANTINE on out-of-scope writes) keeps sole authority",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "NO-DATA or low confidence changes nothing; the path check decides as today",
+  "frequency": "per changed file per unit",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "founder-parity-2026-09-18"
+  ],
+  "value": "semantic scope check beside the path rule, GSD parity",
+  "wave": "W1",
+  "parity": true,
+  "wave_note": "moved to W1 on the founder's parity order 2026-09-18 (parity with Superpowers and GSD)"
+ },
+ {
+  "id": "J118",
+  "surface": "Vault incident notes",
+  "name": "Vault write-time dedup adjudicator",
+  "moment": "a new incident note is about to commit",
+  "question": {
+   "type": "choice",
+   "instructions": "Given a drafted vault note and the top-3 deterministically-retrieved candidate notes, choose whether the new note shares the same root cause as the best candidate, is merely related, or is genuinely novel. SAME only when the failing mechanism matches, not just the symptom text.",
+   "options": [
+    "SAME_ROOT_CAUSE_MERGE",
+    "RELATED_LINK_ONLY",
+    "NOVEL_KEEP",
+    "UNKNOWN"
+   ]
+  },
+  "partner": "bm_vault_intake.py's own deterministic retrieval and write gate (sole write authority, never overridden)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "NO-DATA or low confidence writes the note unchanged, as NOVEL_KEEP; a merge is only ever a logged suggestion for a later human vault-gc pass, never an auto-merge",
+  "frequency": "per new vault note",
+  "privacy": "needs_content_gate",
+  "anchor": "new: no existing surface",
+  "sources": [
+   "docs/plan/INTAKE-2026-09-19-jev-competitive-edge.md",
+   "founder-approval-2026-09-19"
+  ],
+  "value": "attacks the named CRITICAL (weight 7) point-of-need-memory gap directly; both DeepSeek and Muse independently proposed this as their top use case",
+  "wave": "W2",
+  "wave_note": "founder-approved 2026-09-19 (docs/decisions/jev-competitive-edge-2026-09-19.json), option 1 of 3, recommended first; options 2 and 3 (WBS units A2.02, A2.03) are approved but not yet assigned a registry id, built only once this one lands"
+ },
+ {
+  "id": "J119",
+  "surface": "Front door (the already-shipped J014 two-hook seam)",
+  "name": "Front-door readiness and single-slot picker",
+  "moment": "immediately after the already-shipped J014 seam returns its candidate front-door bucket, before dispatch",
+  "question": {
+   "type": "choice",
+   "instructions": "Given the raw request text and the front-door bucket J014 already chose, decide whether dispatch should proceed as-is or ask exactly one clarifying question. PROCEED_BEST when the request is actionable without asking anything. ASK_TARGET_SCOPE, ASK_SUCCESS_CRITERIA, ASK_RISK_BUDGET or ASK_TIMEBOX when exactly one of those slots would resolve the largest ambiguity. NEEDS_HUMAN for anything destructive or irreversible-feeling. Never more than one question.",
+   "options": [
+    "PROCEED_BEST",
+    "ASK_TARGET_SCOPE",
+    "ASK_SUCCESS_CRITERIA",
+    "ASK_RISK_BUDGET",
+    "ASK_TIMEBOX",
+    "NEEDS_HUMAN",
+    "UNKNOWN"
+   ]
+  },
+  "partner": "the dispatch loop's own default of proceeding immediately (sole authority, never overridden)",
+  "role": "second_opinion",
+  "risk": "medium",
+  "fail_direction": "NO-DATA or low confidence always resolves to PROCEED_BEST, never an invented clarifying question; a destructive-pattern match forces NEEDS_HUMAN by a deterministic check that runs before Jev is even asked, regardless of what Jev says",
+  "frequency": "per bare front-door request",
+  "privacy": "needs_content_gate",
+  "anchor": "scripts/jev_frontdoor_classify.py (extends the already-shipped J014 hook, does not replace it)",
+  "sources": [
+   "docs/plan/INTAKE-2026-09-19-jev-competitive-edge.md",
+   "founder-approval-2026-09-19"
+  ],
+  "value": "defends the one-front-door claim against GSD/Superpowers/BMAD/Compound Engineering's many-skill menus, per both DeepSeek's and Muse's independent proposals; both scored it lowest of the three (UX simplicity carries the lower of the two named weak weights)",
+  "wave": "W2",
+  "wave_note": "founder-approved 2026-09-19 (docs/decisions/jev-competitive-edge-2026-09-19.json), option 3 of 3, built ahead of option 2 since A2.01/A2.02 are both blocked on a real packaging gap and this seam has no technical dependency on either"
+ }
+]

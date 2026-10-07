@@ -72,17 +72,19 @@ def manifest_versions(plugins):
 
 
 def subtree_path(plugin):
-    """The products/ directory this plugin installs from, or None.
+    """The products/ or bundle directory this plugin installs from, or None.
 
     The source form is read from the manifest rather than assumed: a
-    git-subdir source carries its subtree in source["path"], while the
-    bundle's source is a plain relative string and owns no subtree.
+    git-subdir source carries its subtree in source["path"]; any other
+    source form owns no subtree here.
     """
     src = plugin.get("source")
     if not isinstance(src, dict):
         return None
     path = src.get("path", "")
-    if not path.startswith("products/"):
+    # The brother bundle ships from bundle/ as a git-subdir too; from 1.1.0 it
+    # is the only catalog entry, so leaving it out checked nothing at all.
+    if not (path.startswith("products/") or path == "bundle"):
         return None
     return ROOT / path
 
@@ -215,10 +217,15 @@ def main():
                   "code")
             failed = True
 
+    checked = [p["name"] for p in plugins if subtree_path(p) is not None]
+    if not checked:
+        print("FAILED: no catalog entry resolves to a shipped plugin.json, so "
+              "nothing was compared; an empty check is not agreement")
+        failed = True
+
     if failed:
         return 1
 
-    checked = [p["name"] for p in plugins if subtree_path(p) is not None]
     shown = ", ".join(f"{k}={v}" for k, v in versions.items())
     files = ", ".join(str(p.relative_to(ROOT)) for p in TEXT_FILES)
     print(f"PASSED: every shipped version string in {files} agrees with "

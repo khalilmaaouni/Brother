@@ -503,7 +503,10 @@ class JevSeamJ097SecondOpinion(unittest.TestCase):
         self.assertEqual(before, after)
 
     def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
-        expected = R._risk_for_action(self.DESC, "TAP")  # real config: off
+        # baseline under an explicit off config: never the live data/jev-seams.json,
+        # which may legitimately hold this seam in shadow (and would call out for real)
+        with mock.patch.object(jev_seam, "load_seams_config", return_value={}):
+            expected = R._risk_for_action(self.DESC, "TAP")
         ledger_dir = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, ledger_dir, ignore_errors=True)
         cfg = {"modes": {"J097": "shadow"}}
@@ -617,7 +620,10 @@ class JevSeamJ098SecondOpinion(unittest.TestCase):
         self.assertEqual(before, after)
 
     def test_b_shadow_mode_output_identical_and_one_ledger_row_written(self):
-        expected = R._selector_match("native_semantic", self.DESC)  # real config: off
+        # baseline under an explicit off config: never the live data/jev-seams.json,
+        # which may legitimately hold this seam in shadow (and would call out for real)
+        with mock.patch.object(jev_seam, "load_seams_config", return_value={}):
+            expected = R._selector_match("native_semantic", self.DESC)
         ledger_dir = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, ledger_dir, ignore_errors=True)
         cfg = {"modes": {"J098": "shadow"}}
@@ -764,6 +770,71 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
                          "once jev_seam's config cache is warm")
         self.assertEqual(risk_outputs, {"safe"})
         self.assertEqual(match_outputs, {True})
+
+
+def setUpModule():
+    # Finding 31 (loop audit 2026-09-26): this module ran against two things
+    # it never supplied. (1) jev_decide's outside content gate reads its
+    # forbidden-terms list from HOME and fails closed when missing, so under
+    # an empty HOME (the pre-push gate's hermetic run) every shadow case went
+    # red, and under the real HOME it borrowed the machine's own list. (2)
+    # Unmocked calls read the tracked data/jev-seams.json, where a seam can
+    # legitimately sit in shadow, so a plain render invoked the machine's
+    # real bridge (~/.claude/bin/or_ask.py, resolved at import); measured
+    # under a fixture HOME it exited 44 five times and opened the breaker,
+    # refusing every later shadow case. Supply both as fixtures: an all-off seams
+    # config and a bridge path that does not exist, so only a case that
+    # patches its own config and runner ever calls out. A fixture HOME, not
+    # only a patched constant, because a child process resolves the terms
+    # list from its own HOME (the way test_jev_seam.py does it).
+    import shutil
+    import coe_outside_gate
+    import jev_decide
+    home = tempfile.mkdtemp(prefix="brother-g1-home-test-")
+    unittest.addModuleCleanup(shutil.rmtree, home, ignore_errors=True)
+    os.makedirs(os.path.join(home, ".claude"))
+    terms = os.path.join(home, ".claude", "coe-outside-gate-terms.json")
+    with open(terms, "w", encoding="utf-8") as fh:
+        json.dump({"vendor-fixture": ["ACMEWIDGET"]}, fh)
+    seams = os.path.join(home, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    for patcher in (mock.patch.object(coe_outside_gate, "DEFAULT_TERMS_PATH", terms),
+                    mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH",
+                                      os.path.join(home, "no-bridge-in-tests")),
+                    mock.patch.dict(os.environ, {"HOME": home})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # The processes these tests launch re-import jev_seam and read the
+    # tracked config afresh, out of reach of the patches above, and every
+    # consult, even an off one, writes attempt rows. So the children get
+    # BROTHER_JEV_SEAMS_OFF (the tracked file reads as every entry off), a
+    # temporary BROTHER_JEV_STATE_DIR (ledger and daily call budget) and a
+    # bridge command that cannot launch, quoted because the variable is
+    # parsed as a command line; this process gets the same ledger and
+    # budget paths, since its constants were fixed at import.
+    import shlex
+    import jev_checks
+    state = tempfile.mkdtemp(prefix="brother-jev-state-test-")
+    unittest.addModuleCleanup(shutil.rmtree, state, ignore_errors=True)
+    ledger = os.path.join(state, "ledger")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                      os.path.join(state, "jev-budget.json")),
+                    mock.patch.dict(os.environ, {
+                        "BROTHER_JEV_SEAMS_OFF": "1",
+                        "BROTHER_JEV_STATE_DIR": state,
+                        "BROTHER_DECISION_BRIDGE": shlex.quote(jev_decide.DEFAULT_BRIDGE_PATH)})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9's unittest runs the module cleanups above only when this
+    # hook exists (fixed in 3.10); without it the fixture HOME leaks per run.
+    pass
 
 
 if __name__ == "__main__":

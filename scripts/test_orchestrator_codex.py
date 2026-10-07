@@ -90,6 +90,19 @@ class StubAdapter(base.OrchestratorAdapter):
         return super(StubAdapter, self).health()
 
 
+class CodexBinTests(unittest.TestCase):
+    """ACC5, 2026-09-26: the adapter's override seam had no test, so it could
+    be dropped with every suite green (a recorded mutation survived)."""
+
+    def test_the_override_names_the_binary(self):
+        self.assertEqual(execution.codex_bin({"BROTHER_CODEX_BIN": "/opt/codex"}), "/opt/codex")
+
+    def test_without_an_override_it_is_an_absolute_app_path(self):
+        path = execution.codex_bin({})
+        self.assertTrue(os.path.isabs(path), path)
+        self.assertNotEqual(path, "codex")
+
+
 class ClassificationTests(unittest.TestCase):
     """base.OrchestratorAdapter._classify(): one attempt in, one
     ActionResult out, no retry loop involved. The per-shape proofs the

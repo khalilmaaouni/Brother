@@ -1,6 +1,6 @@
 ---
 name: brothersbe-learn
-description: "Use when a lesson from an incident, a repeated correction, a review finding or a measured outcome should become a shared rule, or when a session wants to propose an amendment to the laws. Proposes; it never lands a change to shared behavior. Invoke as /brothersbe:learn."
+description: "Use when a lesson from an incident, a repeated correction, a review finding or a measured outcome should become a shared rule, or when a session wants to propose an amendment to the laws. Proposes; it never lands a change to shared behavior. Invoke as /brother:brothersbe-learn."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

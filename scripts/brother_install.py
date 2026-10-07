@@ -73,7 +73,7 @@ import time
 import brother_paths
 import codex_product_skills
 
-CODEX_BIN_DEFAULT = "/Applications/ChatGPT.app/Contents/Resources/codex"
+CODEX_BIN_DEFAULT = brother_paths.codex_bin()
 MARKETPLACE_URL_DEFAULT = "https://github.com/khalilmaaouni/Brother"
 PLUGIN_NAME = "brother"
 STANDALONE_PLUGIN_NAME = "brothermode"
@@ -96,28 +96,88 @@ def default_codex_home():
     return brother_paths.config_dir(env)
 
 
+def account_home():
+    """The real user's home from the password database, never $HOME: a
+    caller that runs Codex in a throwaway home sets HOME to it
+    (scripts/host_live_proof.py does, 2026-10-04), and reading $HOME then
+    took that throwaway's .codex for the real one. Under sudo the uid is 0
+    and the password database answers /var/root, so the user who ran sudo
+    (SUDO_UID) is the account. None when the account cannot be read, uid 0
+    with no SUDO_UID included: an unknown account blocks, it never reads as
+    somebody else's."""
+    try:
+        import pwd
+        uid = os.getuid()
+        if uid == 0:
+            uid = int(os.environ.get("SUDO_UID", ""))
+        return pwd.getpwuid(uid).pw_dir
+    except (ImportError, KeyError, OSError, ValueError):
+        return None
+
+
+def _anchor(path):
+    """realpath(path) split into its nearest EXISTING ancestor and the
+    components below it (deepest first); "/" always exists, so the walk
+    ends."""
+    path = os.path.realpath(path)
+    below = []
+    while not os.path.exists(path):
+        path, name = os.path.split(path)
+        below.append(name)
+    return path, below
+
+
+def same_place(path, other):
+    """True when `path` and `other` are one directory by IDENTITY, never by
+    spelling: os.path.samefile (device and inode) when both exist, because
+    this volume keeps the case it was given and /USERS/<name> and
+    /System/Volumes/Data/Users/<name> are both /Users/<name>. For a path
+    that does not exist yet, its nearest existing ancestor is compared the
+    same way (realpath does not see through the data volume firmlink, so a
+    string compare there let the firmlink spelling of a not-yet-created
+    ~/.codex through) and the components below it casefolded. A stat that
+    fails answers True: an identity that cannot be read blocks."""
+    try:
+        if os.path.exists(path) and os.path.exists(other):
+            return os.path.samefile(path, other)
+        base, below = _anchor(path)
+        other_base, other_below = _anchor(other)
+        return (os.path.samefile(base, other_base)
+                and [n.casefold() for n in below] == [n.casefold() for n in other_below])
+    except OSError:
+        return True
+
+
 def resolve_home(named, allow_default):
     """{"path": ..., "problem": None} or a refusal. Mirrors
-    codex_hooks_install.resolve_home: the founder's own ~/.codex is refused
-    unless named AND allowed, and the path is REALPATH'd because macOS
+    codex_hooks_install.resolve_home: the account's own .codex is refused
+    unless named AND allowed, decided by identity (same_place) so that no
+    spelling of it slips past, and the path is REALPATH'd because macOS
     resolves /tmp and /var through symlinks and a mismatch there is how a
-    write lands somewhere this tool never reports."""
+    write lands somewhere this tool never reports. $HOME/.codex is in the
+    protected set exactly when $HOME is the account's home, which is what
+    same_place answers; a throwaway HOME's own .codex is accepted."""
     path = named or default_codex_home()
     if not path:
         return {"path": None, "problem": "no Codex home given: pass --codex-home <dir>"}
     path = os.path.realpath(os.path.expanduser(path))
+    account = account_home()
+    if account is None:   # the real Codex home cannot be told apart from any other: refuse, never guess
+        return {"path": None, "problem":
+                "refusing %s: the account's home could not be read, so the "
+                "real Codex home cannot be told apart from this one" % path}
     # A Codex home is a directory of its own, never a filesystem root and
     # never the user's whole home: uninstall removes <home>/skills,
     # <home>/hooks.json and <home>/brother/*, and pointed at "/" or "~" by
     # a typo those names may already belong to somebody else.
     real_home = os.path.realpath(os.path.expanduser("~"))
-    if path == os.path.dirname(path) or path == real_home:
+    if (path == os.path.dirname(path) or same_place(path, real_home)
+            or same_place(path, account)):
         return {"path": None, "problem":
                 "refusing %s as a Codex home: it is a filesystem root or "
                 "the user's own home directory, and a Codex home is a "
                 "directory of its own (for example ~/.codex)" % path}
-    real_default = os.path.realpath(os.path.expanduser(os.path.join("~", ".codex")))
-    if path == real_default and not allow_default:
+    if same_place(path, os.path.join(account, ".codex")) and not allow_default:
         return {"path": None, "problem":
                 "refusing to write %s, the real Codex home: pass "
                 "--allow-default-home to mean it" % path}
@@ -182,11 +242,49 @@ def marketplace_name_from_source(source):
     """The name Codex gives a marketplace added from `source`: the basename
     of the URL or path, `.git` stripped, lowercased. Matches what was
     measured live: "https://github.com/khalilmaaouni/Brother" names itself
-    "brother"."""
+    "brother". A local checkout is named by its marketplace.json instead,
+    EXACTLY as written: measured 2026-09-30 on Codex 0.157, a checkout whose
+    marketplace.json said "Brother-Mixed" was added as marketplaceName
+    "Brother-Mixed" and written to config.toml as [marketplaces.Brother-Mixed],
+    so lowercasing here would make the later plugin id miss the table. An
+    unreadable file falls back to the basename, so the later plugin lookup
+    fails loudly rather than guessing."""
+    if os.path.isdir(source):
+        for rel in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
+            try:
+                with open(os.path.join(source, rel), encoding="utf-8") as fh:
+                    name = json.load(fh).get("name")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(name, str) and name:
+                return name
     base = os.path.basename(source.rstrip("/"))
     if base.endswith(".git"):
         base = base[:-4]
     return base.lower()
+
+
+def source_label(source, ref):
+    """What the install lines print for `ref`. A git source installs `ref`,
+    so the label is the ref. A local checkout installs whatever is checked
+    out, whatever ref was asked for, so the label is the checkout's own HEAD
+    and whether it is dirty; a label naming the asked ref there would be a
+    green word that proves nothing (host-parity attack, 2026-09-30). A
+    directory that is not a git repository says so."""
+    if not os.path.isdir(source):
+        return ref
+    try:
+        head = subprocess.run(["git", "-C", source, "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, timeout=30)
+        status = subprocess.run(["git", "-C", source, "status", "--porcelain"],
+                                capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return "checkout %s (git unavailable)" % source
+    if head.returncode != 0 or status.returncode != 0:
+        return "checkout %s (not a git repository)" % source
+    sha = head.stdout.strip() or "unknown"
+    dirty = ", dirty" if status.stdout.strip() else ", clean"
+    return "checkout %s (HEAD %s%s)" % (source, sha, dirty)
 
 
 def read_marketplace_ref(config_text, name):
@@ -250,11 +348,14 @@ def ensure_marketplace(codex_bin, home, source, ref):
     """{"status": PASS|NO-CHANGE|FAIL, "detail": str}. Adds the marketplace
     at `ref`; if it is already present from a DIFFERENT source (Codex's own
     wording, measured live), removes it first and re-adds, since Codex
-    refuses to re-point one in place."""
+    refuses to re-point one in place. A local checkout installs what is
+    checked out: Codex refuses --ref for it ("--ref is only supported for
+    git marketplace sources", Codex 0.157), so the ref is not sent."""
     args = ["plugin", "marketplace", "add", source]
-    if ref is not None:
+    if ref is not None and not os.path.isdir(source):
         args += ["--ref", ref]
     args += ["--json"]
+    label = source_label(source, ref)
     result = run_codex(codex_bin, args, home)
     if result["problem"]:
         return {"status": "FAIL", "detail": result["problem"]}
@@ -266,7 +367,7 @@ def ensure_marketplace(codex_bin, home, source, ref):
             data = {}
         changed = not data.get("alreadyAdded", False)
         return {"status": "PASS" if changed else "NO-CHANGE",
-                "detail": "ref %s (%s)" % (ref, "added" if changed else "already present"),
+                "detail": "%s (%s)" % (label, "added" if changed else "already present"),
                 "installed_root": data.get("installedRoot")}
     if "already added from a different source" in body:
         name = marketplace_name_from_source(source)
@@ -279,12 +380,12 @@ def ensure_marketplace(codex_bin, home, source, ref):
         if add2["problem"] or add2["returncode"] != 0:
             return {"status": "FAIL", "detail":
                     "could not re-add marketplace at %s: %s"
-                    % (ref, add2["problem"] or (add2["stderr"] or add2["stdout"]).strip())}
+                    % (label, add2["problem"] or (add2["stderr"] or add2["stdout"]).strip())}
         try:
             data = json.loads(add2["stdout"])
         except ValueError:
             data = {}
-        return {"status": "PASS", "detail": "re-pointed from a different source to %s" % ref,
+        return {"status": "PASS", "detail": "re-pointed from a different source to %s" % label,
                 "installed_root": data.get("installedRoot")}
     return {"status": "FAIL", "detail": body.strip() or "marketplace add failed"}
 
@@ -511,7 +612,8 @@ def do_install(codex_bin, home, marketplace, ref, product_skills=False, product_
     bm_id = "%s@%s" % (STANDALONE_PLUGIN_NAME, marketplace_name_from_source(marketplace))
 
     mres = ensure_marketplace(codex_bin, home, marketplace, ref)
-    print("%s: %s: marketplace at %s (%s)" % (PROG, mres["status"], ref, mres["detail"]))
+    print("%s: %s: marketplace at %s (%s)"
+          % (PROG, mres["status"], source_label(marketplace, ref), mres["detail"]))
     steps.append(mres["status"])
 
     pres = ensure_plugin_added(codex_bin, home, plugin_id)
@@ -727,8 +829,8 @@ def do_upgrade(codex_bin, home, marketplace, from_ref, ref, product_skills=False
     if snap["problem"]:
         print("%s: FAIL: could not snapshot pre-upgrade state: %s" % (PROG, snap["problem"]))
         return {"verdict": "FAIL"}
-    print("%s: PASS: snapshotted pre-upgrade state (ref %s) to %s"
-          % (PROG, from_ref, snap["dir"]))
+    print("%s: PASS: snapshotted pre-upgrade state (%s) to %s"
+          % (PROG, source_label(marketplace, from_ref), snap["dir"]))
 
     plugin_id = "%s@%s" % (PLUGIN_NAME, marketplace_name_from_source(marketplace))
     version_before = snap["state"]["plugin_versions"].get(plugin_id)
@@ -745,7 +847,8 @@ def do_upgrade(codex_bin, home, marketplace, from_ref, ref, product_skills=False
           % (PROG, len(set(before) | set(after))))
 
     if result["verdict"] != "PASS":
-        print("%s: FAIL: upgrade %s -> %s did not pass install" % (PROG, from_ref, ref))
+        print("%s: FAIL: upgrade %s -> %s did not pass install"
+              % (PROG, from_ref, source_label(marketplace, ref)))
         return {"verdict": "FAIL"}
     version_after = result["version"]
     if version_before == version_after:
@@ -753,7 +856,8 @@ def do_upgrade(codex_bin, home, marketplace, from_ref, ref, product_skills=False
               % (PROG, version_before, version_after))
         return {"verdict": "FAIL"}
     print("%s: PASS: upgrade %s -> %s, %s version %s -> %s"
-          % (PROG, from_ref, ref, plugin_id, version_before, version_after))
+          % (PROG, from_ref, source_label(marketplace, ref), plugin_id,
+             version_before, version_after))
     return {"verdict": "PASS"}
 
 
@@ -782,7 +886,8 @@ def do_rollback(codex_bin, home, to=None):
     source = state["marketplace_source"]
 
     mres = ensure_marketplace(codex_bin, home, source, ref)
-    print("%s: %s: marketplace re-pointed to %s (%s)" % (PROG, mres["status"], ref, mres["detail"]))
+    print("%s: %s: marketplace re-pointed to %s (%s)"
+          % (PROG, mres["status"], source_label(source, ref), mres["detail"]))
 
     plugin_id = "%s@%s" % (PLUGIN_NAME, marketplace_name_from_source(source))
     pres = ensure_plugin_added(codex_bin, home, plugin_id)

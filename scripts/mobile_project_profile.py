@@ -156,15 +156,11 @@ def hand_rules(profile):
 
 
 def check(profile, schema):
-    problems = []
-    CC.validate(profile, schema, "", problems)
-    problems.extend(hand_rules(profile))
-    seen, out = set(), []
-    for p in problems:
-        if p not in seen:
-            seen.add(p)
-            out.append(p)
-    return out
+    """Routes through CC.checked() (scripts/contract_check.py) so
+    hand_rules only runs once validate() has confirmed the shapes it
+    assumes -- the shared root-cause fix for a hand_rules that would
+    otherwise crash on a structurally invalid record."""
+    return CC.checked(profile, schema, lambda: hand_rules(profile))
 
 
 def main(argv=None):

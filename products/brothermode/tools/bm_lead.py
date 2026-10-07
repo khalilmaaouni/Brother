@@ -278,12 +278,12 @@ def _resolve_project_id(kv, store, usage, reader=False):
     _err(usage)
     if not rows:
         _err("bm_lead: this folder holds no project yet, and none is "
-             "invented. Start one with: /brothermode:start (or, on a "
+             "invented. Start one with: /brother:brothermode-start (or, on a "
              'clone install: python3 "${CLAUDE_PLUGIN_ROOT}/tools/'
              'bm_project.py" start)')
     else:
         _err("bm_lead: --project-id is required here: this folder holds "
-             "%d projects (%s). Run: /brothermode:status (or, on a "
+             "%d projects (%s). Run: /brother:brothermode-status (or, on a "
              'clone install: python3 "${CLAUDE_PLUGIN_ROOT}/tools/'
              'bm_project.py" list)'
              % (len(rows), ", ".join(r["project_id"] for r in rows)))
@@ -540,7 +540,7 @@ def _no_project_tree_read(root, want_verdict=False):
     else:
         lines.append("Dossiers and change requests found: none")
     lines.append("")
-    lines.append("Next: /brothermode:start to make this a Brother project "
+    lines.append("Next: /brother:brothermode-start to make this a Brother project "
                  "(or, on a clone install: python3 "
                  '"${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" start)')
     return lines
@@ -591,7 +591,7 @@ def _reader_project_id(kv, usage, want_verdict=False):
                 not os.path.isfile(bs.store_path(root)):
             _err("bm_lead: warning: R-11: git containment (%s) refused a "
                  "store that does not exist on disk; reading the "
-                 "repository tree instead. Run /brothermode:start (or, "
+                 "repository tree instead. Run /brother:brothermode-start (or, "
                  "on a clone install: python3 \"${CLAUDE_PLUGIN_ROOT}/"
                  "tools/bm_project.py\" start) to create the store, "
                  "which also adds the missing ignore line."
@@ -1130,16 +1130,19 @@ def _newest_executed(store, project_id, until=None):
     return None
 
 
-def _open_risks(store, project_id, since=None, until=None):
-    """RISK rows nothing supersedes, newest first."""
+def _open_risks(store, project_id, until=None):
+    """RISK rows nothing supersedes, newest first.
+
+    There is no `since` window any more: it existed so the Risk field could
+    show what was new since the last briefing, and collect_status then
+    counted that narrowed list as the open risks in its Verdict line, which
+    is how 'Verdict: 0 open risk(s)' printed over 'Risk: 122 open' on
+    2026-09-18. Supersession closes a risk; a catch-up does not."""
     everything = store.list_insights(project_id, until=until, raw=True)
     superseded = {r.get("supersedes") for r in everything if r.get("supersedes")}
-    rows = [r for r in everything
+    return [r for r in everything
             if r.get("kind") == "RISK"
             and r.get("insight_id") not in superseded]
-    if since:
-        rows = [r for r in rows if (r.get("created_at") or "") > since]
-    return rows
 
 
 def _human_alerts(store):
@@ -1334,9 +1337,14 @@ def collect_status(store, project_id):
     forecast = store.latest_forecast(project_id, raw=True)
     decisions = _ranked_decisions(store, project_id)
     latest_brief = store.latest_briefing(project_id, raw=True)
-    since = latest_brief.get("created_at") if latest_brief else None
-    risks = _open_risks(store, project_id, since=since)
+    # One risk set, read once, counted by BOTH the Verdict and the Risk
+    # field. They used to differ (2026-09-18: 'Verdict: ... 0 open risk(s)'
+    # over 'Risk: 122 open') because the Verdict took only RISK rows newer
+    # than the last briefing and never the human alerts. A briefing is a
+    # catch-up, not a resolution: a risk stays open until superseded.
+    risks = _open_risks(store, project_id)
     alerts = _human_alerts(store)
+    open_risk_count = len(risks) + len(alerts)
     executed = _newest_executed(store, project_id)
     spend = store.spend_totals(project_id)
     fields = []
@@ -1347,12 +1355,12 @@ def collect_status(store, project_id):
     # has already read (the open decisions, the open risks, the newest
     # executed evidence) and reads nothing new; it is a count with a name
     # put to it, never an opinion.
-    blocking = bool(decisions) or bool(risks) or not executed
+    blocking = bool(decisions) or bool(open_risk_count) or not executed
     fields.append((
         "Verdict",
         "%s: %d open decision(s), %d open risk(s), %s"
         % ("do not ship yet" if blocking else "nothing is blocking",
-           len(decisions), len(risks),
+           len(decisions), open_risk_count,
            "no executed evidence" if not executed
            else "evidence recorded"),
         []))
@@ -1416,8 +1424,8 @@ def collect_status(store, project_id):
         risk_extra.append("  " + render_claim_text(row))
     for alert in alerts[:3]:
         risk_extra.append("  %s" % (alert.get("message") or "").strip())
-    if risk_extra:
-        summary = "%d open" % (len(risks) + len(alerts))
+    if open_risk_count:
+        summary = "%d open" % open_risk_count
     else:
         summary = "none new"
     fields.append(("Risk", summary, risk_extra))
@@ -2149,7 +2157,7 @@ def _print_ask_lines(ask_text):
     _out("Asked: %s" % text)
     route = _ask_route(text)
     if route == "incident":
-        _out("Route: incident, see brothersbe:start")
+        _out("Route: incident, see /brother:brothersbe-start")
     elif route == "audit":
         _out("Route: audit")
 

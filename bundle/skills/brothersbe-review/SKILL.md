@@ -1,6 +1,6 @@
 ---
 name: brothersbe-review
-description: "Use when reviewing a diff, a pull request, or a colleague's change against the design it claims to implement. Runs the deterministic reviewer route to decide who looks, dispatches only the read-only specialists it names, normalizes and deduplicates every finding into the landed schema, and returns a fixed summary (ready or not, mechanical counts, the lenses used, blockers, improvements, pre-existing issues, one next action) with detail underneath. Invoke as /brothersbe:review."
+description: "Use when reviewing a diff, a pull request, or a colleague's change against the design it claims to implement. Runs the deterministic reviewer route to decide who looks, dispatches only the read-only specialists it names, normalizes and deduplicates every finding into the landed schema, and returns a fixed summary (ready or not, mechanical counts, the lenses used, blockers, improvements, pre-existing issues, one next action) with detail underneath. Invoke as /brother:brothersbe-review."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

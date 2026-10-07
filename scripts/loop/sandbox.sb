@@ -1,0 +1,33 @@
+(version 1)
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write*
+    (subpath (param "ROOT"))
+    (subpath (param "TMP"))
+    (literal "/dev/null")
+    (literal "/dev/tty")
+    (literal "/dev/dtracehelper"))
+; THE TREE'S OWN GIT STAYS SHUT (tenth review 2026-10-02, reproduced: a test rewrote the worktree's .git link to a planted
+; git dir with core.fsmonitor, and the lander's next git status ran it outside the sandbox)
+(deny file-write*
+    (literal (string-append (param "ROOT") "/.git"))
+    (subpath (string-append (param "ROOT") "/.git")))
+; A BUILD SIGNALS ONLY ITS OWN PROCESSES (twelfth review 2026-10-02, reproduced: a sandboxed kill -TERM stopped a process
+; outside, so a suite could kill the lander or the driver; measured on this host: same-sandbox still lets a suite kill
+; its own children, self alone breaks them)
+(deny signal)
+(allow signal (target same-sandbox))
+; SECRETS IN A REAL HOME ARE NOT READABLE (plan E, 2026-10-01): with the screen relaxed under this sandbox, a build may
+; start processes, so what it can READ is the boundary. A build runs with a throwaway HOME deeper in the tree, so only
+; direct children of a real home match these.
+(deny file-read* file-write*
+    (regex #"^/Users/[^/]+/\.(ssh|aws|gnupg|config|netrc|docker|kube)(/|$)")
+    (regex #"^/Users/[^/]+/\.brothersbe-private-names$")
+    (regex #"^/Users/[^/]+/\.claude/\.credentials\.json$"))
+(deny file-read* file-write*
+    (regex #"^/Library/Key[c]hains/")
+    (regex #"^/Users/[^/]+/Library/Key[c]hains/"))
+(deny mach-lookup
+    (global-name "com.apple.SecurityServer")
+    (global-name "com.apple.securityd"))

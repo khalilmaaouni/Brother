@@ -210,7 +210,27 @@ case "$sub" in
       exit 1
     fi
     git push --quiet "$remote" "HEAD:refs/heads/main"
+    if [ -n "$FAKE_GH_MERGE_RACE" ]; then
+      # What GitHub answered on the 1.0.21 cut: the merge goes through and
+      # the call still exits 1.
+      echo "GraphQL: Merge already in progress (mergePullRequest)" >&2
+      exit 1
+    fi
     echo "Merged pull request"
+    ;;
+  "pr view")
+    # The pull request's state, read from the remote itself: MERGED when
+    # main carries this checkout's commit, OPEN otherwise.
+    if [ -n "$FAKE_GH_VIEW_UNREADABLE" ]; then
+      echo "fake gh: could not resolve to a PullRequest" >&2
+      exit 1
+    fi
+    git fetch --quiet "$remote" main
+    if git merge-base --is-ancestor HEAD FETCH_HEAD; then
+      echo "MERGED"
+    else
+      echo "OPEN"
+    fi
     ;;
   *)
     echo "fake gh: unsupported command $sub" >&2
@@ -364,6 +384,39 @@ def _real_short_term():
     return None
 
 
+class AnInheritedGitDirNeverSteersTheExport(unittest.TestCase):
+    """Inside a git hook GIT_DIR names the hub. Measured 2026-09-30: the
+    export's `git init` then reinitialized the hub as bare (core.bare true)
+    and checksums.sh read the hub's index, so the regeneration FAILED and
+    the stale manifest shipped. Only throwaway repositories are touched:
+    the "hub" here is a temp repository, never the real one."""
+
+    def test_git_init_lands_in_the_export_dir_and_the_hub_stays_non_bare(self):
+        tmp = tempfile.mkdtemp(prefix="export-gitdir-")
+        try:
+            hub = os.path.join(tmp, "hub")
+            dest = os.path.join(tmp, "dest")
+            os.makedirs(dest)
+            clean = dict(os.environ)
+            for name in EP.GIT_LOCATION_VARS:
+                clean.pop(name, None)
+            subprocess.run(["git", "init", "-q", hub], check=True, env=clean)
+            hub_git = os.path.join(hub, ".git")
+            with mock.patch.dict(os.environ, {"GIT_DIR": hub_git,
+                                              "GIT_INDEX_FILE": os.path.join(hub_git, "index")}):
+                EP._run(["git", "init", "-q"], dest)
+                inside = EP._run(["git", "rev-parse", "--absolute-git-dir"], dest)
+            bare = subprocess.run(["git", "config", "-f",
+                                   os.path.join(hub_git, "config"), "core.bare"],
+                                  capture_output=True, text=True, env=clean)
+            self.assertEqual(bare.stdout.strip(), "false")
+            self.assertTrue(os.path.isdir(os.path.join(dest, ".git")))
+            self.assertEqual(os.path.realpath(inside.stdout.strip()),
+                             os.path.realpath(os.path.join(dest, ".git")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class AShortTermsLowercaseSpellingAtTheExportBoundary(unittest.TestCase):
     """E34: a short (<=5 char) client term's LOWERCASE spelling passed the
     gates that matched short terms case-sensitively, and a product test
@@ -450,8 +503,15 @@ class ThePrivateTermInANonAllowlistedFileNeverAppears(unittest.TestCase):
 
     def test_the_full_exporter_clears_when_the_term_is_not_allowlisted(self):
         """Not just the copy step: the whole CLI, end to end, must report
-        CLEAR when the only place the term lives was never listed."""
-        with tempfile.TemporaryDirectory() as root:
+        CLEAR when the only place the term lives was never listed. Against
+        the local bare remote, like every other CLI case that expects a
+        pass: with no --remote the exporter fetches the real public
+        repository for identity_guard's origin/HEAD, which the landing
+        sandbox (network shut) cannot do, and the guard's honest NO-DATA
+        read as a refusal here on 2026-10-02."""
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as remote_dir:
+            _seed_bare_remote(remote_dir)
             _make_fake_root(root, {
                 "public.md": "hello, nothing private here\n",
                 "secretzone/private.md": "leak: FAKETERM-XYZ lives here\n",
@@ -463,6 +523,7 @@ class ThePrivateTermInANonAllowlistedFileNeverAppears(unittest.TestCase):
             env = dict(os.environ)
             env["BROTHER_PRIVATE_TERMS"] = terms_path
             proc = _run_cli(["--allowlist", allowlist_path, "--root", root,
+                              "--remote", remote_dir, "--branch", "main",
                               "--dry-run"], env)
             self.assertEqual(proc.returncode, EP.EXIT_OK,
                               proc.stdout + proc.stderr)
@@ -1083,6 +1144,25 @@ class TheAllowlistNamesSbeLeavesNotTheBareDirectory(unittest.TestCase):
     real allowlist now names the tracked leaf paths individually; a new
     file added under .sbe in future must never export until it, too, is
     named."""
+
+    def test_a_pair_whose_codex_half_is_dropped_is_named(self):
+        """pair_halves_missing on a fixture tree: the Antigravity manifest
+        alone names its missing codex twin; both halves present names
+        nothing; neither present names nothing (a pair absent whole is not
+        a half pair)."""
+        with tempfile.TemporaryDirectory() as tree:
+            self.assertEqual(EP.pair_halves_missing(tree), [])
+            # The Antigravity adapter ships from bundle/ since the one-plugin
+            # merge (client_parity.ANTIGRAVITY_PAIRS, 2026-09-30).
+            ag = os.path.join(tree, "bundle", ".antigravity-plugin", "plugin.json")
+            os.makedirs(os.path.dirname(ag))
+            open(ag, "w").close()
+            self.assertEqual(EP.pair_halves_missing(tree),
+                             ["bundle/.codex-plugin/plugin.json -> bundle/.antigravity-plugin/plugin.json"])
+            codex = os.path.join(tree, "bundle", ".codex-plugin", "plugin.json")
+            os.makedirs(os.path.dirname(codex))
+            open(codex, "w").close()
+            self.assertEqual(EP.pair_halves_missing(tree), [])
 
     def test_the_real_allowlist_has_no_bare_sbe_entry(self):
         entries = EP.load_allowlist()
@@ -1817,7 +1897,10 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
                 os.path.join(root, "ALLOWLIST.txt"), ["scripts", "clean.md"])
             terms_path = _write_lines(
                 os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
-            gh_bin = self.enterContext(_fake_gh())
+            # TestCase.enterContext is 3.11+; the floor here is 3.9.
+            gh_cm = _fake_gh()
+            gh_bin = gh_cm.__enter__()
+            self.addCleanup(gh_cm.__exit__, None, None, None)
             env = dict(os.environ)
             env["BROTHER_PRIVATE_TERMS"] = terms_path
             self.assertTrue(os.path.isfile(os.path.join(gh_bin, "gh")))
@@ -1888,7 +1971,10 @@ class TheExportersOwnInvocationPasses(unittest.TestCase):
                 os.path.join(root, "ALLOWLIST.txt"), ["scripts", "clean.md"])
             terms_path = _write_lines(
                 os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
-            self.enterContext(_fake_gh())
+            # TestCase.enterContext is 3.11+; the floor here is 3.9.
+            gh_cm = _fake_gh()
+            gh_cm.__enter__()
+            self.addCleanup(gh_cm.__exit__, None, None, None)
             env = dict(os.environ)
             env["BROTHER_PRIVATE_TERMS"] = terms_path
 
@@ -2420,6 +2506,164 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
             self.assertTrue(any(l.startswith("TAGGED") for l in lines), lines)
             self.assertEqual(self._remote_state(remote_dir), ("2", ["v9.9.9"]))
 
+    def test_g_a_release_that_merged_but_was_never_tagged_is_tagged_by_a_rerun(self):
+        """2026-09-20, the 1.0.21 cut: the pull request merged, the merge
+        call's exit 1 ended the run, and public main carried the release
+        with no tag. Reproduced here by a first run whose state read is
+        unreadable (so it refuses after the merge went through), then a
+        plain rerun: one tag added, no second commit, no second request."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh(FAKE_GH_MERGE_RACE="1", FAKE_GH_VIEW_UNREADABLE="1"):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9", wait_sleep=lambda s: None)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertEqual(self._remote_state(remote_dir), ("2", []),
+                             "the fixture must be merged and untagged")
+            with _fake_gh(FAKE_GH_FAIL_CREATE="1", FAKE_GH_FAIL_MERGE="1"):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9")
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertTrue(any(l.startswith("RESUME: v9.9.9") for l in lines), lines)
+            self.assertFalse(any(l.startswith(("PUSHED", "PULL-REQUEST", "MERGED:"))
+                                 for l in lines), lines)
+            self.assertTrue(any(l.startswith("TAGGED: v9.9.9") for l in lines), lines)
+            self.assertEqual(self._remote_state(remote_dir), ("2", ["v9.9.9"]))
+            tip = subprocess.run(
+                ["git", "-C", remote_dir, "rev-parse", "v9.9.9^{commit}", "main"],
+                capture_output=True, text=True, check=True).stdout.split()
+            self.assertEqual(tip[0], tip[1], "the tag must sit on main's tip")
+
+    def test_g2_a_rerun_never_moves_a_tag_that_already_exists(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9")
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            before = subprocess.run(["git", "-C", remote_dir, "rev-parse", "v9.9.9"],
+                                    capture_output=True, text=True, check=True).stdout
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9")
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            after = subprocess.run(["git", "-C", remote_dir, "rev-parse", "v9.9.9"],
+                                   capture_output=True, text=True, check=True).stdout
+            self.assertEqual(before, after)
+
+    def _rerun_tag(self, first_env, second_env, run=None):
+        """Tag v9.9.9 for real, then ask for v9.9.9 again. Returns the
+        rerun's (code, lines) and whether the remote tag stayed put."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh(**first_env):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9")
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            peel = ["git", "-C", remote_dir, "rev-parse", "v9.9.9"]
+            before = subprocess.run(peel, capture_output=True, text=True,
+                                    check=True).stdout
+            with _fake_gh(**second_env):
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9", run=run)
+            after = subprocess.run(peel, capture_output=True, text=True,
+                                   check=True).stdout
+            return code, lines, before == after
+
+    def test_g2b_a_rerun_in_the_same_second_still_refuses(self):
+        """Measured 2026-09-26, test_g2 above went red in one full-suite
+        run under 3.13 and green 12 of 12 run alone: a rerun inside the
+        same second re-creates a byte-identical tag object (red 3 of 3 with
+        the clock pinned), the tag push answers "Everything
+        up-to-date" with exit 0, and the run printed TAGGED for a tag it
+        never made. Pinning the tagger clock makes that the only case, so
+        only the listing before any push can refuse it."""
+        same = {"GIT_COMMITTER_DATE": "2026-01-01T00:00:00+0000"}
+        code, lines, unmoved = self._rerun_tag(same, same)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertTrue(any(l.startswith("REFUSED: v9.9.9 already exists")
+                            for l in lines), lines)
+        self.assertFalse(any(l.startswith("TAGGED:") for l in lines), lines)
+        self.assertTrue(unmoved)
+
+    def test_g2c_an_unreadable_tag_listing_refuses_before_any_push(self):
+        """An unknown is never read as "no tag": nothing pushed, no tag."""
+        def run(cmd, cwd=None, env=None, timeout=120):
+            if cmd[:3] == ["git", "ls-remote", "--tags"]:
+                return subprocess.CompletedProcess(
+                    cmd, 128, "", "fatal: injected listing failure")
+            return EP._run(cmd, cwd, env=env, timeout=timeout)
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh():
+                code, lines = EP.push_appended(
+                    self.ALLOWLIST, remote_dir, "main", root=root,
+                    tag="v9.9.9", run=run)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertTrue(any(l.startswith("REFUSED: could not check")
+                                for l in lines), lines)
+            self.assertEqual(self._remote_state(remote_dir), ("1", []))
+
+    def test_g2d_the_tag_push_still_refuses_a_tag_the_listing_missed(self):
+        """The backstop for a second actor tagging between the listing and
+        the push: the listing answers "no tag", the tagger times differ so
+        the two tag objects differ, and git's own rejection refuses."""
+        def run(cmd, cwd=None, env=None, timeout=120):
+            if cmd[:3] == ["git", "ls-remote", "--tags"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return EP._run(cmd, cwd, env=env, timeout=timeout)
+        code, lines, unmoved = self._rerun_tag(
+            {"GIT_COMMITTER_DATE": "2026-01-01T00:00:00+0000"},
+            {"GIT_COMMITTER_DATE": "2026-01-02T00:00:00+0000"}, run=run)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertTrue(any(l.startswith("REFUSED: the tag push was rejected")
+                            for l in lines), lines)
+        self.assertTrue(unmoved)
+
+    def test_g2e_an_identical_tag_the_listing_missed_still_refuses(self):
+        """The race the rejection above cannot see (found in review
+        2026-09-26): a second actor pushes a byte-identical tag after the
+        listing, so git answers "=" and exits 0. The listing answers "no
+        tag" and the tagger second is the same, so only the porcelain
+        new-ref check can refuse."""
+        def run(cmd, cwd=None, env=None, timeout=120):
+            if cmd[:3] == ["git", "ls-remote", "--tags"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return EP._run(cmd, cwd, env=env, timeout=timeout)
+        same = {"GIT_COMMITTER_DATE": "2026-01-01T00:00:00+0000"}
+        code, lines, unmoved = self._rerun_tag(same, same, run=run)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertTrue(any(l.startswith("REFUSED: the tag push exited 0 but "
+                                         "did not report v9.9.9")
+                            for l in lines), lines)
+        self.assertFalse(any(l.startswith("TAGGED:") for l in lines), lines)
+        self.assertTrue(unmoved)
+
+    def test_g3_an_untagged_rerun_with_nothing_to_push_still_just_returns(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            with _fake_gh():
+                EP.push_appended(self.ALLOWLIST, remote_dir, "main", root=root)
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertFalse(any(l.startswith(("RESUME", "TAGGED", "PUSHED"))
+                                 for l in lines), lines)
+            self.assertEqual(self._remote_state(remote_dir), ("2", []))
+
     def test_j_an_unsigned_environment_tags_plainly_and_says_no_data(self):
         """Row S5: the signing key is the founder's alone, so a machine
         that has configured none still succeeds, creates a plain annotated
@@ -2828,6 +3072,62 @@ class TheReleasePullRequestWaitsForRequiredFast(unittest.TestCase):
             self.assertEqual(int(after), int(before) + 1,
                              "the merge never reached main: %r" % lines)
 
+    def test_a2_a_merge_call_that_exits_1_on_a_merged_request_is_merged(self):
+        """2026-09-20, the 1.0.21 cut: `gh pr merge` exited 1 with "Merge
+        already in progress", the pull request read MERGED seconds later,
+        and the run had ended with nothing tagged. The state decides."""
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            before = self._remote_main_count(remote_dir)
+            with _fake_gh(FAKE_GH_MERGE_RACE="1"):
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root,
+                                               wait_sleep=lambda s: None)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertTrue(any("state reads MERGED" in l and
+                                "Merge already in progress" in l
+                                for l in lines), lines)
+            self.assertTrue(any(l.startswith("MERGED:") for l in lines), lines)
+            self.assertEqual(int(self._remote_main_count(remote_dir)),
+                             int(before) + 1)
+
+    def test_a3_a_merge_that_really_failed_still_refuses(self):
+        """The state is read, says OPEN for the whole minute, and the old
+        refusal stands word for word: reading the state must never turn a
+        real failure into a pass."""
+        slept = []
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            before = self._remote_main_count(remote_dir)
+            with _fake_gh(FAKE_GH_FAIL_MERGE="1"):
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root,
+                                               wait_sleep=slept.append)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertTrue(any(l.startswith("REFUSED: the pull request")
+                                and "nothing was tagged" in l
+                                for l in lines), lines)
+            self.assertFalse(any(l.startswith("MERGED:") for l in lines), lines)
+            self.assertEqual(self._remote_main_count(remote_dir), before)
+            self.assertEqual(len(slept), EP.MERGE_STATE_POLLS - 1,
+                             "an OPEN request is watched for the whole window")
+
+    def test_a4_a_state_that_cannot_be_read_refuses(self):
+        with tempfile.TemporaryDirectory() as remote_dir, \
+             tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._export_root(root)
+            with _fake_gh(FAKE_GH_MERGE_RACE="1", FAKE_GH_VIEW_UNREADABLE="1"):
+                code, lines = EP.push_appended(self.ALLOWLIST, remote_dir,
+                                               "main", root=root,
+                                               wait_sleep=lambda s: None)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertFalse(any(l.startswith("MERGED:") for l in lines), lines)
+
     def test_b_a_failing_check_refuses_and_never_merges(self):
         """bucket="fail" on the very first poll: FAIL, quoting the check's
         own html url, exit nonzero, no merge attempted at all (the fake
@@ -3096,6 +3396,13 @@ class TheRealExportTreeIsWhatTheReadmeSendsAReaderTo(unittest.TestCase):
         cls.tree = os.path.join(cls.tmp, "tree")
         os.makedirs(cls.tree)
         cls.copied = EP.build_export_tree(cls.tree, EP.load_allowlist())
+
+    def test_every_client_parity_pair_in_the_export_tree_is_whole(self):
+        """Red on 2026-09-30 before docs/plan/EXPORT-ALLOWLIST.txt carried
+        plugin/.codex-plugin/plugin.json beside the Antigravity manifest
+        (both plugin/ halves are deleted by OP1.c, 2026-10-04; the pairs now
+        bind the bundle manifests the allowlist already ships)."""
+        self.assertEqual(EP.pair_halves_missing(self.tree), [])
 
     @classmethod
     def tearDownClass(cls):
@@ -4188,8 +4495,66 @@ class J064GateLineShadowNeverChangesRunGates(unittest.TestCase):
             self.assertEqual(lines, baseline_lines)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def setUpModule():
+    # Finding 31 (loop audit 2026-09-26), same source as the G1 suites'
+    # module fixture (test_board_status.py): unmocked export paths read the
+    # tracked data/jev-seams.json, where J064 sits in shadow, and consulted
+    # it 114 times per run, invoking the machine's real bridge
+    # (~/.claude/bin/or_ask.py, resolved at import). Under an empty HOME
+    # those calls failed, opened the in-process breaker, and J094's shadow
+    # cases were refused. Pin an all-off seams config and a bridge path that
+    # does not exist, so only a case that patches its own config and runner
+    # calls out. HOME itself is left alone here: this module's tag tests read
+    # git state through it, and J094 seeds its own terms list per case.
+    #
+    # The exporter CLI children this module launches re-import jev_seam and
+    # read the tracked config again, out of reach of the patches below: a spy
+    # on jev_seam.consult counted 108 J064 calls reaching a live shadow entry
+    # in those children in one run under an empty HOME, with this fixture
+    # already in place. So the one bridge override a child does read is
+    # pinned too: a child's shadow call then ends as NO_DATA at launch
+    # instead of reaching the real bridge.
+    import shutil
+    import jev_decide
+    root = tempfile.mkdtemp(prefix="brother-g1-home-test-")
+    unittest.addModuleCleanup(shutil.rmtree, root, ignore_errors=True)
+    seams = os.path.join(root, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    no_bridge = os.path.join(root, "no-bridge-in-tests")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH", no_bridge)):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # The processes these tests launch re-import jev_seam and read the
+    # tracked config afresh, out of reach of the patches above, and every
+    # consult, even an off one, writes attempt rows. So the children get
+    # BROTHER_JEV_SEAMS_OFF (the tracked file reads as every entry off), a
+    # temporary BROTHER_JEV_STATE_DIR (ledger and daily call budget) and a
+    # bridge command that cannot launch, quoted because the variable is
+    # parsed as a command line; this process gets the same ledger and
+    # budget paths, since its constants were fixed at import.
+    import shlex
+    import jev_checks
+    state = tempfile.mkdtemp(prefix="brother-jev-state-test-")
+    unittest.addModuleCleanup(shutil.rmtree, state, ignore_errors=True)
+    ledger = os.path.join(state, "ledger")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                      os.path.join(state, "jev-budget.json")),
+                    mock.patch.dict(os.environ, {
+                        "BROTHER_JEV_SEAMS_OFF": "1",
+                        "BROTHER_JEV_STATE_DIR": state,
+                        "BROTHER_DECISION_BRIDGE": shlex.quote(jev_decide.DEFAULT_BRIDGE_PATH)})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9's unittest runs the module cleanups above only when this
+    # hook exists (fixed in 3.10); without it the fixture root leaks per run.
+    pass
 
 
 class TheCodexArtifactsShipAndCarryNoMachinePath(unittest.TestCase):
@@ -4228,10 +4593,13 @@ class TheCodexArtifactsShipAndCarryNoMachinePath(unittest.TestCase):
     #: file that carried one. scripts/restore_drill_enterprise.py now writes
     #: a repository-relative tools path and no scratch path at all, and the
     #: gate protects the record like every other exported file.
-    PRE_EXISTING_ABSOLUTE_PATHS = {
-        "products/brothersbe/tools/test_sbe_first_contact_paths.py":
-            "a test fixture's vendor path, BrotherSBE's own file",
-    }
+    #:
+    #: products/brothersbe/tools/test_sbe_first_contact_paths.py LEFT IT on
+    #: 2026-09-26, emptying the list: its seeded vendor path was one real
+    #: home directory, which also made the stale check below go red on any
+    #: other machine. The fixture now seeds a synthetic path. Keep the list
+    #: for a declared exception, never as a way around the check.
+    PRE_EXISTING_ABSOLUTE_PATHS = {}
 
     #: What a Codex user must find in a clone. Files, never directories: a
     #: directory that exists but is empty would satisfy a looser check.
@@ -4257,7 +4625,7 @@ class TheCodexArtifactsShipAndCarryNoMachinePath(unittest.TestCase):
         r"[A-Za-z0-9._-]+/\.(?:codex|claude)\b")
 
     #: The home directory of the machine BUILDING the export, taken from the
-    #: environment rather than written down. Measured over this tree
+    #: account's password entry rather than written down. Measured over this tree
     #: 2026-09-04: every other home-shaped string in it is a documentation
     #: placeholder (/Users/j, /Users/jane, /home/runner, /Users/you and a
     #: dozen more), so a pattern matching "any home" would fail on sixteen
@@ -4333,12 +4701,41 @@ class TheCodexArtifactsShipAndCarryNoMachinePath(unittest.TestCase):
             "they only work on the machine that wrote them: "
             + ", ".join(hits))
 
+    def test_no_exported_file_credits_a_model(self):
+        """Owner law 2026-09-26: only the owner is credited, and no model
+        may add a credit. scripts/self_check_staged.py blocks a NEW credit
+        line at commit time; this reads every file that would actually ship,
+        so a credit that got past the hook (a bypassed hook, a regenerated
+        page) still refuses the export. One pattern serves both."""
+        import self_check_staged
+        # Teeth first: a pattern that matches nothing would pass this test on
+        # any tree (measured 2026-09-26: the mutation survived without this).
+        self.assertTrue(self_check_staged.MODEL_CREDIT.search(
+            "Draf" + "ted by Codex exec on 2026-09-09"),
+            "the credit pattern no longer catches a plain credit line")
+        hits = ["%s:%d" % (rel, n)
+                for rel, text in self.exported_text_files()
+                for n, line in enumerate(text.splitlines(), 1)
+                if self_check_staged.MODEL_CREDIT.search(line)]
+        self.assertEqual(
+            hits, [],
+            "exported file(s) credit a model or tool as author or drafter; "
+            "only the owner is credited: " + ", ".join(hits))
+
     def test_no_new_exported_file_names_this_machines_home(self):
         """Wider than the case above, and therefore carrying the two named
         pre-existing paths. A file appearing here that is not on that list is
         a NEW leak and fails."""
-        home = os.path.expanduser("~")
-        if not home or home == "~" or home in ("/", ""):
+        # The account's home from the password database, never $HOME: a
+        # hermetic run points HOME at an empty temp directory no file names,
+        # so reading $HOME passed the leak half on nothing and called the
+        # declared exemption stale (measured 2026-09-26, HOME=$(mktemp -d)).
+        try:
+            import pwd
+            home = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError):
+            home = ""
+        if not home or home in ("/", ""):
             self.skipTest("NO-DATA: this machine reports no home directory, "
                           "so there is no path to look for")
         offenders = set()
@@ -4358,3 +4755,34 @@ class TheCodexArtifactsShipAndCarryNoMachinePath(unittest.TestCase):
             "these paths are declared here as pre-existing but no longer "
             "carry a home directory; remove them from the list: "
             + ", ".join(stale))
+
+
+
+def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: object) -> unittest.TestSuite:
+    """ACC2: BROTHER_TEST_SHARD=k/n runs the k-th of n class shards (scripts/suite_shard.py); unset runs every test."""
+    import suite_shard
+    return suite_shard.select(tests, os.environ.get("BROTHER_TEST_SHARD"))
+
+
+class ATrackedSymlinkShipsAsTheSameLink(unittest.TestCase):
+    """bundle/.antigravity-plugin/skills -> ../skills (2026-09-30). The old
+    copy2 followed the link and raised "Is a directory" on the pre-push
+    gate; the link itself is what the hub tracks and what ships."""
+
+    def test_directory_symlink_is_recreated_not_copied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "hub")
+            _make_fake_root(root, {"bundle/skills/door/SKILL.md": "---\nname: door\n---\n"})
+            os.makedirs(os.path.join(root, "bundle", ".antigravity-plugin"))
+            os.symlink("../skills", os.path.join(root, "bundle", ".antigravity-plugin", "skills"))
+            _git_track_all(root)
+            dest = os.path.join(tmp, "out")
+            EP.build_export_tree(dest, ["bundle"], root)
+            link = os.path.join(dest, "bundle", ".antigravity-plugin", "skills")
+            self.assertTrue(os.path.islink(link), link)
+            self.assertEqual(os.readlink(link), "../skills")
+            self.assertTrue(os.path.isfile(os.path.join(link, "door", "SKILL.md")))
+
+
+if __name__ == "__main__":
+    unittest.main()

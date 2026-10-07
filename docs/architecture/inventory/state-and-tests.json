@@ -1,0 +1,141 @@
+{
+  "generated_at_note": "produced by U0 inventory worker C, read-only sweep, no files moved",
+  "state_roots": [
+    {
+      "literal_path": ".sbe",
+      "location": "repo root",
+      "referenced_from": "products/brothermode/tools/bm_passport.py:24",
+      "appears_to_be_active": true,
+      "file_count": 2,
+      "what_it_stores": "Sensitive operational state: break-glass.json (emergency credentials), team-profile.json (team configuration)"
+    },
+    {
+      "literal_path": ".brothersbe",
+      "location": "repo root",
+      "referenced_from": "products/brothermode/tools/bm_repo_scope.py:6",
+      "appears_to_be_active": true,
+      "file_count": 1,
+      "what_it_stores": "Configuration state: config.json (hooks on/off and repo scope configuration)"
+    },
+    {
+      "literal_path": ".brother-edition",
+      "location": "repo root",
+      "referenced_from": "editions/personal/.brother-edition (directory present)",
+      "appears_to_be_active": true,
+      "file_count": 1,
+      "what_it_stores": "Edition-specific metadata and runtime state for the canonical personal edition"
+    },
+    {
+      "literal_path": ".brother-edition",
+      "location": "editions/personal/",
+      "referenced_from": "editions/personal/.brother-edition (directory structure)",
+      "appears_to_be_active": true,
+      "file_count": 1,
+      "what_it_stores": "Edition-specific metadata and runtime state for the personal edition variant"
+    },
+    {
+      "literal_path": ".brother-edition",
+      "location": "editions/dev/",
+      "referenced_from": "editions/dev/.brother-edition (directory structure)",
+      "appears_to_be_active": true,
+      "file_count": 1,
+      "what_it_stores": "Edition-specific metadata and runtime state for the dev edition variant"
+    },
+    {
+      "literal_path": ".brother-edition",
+      "location": "editions/client-one/",
+      "referenced_from": "editions/client-one/.brother-edition (directory structure)",
+      "appears_to_be_active": true,
+      "file_count": 1,
+      "what_it_stores": "Edition-specific metadata and runtime state for the client-one edition variant"
+    },
+    {
+      "literal_path": ".brother-edition",
+      "location": "editions/client-two/",
+      "referenced_from": "editions/client-two/.brother-edition (directory structure)",
+      "appears_to_be_active": true,
+      "file_count": 1,
+      "what_it_stores": "Edition-specific metadata and runtime state for the client-two edition variant"
+    },
+    {
+      "literal_path": ".sbe",
+      "location": "products/brothersbe/",
+      "referenced_from": "products/brothersbe/ (sbe structure and checks references)",
+      "appears_to_be_active": true,
+      "file_count": 8,
+      "what_it_stores": "SBE product operational state: checks.yml (test/check definitions), break-glass.json (emergency access), team-profile.json, policy.yml, memory/ (persistence), and evidence artifacts"
+    },
+    {
+      "literal_path": ".brothersbe",
+      "location": "products/brothersbe/",
+      "referenced_from": "products/brothersbe/ (directory structure)",
+      "appears_to_be_active": true,
+      "file_count": 2,
+      "what_it_stores": "BrotherSBE product runtime configuration and state"
+    },
+    {
+      "literal_path": ".sbe",
+      "location": "docs/plan/",
+      "referenced_from": "docs/plan/.sbe (directory structure)",
+      "appears_to_be_active": true,
+      "file_count": 3,
+      "what_it_stores": "Planning and documentation state: sbe checks and evidence for project planning activities"
+    }
+  ],
+  "root_level_dirs": {
+    "tests": {
+      "path": "tests",
+      "file_count": 11,
+      "exists": true
+    },
+    "evals": {
+      "path": "evals",
+      "file_count": 0,
+      "exists": false
+    },
+    "docs": {
+      "path": "docs",
+      "file_count": 1226,
+      "exists": true
+    },
+    "docs_mode": {
+      "path": "docs/mode",
+      "file_count": 0,
+      "exists": false
+    },
+    "docs_sbe": {
+      "path": "docs/sbe",
+      "file_count": 0,
+      "exists": false
+    },
+    "docs_ds": {
+      "path": "docs/ds",
+      "file_count": 0,
+      "exists": false
+    },
+    "docs_mobile": {
+      "path": "docs/mobile",
+      "file_count": 0,
+      "exists": false
+    },
+    "docs_vault": {
+      "path": "docs/vault",
+      "file_count": 0,
+      "exists": false
+    },
+    "docs_architecture": {
+      "path": "docs/architecture",
+      "file_count": 6,
+      "exists": true
+    }
+  },
+  "summary": {
+    "total_state_roots_found": 10,
+    "all_state_roots_live": true,
+    "total_files_in_state_roots": 19,
+    "docs_subdirs_present": ["docs_architecture"],
+    "docs_subdirs_missing": ["docs_mode", "docs_sbe", "docs_ds", "docs_mobile", "docs_vault"],
+    "root_level_test_coverage": ["tests"],
+    "root_level_evals_coverage": []
+  }
+}

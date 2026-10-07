@@ -85,7 +85,7 @@ class ProductPackages(unittest.TestCase):
 
 
 class ShippedSkillInventory(unittest.TestCase):
-    def test_actual_export_contains_all_34_core_skills(self):
+    def test_actual_export_contains_every_core_skill(self):
         root = HERE.parent
         with tempfile.TemporaryDirectory() as d:
             source = root
@@ -101,7 +101,11 @@ class ShippedSkillInventory(unittest.TestCase):
             expected = {name: sorted(p.parent.name for p in (source / "products" / name / "skills").glob("*/SKILL.md"))
                         for name in CPS.PRODUCTS}
             self.assertEqual(built["skills"], expected)
-            self.assertEqual(sum(map(len, expected.values())) + len(list((source / "bundle/skills").glob("*/SKILL.md"))), 34)
+            # A snapshot, not a truth: it read 34 long after the tree held 82, because no gate ran
+            # this file. Now that a gate does, a changed count is a prompt to confirm the change
+            # was meant, then update the number in the same commit.
+            shipped = sum(map(len, expected.values())) + len(list((source / "bundle/skills").glob("*/SKILL.md")))
+            self.assertEqual(shipped, 82, "shipped skill count changed: confirm it was meant, then update this number")
             policies = list(Path(built["marketplace_root"]).glob("plugins/*/skills/*/agents/openai.yaml"))
             self.assertEqual(len(policies), 7)
             for name in CPS.PRODUCTS:

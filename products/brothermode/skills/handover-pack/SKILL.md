@@ -24,7 +24,7 @@ Who this is for: a business analyst or a project lead who has to take the projec
 
 Two properties worth telling the user in plain words. The pages are generated, so regenerating them changes nothing unless the records changed, and a page written today still reads the same a month from now because it only shows what was known at the moment it covers. The pack covers one project: a folder holding several projects produces one set of pages per project rather than a merged view, and no page implies otherwise.
 
-If the project has no records yet, say so plainly and point at `/brothermode:start`; do not generate a folder of empty pages.
+If the project has no records yet, say so plainly and point at `/brother:brothermode-start`; do not generate a folder of empty pages.
 
 Memory ceremony: distill mistakes into the vault. Before or as part of closing a handover, run `tools/bm_vault_distill.py` against a JSON list of this session's own named mistakes (`slug`, `title`, `detail`, `symptom` for each) so they land as searchable `40-Failures/` notes in the vault rather than staying only in this conversation. It searches the vault first, per the vault's own constitution, and skips writing when a close match already exists so a mistake never gets filed as a silent duplicate; this is the exact pattern proven in `tools/test_bm_vault_distill.py`. Command: `python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_vault_distill.py" distill --input <path/to/mistakes.json>` (on a clone install, where the variable is unset, run `python3 tools/bm_vault_distill.py distill --input <path/to/mistakes.json>` from the BrotherMode root instead).
 

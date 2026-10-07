@@ -2,6 +2,20 @@
 
 Use Brother when another person may later need evidence or when the work's risk makes ordinary implementation checks insufficient.
 
+## Start in your host
+
+First [install Brother for your host](../reference/install-matrix.md), then open the repository where you want to work.
+
+In Claude Code or Cursor, type:
+
+```text
+/brother make add() reject non-numeric input and prove the behavior with a test
+```
+
+In Codex, start a fresh session and ask: "Use Brother to reject non-numeric input in add(), preserve valid addition, and show the deciding checks and receipt."
+
+Replace the example with your own outcome.
+
 ## Describe the outcome
 
 State behavior/result, not an internal product.

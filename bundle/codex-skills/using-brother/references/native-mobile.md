@@ -55,8 +55,8 @@ run the corresponding files under `scripts/` from the repository root.
 These are internal support tools for existing verbs and done checks.
 
 ```sh
-python3 scripts/mobile_workflow.py --help
-python3 scripts/mobile_design.py --help
+python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" --help
+python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_design.py" --help
 ```
 
 The workflow helper offers tool discovery, a hashed reference record, an

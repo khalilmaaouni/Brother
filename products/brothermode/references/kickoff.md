@@ -80,6 +80,30 @@ Rules:
   marked. Chat text carries evidence and context, never the option list.
 - One card per decision, highest-stakes decision first when several queue up.
 
+## The weight table and the diagram, beside every options decision, both unskippable
+
+For any non-trivial decision (2 to 3 options, never more), the decision card above is not
+the whole of it. Beside the card, in the same turn, render two more things and never defer
+either:
+
+1. A machine-readable weight table: a GFM table headed by a column named Weight and one
+   column per named option, at least two criterion rows, and every weight and score cell a
+   plain stated number, no words, no ranges, no "high/low". A table with no numbers, or the
+   word "weight" typed once with nothing to check it against, is a pros-and-cons list wearing
+   a comparison's name and scores zero on the intake gate (criterion
+   `weighted_options`). Use exactly this shape: an "## Options" (or "## The options") heading holding the decision
+   card, a nested "### Weighted comparison" heading directly under it holding the table, and
+   one sentence beneath the table spelling out the weighted totals so a reader can check the
+   arithmetic without a calculator.
+2. One Mermaid diagram, capped at one per decision (a second is decoration), drawn for the
+   RECOMMENDED option specifically, never a generic diagram unconnected to the choice being
+   made. Outcome language for a BA reader, exact paths and commands for a dev reader, per the
+   level-adaptation rule elsewhere in this flow; zero unexplained system names either way.
+
+A decision card without its weight table and its diagram is a half-finished step, not a
+smaller one: write all three together, or none of them, exactly as BrotherSBE's own kickoff
+requires the same triple.
+
 ## Error cards
 
 Every error reported to the user uses these four sections, in this order:

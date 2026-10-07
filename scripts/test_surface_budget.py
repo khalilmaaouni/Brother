@@ -223,8 +223,21 @@ class WhatOneInstallMustProduce(unittest.TestCase):
     def test_the_real_manifest_builds_and_names_the_real_plugins(self):
         m, problem = sb.build_manifest()
         self.assertIsNotNone(m, problem)
-        self.assertEqual(m["shipped_plugins"],
-                         ["brother", "brotherds", "brothermode", "brothersbe"])
+        # Two shapes are real: the four entry catalog up to the 1.1.0 cut, and brother alone once the cut has
+        # retired the other three (scripts/retire_catalogs.py). Anything else is a catalog nobody decided.
+        self.assertIn(m["shipped_plugins"],
+                      (["brother", "brotherds", "brothermode", "brothersbe"], ["brother"]))
+
+    def test_no_entry_is_promised_that_the_bundle_does_not_carry(self):
+        """Every entry the manifest lists under brother must exist under bundle/skills or bundle/commands: a
+        manifest that promises a skill from a tree no host installs fails the installed surface check for a
+        user who did nothing wrong (review finding 2026-10-06: two library skills were counted)."""
+        m, problem = sb.build_manifest()
+        self.assertIsNotNone(m, problem)
+        bundle = os.path.join(sb.REPO_ROOT, "bundle")
+        have = set(os.listdir(os.path.join(bundle, "skills")))
+        have |= {f[:-3] for f in os.listdir(os.path.join(bundle, "commands")) if f.endswith(".md")}
+        self.assertEqual([e for e in m["entries"]["brother"] if e not in have], [])
 
     def test_the_manifest_total_is_the_sum_of_its_own_entries(self):
         """A total that is not derivable from the parts it lists is a number

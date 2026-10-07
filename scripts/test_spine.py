@@ -22,6 +22,13 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import work_record as WR  # noqa: E402
+from hermetic_worker_env import worker_environment  # noqa: E402
+
+
+def setUpModule():
+    fixture = worker_environment()
+    fixture.__enter__()
+    unittest.addModuleCleanup(fixture.__exit__, None, None, None)
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -308,6 +315,60 @@ class EveryDispatchedUnitLeavesOneTraceLine(unittest.TestCase):
             val = rows[0][field]
             self.assertTrue(val == U.NODATA or isinstance(val, int),
                             (field, val))
+
+
+class ARaisingWorkersClaimIsStillReleased(unittest.TestCase):
+    """GAP 1 (night-2026-09-10 Codex read, ported from PR 607): inside
+    rolling_run(), _claim_and_run() records the real claim in the closure's
+    `claims` dict BEFORE run_node() is called, and run_node() itself
+    promises never to raise. If something still escapes that promise (a
+    defect in run_node, or the future dying some other way), wait_any()
+    catches it and fabricates {"claim": None, ...}; before this fix,
+    integrate_fn() trusted that fabricated None and skipped
+    claim_store.release() entirely, leaking the claim until its TTL expired.
+    This patches loop_bridge.run_node directly so the raise lands exactly
+    where the real one would (after claims[uid] is already set, inside the
+    pool thread), without depending on run_node ever actually breaking its
+    documented contract."""
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp(prefix="claimleak-cwd-")
+        self.claims_path = os.path.join(tempfile.mkdtemp(), "claims.json")
+        self.doc = {"rows": [
+            {"id": "R1", "depends_on": [], "owns": ["r1.txt"],
+             "done_check": "exit 0", "in_ship_v1": True}]}
+
+    def test_claim_releases_even_when_run_node_itself_raises(self):
+        import loop_bridge as B  # noqa: E402  (local: avoid a module-level cycle with sys.path setup above)
+
+        parts, problem = B.load_parts()
+        self.assertEqual(problem, "", problem)
+
+        class Worker(object):
+            def run(self, unit, cwd=None):
+                return {"worker_claim": "ok", "artifacts": [],
+                        "status": "returned"}
+
+        real_run_node = B.run_node
+
+        def _exploding_run_node(node, *a, **k):
+            if node["id"] == "R1":
+                raise RuntimeError("boom")
+            return real_run_node(node, *a, **k)
+
+        B.run_node = _exploding_run_node
+        try:
+            B.rolling_run(self.doc, parts, Worker(), cwd=self.cwd, cap=1,
+                          store=self.claims_path, owner="leak-test",
+                          isolate=False)
+        finally:
+            B.run_node = real_run_node
+
+        with open(self.claims_path, encoding="utf-8") as fh:
+            store = json.load(fh)
+        self.assertIn("R1", store, "the claim never even shows up: %r" % store)
+        self.assertNotEqual(store["R1"].get("state"), "claimed",
+                            "the claim leaked, never released: %r" % store["R1"])
 
 
 if __name__ == "__main__":

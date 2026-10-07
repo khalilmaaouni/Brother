@@ -150,6 +150,9 @@ def ask_jev(bridge, state, questions, timeout=120):
     except json.JSONDecodeError as exc:
         return None, secs, "unparseable bridge output: %s" % exc
     model = payload.get("model") or ""
+    # startswith is a MEASUREMENT limit, not an access control: a different Jev version, or a lookalike provider id
+    # that begins the same way, passes this check and is scored as Jev. The only thing it can get wrong is which
+    # model an eval result is attributed to; no access, spend or routing decision depends on it.
     if not model.startswith(EXPECT["jev"]):
         # Same rule ask_chat already enforces for Muse and DeepSeek: an
         # answer from a model other than the one asked is a substitute

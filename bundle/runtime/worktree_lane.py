@@ -581,14 +581,42 @@ def release(repo, path, force=False, runner=None):
     return True, ""
 
 
+def _common_git_dir(repo):
+    """The git dir holding `worktrees/` for `repo`: <repo>/.git for a main
+    checkout, the `commondir` of the admin dir a linked worktree's .git file
+    points at. Unreadable pointers fall back to <repo>/.git, which then holds
+    no worktrees/ and reads as "none registered", the answer this had before."""
+    dot = os.path.join(repo, ".git")
+    if not os.path.isfile(dot):
+        return dot
+    try:
+        with open(dot, encoding="utf-8") as fh:
+            line = fh.read().strip()
+        if not line.startswith("gitdir:"):
+            return dot
+        admin = line[len("gitdir:"):].strip()
+        admin = admin if os.path.isabs(admin) else os.path.normpath(os.path.join(repo, admin))
+        with open(os.path.join(admin, "commondir"), encoding="utf-8") as fh:
+            common = fh.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return dot
+    return common if os.path.isabs(common) else os.path.normpath(os.path.join(admin, common))
+
+
 def _admin_dirs(repo):
     """Every worktree admin directory git has ever created for `repo`.
 
     `.git/worktrees/<name>/` is git's own bookkeeping for a linked worktree,
     written by `git worktree add` and left behind by `git worktree remove` only
     once it succeeds. Reading it directly needs no git subprocess and works
-    even for a lane whose working directory has since been deleted by hand."""
-    base = os.path.join(repo, ".git", "worktrees")
+    even for a lane whose working directory has since been deleted by hand.
+
+    FROM A LINKED WORKTREE (engine finding 26, 2026-09-26): there <repo>/.git is
+    a FILE ("gitdir: <admin dir>") and the bookkeeping lives in the COMMON git
+    dir that admin dir's `commondir` names. Reading <repo>/.git/worktrees there
+    found nothing, so every lane a run had just opened read as unregistered and
+    every unit was refused as a stale lane."""
+    base = os.path.join(_common_git_dir(repo), "worktrees")
     if not os.path.isdir(base):
         return []
     return [os.path.join(base, name) for name in sorted(os.listdir(base))]

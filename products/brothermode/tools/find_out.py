@@ -27,6 +27,11 @@ recall path in this estate, does not itself score matches; it shells out to a
 sqlite-and-embeddings index (bm_vault.py) that this stdlib-only tool has no
 reason to depend on for a plain word-overlap search.
 
+--file PATH, THE CHEAP LOOKUP (2026-10-04): reads only the frontmatter of
+each 40-Failures note (stops at the closing fence, never the body) and prints
+one line per lesson whose applies_to anchor names PATH. Exit 0 with hits, 1
+when no lesson is anchored there, 2 NO-DATA when the folder is missing.
+
 NO-DATA IS NEVER A FAKE ZERO. A source whose directory or file is missing or
 unreadable prints "NO-DATA: <source> not found at <path>" and is never
 silently counted as "nothing matched"; a real search that found nothing
@@ -41,6 +46,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pattern_note  # noqa: E402
+import bm_learning  # noqa: E402  the print choke point for the --file lines
 
 VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
 MEMORY = os.path.expanduser(
@@ -194,6 +200,70 @@ def memory_index(query_words, memory_path):
     return hits
 
 
+def _frontmatter_only(path):
+    """The text between a note's opening and closing --- fences, read line by
+    line and stopped at the closing fence, so the body is never read. "" for a
+    note with no frontmatter."""
+    lines = []
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        if fh.readline().rstrip("\n") != "---":
+            return ""
+        for line in fh:
+            if line.rstrip("\n") == "---":
+                return "".join(lines)
+            lines.append(line)
+    return ""
+
+def _names_file(anchor, target):
+    """Same rule as vault_recall_hook._names_file: equal paths, or one is a
+    path suffix of the other."""
+    a, t = anchor, target
+    if not t or " " in a:
+        return False
+    return a == t or t.endswith("/" + a) or a.endswith("/" + t)
+
+def anchored_lessons(target, vault_dir):
+    """(hits or None) for --file: every 40-Failures note whose frontmatter
+    applies_to names `target`. Frontmatter only, no full text search. hits:
+    list of (slug, anchors, symptom), in file name order. None means the
+    folder is absent or unreadable (NO-DATA)."""
+    folder = os.path.join(vault_dir, "40-Failures")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:  # sbe: allow-silent explicit None sentinel, the NO-DATA case
+        return None
+    hits = []
+    for fn in names:
+        if not fn.endswith(".md"):
+            continue
+        try:
+            fm = _frontmatter_only(os.path.join(folder, fn))
+        except OSError:  # sbe: allow-silent one unreadable note drops out; it is not an answer
+            continue
+        value = _frontmatter_field(fm, "applies_to").strip()
+        if value.startswith("[") and value.endswith("]"):
+            value = value[1:-1]
+        anchors = [a.strip().strip('"').strip("'") for a in value.split(",")]
+        anchors = [a for a in anchors if a]
+        if any(_names_file(a, target) for a in anchors):
+            hits.append((fn[:-3], anchors, _frontmatter_field(fm, "symptom")))
+    return hits
+
+def _print_file(target, vault_dir):
+    """Exit code: 0 hits printed, 1 none anchored, 2 NO-DATA."""
+    hits = anchored_lessons(target, vault_dir)
+    folder = os.path.join(vault_dir, "40-Failures")
+    if hits is None:
+        bm_learning.say("%s: vault failures not found at %s" % (NODATA, folder))
+        return 2
+    if not hits:
+        bm_learning.say("no lesson in %s declares an applies_to anchor naming %s" % (folder, target))
+        return 1
+    for slug, anchors, symptom in hits:
+        bm_learning.say("[[%s]]  applies_to: %s  symptom: %s" % (
+            slug, ", ".join(anchors), symptom or "unstated"))
+    return 0
+
 def _print_source(name, hits, path_for_nodata, top):
     print("== %s ==" % name)
     if hits is None:
@@ -209,12 +279,18 @@ def _print_source(name, hits, path_for_nodata, top):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("problem", help="the problem, in plain words")
+    ap.add_argument("problem", nargs="?", help="the problem, in plain words")
+    ap.add_argument("--file", help="answer from 40-Failures frontmatter "
+                    "applies_to anchors only: one line per lesson anchored to this path")
     ap.add_argument("--vault", default=VAULT)
     ap.add_argument("--patterns", default=VAULT)
     ap.add_argument("--memory", default=MEMORY)
     ap.add_argument("--top", type=int, default=3)
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    if args.file:
+        return _print_file(args.file, args.vault)
+    if not args.problem:
+        ap.error("give a problem, or --file PATH")
 
     words = _words(args.problem)
 

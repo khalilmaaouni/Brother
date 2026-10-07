@@ -411,10 +411,6 @@ class Night0912TaskWatchdog(unittest.TestCase):
         self.assertEqual(paths, ["b.txt"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestTriageRotation(unittest.TestCase):
     """Founder ask 2026-08-28 night run: watchdogs for EVERY task. The
     triage budget is a real constraint (it fires from a SessionStart hook),
@@ -506,3 +502,7 @@ class TestAutonomyDialRealCallSite(unittest.TestCase):
                         ["docs/a.md", "scripts/loose.py"], now=NOW)
         drift = [f for f in found if f.startswith("DRIFT")][0]
         self.assertIn("DIAL: ask_one_blocking_question", drift)
+
+
+if __name__ == "__main__":
+    unittest.main()

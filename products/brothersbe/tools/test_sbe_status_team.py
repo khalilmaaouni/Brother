@@ -903,7 +903,7 @@ class TestCanonicalNextAction(TeamScenario):
     other findings, and severity 9 ("completed changes": every plan task
     closed clean) sorts below severity 11 ("review record") as a bare
     integer, so it said "nothing left to do for this change; open a PR" --
-    also wrong, because review had not run. Only `/brothersbe:next`'s own
+    also wrong, because review had not run. Only `/brother:brothersbe-next`'s own
     prose ladder, which checks team's severity 11 directly rather than
     severity 10, would have said "run review".
 

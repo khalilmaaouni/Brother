@@ -412,6 +412,116 @@ def classify_push_state(root):
                  "tracks %s" % result.stdout.strip(), "", category="tracks")]
 
 
+def _load_record_distance():
+    """scripts/record_distance.py, loaded by path: the same load-by-path
+    shape as bm_vault.py's own _load_journal_module() uses. record_distance
+    lives at this monorepo's top-level scripts/, three directories up from
+    HERE (tools -> brothermode -> products -> repo root), which resolves
+    in a source checkout and returns None on an installed plugin copy (the
+    bundle and the installed plugin cache both ship without scripts/, so
+    this is the ordinary case there, not a failure).
+    None on any failure; classify_record_distance degrades to no row at
+    all (this check has nothing to say on an installed copy, the same as
+    the non-git-root case) rather than crashing or reimplementing the git
+    call itself (REUSE, NOT REIMPLEMENTATION, this file's own module
+    rule)."""
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        path = os.path.join(repo_root, "scripts", "record_distance.py")
+        if not os.path.isfile(path):
+            return None
+        spec = importlib.util.spec_from_file_location(
+            "record_distance_for_bm_reconcile", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional distance bridge; degrades to NO-DATA
+        return None
+
+
+#: The incidents that motivated this row (see docs/RECOVERY-TRUTH.md and
+#: the founder's own ASSUMED STATE IS NEVER GROUND TRUTH rule) were
+#: checkouts thousands of commits behind the repository of record.
+#: Lowering this makes the row noisier on fast-moving repositories.
+RECORD_DISTANCE_WARN = 500
+
+#: hub is the repository of record; origin is this checkout's public
+#: export mirror (see the git-hosts and NO PRIVATE CONTENT rules), never
+#: the source of truth for how stale a checkout is. origin is still
+#: preferred over reporting NO-DATA outright, since a clone with no hub
+#: remote at all (a public export checkout) has nothing else to compare.
+_PREFERRED_REMOTES = ("hub", "origin")
+
+
+def classify_record_distance(root, warn_after=None):
+    """'This checkout is far behind the repository of record.' A root with
+    no git repo has nothing to say here. Reuses record_distance.py's
+    measure_distance()/DistanceUnknown wholesale: this function only
+    decides which remote to ask and how to phrase the row, it never
+    re-derives the git call.
+
+    Two conditions have nothing to say and return no row at all, the same
+    as the non-git-root case, rather than a NO-DATA row: the module not
+    loading (an installed copy, never a source checkout, so "run it by
+    hand from a source checkout" is not a thing the caller can do) and no
+    hub or origin remote being configured (many repositories legitimately
+    carry neither, so this is not an actionable gap, it is a check that
+    does not apply here). NO-DATA stays reserved for the one case that IS
+    actionable: a known remote nobody has fetched yet (`git fetch` fixes
+    it).
+
+    The count is only as fresh as the last fetch: this reads local
+    remote-tracking refs and never fetches, because it runs at session
+    start and must be fast and offline. So it can UNDER-report after a
+    long gap without a fetch, never over-report."""
+    if warn_after is None:
+        warn_after = RECORD_DISTANCE_WARN
+    top = _git_toplevel(root)
+    if not top:
+        return []
+    rd = _load_record_distance()
+    if rd is None:
+        return []
+    remotes_result = _run_git(root, "remote")
+    if remotes_result.returncode != 0:
+        return []
+    remotes = {line.strip() for line in remotes_result.stdout.splitlines()
+              if line.strip()}
+    remote = next((r for r in _PREFERRED_REMOTES if r in remotes), None)
+    if remote is None:
+        return []
+    try:
+        local_ref = rd.current_branch(root)
+    except rd.DistanceUnknown:
+        local_ref = "HEAD"
+    for branch in ("main", "master"):
+        remote_ref = "%s/%s" % (remote, branch)
+        try:
+            behind, ahead = rd.measure_distance(root, remote_ref, local_ref)
+        except rd.DistanceUnknown:
+            continue
+        if behind > warn_after:
+            return [_row(
+                STALE, "record-distance", root,
+                "this checkout is %d commits behind %s (%d ahead) as of "
+                "the last fetch; a bug report, plan or file read here may "
+                "describe code %s has already changed"
+                % (behind, remote_ref, ahead, remote_ref),
+                "read %s's version before editing (git log --oneline "
+                "HEAD..%s -- <path>), or branch from it (git switch -c "
+                "<name> %s)" % (remote_ref, remote_ref, remote_ref),
+                category="far-behind")]
+        return [_row(VALID, "record-distance", root,
+                     "%d behind, %d ahead of %s as of the last fetch"
+                     % (behind, ahead, remote_ref), "", category="in-range")]
+    return [_row(NO_DATA, "record-distance", root,
+                 "no local remote-tracking main/master branch is known "
+                 "for %s, so distance to the repository of record cannot "
+                 "be measured" % remote,
+                 "`git fetch %s` then retry" % remote,
+                 category="no-remote-tracking-branch")]
+
+
 #: Which installed hook reads which tracked path's output. Explicit and
 #: small on purpose: this is never derived from ~/.claude/settings.json at
 #: runtime (a hook that is wired but not shipped is exactly the drift this
@@ -817,6 +927,8 @@ def reconcile(bs, st, root, now=None, stale_after_seconds=None,
         finally:
             store.close()
     rows.extend(_stamp(r, "file:.", ref) for r in classify_push_state(root))
+    rows.extend(_stamp(r, "file:.", ref)
+               for r in classify_record_distance(root))
     rows.extend(classify_unpushed_hook_deps(root, ref=ref))
     return rows
 

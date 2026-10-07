@@ -1,9 +1,11 @@
 ---
 name: help
-description: "Use when someone asks how this system works or which command or skill to use. Explains in plain language how a change earns its evidence and its approval, points to the three entry skills, and only then offers the full map of specialist skills and commands. Invoke as /brothersbe:help."
+description: "Use when someone asks how this system works or which command or skill to use. Explains in plain language how a change earns its evidence and its approval, points to the three entry skills, and only then offers the full map of specialist skills and commands. Invoke as /brother:brothersbe-help."
 ---
 
 Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.
+
+Retired from the catalog in Brother 1.1.0, where one plugin carries everything: install brother@brother, then uninstall this plugin. This copy keeps working until you do; say that once, early, when someone asks for help here.
 
 # Help
 
@@ -33,22 +35,22 @@ user has not asked for.
 
 These are the only things a new user needs to remember:
 
-- `/brothersbe:start` to begin or resume anything.
-- `/brothersbe:next` to get the one recommended next action.
-- `/brothersbe:status` to see where the work stands.
+- `/brother:brothersbe-start` to begin or resume anything.
+- `/brother:brothersbe-next` to get the one recommended next action.
+- `/brother:brothersbe-status` to see where the work stands.
 
-Recommend `/brothersbe:start` as the first move for anyone who is unsure.
+Recommend `/brother:brothersbe-start` as the first move for anyone who is unsure.
 
 ## The full map, only after the above
 
 For users who want the specialist layer, list it briefly, one line each:
 
-- `/brothersbe:kickoff` scores new work into a tier before anything is designed.
-- `/brothersbe:design` builds the design dossier the tier requires.
-- `/brothersbe:verify` runs the hard gates and evidence checks.
-- `/brothersbe:review` scores the change, including findings gates cannot catch.
-- `/brothersbe:learn` records lessons so repeated mistakes stop repeating.
-- `/brothersbe:adopt` installs BrotherSBE into a repository or audits the wiring.
+- `/brother:brothersbe-kickoff` scores new work into a tier before anything is designed.
+- `/brother:brothersbe-design` builds the design dossier the tier requires.
+- `/brother:brothersbe-verify` runs the hard gates and evidence checks.
+- `/brother:brothersbe-review` scores the change, including findings gates cannot catch.
+- `/brother:brothersbe-learn` records lessons so repeated mistakes stop repeating.
+- `/brother:brothersbe-adopt` installs BrotherSBE into a repository or audits the wiring.
 
 The command line behind all of this is `"${CLAUDE_PLUGIN_ROOT}/bin/sbe"`; its subcommands
 are documented in `${CLAUDE_PLUGIN_ROOT}/docs/CLI.md`. Point power users there rather than
@@ -73,4 +75,4 @@ End with, in order: where you are, what is complete, what needs attention, the O
 recommended next action, why, what BrotherSBE will do automatically, what decision the user
 owns, and how success will be verified. Omit an element only when it is genuinely empty,
 never because it is inconvenient. When the user has no active project, most elements are
-genuinely empty and the next action is `/brothersbe:start`.
+genuinely empty and the next action is `/brother:brothersbe-start`.

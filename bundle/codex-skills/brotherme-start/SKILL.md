@@ -3,7 +3,7 @@ name: brotherme-start
 description: "Start a project with a short guided conversation that ends in one clear project brief"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-start`.
+This is the Codex route for the existing Claude command `/brother:brotherme-start`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

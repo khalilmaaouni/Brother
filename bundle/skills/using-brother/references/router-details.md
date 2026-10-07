@@ -132,8 +132,10 @@ what will be built. It does not say what was ASKED, and the scenarios this
 retires are the ones where the answer never read the question: an answer in
 the wrong language, an outcome nobody asked for, a delivery with no named
 proof behind it. So a record comes first, written by the intake
-(`bm_project.py adopt`) and validated against
-`docs/schema/outcome-contract-v1.json`: the requested `language`, the
+(`bm_project.py adopt`) and validated against the contract schema
+(`runtime/outcome-contract-v1.json` under the plugin root,
+`docs/schema/outcome-contract-v1.json` in a checkout): the requested
+`language`, the
 `question` itself, the `success_checks` that would prove it done, `ticket`
 and `audit` when they are required, `affected_products`, and the
 `must_answer` fields the answer owes.
@@ -143,7 +145,7 @@ run with nothing claimed and no run directory opened:
 
 1. **The record is checked before the plan is read.** A record that fails
    the schema refuses at exit 1 carrying the checker's own FAIL lines, in
-   `scripts/contract_check.py`'s words, never a paraphrase of them.
+   `runtime/contract_check.py`'s words, never a paraphrase of them.
 2. **A `draft` record refuses**, naming its own open question. A draft means
    a question is still open, and a plan built on an unanswered question
    plans for the wrong outcome. Answer it, move `state` to `contracted`, run

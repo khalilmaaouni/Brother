@@ -33,9 +33,24 @@ over one small set of module functions a caller can also import directly.
 """
 import argparse
 import datetime
+import importlib.util
 import os
 import re
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load(name):
+    """Load a sibling module by PATH, the same way bm_learn.py loads it: this
+    file is invoked from arbitrary working directories."""
+    spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, name + ".py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+L = _load("bm_learning")
 
 DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
 PROMOTE_AFTER = 3
@@ -107,7 +122,18 @@ def record(path, key, value):
     existing line: this is the vault's append-only law applied to one file.
     Creates the file (and its parent directory) with a short header on first
     use. Raises OSError on a write failure; callers decide how to report it,
-    matching the boundary rule that a write failure is never swallowed."""
+    matching the boundary rule that a write failure is never swallowed.
+
+    Raises ValueError, before touching the disk, when key or value carries a
+    line break: _entries() reads the file with str.splitlines(), so a break
+    in either would append a second dated line of the caller's choosing,
+    including a "correct:" line, which always wins. The refused set is
+    exactly the reader's split set, by construction."""
+    for name, text in (("key", key), ("value", value)):
+        s = "%s" % (text,)
+        if "".join(s.splitlines()) != s:
+            raise ValueError("%s carries a line break, which would write a "
+                             "second profile line" % name)
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
@@ -183,6 +209,17 @@ def read(path):
 # CLI, thin over the three functions above.
 # ---------------------------------------------------------------------------
 
+def _say(line):
+    """The one print this CLI owns: the WHOLE formatted line passes through
+    bm_learning.safe_display, so no interpolated value (a path, a --key, a
+    value someone appended to the file by hand) can open a second line or
+    carry a cursor escape, and forge a NO-DATA, a verdict or a profile fact
+    under the real one. The same choke point brothersbe's say() is, built
+    from this product's own primitive rather than imported across the
+    product boundary."""
+    print(L.safe_display(line, 2000))
+
+
 def _resolve_path(args):
     if args.profile:
         return args.profile
@@ -197,14 +234,14 @@ def cmd_read(args):
         print("NO-DATA: pass --profile, or --vault and --project")
         return 3
     if not os.path.isfile(path):
-        print("NO-DATA: no profile at %s" % path)
+        _say("NO-DATA: no profile at %s" % path)
         return 3
     data = read(path)
     if not data:
-        print("no promoted or recorded facts yet at %s" % path)
+        _say("no promoted or recorded facts yet at %s" % path)
         return 0
     for k in sorted(data):
-        print("%s: %s" % (k, data[k]))
+        _say("%s: %s" % (k, data[k]))
     return 0
 
 
@@ -215,10 +252,13 @@ def cmd_record(args):
         return 3
     try:
         record(path, args.key, args.value)
-    except OSError as e:
-        print("NO-DATA: could not write %s: %s" % (path, e))
+    except ValueError as e:
+        _say("NO-DATA: not recorded: %s" % e)
         return 3
-    print("recorded: %s: %s" % (args.key, args.value))
+    except OSError as e:
+        _say("NO-DATA: could not write %s: %s" % (path, e))
+        return 3
+    _say("recorded: %s: %s" % (args.key, args.value))
     return 0
 
 
@@ -229,9 +269,9 @@ def cmd_promoted(args):
         return 3
     value = promoted(path, args.key)
     if value is None:
-        print("NO-DATA: %s is not promoted" % args.key)
+        _say("NO-DATA: %s is not promoted" % args.key)
         return 3
-    print(value)
+    _say(value)
     return 0
 
 

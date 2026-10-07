@@ -41,10 +41,15 @@ _CANDIDATES = (
 def mount():
     """True and mounted, or False with nothing changed. Never raises."""
     for candidate in _CANDIDATES:
-        try:
-            path = os.path.abspath(candidate)
-        except Exception:  # noqa: BLE001
+        # A candidate that is not absolute is `~` left unexpanded (no HOME and
+        # no password entry), which names no checkout at all. Resolving it
+        # against the working directory would mount whatever tree the caller
+        # happened to start in, and abspath() on it was the one call here
+        # that could raise (a deleted working directory). Skipped instead, so
+        # there is no exception to catch; normpath() is string work only.
+        if not os.path.isabs(candidate):
             continue
+        path = os.path.normpath(candidate)
         if os.path.isdir(path) and os.path.isfile(os.path.join(path, "jev_seam.py")):
             if path not in sys.path:
                 sys.path.insert(0, path)

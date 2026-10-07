@@ -82,7 +82,7 @@ python3 "$SBE/evals/run_evals.py"
 ```
 
 ```
-547 evals: 547 passed, 0 regressions.
+550 evals: 550 passed, 0 regressions.
 ```
 
 Every case in `evals/run_evals.py` is a real failure class as a fixture. When you change a gate,
@@ -762,6 +762,12 @@ jobs:
         run: python3 tools/test_sbe_approval_concentration.py
       - name: Tier outcome fixtures (a tier's later defect links back to the closure that shipped it, H5)
         run: python3 tools/test_sbe_tier_outcome.py
+      # tools/test_sbe_score.py: per-check tests for the sbe_score.py lints
+      # (agent-brief-hygiene, agent-brief-cache-order). Added the same day as
+      # the lints themselves so TestEverySuiteIsWiredIntoAGate in
+      # tools/test_sbe.py never has to catch this one unwired.
+      - name: Score lint fixtures (agent-brief-hygiene, agent-brief-cache-order)
+        run: python3 tools/test_sbe_score.py
 
 
   # THE WINDOWS LEG WAS REMOVED HERE, 2026-08-17, and it is named rather than
