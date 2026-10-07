@@ -7,11 +7,15 @@ here ever touches the project's real docs/decisions/annotations.json.
 """
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
 import annotations_store as AS  # noqa: E402
 
 
@@ -187,6 +191,61 @@ class TheCLI(unittest.TestCase):
                 self.assertEqual(AS.main(["remove", "zzz"]), 2)
             finally:
                 AS.ROOT = real_root
+
+
+class WhereTheStoreLives(unittest.TestCase):
+    """THE ENTRY POINT, as a child process with a throwaway HOME, in a layout built here. One condition per case.
+
+    MEASURED 2026-10-06 (review): the command the intake reference gives an installed session,
+    `python3 "$BROTHER_PLUGIN_ROOT/runtime/annotations_store.py" add rec.json`, printed "added 1" and created
+    <install>/docs/decisions/annotations.json inside the plugin folder, which the host replaces on update: a correction
+    "kept from then on" was kept until the next update. The store's root now comes from the ONE rule the runs root
+    uses (brother_state.state_root): a development checkout keeps the store in its own repository, an installed
+    plugin keeps it per user, never in its folder."""
+
+    def setUp(self):
+        scratch = os.path.join(os.path.expanduser("~"), ".claude", "brother-scratch")
+        os.makedirs(scratch, exist_ok=True)
+        self.d = os.path.realpath(tempfile.mkdtemp(prefix="annotations-where-", dir=scratch))
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.home = os.path.join(self.d, "home")
+        os.makedirs(os.path.join(self.d, "tmp"))
+        os.makedirs(self.home)
+        self.env = {"HOME": self.home, "PATH": os.environ.get("PATH", ""), "LANG": "en_US.UTF-8",
+                    "TMPDIR": os.path.join(self.d, "tmp"), "PYTHONDONTWRITEBYTECODE": "1"}
+        self.record = os.path.join(self.d, "r.json")
+        with open(self.record, "w", encoding="utf-8") as fh:
+            json.dump({"title": "T", "annotations": [{"option": "A", "criterion": "tokens", "note": "was a guess",
+                                                    "persona": "lead", "time": "2026-09-06T00:00:00Z"}]}, fh)
+
+    def add(self, tool):
+        try:
+            r = subprocess.run([sys.executable, "-B", tool, "add", self.record], cwd=self.d, env=self.env,
+                               capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.fail("%s could not run (%s: %s)" % (tool, type(exc).__name__, exc))
+        self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-600:])
+        self.assertIn("added 1", r.stdout)
+
+    def test_an_install_only_copy_keeps_the_store_per_user_and_writes_nothing_inside_the_copy(self):
+        install = os.path.join(self.d, "install")
+        shutil.copytree(os.path.join(REPO, "bundle"), install, symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        self.add(os.path.join(install, "runtime", "annotations_store.py"))
+        self.assertFalse(os.path.exists(os.path.join(install, "docs")), "the store was written inside the install")
+        self.assertTrue(os.path.isfile(os.path.join(self.home, ".claude", "brother-run", AS.STORE_REL)),
+                        "the store is not at the per user location")
+
+    def test_a_development_checkout_keeps_the_store_in_its_own_repository(self):
+        scripts = os.path.join(self.d, "repository", "scripts")
+        os.makedirs(scripts)
+        for name in ("annotations_store.py", "brother_state.py"):
+            shutil.copyfile(os.path.join(HERE, name), os.path.join(scripts, name))
+        self.add(os.path.join(scripts, "annotations_store.py"))
+        self.assertTrue(os.path.isfile(os.path.join(self.d, "repository", AS.STORE_REL)),
+                        "a development checkout no longer keeps the store in its own repository")
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")),
+                         "a development checkout wrote to the per user location")
 
 
 if __name__ == "__main__":

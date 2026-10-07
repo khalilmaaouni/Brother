@@ -38,7 +38,12 @@ class DurableReceipt(unittest.TestCase):
         self.assertTrue(AC._under_temp(os.path.join(tempfile.gettempdir(), "receipt.json")))
 
     def test_codex_home_is_durable(self):
-        self.assertFalse(AC._under_temp(os.path.expanduser("~/.codex/brother/runs/receipt.json")))
+        # HOME pinned outside every temp root: the public runner's empty HOME
+        # lives under the temp directory, so the ambient one proves nothing.
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"HOME": "/home/durable-fixture"}):
+            path = os.path.expanduser("~/.codex/brother/runs/receipt.json")
+        self.assertFalse(AC._under_temp(path))
 
 
 class CortexShortCircuit(unittest.TestCase):

@@ -5,13 +5,22 @@ real subprocess, or the keychain. Each of the seven rules in the A0.2/A0.6
 brief gets at least one test named after it; the adversarial-review
 addition (risk class comes only from the registry, consult() has no
 argument that can override it) gets its own test too.
+
+THIS FILE ISOLATES ITS OWN JEV STATE, with nothing to export: the R4.1 block
+below replaces HOME with a fresh temp home and BROTHER_JEV_STATE_DIR with a fresh
+temp state dir before any product import (a live, relative or symlinked value is
+replaced, never used), R4.2 repatches the seam's path constants to that dir, R4.3
+starts every child through scripts/child_isolation.py, and R4.4's
+R4NoRealStateProof records every filesystem read during a shadow spend and
+proves none reaches real machine state. The suite is green under an empty HOME.
 """
 import contextlib
 import io
+import hashlib
 import json
 import os
+import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import threading
@@ -19,13 +28,370 @@ import time
 import unittest
 from unittest import mock
 
+# R4.1: self isolate before any import that can transitively import jev_seam.
+_LIVE_HOME_SNAPSHOT: str = ""
+_TEMP_STATE_DIR: str = ""
+_R41_TEMP_HOME_DIR = None
+_R41_TEMP_STATE_PARENT = None
+
+
+def _fail_closed(msg: str) -> None:
+    raise unittest.SkipTest("R4.1 isolation failure: " + msg)
+
+
+def _ensure_isolated_home() -> str:
+    global _LIVE_HOME_SNAPSHOT, _R41_TEMP_HOME_DIR
+    _LIVE_HOME_SNAPSHOT = os.environ.get("HOME", "")
+    try:
+        _R41_TEMP_HOME_DIR = tempfile.TemporaryDirectory(prefix="brother-jev-home-test-")
+        home = _R41_TEMP_HOME_DIR.name
+    except Exception as exc:
+        _fail_closed("could not create temp home: %s" % exc)
+    os.environ["HOME"] = home
+    os.environ["XDG_CONFIG_HOME"] = home
+    return home
+
+
+def _ensure_isolated_state_dir(seed: str) -> str:
+    global _TEMP_STATE_DIR, _R41_TEMP_STATE_PARENT
+    candidate = seed
+    bad = False
+    if not isinstance(candidate, str):
+        bad = True
+    elif not candidate:
+        bad = True
+    elif not os.path.isabs(candidate):
+        bad = True
+    else:
+        live = _LIVE_HOME_SNAPSHOT
+        if live:
+            try:
+                resolved = os.path.realpath(candidate)
+                live_real = os.path.realpath(live)
+                if resolved == live_real or resolved.startswith(live_real + os.sep):
+                    bad = True
+            except Exception:
+                bad = True
+        if not bad:
+            try:
+                if os.path.islink(candidate):
+                    target = os.readlink(candidate)
+                    if not os.path.isabs(target):
+                        target = os.path.join(os.path.dirname(candidate), target)
+                    resolved_target = os.path.realpath(target)
+                    if live:
+                        live_real = os.path.realpath(live)
+                        if resolved_target == live_real or resolved_target.startswith(live_real + os.sep):
+                            bad = True
+            except Exception:
+                bad = True
+    if bad:
+        try:
+            _R41_TEMP_STATE_PARENT = tempfile.TemporaryDirectory(prefix="brother-jev-state-test-")
+            state_dir = os.path.join(_R41_TEMP_STATE_PARENT.name, "state")
+            os.makedirs(state_dir, exist_ok=True)
+        except Exception as exc:
+            _fail_closed("could not create temp state dir: %s" % exc)
+        os.environ["BROTHER_JEV_STATE_DIR"] = state_dir
+        _TEMP_STATE_DIR = state_dir
+        return state_dir
+    else:
+        _TEMP_STATE_DIR = candidate
+        os.environ["BROTHER_JEV_STATE_DIR"] = candidate
+        return candidate
+
+
+_ensure_isolated_home()
+_R41_HOME_AT_IMPORT = os.environ.get("HOME", "")   # R4.4: the HOME the product modules were imported under
+_TEMP_STATE_DIR = _ensure_isolated_state_dir(os.environ.get("BROTHER_JEV_STATE_DIR"))
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jev_calibration as jc  # noqa: E402
 import jev_canary  # noqa: E402  (item 1 cross-checkout tests)
 import jev_cascade as cascade  # noqa: E402
 import jev_seam as seam  # noqa: E402
+import child_isolation as ci  # noqa: E402  (R4.3: every child of this suite starts through ci._run_isolated)
+import state_proof as sp  # noqa: E402  (R4.4: the proof that this suite reads no real state)
 
 MODEL = "typesafe/jev-1.13-test"
+import ast
+
+
+def _r42_require_dir(state_dir):
+    if not isinstance(state_dir, str) or not state_dir or "\x00" in state_dir or not os.path.isabs(state_dir):
+        raise ValueError("state dir must be a non empty absolute str with no NUL")
+    return os.path.normpath(state_dir)
+
+
+def _r42_is_under(path, parent):
+    if not isinstance(path, str) or not isinstance(parent, str):
+        return False
+    if not path or not parent:
+        return False
+    p = os.path.normpath(path)
+    q = os.path.normpath(parent)
+    return p == q or p.startswith(q + os.sep)
+
+
+def _temp_budget_path(state_dir):
+    return os.path.join(_r42_require_dir(state_dir), "jev-budget.json")
+
+
+def _temp_canary_path(state_dir):
+    return os.path.join(_r42_require_dir(state_dir), "canary-reset.json")
+
+
+def _capture_live_paths():
+    home = _LIVE_HOME_SNAPSHOT
+    if not home:
+        try:
+            import pwd
+            home = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError, OSError):
+            home = ""
+    if not home:
+        return {"state_dir": "", "budget_path": "", "canary_path": ""}
+    state_dir = os.path.join(home, ".brother", "jev")
+    return {
+        "state_dir": state_dir,
+        "budget_path": os.path.join(state_dir, "jev-budget.json"),
+        "canary_path": os.path.join(state_dir, "canary-reset.json"),
+    }
+
+
+def _repatch_seam_constants(state_dir):
+    d = _r42_require_dir(state_dir)
+    tmp = os.path.normpath(_TEMP_STATE_DIR)
+    prefix = os.path.normpath(tempfile.gettempdir())
+    if d != tmp and not _r42_is_under(d, prefix):
+        raise ValueError("state dir is neither the temp state dir nor under the temp prefix")
+    ledger = os.path.join(d, "ledger")
+    budget = _temp_budget_path(d)
+    canary = _temp_canary_path(d)
+    for value in (ledger, budget, canary):
+        if not _r42_is_under(value, d):
+            raise ValueError("computed path is not under the state dir")
+    assigned = {}
+    if hasattr(seam, "JEV_STATE_DIR"):
+        seam.JEV_STATE_DIR = d
+        assigned["jev_seam.JEV_STATE_DIR"] = d
+    if hasattr(seam, "DEFAULT_LEDGER_DIR"):
+        seam.DEFAULT_LEDGER_DIR = ledger
+        assigned["jev_seam.DEFAULT_LEDGER_DIR"] = ledger
+    if hasattr(seam, "DEFAULT_CANARY_MARKER"):
+        seam.DEFAULT_CANARY_MARKER = canary
+        assigned["jev_seam.DEFAULT_CANARY_MARKER"] = canary
+    if hasattr(seam, "DEFAULT_BUDGET_PATH"):
+        seam.DEFAULT_BUDGET_PATH = budget
+        assigned["jev_seam.DEFAULT_BUDGET_PATH"] = budget
+    return assigned
+
+
+_R42_LIVE_PATHS = _capture_live_paths()
+try:
+    _R42_REPATCHED = _repatch_seam_constants(_TEMP_STATE_DIR)
+    _R42_REPATCH_ERROR = ""
+except ValueError as _r42_exc:
+    _R42_REPATCHED = {}
+    _R42_REPATCH_ERROR = str(_r42_exc)
+
+
+def _r42_read_source(name):
+    if not isinstance(name, str):
+        raise ValueError("module name must be a str")
+    if not name or not name.isidentifier():
+        raise ValueError("module name must be a non empty identifier")
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py")
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        raise ValueError("could not read %r: %s" % (name, exc))
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("could not decode %r: %s" % (name, exc))
+
+
+def _r42_parse(source, module_name):
+    if not isinstance(source, str):
+        raise ValueError("source must be a str")
+    if not isinstance(module_name, str) or not module_name:
+        raise ValueError("module name must be a non empty str")
+    if "\x00" in source:
+        raise ValueError("source must not contain a NUL")
+    try:
+        return ast.parse(source, filename=module_name)
+    except SyntaxError as exc:
+        raise ValueError("could not parse %r: %s" % (module_name, exc))
+
+
+def _r42_dotted(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _r42_dotted(node.value)
+        if base:
+            return base + "." + node.attr
+    return ""
+
+
+class _R42Collector(ast.NodeVisitor):
+    def __init__(self):
+        self.nodes = []
+
+    def generic_visit(self, node):
+        self.nodes.append(node)
+        ast.NodeVisitor.generic_visit(self, node)
+
+    def _r42_visit_defaults(self, args):
+        for d in args.defaults:
+            self.visit(d)
+        for d in args.kw_defaults:
+            if d is not None:
+                self.visit(d)
+
+    def visit_FunctionDef(self, node):
+        self.nodes.append(node)
+        for d in node.decorator_list:
+            self.visit(d)
+        self._r42_visit_defaults(node.args)
+        self._r42_no_function_body(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        self.visit_FunctionDef(node)
+
+    def _r42_no_function_body(self, node):
+        return  # R4.2: import time never descends into a function body
+
+    def visit_Lambda(self, node):
+        self.nodes.append(node)
+        self._r42_visit_defaults(node.args)
+        self._r42_no_function_body(node)
+
+
+def _r42_import_time_nodes(tree):
+    if not isinstance(tree, ast.Module):
+        raise ValueError("tree must be an ast.Module")
+    collector = _R42Collector()
+    collector.visit(tree)
+    return collector.nodes
+
+
+_R42_ALLOWED_ENV_NAMES = frozenset(("BROTHER_JEV_STATE_DIR", "BROTHER_JEV_SEAMS_OFF"))
+
+
+def _module_level_state_reads(source, module_name):
+    tree = _r42_parse(source, module_name)
+    nodes = _r42_import_time_nodes(tree)
+    violations = []
+    for node in nodes:
+        if isinstance(node, ast.Call):
+            name = _r42_dotted(node.func)
+            if name == "os.getenv":
+                violations.append("os.getenv")
+                continue
+            if name == "os.environ.get":
+                allowed = False
+                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    if node.args[0].value in _R42_ALLOWED_ENV_NAMES:
+                        allowed = True
+                if not allowed:
+                    violations.append("os.environ.get")
+                continue
+            if name == "os.path.expanduser":
+                ok = False
+                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    arg = node.args[0].value
+                    if arg == "~" or arg.startswith("~/"):
+                        ok = True
+                if not ok:
+                    violations.append("os.path.expanduser")
+                continue
+            if name.startswith("pwd."):
+                violations.append("pwd call")
+                continue
+        if isinstance(node, ast.Subscript):
+            if _r42_dotted(node.value) == "os.environ":
+                violations.append("os.environ subscript")
+                continue
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "os":
+                for alias in node.names:
+                    if alias.name in ("environ", "getenv"):
+                        violations.append("from os import " + alias.name)
+                        break
+            continue
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "pwd":
+                    violations.append("import pwd")
+                    break
+            continue
+    return violations
+
+
+def _transitive_product_modules(root_names):
+    if not isinstance(root_names, (list, tuple)):
+        raise ValueError("root_names must be a list or tuple")
+    if not root_names:
+        raise ValueError("root_names must not be empty")
+    for name in root_names:
+        if not isinstance(name, str):
+            raise ValueError("every root name must be a str")
+        if not name or not name.isidentifier():
+            raise ValueError("every root name must be a non empty identifier")
+    seen = set()
+    queue = list(root_names)
+    while queue:
+        name = queue.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            src = _r42_read_source(name)
+        except ValueError:
+            continue
+        try:
+            tree = _r42_parse(src, name)
+        except ValueError:
+            continue
+        candidates = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    candidates.append(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0 and node.module:
+                    candidates.append(node.module.split(".")[0])
+        for top in candidates:
+            if top in seen:
+                continue
+            try:
+                _r42_read_source(top)
+            except ValueError:
+                continue
+            queue.append(top)
+    return seen
+
+
+def _audit_import_time_state_reads(module_names):
+    if not isinstance(module_names, (list, tuple)):
+        raise ValueError("module_names must be a list or tuple")
+    if not module_names:
+        raise ValueError("module_names must not be empty")
+    for name in module_names:
+        if not isinstance(name, str):
+            raise ValueError("every module name must be a str")
+        if not name or not name.isidentifier():
+            raise ValueError("every module name must be a non empty identifier")
+    closure = _transitive_product_modules(list(module_names))
+    violations = []
+    for name in sorted(closure):
+        src = _r42_read_source(name)
+        for violation in _module_level_state_reads(src, name):
+            violations.append(name + ": " + violation)
+    return violations
 
 
 def _noul_entry(entry_id, risk="low"):
@@ -164,30 +530,58 @@ def _seams_config(modes=None, canary_marker=None, audit_rate=None, promotions_pa
     return cfg
 
 
+_ENTRY_FOR_QTYPE = {"noul": _noul_entry, "choice": _choice_entry, "score": _score_entry}
+
+
+def _live_framing(family, qtype):
+    """The framing hash the seam's live decision for this entry carries
+    (jev_decide's own hash over the registry question): since D3.5 the
+    cascade is framing strict, so seeded evidence under any other framing
+    is evidence about a different question and is never read."""
+    entry = _ENTRY_FOR_QTYPE[qtype](family)
+    ok, question = seam._registry.callable([entry], family)
+    assert ok, question
+    return seam._decide._framing_hash(question)
+
+
 def _seed_calibration(dp, op, family, qtype, confidence, n_correct, n_wrong=0):
     """Mirrors test_jev_cascade.py's own _seed() helper: writes n_correct
     (and optionally n_wrong) joined decision/outcome pairs at a fixed
-    confidence, so threshold()/route() have real evidence to read."""
+    confidence, so threshold()/route() have real evidence to read. Since
+    D3.6 route() also reads the attempts ledger beside the outcomes for
+    the population floor, so every seeded decision gets its submission and
+    answered rows under the same key (a settled population, ratio 1.0)."""
+    framing = _live_framing(family, qtype)
+    ap = os.path.join(os.path.dirname(dp), "attempts.jsonl")
+
+    def one(did, correct, at_label):
+        jc.append_decision(dp, {
+            "id": did, "family": family, "qtype": qtype, "framing": framing,
+            "answer": True if qtype == "noul" else "a", "prob": confidence,
+            "confidence": confidence, "model": MODEL, "cost": 0.0,
+            "at": "2026-09-18T00:00:00Z",
+        })
+        jc.append_outcome(op, {"id": did, "correct": correct, "source": "t",
+                                "at": "2026-09-18T00:0%d:00Z" % at_label}, decisions_path=dp)
+        attempt_id = hashlib.md5(did.encode("utf-8")).hexdigest()
+        jc.append_submission(ap, {
+            "schema": "attempt/v1", "phase": "submitted", "attempt_id": attempt_id,
+            "parent_id": None, "entry_id": family, "qtype": qtype, "framing": framing,
+            "model": MODEL, "mode": "act", "at": "2026-09-18T00:00:00Z",
+        }, max_segment_bytes=None)
+        jc.append_terminal(ap, {
+            "schema": "attempt/v1", "phase": "answered", "attempt_id": attempt_id,
+            "parent_id": None, "entry_id": family, "family": family, "qtype": qtype,
+            "framing": framing, "model": MODEL, "mode": "act", "at": "2026-09-18T00:00:00Z",
+            "decision_id": None, "answer": True if qtype == "noul" else "a",
+            "prob": confidence, "confidence": confidence, "cost": 0.0, "reason": None,
+            "audit": False,
+        }, max_segment_bytes=None)
+
     for i in range(n_correct):
-        did = "%s-%s-%.3f-c%d" % (family, qtype, confidence, i)
-        jc.append_decision(dp, {
-            "id": did, "family": family, "qtype": qtype, "framing": "h",
-            "answer": True if qtype == "noul" else "a", "prob": confidence,
-            "confidence": confidence, "model": MODEL, "cost": 0.0,
-            "at": "2026-09-18T00:00:00Z",
-        })
-        jc.append_outcome(op, {"id": did, "correct": True, "source": "t",
-                                "at": "2026-09-18T00:01:00Z"}, decisions_path=dp)
+        one("%s-%s-%.3f-c%d" % (family, qtype, confidence, i), True, 1)
     for i in range(n_wrong):
-        did = "%s-%s-%.3f-w%d" % (family, qtype, confidence, i)
-        jc.append_decision(dp, {
-            "id": did, "family": family, "qtype": qtype, "framing": "h",
-            "answer": True if qtype == "noul" else "a", "prob": confidence,
-            "confidence": confidence, "model": MODEL, "cost": 0.0,
-            "at": "2026-09-18T00:00:00Z",
-        })
-        jc.append_outcome(op, {"id": did, "correct": False, "source": "t",
-                                "at": "2026-09-18T00:02:00Z"}, decisions_path=dp)
+        one("%s-%s-%.3f-w%d" % (family, qtype, confidence, i), False, 2)
 
 
 class SeamTestCase(unittest.TestCase):
@@ -487,6 +881,37 @@ class Rule4LedgerWrite(SeamTestCase):
         self.assertAlmostEqual(rec["prob"], 0.83)
         self.assertAlmostEqual(rec["confidence"], 0.83)
         self.assertTrue(rec["framing"])
+
+    def test_answered_terminal_row_carries_the_decision_id_and_binds_an_outcome(self):
+        # D3.2 and D3.3 end to end: the answered terminal row names the
+        # decision this attempt wrote, so an outcome keyed on attempt_id
+        # can be bound to exactly that decision and to no other.
+        registry = [_noul_entry("N1")]
+        runner = ScriptedRunner(_noul_answer(0.83))
+        cfg = _seams_config({"N1": "act"}, promotions_path=os.path.join(self.promo_dir, "no-such.jsonl"))
+        result = seam.consult(
+            "N1", {"i": 1}, "current",
+            seams_config=cfg, registry=registry,
+            ledger_dir=self.ledger_dir, runner=runner,
+        )
+        ap = os.path.join(self.ledger_dir, "attempts.jsonl")
+        with open(ap, encoding="utf-8") as fh:
+            rows = [json.loads(l) for l in fh if l.strip()]
+        answered = [r for r in rows if r.get("phase") == "answered"]
+        self.assertEqual(len(answered), 1)
+        self.assertEqual(answered[0]["attempt_id"], result.attempt_id)
+        self.assertEqual(answered[0]["decision_id"], result.decision_id)
+        dp = os.path.join(self.ledger_dir, "decisions.jsonl")
+        op = os.path.join(self.ledger_dir, "outcomes.jsonl")
+        term = answered[0]
+        good = {"id": result.decision_id, "correct": True, "source": "t",
+                "at": "2026-09-18T00:01:00Z", "attempt_id": result.attempt_id,
+                "proposition_hash": jc.proposition_hash(term["family"], term["qtype"],
+                                                        term["framing"], term["model"])}
+        jc.append_outcome(op, good, decisions_path=dp, attempts_path=ap)
+        wrong = dict(good, id=result.decision_id + ":other", at="2026-09-18T00:02:00Z")
+        with self.assertRaises(ValueError):
+            jc.append_outcome(op, wrong, decisions_path=dp, attempts_path=ap, allow_unchecked=True)
 
     def test_two_identical_calls_get_two_distinct_ids_and_two_ledger_rows(self):
         # MAJOR fix, orchestrator decision, re-review of 1385ab88c:
@@ -2200,6 +2625,7 @@ class N2ExitDrainIsBoundedAndConfigurable(SeamTestCase):
             os.chmod(bridge_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
             state_dir = os.path.join(d, "state")
+            os.makedirs(state_dir)   # R4.3: _child_env makes the child's fresh HOME inside it
             child_path = os.path.join(d, "child.py")
             scripts_dir = os.path.dirname(os.path.abspath(seam.__file__))
             with open(child_path, "w", encoding="utf-8") as fh:
@@ -2219,7 +2645,8 @@ class N2ExitDrainIsBoundedAndConfigurable(SeamTestCase):
                     % (scripts_dir, d, d, d)
                 )
 
-            env = dict(os.environ)
+            # R4.3: _child_env's environment (fresh HOME inside the state dir, nothing live), temp cwd, argv checked
+            env = ci._child_env(state_dir, home_files=ci.fixture_home_files(_LIVE_HOME_SNAPSHOT))
             env["BROTHER_DECISION_BRIDGE"] = sys.executable + " " + bridge_path
             # Round 4 fix, item 7 (m4, independent re-review, 2026-09-19):
             # this used to POP BROTHER_JEV_STATE_DIR from the child's env
@@ -2230,11 +2657,10 @@ class N2ExitDrainIsBoundedAndConfigurable(SeamTestCase):
             # under test. Point it at this test's own temp dir instead, so
             # the child is exactly as hermetic as every other test in this
             # suite.
-            env["BROTHER_JEV_STATE_DIR"] = state_dir
 
             t0 = time.monotonic()
-            proc = subprocess.run([sys.executable, child_path], env=env,
-                                   capture_output=True, text=True, timeout=10.0)
+            proc = ci._run_isolated([sys.executable, child_path], env,
+                                    dict(_R42_LIVE_PATHS, home=_LIVE_HOME_SNAPSHOT), d, 10.0)
             elapsed = time.monotonic() - t0
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -2813,5 +3239,440 @@ class Item7AdviseActForcedOffWhenTheCallSiteNeverReads(SeamTestCase):
         self.assertIn("call_site_reads_answer", (result.reason or ""))
 
 
+
+class SeamsOffSwitchReachesOnlyTheTrackedConfig(unittest.TestCase):
+    """BROTHER_JEV_SEAMS_OFF (finding 31): a kill-only switch a test sets so
+    the child processes it launches read the tracked seams config as every
+    entry off. Driven through a real child interpreter, since the switch is
+    read at import, over a disposable tree whose scripts/ is a symlink to
+    this one and whose data/jev-seams.json is this test's own, so no case
+    depends on which entries the real tracked file has in shadow."""
+
+    CHILD = (
+        "import json, os, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import jev_seam, jev_checks\n"
+        "load = lambda p=None: jev_seam.load_seams_config(p).get('modes')\n"
+        "print(json.dumps({\n"
+        "    'default': load(),\n"
+        "    'named': load(jev_seam.DEFAULT_SEAMS_CONFIG_PATH),\n"
+        "    'alias': load(sys.argv[2]),\n"
+        "    'distinct': load(sys.argv[3]),\n"
+        "    'checks_default': jev_checks._load_seams_config(\n"
+        "        jev_checks.DEFAULT_SEAMS_CONFIG_PATH).get('modes'),\n"
+        "}))\n"
+    )
+
+    def setUp(self):
+        tmp = tempfile.mkdtemp(prefix="seams-off-test-")
+        self.tmp = tmp
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        here = os.path.dirname(os.path.abspath(__file__))
+        os.symlink(here, os.path.join(tmp, "scripts"))
+        os.makedirs(os.path.join(tmp, "data"))
+        tracked = os.path.join(tmp, "data", "jev-seams.json")
+        with open(tracked, "w", encoding="utf-8") as fh:
+            json.dump({"modes": {"T1": "shadow"}}, fh)
+        self.alias = os.path.join(tmp, "alias-of-tracked.json")
+        os.symlink(tracked, self.alias)
+        self.distinct = os.path.join(tmp, "distinct.json")
+        with open(self.distinct, "w", encoding="utf-8") as fh:
+            json.dump({"modes": {"D1": "shadow"}}, fh)
+        self.scripts = os.path.join(tmp, "scripts")
+        self.child = os.path.join(tmp, "child.py")
+        with open(self.child, "w", encoding="utf-8") as fh:
+            fh.write(self.CHILD)
+
+    def _run(self, value):
+        # R4.3: the child's environment is _child_env's, so BROTHER_JEV_SEAMS_OFF reaches it only when this test sets it
+        env = ci._child_env(self.tmp)
+        if value is not None:
+            env["BROTHER_JEV_SEAMS_OFF"] = value
+        proc = ci._run_isolated(
+            [sys.executable, self.child, self.scripts, self.alias, self.distinct],
+            env, dict(_R42_LIVE_PATHS, home=_LIVE_HOME_SNAPSHOT), self.tmp, 60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
+    def test_unset_reads_the_tracked_modes(self):
+        seen = self._run(None)
+        self.assertEqual(seen["default"], {"T1": "shadow"})
+        self.assertEqual(seen["named"], {"T1": "shadow"})
+        self.assertEqual(seen["checks_default"], {"T1": "shadow"})
+
+    def test_set_reads_the_tracked_file_as_every_entry_off(self):
+        self.assertIsNone(self._run("1")["default"])
+
+    def test_set_also_covers_the_default_path_named_explicitly(self):
+        seen = self._run("1")
+        self.assertIsNone(seen["named"])
+        self.assertIsNone(seen["checks_default"])
+
+    def test_set_covers_a_symlink_to_the_tracked_file(self):
+        self.assertIsNone(self._run("1")["alias"])
+
+    def test_set_leaves_a_distinct_explicit_file_alone(self):
+        self.assertEqual(self._run("1")["distinct"], {"D1": "shadow"})
+
+    def test_any_non_empty_value_turns_it_on_and_empty_does_not(self):
+        for value in ("0", "false", " "):
+            self.assertIsNone(self._run(value)["default"], repr(value))
+        self.assertEqual(self._run("")["default"], {"T1": "shadow"})
+
+    def _own_tracked_config(self):
+        # The public export ships no data/, so the real tracked file is absent there; these two cases only need A
+        # tracked config, so they get their own and name it as the tracked one (hermetic, export shaped tree).
+        d = tempfile.mkdtemp(prefix="jev-seams-tracked-"); self.addCleanup(shutil.rmtree, d, True)
+        tracked = os.path.realpath(os.path.join(d, "jev-seams.json"))
+        with open(tracked, "w", encoding="utf-8") as fh:
+            json.dump({"T1": "shadow"}, fh)
+        patcher = mock.patch.object(seam, "_TRACKED_SEAMS_CONFIG_REALPATH", tracked); patcher.start(); self.addCleanup(patcher.stop)
+        return tracked
+
+    def test_it_is_read_at_import_not_at_call_time(self):
+        tracked = self._own_tracked_config()
+        with mock.patch.object(seam, "_SEAMS_OFF", False):
+            with mock.patch.dict(os.environ, {"BROTHER_JEV_SEAMS_OFF": "1"}):
+                live = seam.load_seams_config(tracked)
+        with open(tracked, encoding="utf-8") as fh:
+            self.assertEqual(live, json.load(fh))
+
+    def test_it_is_checked_before_the_cache(self):
+        tracked = self._own_tracked_config()
+        with mock.patch.object(seam, "_SEAMS_OFF", False):
+            self.assertNotEqual(seam.load_seams_config(tracked), {})
+        with mock.patch.object(seam, "_SEAMS_OFF", True):
+            self.assertEqual(seam.load_seams_config(tracked), {})
+
+
+# WHAT THESE TESTS NEED FROM THE TREE AND THE HOME, stated once and supplied
+# here, so a clean machine gives the same answer as the author's (measured
+# 2026-09-20 on an export shaped tree under an empty HOME: 23 and 41 reds).
+# 1. data/jev-registry.json. The public export does not ship data/, so on
+#    that tree every class below reads NO-DATA (a skip), never a red: the
+#    same rule the J099 receipt door tests took that morning.
+# 2. The content gate's forbidden terms list, a private file in the
+#    operator's home. A fixture list stands in for it, as in the J100 and
+#    J094 seam tests; a missing list makes the gate refuse, which is its
+#    contract, and that refusal is not what these tests are about.
+# A TRACKED FIXTURE, SO THIS SUITE RUNS ON A TREE THAT SHIPS NO data/ DIRECTORY.
+# Measured 2026-09-22: the public export omits data/, so every class here skipped, the suite
+# reported "OK (skipped=48)", and vacuous_run_guard correctly refused it with exit 1, which
+# blocked the push. The guard was right and the skip was the defect: a suite that can only run
+# on one checkout is measuring that checkout.
+# The fixture is built FROM the real registry (scripts/fixtures/jev-registry-fixture.json) so its
+# shape cannot drift from production by hand, and it is tracked so it travels with the export.
+# FAIL DIRECTION: if NEITHER the real registry nor the fixture is readable, the skipUnless still
+# fires and the guard still refuses. An unreadable input is never read as "nothing to check".
+_FIXTURE_REGISTRY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "fixtures", "jev-registry-fixture.json")
+if not os.path.isfile(seam.DEFAULT_REGISTRY_PATH) and os.path.isfile(_FIXTURE_REGISTRY):
+    seam.DEFAULT_REGISTRY_PATH = _FIXTURE_REGISTRY
+
+_NEEDS_REGISTRY = unittest.skipUnless(
+    os.path.isfile(seam.DEFAULT_REGISTRY_PATH),
+    "NO-DATA: neither data/jev-registry.json nor the tracked fixture is readable in this tree")
+
+
+def setUpModule():
+    import coe_outside_gate
+    # A fixture HOME, not only a patched constant: several tests below spawn
+    # the real CLI as a child process, and the child resolves the list from
+    # its own HOME. The child inherits this one.
+    home = tempfile.mkdtemp(prefix="brother-jev-home-test-")
+    os.makedirs(os.path.join(home, ".claude"))
+    terms = os.path.join(home, ".claude", "coe-outside-gate-terms.json")
+    with open(terms, "w", encoding="utf-8") as fh:
+        json.dump({"vendor-fixture": ["ACMEWIDGET"]}, fh)
+    for patcher in (mock.patch.object(coe_outside_gate, "DEFAULT_TERMS_PATH", terms),
+                    mock.patch.dict(os.environ, {"HOME": home})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+for _name, _obj in list(globals().items()):
+    if isinstance(_obj, type) and issubclass(_obj, unittest.TestCase):
+        globals()[_name] = _NEEDS_REGISTRY(_obj)
+
+
+class R4BudgetIsolationProof(unittest.TestCase):
+    def test_all_repatch_targets_land_under_the_state_dir(self):
+        self.assertEqual(_R42_REPATCH_ERROR, "")
+        for key in ("jev_seam.JEV_STATE_DIR", "jev_seam.DEFAULT_LEDGER_DIR",
+                    "jev_seam.DEFAULT_CANARY_MARKER", "jev_seam.DEFAULT_BUDGET_PATH"):
+            self.assertIn(key, _R42_REPATCHED)
+            self.assertTrue(_r42_is_under(_R42_REPATCHED[key], _TEMP_STATE_DIR))
+
+    def test_canary_marker_is_the_contract_path(self):
+        self.assertEqual(seam.DEFAULT_CANARY_MARKER,
+                         os.path.join(seam.JEV_STATE_DIR, "canary-reset.json"))
+
+    def test_shadow_spends_temp_budget_only(self):
+        self.assertEqual(_R42_REPATCH_ERROR, "")
+        budget_path = _R42_REPATCHED["jev_seam.DEFAULT_BUDGET_PATH"]
+        self.assertTrue(_r42_is_under(budget_path, _TEMP_STATE_DIR))
+        self.assertEqual(budget_path, seam.DEFAULT_BUDGET_PATH)
+        self.assertNotEqual(budget_path, _R42_LIVE_PATHS["budget_path"])
+        if os.path.exists(budget_path):
+            os.remove(budget_path)
+
+        def _cleanup():
+            if os.path.exists(budget_path):
+                os.remove(budget_path)
+
+        self.addCleanup(_cleanup)
+        allowed, reason = seam._consume_budget_slot({"daily_call_budget": 1000000})
+        self.assertTrue(allowed, reason)
+        self.assertTrue(os.path.exists(budget_path))
+
+    def test_corrupt_temp_budget_is_nodata(self):
+        path = _temp_budget_path(_TEMP_STATE_DIR)
+        try:
+            with open(path, "wb") as fh:
+                fh.write(b"not json at all")
+        except OSError as exc:
+            self.skipTest("NO-DATA: could not seed the temp budget: %s" % exc)
+
+        def _cleanup():
+            if os.path.exists(path):
+                os.remove(path)
+
+        self.addCleanup(_cleanup)
+        with open(path, "rb") as fh:
+            before = fh.read()
+        allowed, reason = seam._consume_budget_slot({"budget_path": path, "daily_call_budget": 5})
+        self.assertFalse(allowed)
+        self.assertIn("unreadable", reason)
+        with open(path, "rb") as fh:
+            after = fh.read()
+        self.assertEqual(before, after)
+
+    def test_missing_temp_budget_is_missing_not_funded(self):
+        path = _temp_budget_path(_TEMP_STATE_DIR)
+        if os.path.exists(path):
+            os.remove(path)
+
+        def _cleanup():
+            if os.path.exists(path):
+                os.remove(path)
+
+        self.addCleanup(_cleanup)
+        status, value = seam._read_budget_state(path)
+        self.assertEqual(status, "missing")
+        self.assertIsNone(value)
+
+    def test_live_paths_are_captured_from_the_live_home(self):
+        self.assertEqual(sorted(_R42_LIVE_PATHS.keys()),
+                         ["budget_path", "canary_path", "state_dir"])
+        if not _R42_LIVE_PATHS["state_dir"]:
+            self.skipTest("NO-DATA: no live home resolvable")
+        self.assertFalse(_r42_is_under(_R42_LIVE_PATHS["budget_path"], _TEMP_STATE_DIR))
+        self.assertFalse(_r42_is_under(_R42_LIVE_PATHS["canary_path"], _TEMP_STATE_DIR))
+        if _LIVE_HOME_SNAPSHOT:
+            self.assertEqual(_R42_LIVE_PATHS["state_dir"],
+                             os.path.join(_LIVE_HOME_SNAPSHOT, ".brother", "jev"))
+        else:
+            import pwd
+            try:
+                expected = os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".brother", "jev")
+            except (KeyError, OSError):
+                self.skipTest("NO-DATA: password database has no home")
+            self.assertEqual(_R42_LIVE_PATHS["state_dir"], expected)
+
+    def test_repatch_refuses_a_dir_outside_the_temp_prefix(self):
+        with mock.patch.object(seam, "JEV_STATE_DIR", "sentinel-jev"), \
+                mock.patch.object(seam, "DEFAULT_LEDGER_DIR", "sentinel-ledger"), \
+                mock.patch.object(seam, "DEFAULT_CANARY_MARKER", "sentinel-canary"), \
+                mock.patch.object(seam, "DEFAULT_BUDGET_PATH", "sentinel-budget"):
+            with self.assertRaises(ValueError):
+                _repatch_seam_constants("/r42-not-a-temp-dir")
+
+    def test_hostile_state_dir_is_refused(self):
+        hostile = [None, b"bytes", True, False, 0, 1, 1.5, "", "relative/path", "/nul\x00byte"]
+        for value in hostile:
+            with self.assertRaises(ValueError):
+                _temp_budget_path(value)
+            with self.assertRaises(ValueError):
+                _temp_canary_path(value)
+            with self.assertRaises(ValueError):
+                _repatch_seam_constants(value)
+
+
+class R4ImportAuditProof(unittest.TestCase):
+    def test_recursive_import_audit(self):
+        roots = ["jev_seam", "jev_checks"]
+        closure = _transitive_product_modules(roots)
+        for expected in ("jev_calibration", "jev_cascade", "jev_decide"):
+            self.assertIn(expected, closure)
+            self.assertNotIn(expected, roots)
+
+    def test_only_sanitized_names_read_at_import(self):
+        self.assertEqual(_audit_import_time_state_reads(["jev_seam", "jev_checks"]), [])
+        fixture = "import os\nX = os.environ.get('OTHER_LIVE_STATE')\n"
+        self.assertEqual(len(_module_level_state_reads(fixture, "fixture")), 1)
+        fixture2 = "import os\nX = os.environ.get('BROTHER_JEV_SEAMS_OFF')\n"
+        self.assertEqual(_module_level_state_reads(fixture2, "fixture2"), [])
+
+    def test_import_time_env_and_home_paths_audited(self):
+        cases = (
+            "import os\nX = os.getenv('Y')\n",
+            "from os import environ\n",
+            "import os\nX = os.environ['HOME']\n",
+            "import pwd\n",
+            "import os\nX = os.path.expanduser(os.sep)\n",
+            "class C:\n    X = os.getenv('Y')\n",
+            "def f(x=os.getenv('Y')):\n    pass\n",
+        )
+        for index, source in enumerate(cases):
+            self.assertEqual(len(_module_level_state_reads(source, "case%d" % index)), 1)
+
+    def test_function_bodies_are_not_import_time(self):
+        first = "import os\ndef f():\n    import pwd\n    return os.getenv('Y')\n"
+        self.assertEqual(_module_level_state_reads(first, "first"), [])
+        second = "import os\nX = lambda: os.getenv('Y')\n"
+        self.assertEqual(_module_level_state_reads(second, "second"), [])
+
+    def test_hostile_audit_input_is_refused(self):
+        with self.assertRaises(ValueError):
+            _r42_read_source(None)
+        with self.assertRaises(ValueError):
+            _r42_read_source("")
+        with self.assertRaises(ValueError):
+            _r42_read_source("no/such/module")
+        with self.assertRaises(ValueError):
+            _r42_read_source("definitely_missing_module")
+        with self.assertRaises(ValueError):
+            _r42_parse(None, "x")
+        with self.assertRaises(ValueError):
+            _r42_parse("def f(:", "bad")
+        with self.assertRaises(ValueError):
+            _r42_import_time_nodes("not a tree")
+        with self.assertRaises(ValueError):
+            _transitive_product_modules(None)
+        with self.assertRaises(ValueError):
+            _transitive_product_modules("jev_seam")
+        with self.assertRaises(ValueError):
+            _transitive_product_modules([])
+        with self.assertRaises(ValueError):
+            _transitive_product_modules(["not an identifier"])
+        with self.assertRaises(ValueError):
+            _audit_import_time_state_reads(None)
+        with self.assertRaises(ValueError):
+            _audit_import_time_state_reads([])
+        with self.assertRaises(ValueError):
+            _audit_import_time_state_reads(["ok", 7])
+
+
+
+
+class R4NoRealStateProof(SeamTestCase):
+    """R4.4 (built 2026-10-03): the in process work of this suite reads no real state. The paths a case runs on
+    resolve under no live home (R19), every filesystem read entry point is recorded during a representative shadow
+    spend and none reaches the live home or a state file outside temp (R20), an empty HOME still checks the password
+    database home (R20, M-R4-EMPTY-HOME), the read entry point list is proven complete by a negative listdir fixture
+    (R20a), and the proof class itself is green in a child under a fresh empty HOME (T8)."""
+
+    def _named_paths(self):
+        return {"state_dir": seam.JEV_STATE_DIR, "budget_path": seam.DEFAULT_BUDGET_PATH,
+                "ledger_dir": self.ledger_dir, "HOME": os.environ.get("HOME", ""),
+                "HOME_at_import": _R41_HOME_AT_IMPORT}
+
+    def _shadow_spend(self):
+        """One shadow spend with every read entry point recorded: the ledger row lands before the patches lift."""
+        with sp.record_reads() as seen:
+            result = seam.consult(
+                "N1", {"x": 1}, "keep-me",
+                seams_config=_seams_config({"N1": "shadow"}), registry=[_noul_entry("N1")],
+                ledger_dir=self.ledger_dir, runner=ScriptedRunner(_noul_answer(0.9)))
+            seam.drain(timeout=5)
+            lines = self._wait_for_lines(os.path.join(self.ledger_dir, "decisions.jsonl"), 1)
+        self.assertEqual(result.answer, "keep-me")
+        self.assertEqual(len(lines), 1)
+        return seen
+
+    def test_no_resolved_path_under_live_home(self):
+        live = sp.live_home_for_check(_LIVE_HOME_SNAPSHOT)
+        self.assertEqual(sp.assert_no_real_state(self._named_paths(), live), True if live else sp.NO_DATA)
+        seen = self._shadow_spend()
+        paths = [path for _, path in seen]
+        self.assertTrue(any(path.endswith("decisions.jsonl") for path in paths), "the recorder never saw the spend")
+        self.assertTrue(any(path.endswith("jev-budget.json") for path in paths), "the recorder never saw the budget")
+        self.assertNotIn(_R42_LIVE_PATHS["budget_path"], paths, "the live budget was opened or statted")
+        verdict = sp.recorded_paths_are_temp(seen, live, temp_prefix=(tempfile.gettempdir(), _TEMP_STATE_DIR))
+        if not live:
+            self.skipTest("NO-DATA: no live home resolvable; the temp prefix check ran and passed")
+        self.assertIs(verdict, True)
+
+    def test_empty_home_still_checks_password_db_home(self):
+        import pwd
+        try:
+            expected = pwd.getpwuid(os.getuid()).pw_dir
+        except (KeyError, OSError):
+            self.skipTest("NO-DATA: the password database names no home for this user")
+        with mock.patch.dict(os.environ, {"HOME": ""}):
+            home = sp.live_home_for_check("")
+        self.assertEqual(home, expected, "an empty HOME must fall back to the password database home")
+        self.assertEqual(sp.live_home_for_check("/snapshot/home"), "/snapshot/home")
+        live_budget = os.path.join(expected, ".brother", "jev", "jev-budget.json")
+        with self.assertRaises(ValueError):   # the live check ran against that home, it did not read NO-DATA
+            sp.recorded_paths_are_temp([("builtins.open", live_budget)], home)
+        self.assertEqual(sp.recorded_paths_are_temp([("builtins.open", self.ledger_dir)], ""), sp.NO_DATA)
+        with self.assertRaises(ValueError):   # the temp check still blocks with no live home at all
+            sp.recorded_paths_are_temp([("builtins.open", live_budget)], "")
+
+    def test_listdir_negative_proof(self):
+        self.assertTrue(sp._negative_unpatched_listdir_proof(self.ledger_dir),
+                        "leaving os.listdir unpatched did not make a listdir read invisible, or the full set misses it")
+        names = sp._patched_read_entry_points()
+        self.assertEqual(len(names), 14)
+        self.assertIn("os.listdir", names)
+        with self.assertRaises(ValueError):
+            sp._negative_unpatched_listdir_proof(os.path.join(self.ledger_dir, "missing"))
+
+    def test_hostile_inputs_are_refused_never_a_crash(self):
+        for bad in (None, "", {}, {"x": ""}, {"x": "relative"}, {"x": "/nul\0"}, {"x": 7}):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                sp.assert_no_real_state(bad, "/home")
+        with self.assertRaises(ValueError):
+            sp.assert_no_real_state({"x": "/x"}, None)
+        for bad in (None, "x", [7], [("open",)], [("open", 7)]):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                sp.recorded_paths_are_temp(bad, "/home")
+        with self.assertRaises(ValueError):
+            sp.recorded_paths_are_temp([], "/home", temp_prefix="relative")
+        with self.assertRaises(ValueError):
+            sp.recorded_paths_are_temp([], "/home", temp_prefix=())
+        with self.assertRaises(ValueError):
+            sp.live_home_for_check(7)
+        with self.assertRaises(ValueError):
+            with sp.record_reads(["nodots"]):
+                pass
+
+    def test_empty_home_exit_zero(self):
+        # T8: this file's proof tests, in a child whose whole environment is _child_env's (a fresh empty HOME inside a
+        # temp state dir), must exit 0; the full suite is the unit's done check (donecheck_R4, hermetic), so a test
+        # running its whole file would recurse and is not what runs here
+        state = tempfile.mkdtemp(prefix="r44-empty-home-", dir=self.ledger_dir)
+        module = os.path.splitext(os.path.basename(__file__))[0]
+        names = ["%s.R4NoRealStateProof.%s" % (module, name) for name in
+                 ("test_no_resolved_path_under_live_home", "test_listdir_negative_proof",
+                  "test_empty_home_still_checks_password_db_home")]
+        env = ci._child_env(state, home_files=ci.fixture_home_files(_LIVE_HOME_SNAPSHOT))
+        try:
+            proc = ci._run_isolated([sys.executable, "-B", "-m", "unittest"] + names, env,
+                                    dict(_R42_LIVE_PATHS, home=_LIVE_HOME_SNAPSHOT), state, 120.0)
+        except (OSError, ValueError, ci.SubprocessError) as exc:
+            self.fail("the empty home child did not run: %s" % exc)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Ran 3 tests", proc.stderr)
+        self.assertNotIn("skipped", proc.stderr, "the proof read NO-DATA under an empty home")
+
 if __name__ == "__main__":
-    unittest.main()
+    # NOT unittest.main(). Every TestCase class in this file is wrapped in one
+    # skipUnless above, so a single missing input skips the WHOLE suite, and a
+    # suite that skipped everything still exits 0. Measured 2026-09-21: this file
+    # printed "OK (skipped=48)" at exit 0 with nothing run, and that exact shape is
+    # what unit R4 has on record as its evidence. The guard refuses a run that
+    # proved nothing, so a done_check chained on && cannot certify one.
+    import vacuous_run_guard
+    vacuous_run_guard.run()

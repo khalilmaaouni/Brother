@@ -3,7 +3,7 @@ name: brotherme-handback
 description: "Take a decision and the work under it back into your own hands, with nothing lost"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-handback`.
+This is the Codex route for the existing Claude command `/brother:brotherme-handback`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

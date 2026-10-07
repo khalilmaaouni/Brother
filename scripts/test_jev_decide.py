@@ -45,6 +45,12 @@ def _pid_alive(pid):
 
 
 NOUL_Q = {"correct": {"type": "noul", "instructions": "Is the arithmetic right?"}}
+
+
+def setUpModule():
+    """Every case pins its own BROTHER_TRANSPORTS (set or unset); the caller's value never changes a verdict."""
+    saved = os.environ.pop("BROTHER_TRANSPORTS", None)
+    unittest.addModuleCleanup(lambda: os.environ.update({"BROTHER_TRANSPORTS": saved}) if saved is not None else None)
 CHOICE_Q = {
     "pick": {"type": "choice", "instructions": "Which is bigger?",
               "criteria": {"x": "seven", "y": "twelve"}}
@@ -957,6 +963,74 @@ def _success_payload(questions, choice=None, probabilities=None):
         else:
             answers[qid] = {"type": "score", "score": 7.5, "confidence": 1}
     return json.dumps({"model": "typesafe/jev-1.13-20260917", "answers": answers})
+
+
+
+
+class ClaudeOnlyRunSkipsJev(unittest.TestCase):
+    """Owner 2026-09-30: under BROTHER_TRANSPORTS=claude no Jev call leaves the machine. decide() is where jev_brief,
+    check_wave.jev_verdict, unit_runner (BROTHER_JEV_CHECK) and jev_check converge, so the skip lives here: NO-DATA
+    naming the setting, the runner never called, nothing routed to another model. The content gate is stubbed to
+    allow, as the sibling classes do: under an empty HOME the estate's terms list is absent and the gate refuses first,
+    which would mask what these cases measure."""
+
+    def setUp(self):
+        patcher = mock.patch.object(J, "_gate", new=mock.Mock(decide=allow_gate))
+        patcher.start(); self.addCleanup(patcher.stop)
+
+    def test_the_runner_is_never_called_and_the_answer_is_no_data_naming_the_setting(self):
+        runner = RecordingRunner()
+        with mock.patch.dict(os.environ, {"BROTHER_TRANSPORTS": "claude"}):
+            result = J.decide({}, NOUL_Q, "test", bridge=["fake"], runner=runner)
+        self.assertEqual(result[0], J.NO_DATA, result)
+        self.assertIn("BROTHER_TRANSPORTS=claude", result[1])
+        self.assertEqual(runner.calls, [], "the bridge runner was called under the Claude only switch")
+
+    def test_with_the_switch_off_the_runner_is_reached(self):
+        runner = RecordingRunner()
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_TRANSPORTS"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            J.decide({}, NOUL_Q, "test", bridge=["fake"], runner=runner)
+        self.assertEqual(len(runner.calls), 1, "control: without the switch the bridge runner is reached")
+
+    def test_a_word_that_is_not_a_transport_skips_too(self):
+        runner = RecordingRunner()
+        with mock.patch.dict(os.environ, {"BROTHER_TRANSPORTS": "claude,openrouter"}):
+            result = J.decide({}, NOUL_Q, "test", bridge=["fake"], runner=runner)
+        self.assertEqual(result[0], J.NO_DATA); self.assertIn("could not be read", result[1]); self.assertEqual(runner.calls, [])
+
+    def test_an_allowlist_without_the_bridge_transport_skips_jev_whatever_else_it_names(self):
+        """O4 (second attack): Jev lives only on the bridge (OpenRouter); "claude,codex" must skip it like "claude"."""
+        for words in ("claude,codex", "codex", " claude , codex "):
+            runner = RecordingRunner()
+            with mock.patch.dict(os.environ, {"BROTHER_TRANSPORTS": words}):
+                result = J.decide({}, NOUL_Q, "test", bridge=["fake"], runner=runner)
+            self.assertEqual(result[0], J.NO_DATA, (words, result)); self.assertEqual(runner.calls, [], words)
+        runner = RecordingRunner()
+        with mock.patch.dict(os.environ, {"BROTHER_TRANSPORTS": "claude,bridge"}):
+            J.decide({}, NOUL_Q, "test", bridge=["fake"], runner=runner)
+        self.assertEqual(len(runner.calls), 1, "control: an allowlist naming the bridge reaches it")
+
+    def test_entry_point_jev_brief_never_reaches_a_stand_in_bridge(self):
+        """The attack's own reproduction: scripts/loop/jev_brief.py as a process, HOME holding a stand-in
+        ~/.claude/bin/or_ask.py that writes a marker when run. Under the switch: no marker, no answer (exit 3)."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        home = tempfile.mkdtemp(prefix="jev-claude-only-")
+        self.addCleanup(shutil.rmtree, home, True)
+        os.makedirs(os.path.join(home, ".claude", "bin"))
+        mark = os.path.join(home, "bridge-ran")
+        with open(os.path.join(home, ".claude", "bin", "or_ask.py"), "w") as fh:
+            fh.write("import os\nopen(os.environ['JEV_TEST_MARK'], 'w').close()\nprint('{}')\n")
+        spec = os.path.join(home, "spec.md")
+        with open(spec, "w") as fh:
+            fh.write("# spec\n\nDone check: python3 -B scripts/test_x.py\n")
+        env = {k: v for k, v in os.environ.items() if k not in ("BROTHER_DECISION_BRIDGE", "PYTHONPATH")}
+        env.update(HOME=home, JEV_TEST_MARK=mark, BROTHER_TRANSPORTS="claude")
+        r = subprocess.run([sys.executable, "-B", os.path.join(root, "scripts", "loop", "jev_brief.py"), spec, os.path.join(home, "out.json")],
+                           cwd=root, env=env, capture_output=True, text=True, timeout=120)
+        self.assertFalse(os.path.exists(mark), "the stand-in bridge ran under BROTHER_TRANSPORTS=claude: " + r.stdout + r.stderr)
+        self.assertEqual(r.stdout.strip(), "", r.stdout)
+        self.assertNotEqual(r.returncode, 0, "jev_brief must answer NO-DATA (non zero) when Jev is skipped")
 
 
 if __name__ == "__main__":

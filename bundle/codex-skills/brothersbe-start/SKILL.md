@@ -1,6 +1,6 @@
 ---
 name: brothersbe-start
-description: "Use as the single entry point when someone wants to begin or resume work and does not know, or does not care, which command comes next. Detects existing state, resumes it when found, and otherwise asks for the outcome in plain language and routes into the next step. Invoke as /brothersbe:start."
+description: "Use as the single entry point when someone wants to begin or resume work and does not know, or does not care, which command comes next. Detects existing state, resumes it when found, and otherwise asks for the outcome in plain language and routes into the next step. Invoke as /brother:brothersbe-start."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

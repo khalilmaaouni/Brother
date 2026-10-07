@@ -1,0 +1,99 @@
+{
+ "schema": "brother.loop roles, version 2 (2026-09-22)",
+ "note": "THE NAMED ROLES OF A RUN. Owner, 2026-09-22: \"We have to have set roles inside the loop with names otherwise the user wont know how to set it\" and \"We need an intake process for the loop preparation\". Every role a run needs is listed here with what it does, when it acts, which model kind it needs, what content reaches it, and the setting that carries the user's choice. scripts/loop/loop_roles.py validates a set of choices against this file and the model registry; nothing starts a run on a choice it refused. EDIT THIS FILE to add or change a role. No code change is needed. VERSION 2 (2026-09-30) adds a per role chain: the named models a role falls back along after its first, read by scripts/loop/loop_roles.py role_chain and by model_router.chain; a role with no chain field is a chain of one, exactly as before.",
+ "when_values": {
+  "inside": "acts during the run, every round or every pass",
+  "outside": "runs the loop from a session, never inside a pass",
+  "after_run": "acts only once the loop has exited",
+  "after_final_check": "acts only after the final check has passed"
+ },
+ "roles": {
+  "worker": {
+   "does": "writes and repairs the builds, several seats in parallel each round",
+   "when": "inside",
+   "kind": "build",
+   "content": "public",
+   "setting": "BROTHER_PIN_MODEL",
+   "default": "deepseek",
+   "must_be_chosen": false,
+   "limits": "the default seats are bridge models; a pinned model may be on any transport the fan out speaks (bridge, claude, codex), the privacy gate still runs at the wire"
+  },
+  "adversary": {
+   "does": "writes the hostile probes that are executed against a build that passed the grader",
+   "when": "inside",
+   "kind": "build",
+   "content": "public",
+   "setting": "BROTHER_ADVERSARY_MODEL",
+   "default": "deepseek",
+   "must_be_chosen": false,
+   "limits": "its setting BROTHER_ADVERSARY_MODEL fills both seats; one chosen model fills both seats in probe_wave.py and both lanes of the pass level re-probe in scripts/probe_round.py; the default, deepseek, keeps today's pair: DeepSeek first and Muse or DeepSeek second by the worker mix. A Claude only run (BROTHER_TRANSPORTS=claude at launch, read by the model router at selection and at the wire) chooses a claude model here and for the worker, checker and finisher; the router refuses any other transport before the bridge is spawned"
+  },
+  "checker": {
+   "does": "reads a build that is grader PASS and probe CLEAN and writes a review beside it; a shadow by default, so it advises and never blocks",
+   "when": "inside",
+   "kind": "grade",
+   "content": "public",
+   "setting": "BROTHER_CHECKER",
+   "mode_setting": "BROTHER_CHECKER_MODE",
+   "chain": [],
+   "default": null,
+   "must_be_chosen": false,
+   "limits": "its brief (the spec and the build) passes the same private term screen as the worker brief and is withheld if it fails; any model that can grade may be chosen",
+   "retired_note": "2026-09-22 (fix 7): 0 LAND in 37 rulings on opus and deepseek at about 250 s each inside the round; a stage with zero yield is removed, not tuned. Runs only when the owner names a model; flip: a calibration over 20 landed builds where the checker says LAND on the majority."
+  },
+  "orchestrator": {
+   "does": "prepares the run at intake, starts it on the owner's order, watches the pulse, decides what changes a decision, and tells the owner",
+   "when": "outside",
+   "kind": "plan",
+   "content": "private",
+   "setting": null,
+   "default": "opus55",
+   "must_be_chosen": false,
+   "limits": "a session, not a process of the loop; recorded at intake so the run's record names who held the pen; owner order 2026-09-29 21:4x JST: 'Do not use Fable for the loop'"
+  },
+  "finisher": {
+   "does": "the final check OUTSIDE the loop: takes every build that did not land, debugs and fixes what stopped it, and brings it to a quality landing through the same gates, so that as much paid work as possible is saved",
+   "when": "after_run",
+   "kind": "build",
+   "content": "private",
+   "setting": "BROTHER_FINISHER_MODEL",
+   "chain": ["sonnet"],
+   "default": null,
+   "must_be_chosen": true,
+   "limits": "its tool is scripts/loop/finish_run.py (--dry first, then --model <the finisher chosen here>); it runs only when nothing of the loop is alive and never bypasses a landing gate"
+  },
+  "documenter": {
+   "does": "writes the documentation from the landed tree",
+   "when": "after_final_check",
+   "kind": "prose",
+   "content": "private",
+   "setting": null,
+   "default": null,
+   "must_be_chosen": true,
+   "limits": "never inside a run (scripts/test_no_documentation_in_the_run.py); only after landing, after the loop has exited and after the final check"
+  },
+  "planner": {
+   "does": "writes the plan that heads the round 0 brief",
+   "when": "inside",
+   "kind": "grade",
+   "content": "private",
+   "setting": "BROTHER_BUILD_PLAN_MODEL",
+   "default": "sonnet",
+   "chain": ["haiku"],
+   "must_be_chosen": false,
+   "limits": "a named seat (owner row 55): the model is read at CALL time from role_chain, never at import; the side seat uses this default and falls back along the chain when the first member is out"
+  },
+  "repair_advisor": {
+   "does": "writes the three edits that head a repair brief",
+   "when": "inside",
+   "kind": "grade",
+   "content": "private",
+   "setting": "BROTHER_REPAIR_ADVISOR_MODEL",
+   "default": "sonnet",
+   "chain": ["haiku"],
+   "must_be_chosen": false,
+   "limits": "a named seat (owner row 55): the model is read at CALL time from role_chain, never at import; the header names the model that actually answered"
+  }
+ },
+ "after_a_run": "THE STANDARD SEQUENCE AFTER EVERY RUN (owner, 2026-09-22, 'Should this be the standard': yes). 1. The loop exits (deadline or alarm). 2. The FINISHER runs, always: scripts/loop/finish_run.py --dry, then --model <the finisher chosen at intake>; it promotes the clean builds, gives every dropped or dirty build ONE repair round, re-executes the cached probes and lands through every gate; a build that fails its one round stays NOT SAVED with its reason for a human, never a second round. 3. The final check (the landed tree's own gates). 4. The DOCUMENTER, only then. Nothing is documented and nothing is restarted before step 2 has run."
+}

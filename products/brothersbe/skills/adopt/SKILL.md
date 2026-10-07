@@ -1,6 +1,6 @@
 ---
 name: adopt
-description: "Use when someone is adding risk and evidence checks to a repository that has never had them, or is checking whether an existing installation is actually wired up. Inspects the repository for readiness, proposes a configuration, and reports what is present, what is missing and what it could not check. Dry run by default. Invoke as /brothersbe:adopt."
+description: "Use when someone is adding risk and evidence checks to a repository that has never had them, or is checking whether an existing installation is actually wired up. Inspects the repository for readiness, proposes a configuration, and reports what is present, what is missing and what it could not check. Dry run by default. Invoke as /brother:brothersbe-adopt."
 ---
 
 Plugin root: a Claude Code install exports `${CLAUDE_PLUGIN_ROOT}` and a Codex install exports `${BROTHER_PLUGIN_ROOT}`; both name this plugin's own directory, so read whichever variable appears below as the one your client set. On a clone install neither is set: run the same commands from the checkout root instead.

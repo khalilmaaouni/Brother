@@ -57,6 +57,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -678,6 +679,35 @@ def run_one_tenant(tools_dir, root, tenant, canary_self, canary_other):
     return checks, timings, detail
 
 
+def portable(value, roots):
+    """The record with every machine path replaced by its role. The tool
+    CLIs echo the absolute paths they were handed (a scratch vault, the tools
+    directory) into the details this record keeps, so a drill run from a
+    checkout or a scratch root under a home-anchored runtime directory
+    (~/.claude, ~/.codex) wrote that path into a tracked, exported file, which
+    scripts/test_export_public.py refuses. Each root is replaced in both its
+    given and its resolved spelling (macOS resolves /var to /private/var), the
+    longest first so a nested root never leaves a fragment behind. Only the
+    strings change; counts, hashes and the pass/fail shape are untouched."""
+    pairs = []
+    for path, label in roots.items():
+        for spelling in {path, os.path.realpath(path)}:
+            pairs.append((spelling, label))
+    pairs.sort(key=lambda item: len(item[0]), reverse=True)
+    if isinstance(value, str):
+        # A root is replaced only where it ends at a path boundary, so /home/me/Brother never relabels
+        # /home/me/Brother2 as <repo>2 (attack B1, 2026-09-30).
+        for spelling, label in pairs:
+            value = re.sub(re.escape(spelling) + r"(?=$|[/\s\"'),:;\]}])", lambda _m, _l=label: _l, value)
+        return value
+    if isinstance(value, (list, tuple)):
+        return type(value)(portable(v, roots) for v in value)
+    if isinstance(value, dict):
+        # keys can carry a path too (a per file table keyed by its path), so they are scrubbed like values
+        return {portable(k, roots): portable(v, roots) for k, v in value.items()}
+    return value
+
+
 def main(argv=None):
     # --help must print usage and exit 0 without running the drill (two temp
     # tenants, about 7 seconds). The drill takes no arguments.
@@ -743,6 +773,16 @@ def main(argv=None):
         "scratch": "temporary directory, not kept",
     }
 
+    # Every machine path becomes its role (portable() above). The home
+    # directory is the backstop root: any other home-anchored path a tool
+    # echoes (test_export_public refuses this machine's home in any exported
+    # file) is scrubbed too. portable() replaces the longest root first, so
+    # the checkout, tools and scratch roots keep their own labels.
+    roots = {root: "<scratch>", tools_dir: "<tools>", REPO_ROOT: "<repo>"}
+    home = os.path.expanduser("~")
+    if home and home not in ("/", "~"):
+        roots[home] = "<home>"
+    result = portable(result, roots)
     print(json.dumps(result, indent=2, sort_keys=True))
     if failed:
         print("\nFAILED (%d of %d checks):" % (len(failed), len(all_checks)), file=sys.stderr)

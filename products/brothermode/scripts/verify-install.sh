@@ -39,7 +39,9 @@ set -e
 # asserts the two outcomes the split promises. Run it directly with
 # `scripts/verify-install.sh --selftest`.
 if [ "${1:-}" = "--selftest" ]; then
-    SDIR=$(mktemp -d 2>/dev/null || echo "/tmp/bm-verify-install-selftest.$$")
+    # a template under TMPDIR, slash trimmed: bare `mktemp -d` ignores TMPDIR on macOS (see checksums.sh)
+    TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+    SDIR=$(mktemp -d "$TMPBASE/bm-verify-install-selftest.XXXXXX" 2>/dev/null || echo "$TMPBASE/bm-verify-install-selftest.$$")
     trap 'rm -rf "$SDIR"' EXIT INT TERM
     STARGET="$SDIR/target"
     mkdir -p "$STARGET"
@@ -120,7 +122,9 @@ else
     exit 1
 fi
 
-WORKDIR=$(mktemp -d 2>/dev/null || echo "/tmp/bm-verify-install-work.$$")
+# a template under TMPDIR, slash trimmed: bare `mktemp -d` ignores TMPDIR on macOS (see checksums.sh)
+TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+WORKDIR=$(mktemp -d "$TMPBASE/bm-verify-install-work.XXXXXX" 2>/dev/null || echo "$TMPBASE/bm-verify-install-work.$$")
 mkdir -p "$WORKDIR"
 trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 

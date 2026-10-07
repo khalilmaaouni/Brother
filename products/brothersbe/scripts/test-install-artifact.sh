@@ -62,7 +62,9 @@ if ! git rev-parse --verify --quiet "$REF^{commit}" >/dev/null 2>&1; then
 fi
 RESOLVED=$(git rev-parse --short "$REF")
 
-WORKDIR=$(mktemp -d 2>/dev/null || echo "/tmp/sbe-test-install-artifact-work.$$")
+# a template under TMPDIR, slash trimmed: bare `mktemp -d` ignores TMPDIR on macOS (see checksums.sh)
+TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+WORKDIR=$(mktemp -d "$TMPBASE/sbe-test-install-artifact-work.XXXXXX" 2>/dev/null || echo "$TMPBASE/sbe-test-install-artifact-work.$$")
 mkdir -p "$WORKDIR"
 TARGET="$WORKDIR/install"
 mkdir -p "$TARGET"

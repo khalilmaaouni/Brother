@@ -120,6 +120,7 @@ REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import autonomy_dial  # noqa: E402
 import brother_paths  # noqa: E402
+import brother_state  # noqa: E402
 import claim_store  # noqa: E402
 import contract_check  # noqa: E402
 import decide  # noqa: E402
@@ -134,6 +135,7 @@ import loom  # noqa: E402
 import loop_bridge  # noqa: E402
 import managed_safety  # noqa: E402
 import park_sidecar  # noqa: E402
+import proof_card  # noqa: E402
 import receipt_door  # noqa: E402
 import run_heartbeat  # noqa: E402
 import work_record  # noqa: E402
@@ -197,6 +199,19 @@ ATTEMPTS_DIRNAME = "attempts"
 #: this way needs no edit at all).
 RECEIPT_DIRNAME = "receipt"
 RECEIPT_FILENAME = "receipt.json"
+
+#: E-C2, THE PROOF CARD, same rule as RECEIPT_DIRNAME just above: a DIRECTORY,
+#: never a bare proof_card.json sitting at run_dir's own level, for the exact
+#: reason receipt.json is not there either. Measured while porting this
+#: wiring in (2026-09-28): a first attempt wrote proof_card.json straight
+#: into run_dir and broke _find_work_doc's "the one *.json that is neither
+#: engine bookkeeping" rule on every --resume of a finished run, failing
+#: TheFirstRunLeavesAReceipt.test_a_receipt_that_cannot_be_written_exits_
+#: nonzero_saying_so with "needs a run directory holding exactly one Work
+#: document ... does not".
+PROOF_CARD_DIRNAME = "proof_card"
+PROOF_CARD_TEXT_FILENAME = "proof_card.txt"
+PROOF_CARD_JSON_FILENAME = "proof_card.json"
 
 #: FX-A: where the session route keeps what it hands across two processes,
 #: the lanes it opened and the file naming them. A DIRECTORY for exactly the
@@ -418,6 +433,40 @@ def run_dir_for(outcome, runs_root, clock=None):
 FALLBACK_RUNS_DIR = os.path.join("brother", "runs")
 
 
+def default_runs_root(here=HERE, env=None):
+    """(runs root, in a checkout) when the caller names none: ONE RULE, for this engine run directly and for the
+    brother-run launcher alike, and the SAME one every tool that keeps records beside itself uses
+    (brother_state.state_root, where the rule and its reasons are written). MEASURED 2026-10-06 in a copy holding
+    only bundle/: the launcher computed a default of its own (<HOME>/.claude/brother-run) while
+    `python3 <plugin root>/runtime/brother_run.py`, the form the shipped skill gives, wrote
+    <plugin root>/docs/plan/runs, a folder the host replaces on update."""
+    return brother_state.state_root(here, env)
+
+
+def _earlier_runs(root):
+    """[(folder that holds docs/plan/runs, how many runs it holds)] for the places an EARLIER engine kept runs by
+    default and this one no longer reads: beside the engine (an install's own folder, the form the shipped skill
+    gave), and the git checkout above it (the old launcher's default). Only what the engine itself recognises as a
+    run is counted (a folder holding one Work document), and the place actually in use is never listed."""
+    places = [REPO_ROOT]
+    try:
+        top = subprocess.run(["git", "-C", HERE, "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, timeout=15)
+        places += [top.stdout.strip()] if top.returncode == 0 and top.stdout.strip() else []
+    except (OSError, subprocess.SubprocessError):
+        pass   # no git, or it would not answer: there is then no checkout above this engine to speak of
+    found = []
+    for place in dict.fromkeys(os.path.realpath(p) for p in places):
+        runs = os.path.join(place, "docs", "plan", "runs")
+        try:
+            held = [n for n in os.listdir(runs) if _find_work_doc(os.path.join(runs, n))]
+        except OSError:
+            held = []
+        if held and place != os.path.realpath(root):
+            found.append((place, len(held)))
+    return found
+
+
 def _resolve_runs_root(requested, default=None, probe=None):
     """The runs root to use, plus the line to print when it is not the one
     asked for. An EXPLICIT --runs-root is honored as given and never moved:
@@ -433,18 +482,38 @@ def _resolve_runs_root(requested, default=None, probe=None):
     makedirs the run will do."""
     if requested:
         return os.path.abspath(requested)
-    root = os.path.abspath(default or REPO_ROOT)
+    in_checkout = True
+    if not default:
+        default, in_checkout = default_runs_root()
+    root = os.path.abspath(default)
+    said_where = False
     probe = probe or (lambda path: os.makedirs(path, exist_ok=True))
     try:
         probe(os.path.join(root, "docs", "plan", "runs"))
-        return root
     except OSError as exc:
         fallback = os.path.join(brother_paths.config_dir(), FALLBACK_RUNS_DIR)
         print("brother_run: the default run directory under %s cannot be "
               "written (%s), so this run's records go to %s instead. Pass "
               "--runs-root to choose your own; keep it outside the "
               "repository being worked on." % (root, exc, fallback))
-        return fallback
+        root, said_where = fallback, True
+    if not in_checkout:
+        # ONE LOCATION, STATED ONCE, THE ONE ACTUALLY USED: both lines below are written after the probe, about `root`.
+        engine_home = os.path.realpath(REPO_ROOT)
+        if os.path.commonpath([os.path.realpath(root), engine_home]) == engine_home:
+            # an explicit choice is honoured, and told once what it costs
+            print("brother_run: %s names %s, inside the plugin's own folder. It is honoured as asked; an update of "
+                  "the plugin deletes that folder and the runs in it." % (brother_state.STATE_ROOT_ENV, root))
+        # RUNS AN EARLIER VERSION KEPT ELSEWHERE BY DEFAULT are neither moved nor deleted nor silently ignored: one
+        # line per place says how many, where, that they are not read by default, and the root that continues one.
+        for place, count in _earlier_runs(root):
+            print("brother_run: %d earlier run(s) are kept under %s, where an earlier version kept them by default. "
+                  "They are not read by default and nothing new is written there%s; pass --runs-root %s to continue "
+                  "one%s." % (count, os.path.join(place, "docs", "plan", "runs"),
+                              "" if said_where else ", this run's records go to %s" % root, place,
+                              ", and move that folder somewhere of your own first, since an update of the plugin "
+                              "deletes it" if place == engine_home else ""))
+    return root
 
 
 def in_claude_code_session(env=None):
@@ -2563,9 +2632,13 @@ def _load_bm_recurrence():
     global _BM_RECURRENCE_MODULE
     if _BM_RECURRENCE_MODULE is not None:
         return _BM_RECURRENCE_MODULE
-    path = os.path.join(REPO_ROOT, "products", "brothermode", "tools",
-                        "bm_recurrence.py")
-    if not os.path.isfile(path):
+    # the source checkout, then the installed bundle (runtime/hooks/brothermode/tools beside this file), the same
+    # two candidates as _load_bm_vault_intake below: the bundle has no products/ directory (review 2026-10-05)
+    path = next((p for p in (
+        os.path.join(REPO_ROOT, "products", "brothermode", "tools", "bm_recurrence.py"),
+        os.path.join(HERE, "hooks", "brothermode", "tools", "bm_recurrence.py"))
+        if os.path.isfile(p)), None)
+    if path is None:
         return None
     try:
         import importlib.util
@@ -2835,9 +2908,13 @@ def _load_bm_vault_intake():
     global _BM_VAULT_INTAKE_MODULE
     if _BM_VAULT_INTAKE_MODULE is not None:
         return _BM_VAULT_INTAKE_MODULE
-    path = os.path.join(REPO_ROOT, "products", "brothermode", "tools",
-                        "bm_vault_intake.py")
-    if not os.path.isfile(path):
+    # the source checkout, then the installed bundle (runtime/hooks/brothermode/tools beside this file): the
+    # bundle has no products/ directory, so an installed run read NO-DATA every time (review 2026-10-05)
+    path = next((p for p in (
+        os.path.join(REPO_ROOT, "products", "brothermode", "tools", "bm_vault_intake.py"),
+        os.path.join(HERE, "hooks", "brothermode", "tools", "bm_vault_intake.py"))
+        if os.path.isfile(p)), None)
+    if path is None:
         return None
     try:
         import importlib.util
@@ -3089,16 +3166,57 @@ def _reexecute_check(command, cwd, recorded_exit_code, runner=None):
 #: 2026-09-03: "a syntax error in a python -c string, a missing
 #: interpreter"). A check matching one of these before the work and again
 #: after, unchanged, is not proving anything about the work either way.
+#: F25 (engine finding 25, 2026-09-26): these are consulted ONLY once
+#: _check_looks_broken has already ruled out that the check ever actually
+#: ran (see below); they used to be matched as a bare substring anywhere in
+#: the whole of stderr, which is also exactly the interpreter's own fixed
+#: wording for a FileNotFoundError an ordinary assertion raises on purpose
+#: ("No such file or directory: <path>"), so a real, running test that
+#: quoted that sentence in its own failure message was misread as a check
+#: that never ran at all.
 BROKEN_CHECK_STDERR_PATTERNS = (
     "SyntaxError", "command not found", "No such file or directory")
 
+#: The shell's own POSIX-fixed exit code for "the command named could not be
+#: found or executed at all" (bash, dash, sh all agree on 127): the single
+#: most reliable signal that a check never ran, because nothing about an
+#: ordinary passing or failing assertion ever produces it.
+_SHELL_COMMAND_NOT_FOUND_EXIT_CODE = 127
 
-def _check_looks_broken(stderr_text):
-    """True when `stderr_text` names one of BROKEN_CHECK_STDERR_PATTERNS: a
-    plain substring test is enough here, because these are the interpreter's
-    and the shell's own fixed wording, not a person's free text a check
-    could coincidentally echo."""
+#: Markers that a check ACTUALLY RAN, whatever its stderr goes on to quote:
+#: a Python traceback means the interpreter compiled the check and started
+#: executing it before anything raised, and unittest's own "FAILED (...)"
+#: summary line (or a per-test "FAIL: "/"ERROR: " banner) means the whole
+#: suite ran to its own conclusion. A check that produced either of these is
+#: an ORDINARY RED, whatever substring its own assertion message happens to
+#: quote; checked before BROKEN_CHECK_STDERR_PATTERNS below precisely so
+#: that quoted substring never gets the last word.
+_CHECK_RAN_MARKERS = (
+    re.compile(r"Traceback \(most recent call last\):"),
+    re.compile(r"^(?:FAILED \(|FAIL: |ERROR: )", re.MULTILINE),
+)
+
+
+def _check_looks_broken(stderr_text, exit_code=None):
+    """True when `stderr_text`/`exit_code` show the check itself could
+    never run, as opposed to running and failing on its own terms.
+
+    F25 (engine finding 25, 2026-09-26): decided from HOW the check failed,
+    never from a substring matched anywhere in whatever it printed. Exit
+    127 is the shell's own fixed word for "could not even find the command"
+    and needs no text to back it up. Short of that, a check that left
+    behind a real Python traceback or unittest's own FAILED/FAIL/ERROR
+    banner RAN, in full, on its own assertions, so it is an ordinary red
+    even when its message happens to quote "No such file or directory" or
+    "SyntaxError" about the THING IT WAS TESTING rather than about itself.
+    Only once neither of those is present does BROKEN_CHECK_STDERR_PATTERNS
+    get to answer, which is now the narrow case it was always meant to be:
+    the interpreter refusing to even open or compile the check's own file."""
     text = stderr_text or ""
+    if exit_code == _SHELL_COMMAND_NOT_FOUND_EXIT_CODE:
+        return True
+    if any(marker.search(text) for marker in _CHECK_RAN_MARKERS):
+        return False
     return any(p in text for p in BROKEN_CHECK_STDERR_PATTERNS)
 
 
@@ -3148,7 +3266,8 @@ def _check_passes_now(command, cwd, runner=None, capture=None):
     stderr_text = getattr(proc, "stderr", None)
     if capture is not None:
         capture["stderr"] = stderr_text
-    looks_broken = (not passed) and _check_looks_broken(stderr_text)
+    looks_broken = (not passed) and _check_looks_broken(stderr_text,
+                                                        proc.returncode)
     return passed, proc.returncode, looks_broken, None
 
 
@@ -3932,25 +4051,52 @@ def _check_without(cwd, unit_rev, dep_rev, files, command, runner=None,
             return None, ("a throwaway worktree at %s could not be made: %s"
                           % (unit_rev[:12], (made.stderr or "").strip()[:160]))
         base = dep_rev + "^1"
-        for path in files:
+        if files:
+            # One batch-check plus one checkout for every file, instead of
+            # a cat-file-plus-checkout pair per file: git cat-file
+            # --batch-check reads one "<rev>:<path>" per stdin line and
+            # answers one line per input line, in the same order, so N
+            # files cost 2 subprocess spawns total here, not up to 2N.
             try:
-                had = subprocess.run(
-                    ["git", "cat-file", "-e", "%s:%s" % (base, path)],
-                    cwd=cwd, capture_output=True, text=True, timeout=30)
-                if had.returncode == 0:
-                    put = subprocess.run(
-                        ["git", "checkout", base, "--", path], cwd=scratch,
-                        capture_output=True, text=True, timeout=60)
-                    if put.returncode != 0:
-                        return None, ("%s could not be put back to %s: %s"
-                                      % (path, base[:14],
-                                         (put.stderr or "").strip()[:160]))
-                elif os.path.lexists(os.path.join(scratch, path)):
-                    # The dependency CREATED this file: reverting it means
-                    # it is not there.
-                    os.remove(os.path.join(scratch, path))
+                probe = subprocess.run(
+                    ["git", "cat-file", "--batch-check=%(objectname)"],
+                    cwd=cwd, input="".join("%s:%s\n" % (base, p) for p in files),
+                    capture_output=True, text=True, timeout=30)
             except Exception as exc:  # noqa: BLE001
-                return None, "%s could not be put back: %s" % (path, exc)
+                return None, "could not batch-check %s at %s: %s" % (
+                    ", ".join(files), base[:14], exc)
+            if probe.returncode != 0:
+                return None, ("could not batch-check %s at %s: %s"
+                              % (", ".join(files), base[:14],
+                                 (probe.stderr or "").strip()[:160]))
+            out_lines = probe.stdout.splitlines()
+            if len(out_lines) != len(files):
+                return None, ("git cat-file --batch-check returned %d line(s) "
+                              "for %d file(s), could not tell which existed at %s"
+                              % (len(out_lines), len(files), base[:14]))
+            present = [p for p, line in zip(files, out_lines)
+                      if not line.strip().endswith("missing")]
+            absent = [p for p in files if p not in present]
+            if present:
+                try:
+                    put = subprocess.run(
+                        ["git", "checkout", base, "--"] + present, cwd=scratch,
+                        capture_output=True, text=True, timeout=60)
+                except Exception as exc:  # noqa: BLE001
+                    return None, ("%s could not be put back to %s: %s"
+                                  % (", ".join(present), base[:14], exc))
+                if put.returncode != 0:
+                    return None, ("%s could not be put back to %s: %s"
+                                  % (", ".join(present), base[:14],
+                                     (put.stderr or "").strip()[:160]))
+            for path in absent:
+                # The dependency CREATED this file: reverting it means it
+                # is not there.
+                if os.path.lexists(os.path.join(scratch, path)):
+                    try:
+                        os.remove(os.path.join(scratch, path))
+                    except Exception as exc:  # noqa: BLE001
+                        return None, "%s could not be put back: %s" % (path, exc)
         try:
             proc = runner(command, cwd=scratch)
         except Exception as exc:  # noqa: BLE001
@@ -4308,6 +4454,35 @@ def _rewrite_broken_checks(record_path, cwd, log, runner=None, model_cmd=None):
     broken = [r for r in rows if r.get("status") != "DONE"
              and r.get("check_looks_broken")]
     if not broken:
+        return rows
+    # F24 (engine finding 24, 2026-09-26): D-001's own rule, respelled here.
+    # Asking the planner for a replacement done_check spawns EXACTLY the
+    # headless decomposer D-001 already refuses to spawn from inside a
+    # coding session (in_claude_code_session(), scripts/brother_run.py):
+    # a model command started from inside one cannot reach a model, it
+    # hangs or exits with an empty error. This call site had no such guard,
+    # so a broken precheck inside a session spawned a real headless
+    # `claude -p` anyway, a paid call the session never asked for. An
+    # explicit opt-in (a --model-cmd this caller passed, or DOOR_MODEL_CMD
+    # named on purpose, the same opt-in door.resolve_cmd itself reads) is
+    # still taken at its word, exactly as session_units_are_yours() takes
+    # MODEL_WORKER_CMD at its word on the worker's own half of D-001: this
+    # stays a routing rule, never the removal of a capability. Refusing here
+    # means never calling door.resolve_cmd/door.ask_decomposer at all; the
+    # broken rows are returned untouched, still carrying check_looks_broken,
+    # so _refuse_broken_precheck_units (the caller's very next step) refuses
+    # each of them by name, the same shape a missing decomposer already
+    # falls through to just below.
+    if in_claude_code_session() and not (model_cmd
+                                         or os.environ.get("DOOR_MODEL_CMD")):
+        log.note("brother_run: this is a coding session, and asking the "
+                 "planner for a replacement done_check would spawn a "
+                 "headless model command from inside one: it hangs or "
+                 "exits with an empty error, exactly what D-001 already "
+                 "refuses on every other route. %d broken check(s) stay as "
+                 "they are, refused below rather than asked about. Fix the "
+                 "check(s) yourself, or name DOOR_MODEL_CMD to ask a "
+                 "headless planner anyway." % len(broken))
         return rows
     cmd = door.resolve_cmd(model_cmd)
     missing = door.missing_reason(cmd)
@@ -5391,11 +5566,17 @@ def main(argv=None):
                          "intent screen. The report at the end is unchanged")
     ap.add_argument("--runs-root",
                     help="where the run's Work document and claim store live "
-                         "(under docs/plan/runs); defaults to this tool's own "
-                         "repository, and to a brother/runs directory under "
-                         "the user's Claude or Codex config directory when "
-                         "that one cannot be written (a read-only plugin "
-                         "install), never a temp directory (a receipt there "
+                         "(under docs/plan/runs). In a checkout of the Brother "
+                         "repository it defaults to that repository. An "
+                         "installed plugin keeps them per user, under "
+                         "~/.claude/brother-run (BROTHER_RUNS_ROOT names "
+                         "another place: absolute or starting with ~, a "
+                         "relative value is refused; a checkout ignores it), "
+                         "never in the plugin folder, which an update "
+                         "replaces. A default that cannot be written "
+                         "falls back to a brother/runs directory under the "
+                         "user's Claude or Codex config directory, never a "
+                         "temp directory (a receipt there "
                          "is lost at reboot) and never the target --cwd, "
                          "which integration requires to stay clean. WHAT CLEAN "
                          "MEANS HERE, exactly: every path git status reports "
@@ -5820,6 +6001,47 @@ def main(argv=None):
                     "work_id": record.get("work_id"),
                     "units": len(record.get("rows")
                                  or record.get("units") or [])})
+                # F30 (engine finding 30, 2026-09-26): THE SAME FENCE, MOVED
+                # EARLIER FOR THE ONE ROUTE THAT SURVIVES ACROSS PROCESSES.
+                # A fresh record whose units are about to be handed to the
+                # session (session_units_are_yours(), just below in
+                # run_loop) never runs in THIS process at all: this run
+                # opens one worktree per unit and returns, and a later,
+                # SEPARATE `--continue` reads this exact record back off
+                # disk, where the fence just below (`if resumed:`) already
+                # refuses a chained or crafted done_check. Refusing only
+                # there let a unit get claimed, its worktree opened and
+                # real work done in it by the session, and only THEN
+                # refused: unverifiable, and the work in that worktree
+                # stranded. Checked here, before anything is claimed, so
+                # that unit is never handed over in the first place.
+                #
+                # SCOPED TO THE SESSION ROUTE ON PURPOSE. A run that spawns
+                # its own worker in this same process (no session, no later
+                # --continue) already runs every check for real, right
+                # here, before this function returns; test_brother_run_
+                # contract.py's own "&&"-chaining fixture
+                # (test_a_done_check_that_starts_with_the_promised_command_
+                # counts) relies on exactly that staying unfenced, since a
+                # unit dispatched to a real worker in one process is proven
+                # or refused by that same process, never resumed off disk.
+                if session_units_are_yours():
+                    refused_checks = _guard_record_checks(record)
+                    for unit_id, reason in refused_checks:
+                        print("brother_run: %s's done_check was refused: %s"
+                             % (unit_id, reason), file=sys.stderr)
+                    if refused_checks:
+                        print("brother_run: this run would hand its units "
+                             "to this coding session, and the session route "
+                             "reads the record back off disk on every "
+                             "--continue, where a check like this is always "
+                             "refused; refusing it now, before anything is "
+                             "claimed, rather than after a worktree is "
+                             "opened and worked in for nothing. Edit the "
+                             "refused done_check(s) in %s and run again."
+                             % record.get("path", "the Work document"),
+                             file=sys.stderr)
+                        return 1
     if resumed:
         # P1-2 fix 3 (2026-09-06 resume defects): DRIFT DETECTION. Read
         # the checkpoint's own last-recorded canonical revision BEFORE
@@ -6885,6 +7107,34 @@ def main(argv=None):
             lead = ["--continue"] + ([] if len(matches) == 1 else [str(index)])
             print("brother_run: this run is not finished. Continue it with:"
                   "\n  %s" % _next_command(cwd, runs_root, lead))
+    # E-C2, THE PROOF CARD (P0-D, previously built and never called): one
+    # screen projected from this run's own records. Best effort, like the
+    # attempt trace above: a card that cannot be rendered or written is
+    # reported and swallowed, never allowed to move exit_code off what the
+    # delivery itself already decided. Printed and written BEFORE the
+    # receipt line below, never after: E81 (just above) already made
+    # "brother_run: receipt: ..." / "brother_run: no receipt: ..." the last
+    # thing this process says, proven by
+    # TheFirstRunLeavesAReceipt.test_the_last_stdout_line_names_a_receipt_
+    # file_that_exists, and this card is additive to that contract, not a
+    # replacement for it.
+    try:
+        card_fields = proof_card.build_card(run_dir)
+        card_text = proof_card.render_text(card_fields)
+        card_dir = os.path.join(run_dir, PROOF_CARD_DIRNAME)
+        os.makedirs(card_dir, exist_ok=True)
+        with open(os.path.join(card_dir, PROOF_CARD_TEXT_FILENAME), "w",
+                 encoding="utf-8") as fh:
+            fh.write(card_text + "\n")
+        with open(os.path.join(card_dir, PROOF_CARD_JSON_FILENAME), "w",
+                 encoding="utf-8") as fh:
+            json.dump(card_fields, fh, indent=1, sort_keys=True)
+        print(card_text)
+    except Exception as exc:  # noqa: BLE001, the card is best effort
+        log.note("brother_run: the proof card could not be rendered for "
+                "%s (%s); the run's own exit code is unaffected"
+                % (run_dir, exc))
+        print("PROOF CARD: NO-DATA (%s)" % exc)
     if receipt_path:
         print("brother_run: receipt: %s" % receipt_path)
     else:

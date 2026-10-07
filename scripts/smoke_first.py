@@ -2,8 +2,7 @@
 """Run a command over many items only after it succeeds on ONE item first.
 
 Written 2026-09-12 after a night run launched driver scripts at full scale
-that failed on every item for the same reason. Drafted by Muse Spark 1.2
-from a role-worded spec, cross-reviewed by DeepSeek V4.1 Flash.
+that failed on every item for the same reason.
 """
 import argparse
 import concurrent.futures

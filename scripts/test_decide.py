@@ -6,6 +6,7 @@ reads as arithmetic whether or not any arithmetic happened, and a code excerpt
 reads as current whether or not the file still says that. So these tests drive
 the four things the module claims and refuses to take any of them on trust.
 """
+import html
 import json
 import os
 import re
@@ -142,6 +143,158 @@ class TheCodeIsReadFromTheLiveFile(unittest.TestCase):
         self.assertIn("is not present", D.render(s))
 
 
+class ACodeAnchorCannotLeaveTheRepository(unittest.TestCase):
+    """A code anchor comes from a model authored spec, and the rendered page is
+    committed under docs/decisions/. An anchor that resolves outside the
+    repository would copy that file (an .env, a key) into a tracked page, so
+    each way out is refused on its own fixture: the file outside EXISTS in
+    every one, so only the confinement can be what refuses it."""
+
+    SECRET = "outside-the-repo-" + "S3cr3t" * 3
+
+    @staticmethod
+    def git(*args, cwd):
+        """git with the hook's location variables dropped, so a run from a
+        pre-push hook cannot aim this at the real repository."""
+        import subprocess
+        import tmp_sandbox
+        env = dict(os.environ)
+        tmp_sandbox.drop_git_location(env)
+        return subprocess.run(("git",) + args, cwd=cwd, env=env,
+                              capture_output=True, text=True)
+
+    def setUp(self):
+        import shutil
+        self.root = tempfile.mkdtemp()
+        self.away = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.addCleanup(shutil.rmtree, self.away, True)
+        made = self.git("init", "-q", cwd=self.root)
+        self.assertEqual(made.returncode, 0, made.stderr)
+        self.outside = os.path.join(self.away, "secret.env")
+        with open(self.outside, "w", encoding="utf-8") as fh:
+            fh.write(self.SECRET + "\n")
+        with open(os.path.join(self.root, "inside.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("inside line one\ninside line two\n")
+        real_root = os.path.realpath(self.root)
+        self.assertFalse(os.path.realpath(self.outside).startswith(
+            real_root + os.sep), "fixture broken: the outside file is inside")
+        self.saved_root = D.ROOT
+        D.ROOT = self.root
+        self.addCleanup(setattr, D, "ROOT", self.saved_root)
+
+    def assertRefused(self, path):
+        text, note = D.excerpt({"path": path, "lines": "1"})
+        self.assertIsNone(text, "read a file outside the repository")
+        self.assertIn(D.NODATA, note)
+        self.assertIn("outside this repository", note)
+        self.assertNotIn(self.SECRET, note)
+
+    def test_an_absolute_path_outside_is_refused(self):
+        self.assertTrue(os.path.isabs(self.outside))
+        self.assertRefused(self.outside)
+
+    def test_a_dot_dot_path_outside_is_refused(self):
+        rel = os.path.relpath(self.outside, self.root)
+        self.assertTrue(rel.startswith(".."), rel)
+        self.assertRefused(rel)
+
+    def test_a_symlink_inside_pointing_outside_is_refused(self):
+        os.symlink(self.outside, os.path.join(self.root, "link.env"))
+        self.assertRefused("link.env")
+
+    def test_an_ordinary_path_inside_is_still_read(self):
+        text, note = D.excerpt({"path": "inside.py", "lines": "2"})
+        self.assertEqual(note, "")
+        self.assertIn("inside line two", text)
+
+    def test_a_symlink_inside_pointing_inside_is_still_read(self):
+        os.symlink(os.path.join(self.root, "inside.py"),
+                   os.path.join(self.root, "alias.py"))
+        text, note = D.excerpt({"path": "alias.py", "lines": "1"})
+        self.assertEqual(note, "")
+        self.assertIn("inside line one", text)
+
+    def write_ignored_secret(self):
+        with open(os.path.join(self.root, ".gitignore"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("*.local\n")
+        with open(os.path.join(self.root, "secret.local"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(self.SECRET + "\n")
+
+    def test_a_git_ignored_file_inside_is_refused(self):
+        """Inside the repository, so only the ignore check can refuse it."""
+        self.write_ignored_secret()
+        text, note = D.excerpt({"path": "secret.local", "lines": "1"})
+        self.assertIsNone(text, "read a file git ignores")
+        self.assertIn(D.NODATA, note)
+        self.assertIn("git ignores", note)
+        self.assertNotIn(self.SECRET, note)
+
+    def test_a_symlink_inside_pointing_at_an_ignored_file_is_refused(self):
+        """The link itself is not ignored; what it resolves to is."""
+        self.write_ignored_secret()
+        os.symlink(os.path.join(self.root, "secret.local"),
+                   os.path.join(self.root, "notes.txt"))
+        text, note = D.excerpt({"path": "notes.txt", "lines": "1"})
+        self.assertIsNone(text, "read an ignored file through a link")
+        self.assertIn("git ignores", note)
+
+    def test_a_path_into_dot_git_is_refused(self):
+        """git check-ignore answers "not ignored" for .git/config (measured),
+        so only the .git rule can refuse this one."""
+        self.assertTrue(os.path.isfile(os.path.join(self.root, ".git",
+                                                    "config")))
+        text, note = D.excerpt({"path": ".git/config", "lines": "1"})
+        self.assertIsNone(text, "read git's own metadata")
+        self.assertIn(D.NODATA, note)
+        self.assertIn(".git", note)
+
+    def test_a_hooks_GIT_DIR_does_not_redirect_the_ignore_check(self):
+        """The pre-push gate runs suites inside a git hook, which exports
+        GIT_DIR. Inherited, it would aim check-ignore at another repository."""
+        saved = os.environ.get("GIT_DIR")
+        os.environ["GIT_DIR"] = os.path.join(self.away, "no-such.git")
+        self.addCleanup(lambda: os.environ.pop("GIT_DIR", None) if saved is None
+                        else os.environ.__setitem__("GIT_DIR", saved))
+        text, note = D.excerpt({"path": "inside.py", "lines": "1"})
+        self.assertEqual(note, "")
+        self.assertIn("inside line one", text)
+
+    def test_when_git_cannot_answer_nothing_is_read(self):
+        """Fail closed: a tree git cannot see into is not assumed clean."""
+        import shutil
+        plain = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, plain, True)
+        with open(os.path.join(plain, "inside.py"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("plain line one\n")
+        probe = self.git("rev-parse", "--git-dir", cwd=plain)
+        self.assertNotEqual(probe.returncode, 0,
+                            "fixture broken: the plain folder is inside a repo")
+        D.ROOT = plain
+        text, note = D.excerpt({"path": "inside.py", "lines": "1"})
+        self.assertIsNone(text, "read a file git could not vouch for")
+        self.assertIn(D.NODATA, note)
+        self.assertIn("could not ask git", note)
+
+    def test_a_path_that_cannot_be_resolved_is_NO_DATA_not_a_crash(self):
+        text, note = D.excerpt({"path": "inside\x00.py", "lines": "1"})
+        self.assertIsNone(text)
+        self.assertIn(D.NODATA, note)
+
+    def test_the_rendered_page_carries_the_refusal_not_the_file(self):
+        """The entry point: render() builds the committed page."""
+        D.ROOT = self.saved_root
+        s = clone()
+        s["options"][0]["code"] = [{"path": self.outside, "lines": "1"}]
+        page = D.render(s)
+        self.assertNotIn(self.SECRET, page)
+        self.assertIn("outside this repository", page)
+
+
 class ThePageIsSafeAndComplete(unittest.TestCase):
     def test_content_is_escaped(self):
         s = clone(title="<script>alert(1)</script>")
@@ -180,6 +333,58 @@ class ThePageIsSafeAndComplete(unittest.TestCase):
         self.assertNotIn("<script", page.lower())
         self.assertNotIn("cdn", page.lower())
         self.assertNotIn("src=", page.lower())
+
+    def test_a_web_source_renders_its_link(self):
+        """SOURCE_KEYS accepts a web citation {title, url, what}, so the page
+        must show where it points: until 2026-09-26 the url and title were
+        dropped without a word. No title falls back to the url text."""
+        s = clone()
+        s["options"][0]["sources"] = [
+            {"title": "Install guide", "what": "how it installs",
+             "url": "https://example.com/install?a=1&b=2"},
+            {"what": "no title", "url": "https://example.com/bare"}]
+        page = D.render(s)
+        self.assertIn('<a href="https://example.com/install?a=1&amp;b=2" '
+                      'rel="noreferrer">Install guide</a>', page)
+        self.assertIn('<a href="https://example.com/bare" rel="noreferrer">'
+                      'https://example.com/bare</a>', page)
+
+    def test_a_url_that_is_not_http_is_never_an_href(self):
+        """E() stops a quote leaving href, not a javascript: or data: scheme,
+        which runs when the reader clicks. repos, docs and sources all go
+        through one guard, so all three are driven here, and one https link
+        per list proves the guard does not simply refuse everything."""
+        hostile = ["javascript:alert(1)", " JavaScript:alert(1)",
+                   "data:text/html,<b>x</b>", "vbscript:x"]
+        good = "https://example.com/ok"
+        s = clone()
+        o = s["options"][0]
+        o["sources"] = [{"what": "w", "title": "src%d" % i, "url": u}
+                        for i, u in enumerate(hostile + [good])]
+        o["repos"] = [{"name": "repo%d" % i, "url": u}
+                      for i, u in enumerate(hostile + [good])]
+        o["docs"] = [{"title": "doc%d" % i, "url": u}
+                     for i, u in enumerate(hostile + [good])]
+        page = D.render(s)
+        for h in re.findall(r'href="([^"]*)"', page):
+            self.assertTrue(html.unescape(h).startswith(("#", "https://", "http://")),
+                            "a clickable non http(s) href: %r" % h)
+        self.assertEqual(page.count('href="%s"' % good), 3)
+        for i in range(len(hostile)):
+            for name in ("src", "repo", "doc"):
+                self.assertIn("%s%d" % (name, i), page)
+
+    def test_a_source_shows_the_date_it_was_checked(self):
+        """SOURCE_KEYS accepts checked, the audit stamp on a citation, so the
+        page must show it: until 2026-09-26 it was dropped without a word on
+        all 20 option sources in docs/decisions that carry one."""
+        s = clone()
+        s["options"][0]["sources"] = [
+            {"what": "the inventory", "where": "file",
+             "found_in": "docs/plan/X.md", "checked": "2026-08-31<b>"}]
+        page = D.render(s)
+        self.assertIn('<span class="checked">checked 2026-08-31&lt;b&gt;</span>',
+                      page)
 
     def test_an_unreadable_spec_is_NO_DATA_not_a_crash(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
@@ -281,17 +486,40 @@ class TheRealDecisionStillResolves(unittest.TestCase):
     NARRATIVE_SCOPE = "narrative"
     _LOOKS_LIKE_A_FILE = re.compile(r"/[^\s/]+\.[A-Za-z0-9]{1,6}\b")
 
+    #: The only keys a source may carry. decide.py renders what (the bold
+    #: label), where and found_in; this test reads scope; checked is an audit
+    #: stamp the page shows as "checked <date>"; receipt is read by
+    #: scripts/receipt_check.py, whose default
+    #: record shape is this one. Any other key is dropped by the page without
+    #: a word, and a file named under it is never existence checked:
+    #: mutation M5b (2026-09-26) put {"label", "path": <missing file>} in a
+    #: record, this test stayed
+    #: green, and the page rendered an empty label. A closed set, not a list
+    #: of file-looking names, because "path" was one spelling of the defect
+    #: and the next one will be another. title and url are a web citation: a
+    #: URL is not a file, so it is exempt from existence the way machine scope
+    #: is, but it must still carry what, it is counted, and
+    #: test_every_outside_link_was_actually_checked holds it to https and a
+    #: checked date like every other outside link.
+    SOURCE_KEYS = frozenset({"what", "where", "found_in", "scope", "checked",
+                             "receipt", "title", "url"})
+
     def test_every_source_names_a_file_that_exists(self):
         """The flag is not a mute button, so it is checked in both directions: a
         machine level source must name a path that is outside this tree by
         construction, an outside path carrying no flag still fails, and a
         narrative source must not be shaped like a file citation in disguise.
-        Every offender is COLLECTED and reported together, never truncated at
-        the first one: a source guard that stops at the first offender hid
-        every sibling behind it."""
+        Before any of that, a source must be in the shape decide.py reads: no
+        key outside SOURCE_KEYS, and a what, the label the page shows. Every
+        offender is COLLECTED and reported together, never truncated at the
+        first one: a source guard that stops at the first offender hid every
+        sibling behind it."""
         missing = []
         machine = []
         narrative = []
+        web = []
+        unread = []
+        unlabeled = []
         machine_misscoped = []
         unflagged_outside = []
         narrative_misscoped = []
@@ -299,6 +527,18 @@ class TheRealDecisionStillResolves(unittest.TestCase):
         for name, spec in self.specs():
           for opt in spec["options"]:
             for s in opt.get("sources") or []:
+                at = "%s option %s" % (name, opt.get("id"))
+                if not isinstance(s, dict):
+                    unread.append("%s: a source that is not an object: %r" % (at, s))
+                    continue
+                extra = sorted(set(s) - self.SOURCE_KEYS)
+                if extra:
+                    unread.append("%s: %s outside SOURCE_KEYS in %r"
+                                  % (at, extra, s))
+                if not s.get("what"):
+                    unlabeled.append("%s: %r" % (at, s))
+                if "url" in s:
+                    web.append(str(s["url"]))
                 p = s.get("found_in")
                 if not p:
                     continue
@@ -343,6 +583,16 @@ class TheRealDecisionStillResolves(unittest.TestCase):
             print("%s: %d source(s) are narrative (no file ever existed), so "
                   "their existence was not checked: %s"
                   % (D.NODATA, len(narrative), ", ".join(narrative)))
+        if web:
+            print("%s: %d source(s) are web pages, not files, so their "
+                  "existence was not checked: %s"
+                  % (D.NODATA, len(web), ", ".join(web)))
+        self.assertEqual(unread, [],
+                          "sources carry keys the page never shows, so a file "
+                          "named there is never checked: %s" % unread)
+        self.assertEqual(unlabeled, [],
+                          "sources with no what render as an empty label: %s"
+                          % unlabeled)
         self.assertEqual(machine_misscoped, [],
                           "machine scoped sources name a repo relative path: %s"
                           % machine_misscoped)
@@ -405,11 +655,14 @@ class TheRealDecisionStillResolves(unittest.TestCase):
     def test_every_outside_link_was_actually_checked(self):
         """The guard against a plausible URL pasted from memory. A link the
         founder clicks that 404s is worse than no link, so every one carries the
-        date it was resolved and this fails if any does not."""
+        date it was resolved and this fails if any does not. A web citation in
+        sources is an outside link too, held to the same rule."""
         unchecked = []
         for name, spec in self.specs():
           for opt in spec["options"]:
-            for r in (opt.get("repos") or []) + (opt.get("docs") or []):
+            web = [s for s in opt.get("sources") or []
+                   if isinstance(s, dict) and "url" in s]
+            for r in (opt.get("repos") or []) + (opt.get("docs") or []) + web:
                 if not r.get("checked"):
                     unchecked.append(r.get("url", "?"))
                 if not str(r.get("url", "")).startswith("https://"):
@@ -424,9 +677,14 @@ class TheRealDecisionStillResolves(unittest.TestCase):
         same nothing-marked failure happens for a part of it."""
         spec = self.load()
         for name, spec in self.specs():
-            decided = spec.get("decided") or {}
-            if not decided:
+            if "decided" not in spec:
                 continue
+            decided = spec["decided"]
+            # A bare boolean reads as a verdict to a person and as nothing to
+            # the renderer: true crashed decide.py, false slipped past this
+            # check, and three records shipped that way (2026-09-21/22). No
+            # decision is recorded by leaving the key out, never by false.
+            self.assertIsInstance(decided, dict, name)
             ids = {o.get("id") for o in spec["options"]}
             choice = decided.get("choice") or ""
             for part in choice.split("+"):
@@ -443,6 +701,222 @@ class TheRealDecisionStillResolves(unittest.TestCase):
                 self.assertTrue(opt.get("flow_mermaid"), opt["name"])
                 self.assertTrue(opt.get("sources"), opt["name"])
                 self.assertTrue(opt.get("score_basis"), opt["name"])
+
+
+class TheStampLandsWhereTheGateReadsIt(unittest.TestCase):
+    """The sentinel is half of a two part control, and the halves drifted.
+
+    The intake gate refuses a founder facing question unless a screen was
+    rendered BY THAT SESSION, and since its 2026-09-15 per session fix it
+    reads ~/.claude/decision-screens/<session id>.json. decide.py never
+    followed: it kept stamping the old single global file, which nothing
+    reads any more. The visible result on 2026-09-18 was a session that
+    rendered two screens, published both, and was still refused, which is
+    the state that teaches people to reach for the escape hatch. These
+    tests drive the path the gate actually opens, not the path the writer
+    happens to like.
+    """
+
+    @staticmethod
+    def stamp_env(home):
+        """The caller's environment with HOME moved to the test's own and
+        every variable that can move the stamp cleared: brother_paths reads
+        BROTHER_CONFIG_DIR, then CLAUDE_CONFIG_DIR, then CODEX_HOME before
+        HOME, so a suite run from a session that sets one of them would
+        otherwise write that session's live stamp."""
+        env = dict(os.environ)
+        env["HOME"] = home
+        for name in ("BROTHER_DECISION_SENTINEL", "BROTHER_CONFIG_DIR",
+                     "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+            env.pop(name, None)
+        return env
+
+    def run_decide(self, home, session_id):
+        import subprocess
+        tmp = tempfile.mkdtemp()
+        spec_path = os.path.join(tmp, "spec.json")
+        with open(spec_path, "w", encoding="utf-8") as fh:
+            json.dump(clone(title="Gate contract"), fh)
+        env = self.stamp_env(home)
+        if session_id is None:
+            env.pop("CLAUDE_CODE_SESSION_ID", None)
+        else:
+            env["CLAUDE_CODE_SESSION_ID"] = session_id
+        out = os.path.join(tmp, "screen.html")
+        r = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "decide.py"),
+             spec_path, "-o", out],
+            env=env, capture_output=True, text=True)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        return out
+
+    def test_the_stamp_is_written_per_session_where_the_gate_looks(self):
+        home = tempfile.mkdtemp()
+        session = "42fbcd3b-c243-4dc2-b7b6-5fa615c68ee3"
+        out = self.run_decide(home, session)
+        expected = os.path.join(home, ".claude", "decision-screens",
+                                "%s.json" % session)
+        self.assertTrue(
+            os.path.exists(expected),
+            "the intake gate reads %s and nothing else; rendering a screen "
+            "must stamp exactly that path, or every session that follows "
+            "the ceremony is still refused. Wrote instead: %r"
+            % (expected, sorted(os.listdir(os.path.join(home, ".claude")))
+               if os.path.isdir(os.path.join(home, ".claude")) else "nothing"))
+        with open(expected, encoding="utf-8") as fh:
+            stamp = json.load(fh)
+        self.assertEqual(os.path.abspath(out), stamp.get("path"))
+        self.assertEqual("Gate contract", stamp.get("title"))
+        self.assertGreater(float(stamp.get("written_at_epoch", 0)), 0)
+        self.assertIsNone(stamp.get("used_at_epoch"),
+                          "a fresh stamp is unconsumed; the gate is what "
+                          "marks it used")
+
+    def test_a_session_id_with_separators_cannot_escape_the_state_dir(self):
+        home = tempfile.mkdtemp()
+        self.run_decide(home, "../../etc/evil id")
+        state = os.path.join(home, ".claude", "decision-screens")
+        self.assertTrue(os.path.isdir(state))
+        names = os.listdir(state)
+        self.assertEqual(1, len(names), names)
+        self.assertNotIn("/", names[0])
+        self.assertFalse(os.path.exists(os.path.join(home, "etc")))
+
+    def test_no_session_id_still_stamps_under_the_gates_own_default_name(self):
+        home = tempfile.mkdtemp()
+        out = self.run_decide(home, None)
+        self.assertTrue(os.path.exists(out))
+        expected = os.path.join(home, ".claude", "decision-screens",
+                                "no-session.json")
+        self.assertTrue(
+            os.path.exists(expected),
+            "the gate names an absent session 'no-session', so the writer "
+            "uses that same name rather than dropping the stamp")
+
+    def test_the_test_override_still_wins_so_a_suite_never_stamps_the_real_gate(self):
+        import subprocess
+        home = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp()
+        spec_path = os.path.join(tmp, "spec.json")
+        with open(spec_path, "w", encoding="utf-8") as fh:
+            json.dump(clone(), fh)
+        sentinel = os.path.join(tmp, "sentinel.json")
+        env = self.stamp_env(home)
+        env["BROTHER_DECISION_SENTINEL"] = sentinel
+        env["CLAUDE_CODE_SESSION_ID"] = "s1"
+        r = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "decide.py"),
+             spec_path, "-o", os.path.join(tmp, "o.html")],
+            env=env, capture_output=True, text=True)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertTrue(os.path.exists(sentinel))
+        self.assertFalse(
+            os.path.exists(os.path.join(home, ".claude", "decision-screens",
+                                        "s1.json")),
+            "with the override set, a suite must not write the real per "
+            "session stamp")
+
+    def test_an_explicit_session_id_flag_names_the_stamp_over_the_environment(self):
+        import subprocess
+        home = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp()
+        spec_path = os.path.join(tmp, "spec.json")
+        with open(spec_path, "w", encoding="utf-8") as fh:
+            json.dump(clone(), fh)
+        env = self.stamp_env(home)
+        env["CLAUDE_CODE_SESSION_ID"] = "from-env"
+        r = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "decide.py"),
+             spec_path, "-o", os.path.join(tmp, "o.html"),
+             "--session-id", "from/flag"],
+            env=env, capture_output=True, text=True)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        state = os.path.join(home, ".claude", "decision-screens")
+        self.assertEqual(["from_flag.json"], sorted(os.listdir(state)),
+                         "--session-id names the stamp, sanitised by the "
+                         "gate's own rule, and the environment id is not "
+                         "also written")
+
+
+class ASecretInTheSpecIsRedactedBeforeAnyWrite(unittest.TestCase):
+    """The spec is written by a model session, and the screen lands under
+    docs/decisions/, inside the tree git commits. The title also goes to the
+    intake sentinel and the top option's name to stdout. So every string in
+    the spec passes through bm_store.redact_text once, right after it is
+    loaded, and all three sinks receive the redacted text. Built by
+    concatenation so no scanner reads a live-looking key here."""
+
+    SECRET = "gh" + "p_" + "A1b2" * 5
+
+    def run_decide(self, spec, script_dir=None):
+        import subprocess
+        tmp = tempfile.mkdtemp()
+        spec_path = os.path.join(tmp, "spec.json")
+        with open(spec_path, "w", encoding="utf-8") as fh:
+            json.dump(spec, fh)
+        env = dict(os.environ)
+        env["BROTHER_DECISION_SENTINEL"] = os.path.join(tmp, "sentinel.json")
+        out = os.path.join(tmp, "screen.html")
+        r = subprocess.run(
+            [sys.executable,
+             os.path.join(script_dir or os.path.join(ROOT, "scripts"),
+                          "decide.py"),
+             spec_path, "-o", out],
+            env=env, capture_output=True, text=True)
+        return r, out, env["BROTHER_DECISION_SENTINEL"]
+
+    def secret_spec(self):
+        s = clone(title="Rotate %s now" % self.SECRET)
+        s["options"][0]["name"] = "Keep %s" % self.SECRET
+        return s
+
+    def test_the_secret_reaches_neither_the_screen_nor_the_sentinel(self):
+        r, out, sentinel = self.run_decide(self.secret_spec())
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        with open(out, encoding="utf-8") as fh:
+            page = fh.read()
+        self.assertNotIn(self.SECRET, page)
+        self.assertIn("Rotate [REDACTED] now", page)
+        self.assertIn("Keep [REDACTED]", page)
+        with open(sentinel, encoding="utf-8") as fh:
+            stamp = json.load(fh)
+        self.assertNotIn(self.SECRET, stamp.get("title", ""))
+        self.assertEqual("Rotate [REDACTED] now", stamp.get("title"))
+        self.assertNotIn(self.SECRET, r.stdout + r.stderr)
+
+    def test_a_secret_shaped_criterion_key_still_matches_its_marks(self):
+        """Keys are redacted with the values, so a criterion key and the
+        `scores` entry naming it are rewritten alike and the option stays
+        marked on it. Redacting only the value would leave the mark
+        unmatched and quietly drop the criterion from every total."""
+        s = clone()
+        s["criteria"][0]["key"] = self.SECRET
+        for opt in s["options"]:
+            opt["scores"][self.SECRET] = opt["scores"].pop("a")
+        r, out, _ = self.run_decide(s)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        with open(out, encoding="utf-8") as fh:
+            page = fh.read()
+        self.assertNotIn(self.SECRET, page)
+        self.assertNotIn("was never marked on", page)
+        self.assertIn("top is X at 10.00", r.stdout)
+
+    def test_no_redactor_means_no_screen_and_no_stamp(self):
+        """A copy of decide.py with neither bm_store.py candidate beside it
+        cannot redact, so it refuses: nothing is written, the exit is
+        nonzero, and the refusal says NO-DATA. Rendering raw would be the
+        unsafe direction."""
+        import shutil
+        lone = tempfile.mkdtemp()
+        for name in ("decide.py", "brother_paths.py", "annotations_store.py",
+                     "brother_state.py", "tmp_sandbox.py"):
+            shutil.copy(os.path.join(ROOT, "scripts", name), lone)
+        r, out, sentinel = self.run_decide(self.secret_spec(), script_dir=lone)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn(D.NODATA, r.stderr)
+        self.assertFalse(os.path.exists(out))
+        self.assertFalse(os.path.exists(sentinel))
+        self.assertNotIn(self.SECRET, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

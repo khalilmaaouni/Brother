@@ -268,6 +268,12 @@ class Context(dict):
     needs them, read by any step after it."""
 
 
+def _need_ctx(ctx):
+    """A step reads a context mapping; any other value is refused before it is read."""
+    if not isinstance(ctx, dict):
+        raise ValueError("a step wants the Context mapping, got %s" % type(ctx).__name__)
+
+
 def _isolated_home(evidence_dir):
     """A durable-but-disposable home under the evidence directory: deleted
     and rebuilt at the start of every conformance run. See the module
@@ -349,11 +355,12 @@ def _lifecycle_verb(ctx, verb):
     if ctx["offline"]:
         return NODATA, "offline: %s not attempted" % verb
     if os.path.isfile(BROTHER_INSTALL):
-        # brother_install.py adds its marketplace with --ref, which Codex
-        # accepts only for a GIT source (a local path is refused with
-        # "--ref is only supported for git marketplace sources", measured
-        # 2026-09-07 on the first online run of this suite). So the
-        # lifecycle verbs run against the public repository at real tags:
+        # brother_install.py sends --ref only for a GIT source: Codex
+        # accepts it for nothing else ("--ref is only supported for git
+        # marketplace sources", measured 2026-09-07 on the first online run
+        # of this suite), so for a local path the installer omits it and
+        # installs whatever is checked out (ebd06c657). So the lifecycle
+        # verbs run against the public repository at real tags:
         # install and install-again at the PREVIOUS public tag, upgrade
         # from that tag to the CURRENT one (an upgrade proves the version
         # moved, so same-to-same could never pass), rollback and uninstall
@@ -432,11 +439,13 @@ def _claude_local_marketplace(ctx, verb, claude_bin):
 
 
 def step_install(ctx):
+    _need_ctx(ctx)
     verdict, reason = _lifecycle_verb(ctx, "install")
     return Step("install", verdict, reason)
 
 
 def step_same_task(ctx):
+    _need_ctx(ctx)
     toy = os.path.join(ctx["isolated_home"], "toy")
     why = _build_toy(toy)
     if why:
@@ -478,6 +487,7 @@ def _receipt_changed_entry(ctx, filename="mathlib.py"):
 
 
 def step_baseline_red(ctx):
+    _need_ctx(ctx)
     if not ctx.get("run_dir"):
         return Step("baseline-red", NODATA,
                    "no run directory from the same-task step to read")
@@ -493,6 +503,7 @@ def step_baseline_red(ctx):
 
 
 def step_changed_files(ctx):
+    _need_ctx(ctx)
     toy = ctx.get("toy")
     if not toy:
         return Step("changed-files", NODATA, "no toy directory to compare")
@@ -516,6 +527,7 @@ def step_changed_files(ctx):
 
 
 def step_receipt_evidence(ctx):
+    _need_ctx(ctx)
     run_dir = ctx.get("run_dir")
     if not run_dir:
         return Step("receipt-evidence", NODATA, "no run directory to check")
@@ -551,6 +563,7 @@ def step_receipt_evidence(ctx):
 
 
 def step_exit_semantics(ctx):
+    _need_ctx(ctx)
     if not ctx.get("run_dir"):
         return Step("exit-semantics", NODATA,
                    "no successful run from the same-task step to compare "
@@ -580,6 +593,7 @@ def step_exit_semantics(ctx):
 
 
 def step_resume(ctx):
+    _need_ctx(ctx)
     toy3 = os.path.join(ctx["isolated_home"], "toy3")
     why = _build_toy(toy3)
     if why:
@@ -638,21 +652,25 @@ def step_resume(ctx):
 
 
 def step_install_again(ctx):
+    _need_ctx(ctx)
     verdict, reason = _lifecycle_verb(ctx, "install")
     return Step("install-again", verdict, reason)
 
 
 def step_upgrade(ctx):
+    _need_ctx(ctx)
     verdict, reason = _lifecycle_verb(ctx, "upgrade")
     return Step("upgrade", verdict, reason)
 
 
 def step_rollback(ctx):
+    _need_ctx(ctx)
     verdict, reason = _lifecycle_verb(ctx, "rollback")
     return Step("rollback", verdict, reason)
 
 
 def step_uninstall(ctx):
+    _need_ctx(ctx)
     verdict, reason = _lifecycle_verb(ctx, "uninstall")
     return Step("uninstall", verdict, reason)
 
@@ -663,6 +681,7 @@ SECOND_UNINSTALL_LINE = "NO-DATA: nothing of Brother's is installed"
 
 
 def step_uninstall_again(ctx):
+    _need_ctx(ctx)
     """Step 12 runs the second uninstall for real and PASSES on exactly the
     shape the tool documents for it: exit 0 and the NO-DATA line above.
     Before 2026-09-07 this step never ran anything and hard coded NO-DATA,
@@ -719,6 +738,12 @@ def run_conformance(provider, evidence_dir, offline, marketplace=None,
     """The twelve Step results for one provider, in STEP_ORDER. Never
     raises: a step function that cannot even attempt its work returns a
     NO-DATA or FAIL Step rather than propagating."""
+    if not isinstance(provider, str) or not isinstance(evidence_dir, str) or not evidence_dir \
+            or "\0" in evidence_dir or not isinstance(offline, bool):
+        raise ValueError("run_conformance wants a provider name, an evidence directory and a bool offline")
+    for extra in (marketplace, ref, from_ref):
+        if extra is not None and not isinstance(extra, str):
+            raise ValueError("marketplace, ref and from_ref are text or None")
     cls = PA.ADAPTERS.get(provider)
     if cls is None:
         raise ValueError("unknown provider %r" % (provider,))
@@ -772,6 +797,8 @@ def _summary_line(provider, results):
 
 
 def main(argv=None):
+    if argv is not None and (not isinstance(argv, list) or not all(isinstance(a, str) for a in argv)):
+        raise SystemExit(2)
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--provider", required=True,
                    choices=sorted(PA.ADAPTERS) + ["all"])

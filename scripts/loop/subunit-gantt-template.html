@@ -1,0 +1,65 @@
+<!doctype html><meta charset="utf-8">
+<title>Sub unit board</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--ink:#141B22;--paper:#F7F8F6;--petrol:#0E7A6F;--line:#DDE3E0;--mute:#6B7A76;
+--landed:#0E7A6F;--ready:#E8A33D;--building:#3AA893;--blocked:#C05746;--underspec:#9B8AA6;--todo:#E4E9E6}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#E8EDEA;--paper:#141B22;--line:#2A3630;
+--mute:#8FA09A;--petrol:#3AA893;--landed:#3AA893;--todo:#26322D}}
+:root[data-theme="dark"]{--ink:#E8EDEA;--paper:#141B22;--line:#2A3630;--mute:#8FA09A;--petrol:#3AA893;
+--landed:#3AA893;--todo:#26322D}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+font:15px/1.5 Seravek,Avenir,"Segoe UI",system-ui,sans-serif;padding:24px 16px 56px}
+.w{max-width:1100px;margin:0 auto}
+h1{font:600 30px/1.2 "Iowan Old Style",Palatino,Georgia,serif;margin:.2em 0}
+.eyebrow{color:var(--petrol);letter-spacing:.14em;text-transform:uppercase;font-size:11px;font-weight:700}
+.stamp{color:var(--mute);font-size:12px;margin-bottom:22px}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:18px 0 26px}
+.k{border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.k b{display:block;font:600 26px/1.1 "Iowan Old Style",Palatino,Georgia,serif;color:var(--petrol)}
+.k span{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+ul.leg{list-style:none;padding:0;margin:0 0 22px;display:grid;
+grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 18px;font-size:13px}
+ul.leg li{display:flex;align-items:center;gap:8px}
+ul.leg b{font-weight:600}
+ul.leg em{margin-left:auto;font-style:normal;color:var(--mute);font-variant-numeric:tabular-nums}
+i.c{width:13px;height:13px;border-radius:3px;display:inline-block;flex:0 0 auto;background:var(--todo)}
+i.c.landed{background:var(--landed)}
+i.c.ready{background:var(--ready)}
+i.c.building{background:var(--building);animation:p 1.6s ease-in-out infinite}
+i.c.blocked{background:var(--blocked)}
+i.c.underspec{background:var(--underspec)}
+@keyframes p{50%{opacity:.4}}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-weight:500;width:290px}
+th b{font:600 14px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}
+th span{display:block;color:var(--mute);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.n{width:62px;color:var(--mute);font-size:12px;font-variant-numeric:tabular-nums}
+td.bar{display:flex;flex-wrap:wrap;gap:3px;padding-top:9px;padding-bottom:9px}
+tr.done th b{color:var(--petrol)}
+tr.near{background:color-mix(in srgb,var(--ready) 9%,transparent)}
+tr.gap{background:color-mix(in srgb,var(--underspec) 12%,transparent)}
+tr.hollow{background:color-mix(in srgb,var(--blocked) 10%,transparent)}
+tr.hollow td.n{color:var(--blocked);font-weight:600}
+.gapnote{border-left:3px solid var(--underspec);padding:8px 12px;margin:0 0 16px;font-size:13px;color:var(--mute)}
+footer{margin-top:30px;color:var(--mute);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+@media(max-width:640px){th{width:130px}th span{display:none}}
+</style>
+<div class="w">
+<div class="eyebrow">1.1.0 launch</div>
+<h1>Every sub unit, by state</h1>
+<div class="stamp">@STAMP@ &middot; @HEAD@ &middot; rows ordered by how few sub units remain, so the nearest to closing sit at the top</div>
+<div class="strip">
+<div class="k"><b>@LANDED@/@TOT@</b><span>sub units landed</span></div>
+<div class="k"><b>@DONEU@/53</b><span>units closed</span></div>
+<div class="k"><b>@NEAR@</b><span>units one sub unit away</span></div>
+<div class="k"><b>@READY@</b><span>ready to land</span></div>
+<div class="k"><b>@BLOCKED@</b><span>blocked</span></div>
+</div>
+<ul class="leg">@LEGEND@</ul>
+<table>@ROWS@</table>
+<footer>Each square is one sub unit. A unit closes only when every square is filled, which is why the count
+that matters is units closed, not squares filled. Hover a square for its id, state and specification score.
+Generated from the plan, the run history and the process table at the stamp above.</footer>
+</div>

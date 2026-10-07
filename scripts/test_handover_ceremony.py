@@ -4,7 +4,9 @@
 frontmatter, an invalid status/type proven REFUSED rather than written, and
 emission proven idempotent. No em or en dashes."""
 
+import contextlib
 import filecmp
+import io
 import json
 import os
 import shutil
@@ -18,7 +20,7 @@ from handover_ceremony import (
     repo_state, sbe_task_summary, day_plan_state, pr_state, limit_state,
     collect_state, state_has_error, build_vault_note, emit_vault_notes,
     emit_pattern_notes, build_handover_markdown, main, ALLOWED_STATUS,
-    ALLOWED_TYPE)
+    ALLOWED_TYPE, PROCESS_WAIVER, INDEX_NAME)
 import pattern_note
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
@@ -47,6 +49,7 @@ def lesson(name="a-lesson", **overrides):
         "what_happened": "the thing that happened",
         "why_it_matters": "the thing that matters",
         "how_to_apply": "the thing to do next time",
+        "applies_to": ["scripts/handover_ceremony.py"],
     }
     base.update(overrides)
     return base
@@ -226,14 +229,14 @@ class TestEmitVaultNotes(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
     def test_invalid_lesson_is_refused_not_written(self):
-        written, refused = emit_vault_notes(
+        written, refused, _ = emit_vault_notes(
             self.tmp, [lesson(status="bogus")], today="2026-08-29")
         self.assertEqual(written, [])
         self.assertEqual(len(refused), 1)
         self.assertEqual(os.listdir(self.tmp), [])
 
     def test_valid_lesson_alongside_an_invalid_one_still_writes_the_valid_one(self):
-        written, refused = emit_vault_notes(
+        written, refused, _ = emit_vault_notes(
             self.tmp, [lesson(name="good-one"), lesson(status="bogus")],
             today="2026-08-29")
         self.assertEqual(len(written), 1)
@@ -253,6 +256,144 @@ class TestEmitVaultNotes(unittest.TestCase):
         self.assertEqual(cmp.diff_files, [])
         self.assertEqual(cmp.left_only, [])
         self.assertEqual(cmp.right_only, [])
+
+
+class TestAnchorsAndFailuresIndex(unittest.TestCase):
+    """2026-10-04 owner order: a failure lesson carries applies_to (or the
+    process-lesson waiver) into frontmatter, and each written failure appends
+    one detailed AREA/SYMPTOM/FIX line to Failures-Index.md, append only.
+    One fixture per guard."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.index = os.path.join(self.tmp, INDEX_NAME)
+        self.prior = "# Failures Index\n\n## Old section\n- [[old-one]] 2026-01-01. kept.\n"
+        with open(self.index, "w", encoding="utf-8") as fh:
+            fh.write(self.prior)
+
+    def read_index(self):
+        with open(self.index, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_applies_to_is_written_into_frontmatter(self):
+        _, content = build_vault_note(
+            lesson(applies_to=["scripts/a.py", "scripts/b.py"]), today="2026-10-04")
+        front = content.split("\n---", 1)[0]
+        self.assertIn("applies_to: [scripts/a.py, scripts/b.py]", front)
+
+    def test_failure_with_no_anchor_is_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            build_vault_note(lesson(applies_to=None), today="2026-10-04")
+        self.assertIn("applies_to", str(ctx.exception))
+
+    def test_failure_with_an_empty_anchor_list_is_refused(self):
+        with self.assertRaises(ValueError):
+            build_vault_note(lesson(applies_to=[]), today="2026-10-04")
+
+    def test_a_non_list_anchor_value_is_refused(self):
+        with self.assertRaises(ValueError):
+            build_vault_note(lesson(applies_to="scripts/a.py"), today="2026-10-04")
+
+    def test_an_anchor_with_a_comma_is_refused(self):
+        with self.assertRaises(ValueError):
+            build_vault_note(lesson(applies_to=["a.py, b.py"]), today="2026-10-04")
+
+    def test_process_waiver_writes_an_empty_list_never_the_waiver_text(self):
+        _, content = build_vault_note(
+            lesson(applies_to=PROCESS_WAIVER), today="2026-10-04")
+        front = content.split("\n---", 1)[0]
+        self.assertIn("applies_to: []", front)
+        self.assertNotIn("applies_to: none", front)
+        self.assertIn('anchor_waiver: "none (process lesson)"', front)
+
+    def test_a_non_failure_needs_no_anchor(self):
+        _, content = build_vault_note(
+            lesson(type="finding", applies_to=None), today="2026-10-04")
+        self.assertNotIn("applies_to", content)
+
+    def test_written_failure_appends_one_detailed_index_line(self):
+        written, refused, appended = emit_vault_notes(self.tmp, [lesson(
+            name="disk ran out", area="loop driver", symptom="every unit stalled",
+            fix="hold under 2 GB", applies_to=["scripts/loop/loop_until.sh"])],
+            today="2026-10-04")
+        self.assertEqual((len(written), refused, appended), (1, [], 1))
+        text = self.read_index()
+        self.assertIn("## Handover ceremony 2026-10-04\n", text)
+        self.assertIn("- [[disk-ran-out]] 2026-10-04. AREA: loop driver. "
+                      "SYMPTOM: every unit stalled. FIX: hold under 2 GB.\n", text)
+
+    def test_index_is_append_only(self):
+        emit_vault_notes(self.tmp, [lesson(name="n1")], today="2026-10-04")
+        self.assertTrue(self.read_index().startswith(self.prior))
+
+    def test_a_slug_already_in_the_index_is_not_repeated(self):
+        emit_vault_notes(self.tmp, [lesson(name="n1")], today="2026-10-04")
+        _, _, appended = emit_vault_notes(self.tmp, [lesson(name="n1")], today="2026-10-04")
+        self.assertEqual(appended, 0)
+        self.assertEqual(self.read_index().count("[[n1]]"), 1)
+
+    def test_same_day_reuses_the_dated_section(self):
+        emit_vault_notes(self.tmp, [lesson(name="n1")], today="2026-10-04")
+        emit_vault_notes(self.tmp, [lesson(name="n2")], today="2026-10-04")
+        self.assertEqual(self.read_index().count("## Handover ceremony 2026-10-04"), 1)
+
+    def test_area_falls_back_to_anchors_and_fix_to_how_to_apply(self):
+        emit_vault_notes(self.tmp, [lesson(name="n1")], today="2026-10-04")
+        self.assertIn("AREA: scripts/handover_ceremony.py. SYMPTOM: it looked fine "
+                      "and then it was not. FIX: the thing to do next time.",
+                      self.read_index())
+
+    def test_a_finding_appends_no_index_line(self):
+        _, _, appended = emit_vault_notes(
+            self.tmp, [lesson(name="f1", type="finding")], today="2026-10-04")
+        self.assertEqual(appended, 0)
+        self.assertEqual(self.read_index(), self.prior)
+
+    def test_a_refused_failure_appends_no_index_line(self):
+        _, refused, appended = emit_vault_notes(
+            self.tmp, [lesson(name="n1", applies_to=None)], today="2026-10-04")
+        self.assertEqual((len(refused), appended), (1, 0))
+        self.assertEqual(self.read_index(), self.prior)
+
+    def test_an_index_without_a_final_newline_gets_one_before_the_append(self):
+        with open(self.index, "w", encoding="utf-8") as fh:
+            fh.write("# Failures Index\n- [[old-one]] kept.")
+        emit_vault_notes(self.tmp, [lesson(name="n1")], today="2026-10-04")
+        self.assertIn("- [[old-one]] kept.\n\n## Handover ceremony 2026-10-04\n- [[n1]]",
+                      self.read_index())
+
+    def test_findings_only_into_a_dir_without_an_index_are_not_flagged(self):
+        os.remove(self.index)
+        _, _, appended = emit_vault_notes(
+            self.tmp, [lesson(name="f1", type="finding")], today="2026-10-04")
+        self.assertEqual(appended, 0)
+
+    def test_no_index_file_is_flagged_never_created(self):
+        os.remove(self.index)
+        written, _, appended = emit_vault_notes(
+            self.tmp, [lesson(name="n1")], today="2026-10-04")
+        self.assertEqual((len(written), appended), (1, None))
+        self.assertFalse(os.path.exists(self.index))
+
+    def test_cli_exits_1_when_the_index_is_missing(self):
+        os.remove(self.index)
+        lf = os.path.join(self.tmp, "lessons.json")
+        with open(lf, "w", encoding="utf-8") as fh:
+            json.dump([lesson(name="n1")], fh)
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            code = main(["--emit-vault", self.tmp, "--lesson-file", lf])
+        self.assertEqual(code, 1)
+        self.assertIn("FLAGGED", buf.getvalue())
+
+    def test_cli_exits_0_and_appends_when_the_index_exists(self):
+        lf = os.path.join(self.tmp, "lessons.json")
+        with open(lf, "w", encoding="utf-8") as fh:
+            json.dump([lesson(name="n1")], fh)
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = main(["--emit-vault", self.tmp, "--lesson-file", lf])
+        self.assertEqual(code, 0)
+        self.assertIn("[[n1]]", self.read_index())
 
 
 def pattern_vault():
@@ -409,6 +550,10 @@ class TestMainCLI(unittest.TestCase):
         with open(lf, "w") as f:
             json.dump([lesson(name="cli-lesson")], f)
         out_dir = os.path.join(tmp, "vault")
+        # 2026-10-04: a failure now also appends to DIR/Failures-Index.md,
+        # and a DIR without one exits 1 (FLAGGED), so the fixture carries it.
+        os.makedirs(out_dir)
+        open(os.path.join(out_dir, INDEX_NAME), "w").close()
         import io
         import contextlib
         buf = io.StringIO()
@@ -447,7 +592,7 @@ class Night0912HandoverCeremony(unittest.TestCase):
                 lesson(name="Same Name", description="first"),
                 lesson(name="Same Name", description="second"),
             ]
-            written, refused = emit_vault_notes(d, lessons, today="2026-08-29")
+            written, refused, _ = emit_vault_notes(d, lessons, today="2026-08-29")
             self.assertEqual(len(written), len(set(written)))
             self.assertEqual(len(written), 1)
             self.assertEqual(len(refused), 1)

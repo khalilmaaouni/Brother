@@ -65,10 +65,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+import brother_paths  # noqa: E402  (one Codex binary resolver, ACC5)
 
 #: The app-bundled Codex CLI. The PATH `codex` on this machine is an older
 #: npm build (0.146.0), so the binary is named rather than resolved.
-DEFAULT_CODEX = "/Applications/ChatGPT.app/Contents/Resources/codex"
+DEFAULT_CODEX = brother_paths.codex_bin()
 DEFAULT_WORK = os.path.expanduser("~/.claude/evidence/codex-smoke")
 FOUNDER_CODEX_HOME = os.path.expanduser("~/.codex")
 
@@ -580,7 +581,7 @@ def main(argv=None):
 
     # Since the portability release the Codex marketplace offers ONE plugin:
     # brother@brother carries the runtime, the skills, the commands and both
-    # products' hooks itself (bundle/hooks/union.json, renamed 2026-09-13,
+    # products' hooks itself (bundle/hooks/hooks.json, guarded since 2026-09-30,
     # mirrored tools under bundle/runtime/hooks/). Codex itself does not read
     # this file (its plugin validator refuses any manifest carrying a
     # "hooks" key; scripts/codex_hooks_install.py wires Codex's OWN

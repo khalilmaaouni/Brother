@@ -21,14 +21,18 @@ the routing table that says which reference file to load when. Do not work from 
 1. CLASSIFY in one line: the work profile (backend service, warehouse and SQL, pipeline, data
    quality, infrastructure, performance, or artifact mode) and the tier from L1. State your own
    classification first; it is the real answer and the founder confirm screen still governs it.
-   Then, only when this checkout is a real Brother checkout (a `scripts/jev_checks.py` and
-   `data/jev-registry.json` exist at its root), log a shadow second opinion for calibration by
-   running, fire-and-forget (never wait on it, never let its output or exit code change your
-   own stated classification):
-   `python3 scripts/jev_checks.py j001 --request "<the raw ask, verbatim>" --current-answer "<your own one-line classification>" >/dev/null 2>&1 &`
-   Off by default (`data/jev-seams.json`), so this call costs nothing and changes nothing until
-   a human sets J001 live; skip it entirely outside a Brother checkout or when the command is
-   not available.
+   Then, only inside a checkout of the Brother repository itself, log a shadow second opinion
+   for calibration. The Jev checker and its registry live in that checkout and do not ship with
+   this plugin, so the command below tests for both first and does nothing anywhere else. Run it
+   from the checkout root, fire-and-forget (never wait on it, never let its output or exit code
+   change your own stated classification). Off by default (every Jev seam stays off until that
+   checkout's own seams config sets it), so this call costs nothing and changes nothing until a
+   human sets J001 live:
+
+```
+[ -f scripts/jev_checks.py ] && [ -f data/jev-registry.json ] && python3 scripts/jev_checks.py j001 --request "<the raw ask, verbatim>" --current-answer "<your own one-line classification>" >/dev/null 2>&1 &
+```
+
 2. Read memory before question one, unconditionally: the project's Kay Vault space Overview
    and Open-Items when a vault is configured for this project, otherwise the project's own
    STATE.md and its plan files. Also read the failures index and LEARNED.md. Play back ONE
@@ -54,7 +58,7 @@ origin and intent questions that scale with the tier, up to ten in all, and writ
 first question and numbers every question after the tier is known, and `--answers FILE` (a JSON
 object holding any of the ten answer keys) answers them ahead of time and skips what it
 covers, so an intake can complete with nobody at a prompt. The tier it computes decides
-which artifacts `/brothersbe:design` will require and which gates `/brothersbe:verify` will
+which artifacts `/brother:brothersbe-design` will require and which gates `/brother:brothersbe-verify` will
 run. Trivial one-line work stays at zero extra questions: ceremony scales with risk,
 inferred from what the change touches and confirmed in one line, never a questionnaire.
 
@@ -129,7 +133,7 @@ tree the whole time. That is the failure this paragraph exists to prevent.
 ## One record, two renderings
 
 Whichever path walked in (this developer path, or the outcome-speaker discovery in
-`/brothersbe:start`), the product is ONE intake record. Render it twice from the same
+`/brother:brothersbe-start`), the product is ONE intake record. Render it twice from the same
 record: the developer rendering carries exact paths, commands, and the runnable check; the
 outcome-speaker rendering carries the same content as outcomes and acceptance criteria in
 the user's own phrasing, with zero unexplained file paths, commands, or code terms. One
@@ -146,6 +150,29 @@ later and this failed because...". This step is not complete without its diagram
 turn that presents the decision card also renders the one Mermaid diagram below, drawn for
 the RECOMMENDED option specifically, never a generic diagram unconnected to the choice being
 made. Options without the diagram is a half-finished step, not a smaller one.
+
+### The weight table, beside the options, machine-readable
+
+The decision card is prose for a person; it also needs a form a script can check. Beside the
+options (never instead of them), render a machine-readable weight table: a GFM table headed
+by a column named Weight and one column per named option, at least two criterion rows, and
+every weight and score cell a plain stated number, no words, no ranges, no "high/low". A
+table with no numbers, or the word "weight" typed once with nothing to check it against,
+is a pros-and-cons list wearing a comparison's name and scores zero. Use exactly this
+shape: an "## Options" (or "## The options") heading holding the decision
+card, a nested "### Weighted comparison" heading directly under it holding the table, and
+one sentence beneath the table spelling out the weighted totals so a reader can check the
+arithmetic without a calculator. The intake scorer's weighted_options criterion scores
+exactly this shape; write it in the same turn as the decision card and its diagram,
+never appended later, so all three land together or none of them do. An installed plugin
+carries neither the scorer nor a reference record; a reader working in a clone of the
+repository finds both there:
+
+```
+# in a clone of the repository only, never in an installed plugin
+docs/plan/examples/REFERENCE-INTAKE-RECORD.md   the reference intake record, weighted table under "### Weighted comparison"
+scripts/intake_score.py                          the intake scorer
+```
 
 ## One flow diagram, tied to the recommendation, never optional
 
@@ -186,9 +213,9 @@ touches money, partner data, personal data, or production state.
 
 ## Next
 
-`/brothersbe:design` for the dossier, `/brothersbe:verify` for the gates.
+`/brother:brothersbe-design` for the dossier, `/brother:brothersbe-verify` for the gates.
 
 ## Invoking it on purpose
 
 This skill is meant to arrive on its own, which is the whole point of it.
-Invoke as /brothersbe:kickoff. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.
+Invoke as /brother:brothersbe-kickoff. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.

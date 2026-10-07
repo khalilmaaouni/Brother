@@ -15,5 +15,6 @@ They are not product modes, separate agents the user must choose, or values prom
 - [QA/QC automation engineer](qa-automation-engineer.md)
 - [Manual QA/QC](manual-qa-qc.md)
 - [Solo founder](solo-founder.md)
+- [Mobile developer](mobile-developer.md)
 
 Senior practitioners do not need longer questionnaires. Inspect first; ask only when the answer can materially change scope, risk, evidence, or execution. The best pack identifies the few invariants/failure modes deserving independent evidence, not the most tests.

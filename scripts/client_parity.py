@@ -47,6 +47,11 @@ import subprocess
 import sys
 import tempfile
 
+# Antigravity client parity targets (Brother 1.1.0 portability)
+ANTIGRAVITY_PAIRS = {
+    "bundle/.codex-plugin/plugin.json": "bundle/.antigravity-plugin/plugin.json",
+}
+
 PAIRS = {
     "scripts/codex_battery.py": "scripts/cursor_battery.py",
     "scripts/test_codex_battery.py": "scripts/test_cursor_battery.py",
@@ -76,6 +81,11 @@ EXEMPT = {
     "scripts/codex_skills.py": "generator for bundle/codex-skills, which Cursor does not need",
     "bundle/runtime/codex_hooks_install.py": "bundled mirror of the Codex hook installer; Cursor plugins carry hooks in the manifest",
     "scripts/test_orchestrator_codex.py": "tests the ORCH-06 orchestrator adapter, where Codex is an outside model the orchestrator calls for its execution role, not a client install surface; Cursor has no counterpart role to be at parity with",
+    "scripts/test_model_call_codex_admission.py": "tests the model_call Codex transport's proof admission, where Codex is an outside model the loop calls, not a client install surface; Cursor has no counterpart transport to be at parity with",
+    "scripts/loop/adapters/codex.py": "the FX-31 loop model adapter for codex exec, where Codex is an outside model the loop calls, not a client install surface; FX-31 (docs/plan/specs/fixes/FX-31.md) defines no Cursor model transport",
+    "scripts/loop/test_codex_adapter.py": "tests the FX-31 loop model adapter for codex exec, where Codex is an outside model the loop calls, not a client install surface; FX-31 (docs/plan/specs/fixes/FX-31.md) defines no Cursor model transport",
+    "bundle/runtime/loop/test_codex_adapter.py": "bundled mirror of scripts/loop/test_codex_adapter.py (exempt above)",
+    "scripts/fixtures/hp1-real-2026-10-04/codex-trace-rows.jsonl": "recorded hook rows of one real Codex run of the HP1 live proof, replayed as test input by scripts/test_host_live_proof.py beside the two claude- recordings in the same folder; data a test reads, not a client install surface. This file alone: the next recording is a new path and is asked about again",
 }
 
 DEBT = {}
@@ -86,11 +96,15 @@ BATTERY_PAIRS = {
     "codex-smoke-self": "cursor-smoke-self",
     "codex-package-self": "cursor-plugin-self",
     "codex-hooks-self": "cursor-hook-run-self",
+    "codex-product-skills-self": "cursor-plugin-self",
 }
 
 BATTERY_EXEMPT = {
     "codex-surface-current": "checks generated bundle skills consumed by both clients",
+    "codex-surface-self": "tests scripts/codex_surface.py, the shared bundle/skills generator both clients read (EXEMPT above)",
+    "codex-product-skills-self": "tests the opt-in Codex product-skills companion export; Cursor reads bundle/skills directly through its manifest",
     "codex-skills-current": "Codex needs a stripped skill copy; Cursor reads bundle/skills directly through its manifest",
+    "codex-adapter-self": "runs scripts/loop/test_codex_adapter.py, the FX-31 model transport for codex exec (EXEMPT above); not a client install surface",
 }
 
 BATTERY_DEBT = {}
@@ -196,6 +210,10 @@ def run_check(root):
         if _is_exempt_surface(path):
             continue
         fail("new Codex surface %s has no Cursor twin, exemption or debt entry in scripts/client_parity.py" % path)
+
+    for codex_path, ag_path in ANTIGRAVITY_PAIRS.items():
+        if _path_exists(root, ag_path) and not _path_exists(root, codex_path):
+            fail("ANTIGRAVITY_PAIRS %s -> %s: codex path missing" % (codex_path, ag_path))
 
     for codex_path, cursor_path in PAIRS.items():
         if _path_exists(root, codex_path):
@@ -420,6 +438,19 @@ def selftest():
         _base_repo(tmp, codex_ver="1.0.0", cursor_ver="1.0.1")
         code, lines = run_check(tmp)
         _assert_case("case 7 version mismatch", code == 1 and any("bundle versions differ" in line for line in lines), "code=%s lines=%s" % (code, lines))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # An EXEMPT key that names a file exempts that file and nothing beside it: the same recording one folder
+        # over is still a new surface somebody has to classify. Only a key ending in "/" covers a folder.
+        _base_repo(tmp)
+        _write(tmp, "scripts/fixtures/run-a/codex-trace-rows.jsonl", "{}\n")
+        _write(tmp, "scripts/fixtures/run-b/codex-trace-rows.jsonl", "{}\n")
+        _commit_all(tmp, "two recorded traces")
+        from unittest.mock import patch
+        with patch.dict(EXEMPT, {"scripts/fixtures/run-a/codex-trace-rows.jsonl": "synthetic recorded trace"}):
+            code, lines = run_check(tmp)
+        new = [line for line in lines if "new Codex surface" in line]
+        _assert_case("case 8 an exempt file exempts that file only", code == 1 and len(new) == 1 and "run-b/codex-trace-rows.jsonl" in new[0], "code=%s lines=%s" % (code, lines))
 
     print("selftest OK")
     return 0

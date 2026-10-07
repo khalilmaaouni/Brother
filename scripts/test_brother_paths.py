@@ -240,6 +240,116 @@ class Describe(unittest.TestCase):
         self.assertEqual(facts["plugin_root"], REPO)
 
 
+class CodexBinary(unittest.TestCase):
+    """ACC5, 2026-09-26: six tools each declared their own copy of the app's
+    Codex path, the app moved the binary, and every copy went stale at once
+    (virgin-unit-proof printed "no executable Codex binary" on every gate run).
+    One resolver, newest app location first, never PATH."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="codex-bin-test-")
+        self.new = os.path.join(self.tmp, "new", "codex")
+        self.old = os.path.join(self.tmp, "old", "codex")
+        self.saved = brother_paths.CODEX_APP_BINS
+        brother_paths.CODEX_APP_BINS = (self.new, self.old)
+
+    def tearDown(self):
+        import shutil
+        brother_paths.CODEX_APP_BINS = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def make(self, path, executable=True):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n")
+        os.chmod(path, 0o755 if executable else 0o644)
+
+    def test_the_override_wins(self):
+        self.make(self.new)
+        self.assertEqual(brother_paths.codex_bin({"BROTHER_CODEX_BIN": "/opt/codex"}), "/opt/codex")
+
+    def test_the_newest_app_location_comes_first(self):
+        self.make(self.new)
+        self.make(self.old)
+        self.assertEqual(brother_paths.codex_bin({}), self.new)
+
+    def test_the_old_location_still_works_alone(self):
+        self.make(self.old)
+        self.assertEqual(brother_paths.codex_bin({}), self.old)
+
+    def test_a_file_that_cannot_run_is_skipped(self):
+        self.make(self.new, executable=False)
+        self.make(self.old)
+        self.assertEqual(brother_paths.codex_bin({}), self.old)
+
+    def test_nothing_installed_names_where_it_is_expected_now(self):
+        self.assertEqual(brother_paths.codex_bin({}), self.new)
+
+    def test_never_the_codex_on_path(self):
+        shim_dir = os.path.join(self.tmp, "path")
+        self.make(os.path.join(shim_dir, "codex"))
+        self.assertEqual(brother_paths.codex_bin({"PATH": shim_dir}), self.new)
+
+    def test_no_other_script_declares_its_own_app_path(self):
+        """The caller count lives here: a sibling that re-declares the literal
+        path goes stale on the next app move, exactly as six did."""
+        literal = '"/Applications/ChatGPT.app/Contents/Resources/codex"'
+        offenders = []
+        for root, _dirs, files in os.walk(HERE):
+            for name in files:
+                if not name.endswith(".py") or name.startswith("test_") or name == "brother_paths.py":
+                    continue
+                path = os.path.join(root, name)
+                with open(path, encoding="utf-8") as fh:
+                    for number, line in enumerate(fh, 1):
+                        code = line.split("#", 1)[0]
+                        if literal in code:
+                            offenders.append("%s:%d" % (os.path.relpath(path, REPO), number))
+        self.assertEqual(offenders, [], "route these through brother_paths.codex_bin()")
+
+
+class ClaudeDesktopBinary(unittest.TestCase):
+    """2026-10-03: the desktop app updated 2.1.284 to 2.1.286 and now nests each version's binary one directory deeper
+    (<version>/<build hash>/claude.app/...). claude_candidates scanned only <version>/claude.app/..., found nothing,
+    and the loop fell back to an old npm CLI that answered unrecognized_model, so every restart was refused."""
+
+    def setUp(self):
+        import tempfile
+        self.home = tempfile.mkdtemp(prefix="claude-bin-test-")
+        self.root = os.path.join(self.home, "Library", "Application Support", "Claude", "claude-code")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def make(self, *parts):
+        path = os.path.join(self.root, *parts, "claude.app", "Contents", "MacOS", "claude")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n")
+        os.chmod(path, 0o755)
+        return os.path.realpath(path)
+
+    def env(self):
+        return {"HOME": self.home, "PATH": ""}
+
+    def test_the_nested_layout_is_found(self):
+        nested = self.make("2.1.286", "f2326db61802")
+        self.assertIn(nested, brother_paths.claude_candidates(self.env()))
+
+    def test_both_layouts_side_by_side(self):
+        flat = self.make("2.1.284")
+        nested = self.make("2.1.286", "f2326db61802")
+        got = brother_paths.claude_candidates(self.env())
+        self.assertIn(flat, got)
+        self.assertIn(nested, got)
+
+    def test_a_non_executable_or_missing_bundle_is_not_a_candidate(self):
+        os.makedirs(os.path.join(self.root, "2.1.290", "abc", "claude.app"))
+        self.assertEqual([p for p in brother_paths.claude_candidates(self.env()) if "2.1.290" in p], [])
+
+
 class CopiesDoNotDrift(unittest.TestCase):
     SOURCE = os.path.join(HERE, "brother_paths.py")
 

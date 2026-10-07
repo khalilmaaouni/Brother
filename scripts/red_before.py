@@ -6,8 +6,7 @@ checkout), puts the --files back to their --base content in the first copy,
 and runs the test command in both. The caller's working tree, index and stash
 are never touched. Written 2026-09-12 after a night run lost two fixes, one
 to `git checkout HEAD --` over uncommitted work and one to a stash that every
-worktree of a repository shares. Drafted by Muse Spark 1.2, cross-reviewed by
-DeepSeek V4.1 Flash.
+worktree of a repository shares.
 """
 import sys
 import os

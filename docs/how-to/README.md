@@ -10,6 +10,7 @@
 - [Verify a migration](verify-a-migration.md)
 - [Verify a decision-grade number](verify-a-number.md)
 - [Record native build and test evidence](native-evidence.md)
+- [Give the loop a long-lived Claude login](loop-login.md)
 - [Use the Vault](use-the-vault.md)
 - [Recover from failure/refusal](recover-from-failure.md)
 - [Scope/disable hooks](scope-hooks.md)

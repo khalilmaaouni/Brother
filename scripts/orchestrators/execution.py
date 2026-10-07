@@ -46,11 +46,12 @@ import os
 import subprocess
 
 from orchestrators import base
+import brother_paths  # noqa: E402  (one Codex binary resolver, ACC5)
 
 #: The app-bundled Codex binary this estate has already verified working
 #: headless (see the module docstring, point 1). Never the bare "codex"
 #: name: that resolves through PATH to the older, broken shim.
-CODEX_BIN_DEFAULT = "/Applications/ChatGPT.app/Contents/Resources/codex"
+CODEX_BIN_DEFAULT = brother_paths.CODEX_APP_BINS[0]
 
 #: Override seam for a machine where the bundle lives elsewhere. Read only
 #: at call time (codex_bin()), never cached at import time.
@@ -66,7 +67,7 @@ def codex_bin(env=None):
     """The absolute Codex binary path this call should use: CODEX_BIN_ENV
     when set, else CODEX_BIN_DEFAULT. Never the bare "codex" name."""
     env = os.environ if env is None else env
-    return env.get(CODEX_BIN_ENV) or CODEX_BIN_DEFAULT
+    return brother_paths.codex_bin(env)
 
 
 class ExecutionAdapter(base.OrchestratorAdapter):

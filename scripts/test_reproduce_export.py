@@ -152,6 +152,13 @@ class ReproduceExport(unittest.TestCase):
         # The exporter selects files with `git ls-files`; an extracted
         # archive has no index, so the reproduction copied nothing and read
         # NO-DATA on the real v1.0.1 proof. A detached worktree answers.
+        # The premise is the hub checkout. The public export is not one (it has no hub edition marker, a hard
+        # exclude of every export), so there this case has no checkout to ask and says so; in the hub tree it
+        # runs and a source tree that cannot be made is a failure.
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if not os.path.exists(os.path.join(here, ".brother-edition")):
+            self.skipTest("public export: no hub checkout here for the exporter to ask; the hub tree, which "
+                          "carries .brother-edition, runs this case")
         src = R.source_tree("HEAD")
         self.assertIsNotNone(src)
         self.assertTrue(os.path.exists(os.path.join(src, ".git")))
@@ -905,6 +912,140 @@ class RegenerateNoteFlag(unittest.TestCase):
                                      "exited 1: boom"))
         self.assertEqual(code, 2, out)
         self.assertIn("NO-DATA", out)
+
+
+class TheUncutDraftAtTheSourceRevision(unittest.TestCase):
+    """Review round 1 of the uncut draft fix, the reader it had not counted.
+    When the manifests are bumped ahead of the tag, the revision X that the
+    generated note names still carries the hand written draft of that
+    version (cut_v1.0.0.sh commits X at step 2s, and only step 2b replaces
+    the draft). After the tag is public, release_closeout.py rebuilds the
+    export from X with --regenerate-note, the rebuilt tree carried the draft
+    as its note, and comparing the draft with the tag's note read MISMATCH: a
+    published tag failing its own closeout. The draft is no release note
+    (cut_preflight.is_uncut_draft, the one predicate every reader of this
+    fact calls), so it is set aside and the note is regenerated at X, exactly
+    as for a revision that carries no note at all. One thing changes per
+    case, so only the guard a case names can answer."""
+
+    REL_NOTE = "docs/releases/%s.md" % VERSION
+    DRAFT = ("# Brother %s\n\nWhat moved, drafted by hand before the cut.\n"
+             % VERSION).encode()
+    TAG_NOTE = (_NOTE % ("a" * 40, "a" * 8, "1" * 64)).encode()
+
+    def _run(self, note_at_source, regenerated=None, declared=VERSION,
+             flag=True):
+        other_gen = {"scripts/a.py": b"one"}
+        tag_bytes = {"scripts/a.py": b"one", self.REL_NOTE: self.TAG_NOTE}
+        regenerated = self.TAG_NOTE if regenerated is None else regenerated
+        self.regenerate_calls = []
+        saved = (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
+                 R.tag_file_bytes, R.os.path.exists, R.regenerate_note,
+                 R.fetch_and_resolve_tag)
+        self.tmp = tempfile.mkdtemp(prefix="repro-draft-test-")
+        exp = os.path.join(self.tmp, "export")
+        os.makedirs(exp)
+        seeded = dict(other_gen)
+        if note_at_source is not None:
+            seeded[self.REL_NOTE] = note_at_source
+        _seed_export(exp, seeded)
+        # The source revision's own manifests: what it declares it is.
+        src = os.path.join(self.tmp, "src")
+        os.makedirs(os.path.join(src, ".claude-plugin"))
+        if declared is not None:
+            with open(os.path.join(src, ".claude-plugin", "marketplace.json"),
+                      "w", encoding="utf-8") as fh:
+                fh.write('{"metadata": {"version": "%s"}, "plugins": []}\n'
+                         % declared)
+
+        def fake_regenerate(src_root, version):
+            self.regenerate_calls.append((src_root, version))
+            return regenerated, ""
+
+        try:
+            R.EP.load_allowlist = lambda p=None: ["scripts", "docs"]
+            R.source_tree = lambda rev, root=None: src
+            R.EP.build_export_tree = lambda dest, al, root=None: (
+                _copy_into(exp, dest), list(seeded))[1]
+            R.tag_file_bytes = lambda tag, rel, public=None: tag_bytes.get(
+                rel)
+            R.os.path.exists = lambda p: True
+            R.regenerate_note = fake_regenerate
+            R.fetch_and_resolve_tag = lambda public, tag, remote, runner=None, \
+                expect_commit=None: (
+                True, "stubbed: not fetched in this unit test")
+            argv = ["--tag", TAG, "--public", self.tmp, "--source-rev", "x" * 40]
+            if flag:
+                argv.append("--regenerate-note")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = R.main(argv)
+            return code, out.getvalue()
+        finally:
+            (R.EP.load_allowlist, R.source_tree, R.EP.build_export_tree,
+             R.tag_file_bytes, R.os.path.exists, R.regenerate_note,
+             R.fetch_and_resolve_tag) = saved
+
+    # The defect, at the entry point.
+    def test_the_draft_at_the_source_revision_reproduces(self):
+        code, out = self._run(note_at_source=self.DRAFT)
+        self.assertEqual(code, 0, out)
+        # Never silent: the run says the draft was set aside, and the note
+        # was then regenerated at the source revision and compared.
+        self.assertIn("uncut draft", out)
+        self.assertEqual(len(self.regenerate_calls), 1, out)
+        self.assertIn("self-naming %s" % self.REL_NOTE, out)
+        self.assertIn("MATCH", out)
+
+    def test_without_the_flag_the_draft_reads_like_an_absent_note(self):
+        code, out = self._run(note_at_source=self.DRAFT, flag=False)
+        self.assertEqual(code, 0, out)
+        self.assertIn("uncut draft", out)
+        self.assertIn("NO-DATA: %s is not regenerated at" % self.REL_NOTE, out)
+        self.assertEqual(self.regenerate_calls, [])
+
+    # The control: a revision with no note at all read this way before.
+    def test_no_note_at_the_source_revision_still_reproduces(self):
+        code, out = self._run(note_at_source=None)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("uncut draft", out)
+        self.assertEqual(len(self.regenerate_calls), 1, out)
+
+    # One guard per case. Unknown blocks: each of these is still exit 1.
+    def test_a_real_mismatch_behind_the_draft_is_still_caught(self):
+        moved = self.TAG_NOTE.replace(b"Prose a reader checks",
+                                      b"Prose that moved")
+        code, out = self._run(note_at_source=self.DRAFT, regenerated=moved)
+        self.assertEqual(code, 1, out)
+        self.assertIn("MISMATCH: %s" % self.REL_NOTE, out)
+        self.assertEqual(len(self.regenerate_calls), 1, out)
+
+    def test_a_cut_note_at_the_source_revision_is_compared_never_set_aside(self):
+        moved = self.TAG_NOTE.replace(b"Prose a reader checks",
+                                      b"Prose that moved")
+        code, out = self._run(note_at_source=moved)
+        self.assertEqual(code, 1, out)
+        self.assertIn("MISMATCH: %s" % self.REL_NOTE, out)
+        self.assertNotIn("uncut draft", out)
+        self.assertEqual(self.regenerate_calls, [])
+
+    def test_a_draft_the_source_revision_does_not_declare_is_compared(self):
+        for label, declared in (("another version", "0.0.1"), ("no manifests", None)):
+            with self.subTest(manifests=label):
+                code, out = self._run(note_at_source=self.DRAFT, declared=declared)
+                self.assertEqual(code, 1, out)
+                self.assertIn("MISMATCH: %s" % self.REL_NOTE, out)
+                self.assertNotIn("uncut draft", out)
+                self.assertEqual(self.regenerate_calls, [])
+
+    def test_a_note_that_is_not_text_is_never_set_aside(self):
+        """Left in the tree, where the stamp step (export_public's
+        stamp_source_revision, which reads the note as text) stops the run on
+        it, as it did before this predicate existed. Read leniently it would
+        look like a draft, be set aside, and reproduce."""
+        with self.assertRaises(UnicodeDecodeError):
+            self._run(note_at_source=b"\xff\xfe not utf-8\n")
+        self.assertEqual(self.regenerate_calls, [])
 
 
 def _copy_into(src_dir, dest_dir):

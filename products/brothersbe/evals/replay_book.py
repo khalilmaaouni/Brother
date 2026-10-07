@@ -59,6 +59,15 @@ CONTENT_DIRS = (BOOK_DIR, os.path.join(REPO, "docs", "for-business-analysts"))
 # the book rather than as the harness change it would be.
 INSTALLED_PLUGINS_FIXTURE = os.path.join(
     REPO, "evals", "fixtures", "installed_plugins_none.json")
+# The same pin for doctor's install-identity check, which reads a SECOND
+# machine fact: the plugin cache directory (`_plugin_cache_root()` in
+# src/brothersbe/cli.py). Unpinned, the book recorded "6 installed copies
+# examined" from the author's cache while a machine with no cache under that
+# path printed NO-DATA, so three doctor blocks differed with no book or tool
+# change (2026-09-26). This fixture is a cache root holding no installed
+# copy (one file, no subdirectory), so the recorded scenario matches the
+# zero-entry installed-plugins pin above on every machine.
+PLUGIN_CACHE_FIXTURE = os.path.join(REPO, "evals", "fixtures", "plugin_cache_none")
 WRITE = "--write" in sys.argv
 
 # --write REFUSES TO RUN FROM A THROWAWAY CHECKOUT, because it records whatever
@@ -101,8 +110,8 @@ VOLATILE_LINE = re.compile(
 # The first authenticated read of the CI logs (2026-07-31) proved three more
 # machine-dependent surfaces inside otherwise-honest excerpts, each masked
 # here BY SHAPE and nothing else, so every remaining byte stays compared:
-# absolute filesystem paths (the author's /Users/... against a runner's
-# /home/runner/...), bare commit hashes of the demo repositories the replay
+# absolute filesystem paths (the author's /Users/... against a hosted
+# runner's own home), bare commit hashes of the demo repositories the replay
 # itself creates (a commit id folds in dates and identity, so no two
 # machines agree), and the unittest verbose id, whose format gained the
 # method name in newer interpreters while the floor this project promises
@@ -449,7 +458,8 @@ def replay_chapter(name, content_dir=BOOK_DIR):
               # in the Brother umbrella repo. SBE_INSTALLED_PLUGINS_JSON pins the replay to
               # a fixture with zero brothersbe entries, so the recorded "no installed copy"
               # scenario is a property of the fixture, never of the replaying machine.
-              'export SBE_INSTALLED_PLUGINS_JSON="%s"' % INSTALLED_PLUGINS_FIXTURE]
+              'export SBE_INSTALLED_PLUGINS_JSON="%s"' % INSTALLED_PLUGINS_FIXTURE,
+              'export SBE_PLUGIN_CACHE_ROOT="%s"' % PLUGIN_CACHE_FIXTURE]
     unmet = [r for r in _chapter_requirements("".join(lines))
              if r in CAPABILITIES and not CAPABILITIES[r][1]()]
     if unmet:

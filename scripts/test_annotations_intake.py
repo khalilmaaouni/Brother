@@ -5,6 +5,11 @@ until this test nothing in a live intake ever read one back. This drives
 decide.py's own render() against a temp store: one mark with a matching
 stored correction must carry "corrected before" on the rendered page, and
 an unmatched mark must not.
+
+The temp store is placed at the STORE'S OWN root (annotations_store.ROOT),
+never decide.py's: since 2026-10-06 an installed plugin keeps the store per
+user, so decide.py reads it where the store says it lives. These cases would
+fail if decide.py went back to looking beside itself.
 """
 import os
 import sys
@@ -34,12 +39,12 @@ class CorrectedBeforeLine(unittest.TestCase):
                  "persona": "lead", "at": "2026-09-06T00:00:00Z",
                  "record": "r.json"},
             ])
-            real_root = D.ROOT
-            D.ROOT = d
+            real_root = AS.ROOT
+            AS.ROOT = d
             try:
                 html = D.render(SPEC)
             finally:
-                D.ROOT = real_root
+                AS.ROOT = real_root
 
             self.assertIn("corrected before", html)
             self.assertIn("undercounts the drafter&#x27;s own overhead", html)
@@ -51,22 +56,22 @@ class CorrectedBeforeLine(unittest.TestCase):
                  "note": "irrelevant", "persona": "lead",
                  "at": "t", "record": "r.json"},
             ])
-            real_root = D.ROOT
-            D.ROOT = d
+            real_root = AS.ROOT
+            AS.ROOT = d
             try:
                 html = D.render(SPEC)
             finally:
-                D.ROOT = real_root
+                AS.ROOT = real_root
             self.assertNotIn("corrected before", html)
 
     def test_an_empty_store_renders_nothing_extra_and_never_errors(self):
         with tempfile.TemporaryDirectory() as d:
-            real_root = D.ROOT
-            D.ROOT = d
+            real_root = AS.ROOT
+            AS.ROOT = d
             try:
                 html = D.render(SPEC)
             finally:
-                D.ROOT = real_root
+                AS.ROOT = real_root
             self.assertNotIn("corrected before", html)
 
 

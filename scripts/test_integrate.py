@@ -196,6 +196,114 @@ class ConflictsAndRefusals(unittest.TestCase):
         self.assertTrue(os.path.exists(
             os.path.join(lanes.path_for("A"), "lib.py")))
 
+    def _locked_canonical(self):
+        repo = canon()
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"), {"new.py": "x = 1\n"}, "A")
+        lock = os.path.join(repo, ".git", "index.lock")
+        with open(lock, "w", encoding="utf-8") as fh:
+            fh.write("another process\n")
+        return repo, lock
+
+    def test_a_merge_refused_only_for_a_held_index_lock_is_retried(self):
+        """Measured 2026-09-26: a concurrent resume's own git reads held
+        canonical's index lock at the moment of the winner's merge, and that
+        was reported as CONFLICT, so a green lane was thrown away. The lock
+        is released here right after the first refused merge."""
+        repo, lock = self._locked_canonical()
+        merges = []
+
+        def runner(cmd):
+            proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+            if cmd[1] == "merge" and cmd[2] != "--abort":
+                merges.append(proc.returncode)
+                if os.path.exists(lock):
+                    os.unlink(lock)
+            return proc
+        with mock.patch.object(I, "INDEX_LOCK_BACKOFF_S", 0.01):
+            r = I.integrate_one(repo, "lane/A", {"id": "A",
+                                                 "done_check": "test -f new.py"},
+                                runner=runner)
+        self.assertEqual(r["verdict"], I.INTEGRATED, r)
+        self.assertEqual(len(merges), 2, merges)
+        self.assertNotEqual(merges[0], 0)
+
+    def _first_merge_then(self, repo, lock, act):
+        """A runner that, right after the first (locked) merge, clears the
+        lock and does `act`: what another process did in the meantime."""
+        merges = []
+
+        def runner(cmd):
+            proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+            if cmd[1] == "merge" and cmd[2] != "--abort":
+                merges.append(proc.returncode)
+                if len(merges) == 1:
+                    os.unlink(lock)
+                    act()
+            return proc
+        return runner, merges
+
+    def test_a_merge_failure_that_is_not_a_lock_is_not_retried(self):
+        repo = canon()
+        merges = []
+
+        def runner(cmd):
+            proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+            if cmd[1] == "merge" and cmd[2] != "--abort":
+                merges.append(proc.returncode)
+            return proc
+        with mock.patch.object(I, "INDEX_LOCK_BACKOFF_S", 0.01):
+            r = I.integrate_one(repo, "lane/NOT-A-BRANCH",
+                                {"id": "N", "done_check": "true"}, runner=runner)
+        self.assertEqual(r["verdict"], I.CONFLICT, r)
+        self.assertEqual(len(merges), 1, merges)
+
+    def test_a_tip_that_moved_while_locked_is_never_merged_onto(self):
+        """Retrying onto a moved tip would let the unwind below reset
+        canonical back to the OLD tip and drop the commit that moved it."""
+        repo, lock = self._locked_canonical()
+
+        def commit_elsewhere():
+            with open(os.path.join(repo, "other.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("another writer\n")
+            subprocess.run(["git", "add", "other.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "other"], cwd=repo, check=True)
+        runner, merges = self._first_merge_then(repo, lock, commit_elsewhere)
+        with mock.patch.object(I, "INDEX_LOCK_BACKOFF_S", 0.01):
+            r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "false"},
+                                runner=runner)
+        self.assertEqual(r["verdict"], I.NODATA, r)
+        self.assertEqual(len(merges), 1, merges)
+        self.assertTrue(os.path.exists(os.path.join(repo, "other.txt")))
+
+    def test_a_tree_dirtied_while_locked_is_never_merged_into(self):
+        """Retrying over new dirt would let the unwind's reset --hard
+        discard somebody's uncommitted edit."""
+        repo, lock = self._locked_canonical()
+
+        def edit_elsewhere():
+            with open(os.path.join(repo, "lib.py"), "a", encoding="utf-8") as fh:
+                fh.write("# somebody's edit\n")
+        runner, merges = self._first_merge_then(repo, lock, edit_elsewhere)
+        with mock.patch.object(I, "INDEX_LOCK_BACKOFF_S", 0.01):
+            r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "false"},
+                                runner=runner)
+        self.assertEqual(r["verdict"], I.NODATA, r)
+        self.assertEqual(len(merges), 1, merges)
+        with open(os.path.join(repo, "lib.py"), encoding="utf-8") as fh:
+            self.assertIn("somebody's edit", fh.read())
+
+    def test_an_index_lock_that_outlasts_every_retry_is_no_data(self):
+        repo, lock = self._locked_canonical()
+        before = tip(repo)
+        with mock.patch.object(I, "INDEX_LOCK_BACKOFF_S", 0.01):
+            r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "true"})
+        os.unlink(lock)
+        self.assertEqual(r["verdict"], I.NODATA, r)
+        self.assertIn("stayed locked", r["reason"])
+        self.assertEqual(tip(repo), before)
+
     def test_bytecode_on_canonical_does_not_refuse_the_next_unit(self):
         """Running a unit's check ON canonical leaves __pycache__ behind, and
         the guard refusing the NEXT unit for that starved a correct
@@ -333,6 +441,58 @@ class TheInteractiveFenceIsHonoredByAutonomousIntegration(unittest.TestCase):
                     {"lib.py": 'GREETING = "autonomous"\n'}, "A")
         r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "true"})
         self.assertEqual(r["verdict"], I.INTEGRATED)
+
+    def test_a_touched_path_the_store_cannot_place_refuses(self):
+        """2026-09-30: canonicalize_path raising used to skip that path, so
+        an unknown read as no conflict. The lane touches only an unclaimed
+        path (the sibling test above integrates it); the one change is that
+        the store cannot place it."""
+        repo = canon()
+        self._claim(repo, "interactive-work", ["lib.py"])
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"), {"new.py": "x = 1\n"}, "A")
+        before = tip(repo)
+        with mock.patch.object(self.bs, "canonicalize_path",
+                               side_effect=ValueError("cannot place")):
+            r = I.integrate_one(repo, "lane/A",
+                                {"id": "A", "done_check": "test -f new.py"})
+        self.assertEqual(r["verdict"], I.REFUSED)
+        self.assertEqual(tip(repo), before)
+        self.assertIn("uncomparable", r["reason"])
+        self.assertNotIn("is inside", r["reason"],
+                         "an uncomparable path is not inside any fence; the reason must not say so")
+
+    def test_a_path_escaping_the_root_is_skipped_as_the_hook_skips_it(self):
+        """The store's KNOWN 'path-escape' refusal is the case bm_fence_hook.canonical_target
+        answers None (allow) for; the two fences must agree, so it continues rather than refuses.
+        Isolates that one branch: the only exception raised carries reason 'path-escape'."""
+        repo = canon()
+        self._claim(repo, "interactive-work", ["lib.py"])
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"), {"new.py": "x = 1\n"}, "A")
+        escape = self.bs.OwnershipRefused("path-escape", "path 'new.py' resolves outside the project root")
+        with mock.patch.object(self.bs, "canonicalize_path", side_effect=escape):
+            r = I.integrate_one(repo, "lane/A",
+                                {"id": "A", "done_check": "test -f new.py"})
+        self.assertEqual(r["verdict"], I.INTEGRATED, r.get("reason"))
+
+    def test_a_real_symlink_out_of_the_root_integrates_while_an_unrelated_claim_is_active(self):
+        """The attack's reproduction (2026-09-30): a lane adding a symlink whose target lies outside the
+        project, while an unrelated interactive claim is active, was refused with a reason saying the
+        path was inside that fence. No mock: the store's own canonicalize_path raises path-escape."""
+        repo = canon()
+        self._claim(repo, "interactive-work", ["lib.py"])
+        lanes = W.Lanes(repo, ["A"])
+        lane = lanes.path_for("A")
+        elsewhere = tempfile.mkdtemp(prefix="outside-the-root-")
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        with open(os.path.join(elsewhere, "target.txt"), "w") as fh:
+            fh.write("outside\n")
+        os.symlink(os.path.join(elsewhere, "target.txt"), os.path.join(lane, "ext"))
+        subprocess.run(["git", "add", "-A"], cwd=lane, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-qm", "A"], cwd=lane, capture_output=True, check=True)
+        r = I.integrate_one(repo, "lane/A", {"id": "A", "done_check": "test -L ext"})
+        self.assertEqual(r["verdict"], I.INTEGRATED, r.get("reason"))
 
 
 class ADeadIntegrationLockHolderIsReclaimedNotWaitedOut(unittest.TestCase):

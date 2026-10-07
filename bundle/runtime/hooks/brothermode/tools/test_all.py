@@ -114,6 +114,7 @@ SUITES = (
     # gate does not know about is a suite nobody runs.
     "test_bm_embed_exit_code.py",
     "test_bm_vault_staleness_label.py",
+    "test_bm_vault_plugins.py",
     # Registered 2026-08-29. These four shipped today and the gate correctly
     # REFUSED to run without them, which is the same refusal that made the
     # superseded local main look like a draft. A suite on disk that the gate
@@ -321,6 +322,15 @@ SUITES = (
     "test_bm_vault_promotions.py",
     # 2026-08-30, D07: claim-level provenance, the tooling half.
     "test_bm_vault_provenance.py",
+    # 2026-09-10: both suites arrived with the vault shipping work and
+    # neither was registered here, so the inventory gate refused the
+    # export on release eve. That is the defect this list exists to
+    # catch, and it caught it: a suite on disk that no gate runs proves
+    # nothing, however green it is on its own. Registered in the change
+    # that found them, per every entry above.
+    "test_bm_embed_exit_code.py",
+    "test_bm_vault_staleness_label.py",
+    "test_bm_vault_plugins.py",
     # 2026-08-30, D14: the entity layer. Registered with its module and its
     # CI step in one change, same lesson as the entries above.
     "test_bm_vault_entity.py",
@@ -503,6 +513,11 @@ SUITES = (
     # tools/bm_telemetry.py. placed right after the installer suite; both
     # drive real subprocesses against a fake HOME, and this one is fast.
     "test_bm_consent.py",
+    # The disk backed BrotherMode canary (2026-09-15): SessionStart plus
+    # PostToolUse(Skill) liveness detection and the activation nudge.
+    # Placed right after the consent suite since both are fast, stdlib
+    # and filesystem only, and the canary is itself consent gated.
+    "test_bm_brother_canary.py",
     "test_bm_runtimes.py",
     "test_bm_cursor.py",
     "test_bm_autosave.py",
@@ -764,6 +779,30 @@ SUITES = (
     # Registered in the same change that creates the suite; the inventory
     # gate refuses a test_*.py on disk that SUITES does not name.
     "test_bm_device_lease.py",
+    # 2026-09-26: the print choke point lint (bm_learning.one_line and say).
+    # Every print in a shipping module goes through one choke point or owes
+    # an exact count in its ratchet. Registered in the same change that
+    # creates the suite; the inventory gate refuses a test_*.py on disk that
+    # SUITES does not name.
+    "test_bm_print_choke_point.py",
+    # Registered 2026-10-06, late. These eight shipped between 2026-09-20 and
+    # 2026-10-02 and were never added here, so --check-only exited 2 and the
+    # 1.1.0 cut's battery_inventory export gate refused with it. Six of them
+    # could not have run here even if listed: they imported the tool by the
+    # repository root package (products.brothermode.tools), which does not
+    # exist when this runner starts a suite as a script from this folder,
+    # and test_bm_clock_guard.py had no __main__ block, so as a script it
+    # ran nothing and exited 0. All eight now use the folder's own import
+    # form; the hub rows that name them by dotted path still pass. Placed
+    # last, after the cheap lint: pure unit suites, each under a second.
+    "test_bm_clock_guard.py",
+    "test_bm_clock_guard_m12.py",
+    "test_bm_clock_guard_m13.py",
+    "test_bm_clock_guard_m14.py",
+    "test_bm_clock_guard_prefilter.py",
+    "test_bm_attempt_ledger.py",
+    "test_bm_context_authority.py",
+    "test_bm_repair_d16.py",
 )
 
 # unittest writes its summary to stderr. Both shapes appear in real output:

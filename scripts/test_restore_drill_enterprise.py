@@ -25,5 +25,39 @@ class HelpNeverRunsTheDrill(unittest.TestCase):
         self.assertNotIn("checks_total", out, out)
 
 
+class PortableScrubsEveryMachinePath(unittest.TestCase):
+    """portable() is the only thing between a drill run and a machine path in a tracked, exported record
+    (attack B1 2026-09-30: nothing called it with a path, so three guards were caught only by a script hash)."""
+    def setUp(self):
+        import tempfile
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+        import restore_drill_enterprise as R
+        self.R = R
+        self.tmp = tempfile.mkdtemp(prefix="portable-")
+        self.real = os.path.join(self.tmp, "real"); os.makedirs(os.path.join(self.real, "repo"))
+        self.link = os.path.join(self.tmp, "link"); os.symlink(self.real, self.link)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_resolved_spelling_is_scrubbed(self):
+        roots = {self.link: "<home>"}
+        self.assertEqual(self.R.portable(os.path.realpath(self.link) + "/x", roots), "<home>/x")
+
+    def test_longest_root_wins(self):
+        roots = {self.real: "<home>", os.path.join(self.real, "repo"): "<repo>"}
+        self.assertEqual(self.R.portable(os.path.join(self.real, "repo", "f.py"), roots), "<repo>/f.py")
+
+    def test_a_root_is_replaced_only_at_a_path_boundary(self):
+        roots = {self.real: "<home>", os.path.join(self.real, "repo"): "<repo>"}
+        self.assertEqual(self.R.portable(os.path.join(self.real, "repo2", "f"), roots), "<home>/repo2/f")
+
+    def test_dict_keys_and_tuples_are_scrubbed(self):
+        roots = {self.real: "<home>"}
+        got = self.R.portable({os.path.join(self.real, "k"): (os.path.join(self.real, "v"), 3, None)}, roots)
+        self.assertEqual(got, {"<home>/k": ("<home>/v", 3, None)})
+
+
 if __name__ == "__main__":
     unittest.main()

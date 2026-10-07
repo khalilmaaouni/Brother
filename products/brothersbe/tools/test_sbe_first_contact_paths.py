@@ -49,9 +49,14 @@ SBE = os.path.join(HERE, "..", "bin", "sbe")
 
 # A UNIX absolute path token: a slash, then path characters, with no path
 # character immediately BEFORE the leading slash (so "a/b/c" is not
-# mis-split into a bogus "/b/c" hit). Trailing punctuation a sentence would
-# carry (a period, a comma, a closing paren) is stripped by the caller.
-_ABS_PATH = re.compile(r"(?<![\w./-])(/[\w][\w./-]*)")
+# mis-split into a bogus "/b/c" hit). A glob wildcard counts as a path
+# character for the same reason: "*" stands for a segment name, so the
+# relative glob "*/agents/*.md" a NO-DATA line prints is not "/agents/".
+# ponytail: a path wrapped in markdown bold ("**/abs/path**") reads as a
+# recursive glob and is skipped; sbe prints plain terminal text, so revisit
+# only if its output ever gains markdown. Trailing punctuation a sentence
+# would carry (a period, a comma, a closing paren) is stripped by the caller.
+_ABS_PATH = re.compile(r"(?<![\w./*-])(/[\w][\w./-]*)")
 
 
 def foreign_absolute_paths(transcript, inside):
@@ -76,6 +81,27 @@ def foreign_absolute_paths(transcript, inside):
             continue
         hits.append(token)
     return hits
+
+
+class DetectorReadsAGlobAsRelative(unittest.TestCase):
+    """The detector's own contract, without a subprocess. Measured
+    2026-09-26: the agent-brief checks print "no */agents/*.md file found
+    under <repo>", and the detector reported "/agents/" as a foreign
+    absolute path four times. The glob names a pattern searched, not a
+    place on this machine."""
+
+    INSIDE = "/nonexistent-fixture/repo"
+
+    def test_a_relative_glob_is_not_an_absolute_path(self):
+        line = ("agent-brief-hygiene  NO-DATA  no */agents/*.md file found under "
+                "%s, so no agent brief was examined\n" % self.INSIDE)
+        self.assertEqual(foreign_absolute_paths(line, self.INSIDE), [])
+
+    def test_a_foreign_path_on_the_same_glob_line_is_still_caught(self):
+        line = ("agent-brief-hygiene  NO-DATA  no */agents/*.md file found under "
+                "/Users/someone/elsewhere, so no agent brief was examined\n")
+        self.assertEqual(foreign_absolute_paths(line, self.INSIDE),
+                         ["/Users/someone/elsewhere"])
 
 
 class FirstRunTranscriptStaysInsideTheRepo(unittest.TestCase):
@@ -141,7 +167,10 @@ class FirstRunTranscriptStaysInsideTheRepo(unittest.TestCase):
         exactly like the original finding, then confirm the SAME function
         that just found nothing now finds exactly that."""
         out = self._transcript()
-        vendor_path = "/Users/khalil.maaouni/Documents/BrotherSBE"
+        # Synthetic on purpose: any absolute path outside the scanned repo
+        # is what the detector must catch; a real home here shipped one
+        # machine's layout to every reader of the public tree.
+        vendor_path = "/Users/vendor-example/Documents/BrotherSBE"
         seeded = out + ("\ncitation-inventory  PASS  137 URL(s) scanned under %s\n"
                         % vendor_path)
         hits = foreign_absolute_paths(seeded, self.repo)

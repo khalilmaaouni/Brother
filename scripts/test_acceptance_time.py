@@ -198,10 +198,6 @@ class ScoringEnforcesTheHonestFloor(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheOrdinarySummaryArmIsNotWrittenToLose(unittest.TestCase):
     """The control arm of a benchmark must not be authored by the party being
     compared.
@@ -243,3 +239,7 @@ class TheOrdinarySummaryArmIsNotWrittenToLose(unittest.TestCase):
         for change in A.CHANGES:
             self.assertTrue(change.get("summary"), change.get("id"))
             self.assertTrue(change.get("files"), change.get("id"))
+
+
+if __name__ == "__main__":
+    unittest.main()

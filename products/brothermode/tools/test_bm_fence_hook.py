@@ -25,6 +25,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -677,6 +678,78 @@ class EnforcedModeFailsClosed(FenceHookBase):
         self.assertEqual(r_out.returncode, 1, r_out.stderr)
         self.assertTrue(r_out.stdout.startswith("DENY"), r_out.stdout)
         self.assertIn("strict mode", r_out.stdout)
+
+
+class OutOfRootAndRunnableRemedy(FenceHookBase):
+    """E122 and E123 (2026-09-10). Found by a session whose enforced-mode
+    write to its own memory index, a file outside every repository, was
+    refused because the claim store was empty, and whose refusal said the
+    claim command was "on stderr", which a refused tool call never shows the
+    model. It guessed a different copy of bm_store.py and reported a deadlock
+    that did not exist.
+
+    E122: the fence governs a project, not the machine, and skips an
+    outside-root target when it compares fences. The empty-store refusal ran
+    BEFORE that skip, so under enforcement an empty store refused writes the
+    fence does not govern. An outside-root target is allowed whatever the
+    claims; an inside-root target is still refused.
+
+    E123: the enforced reason is the only text the model reads, so it carries
+    runnable commands, and still never the project root, a payload path or
+    the home directory."""
+
+    def _outside(self):
+        d = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        return os.path.join(d, "note.md")
+
+    def test_zero_claims_allows_a_write_outside_the_root_when_enforced(self):
+        p = payload(self.OTHER, self.root, tool_name="Write",
+                    tool_input={"file_path": self._outside(), "content": "x"})
+        for mode in ("enforced", ""):
+            with mock.patch.dict(os.environ, {"BM_FENCE_MODE": mode}):
+                decision, notes = self.decide(p)
+            self.assertAllowed(decision, notes)
+
+    def test_zero_claims_still_denies_a_write_inside_the_root_when_enforced(self):
+        p = payload(self.OTHER, self.root)
+        with mock.patch.dict(os.environ, {"BM_FENCE_MODE": "enforced"}):
+            decision, _notes = self.decide(p)
+        self.assertDenied(decision)
+
+    def _assert_runnable_and_private(self, reason, script, verb):
+        m = re.search(r"`python3 ([^`]+?) %s\b" % re.escape(verb), reason)
+        self.assertIsNotNone(
+            m, "no runnable `python3 ... %s` in the reason: %s" % (verb, reason))
+        shown = shlex.split(m.group(1))[0]
+        self.assertEqual(os.path.realpath(os.path.expanduser(shown)),
+                         os.path.realpath(os.path.join(HERE, script)))
+        self.assertNotIn("on stderr just above", reason)
+        self.assertNotIn(self.root, reason)
+        self.assertNotIn("src/app.py", reason)
+        home = os.path.expanduser("~")
+        if HERE.startswith(home + os.sep):
+            self.assertNotIn(home + os.sep, reason)
+
+    def test_zero_claims_reason_carries_the_claim_and_label_commands(self):
+        p = payload(self.OTHER, self.root)
+        with mock.patch.dict(os.environ, {"BM_FENCE_MODE": "enforced"}):
+            decision, _notes = self.decide(p)
+        reason = self.assertDenied(decision)
+        self._assert_runnable_and_private(reason, "bm_store.py", "claim")
+        self._assert_runnable_and_private(reason, "bm_fence_hook.py",
+                                          "session-label")
+
+    def test_missing_store_reason_carries_the_init_command(self):
+        for suffix in ("", "-wal", "-shm"):
+            q = bs.store_path(self.root) + suffix
+            if os.path.exists(q):
+                os.remove(q)
+        p = payload(self.OTHER, self.root)
+        with mock.patch.dict(os.environ, {"BM_FENCE_MODE": "enforced"}):
+            decision, _notes = self.decide(p)
+        reason = self.assertDenied(decision)
+        self._assert_runnable_and_private(reason, "bm_store.py", "init")
 
 
 class Canonicalization(FenceHookBase):

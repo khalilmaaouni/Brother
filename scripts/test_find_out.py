@@ -214,5 +214,103 @@ class TheRefusalNamesTheExactCommand(unittest.TestCase):
         self.assertIn("python3 scripts/find_out.py %r" % problem, reason)
 
 
+def _load_products_copy():
+    """The shipped copy under products/brothermode/tools, loaded by path, so
+    --file is proven on both copies of find_out.py, not only this one."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "products", "brothermode", "tools", "find_out.py")
+    spec = importlib.util.spec_from_file_location("find_out_products", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class FileLookupReadsAnchorsOnly(unittest.TestCase):
+    """2026-10-04: find_out.py --file answers from 40-Failures frontmatter
+    applies_to anchors only, one line per lesson. One fixture per guard."""
+
+    MODULES = (F, _load_products_copy())
+
+    def setUp(self):
+        self.vault = tempfile.mkdtemp()
+        folder = os.path.join(self.vault, "40-Failures")
+        _write(os.path.join(folder, "anchored.md"),
+               '---\ntype: failure\nsymptom: "it broke"\n'
+               'applies_to: [scripts/loop/proof_accept.py, scripts/x.py]\n---\n\nbody\n')
+        # Names the file in its BODY only: a full text search would find it,
+        # an anchors-only lookup must not.
+        _write(os.path.join(folder, "body-only.md"),
+               '---\ntype: failure\n---\n\nscripts/loop/proof_accept.py broke\n')
+        _write(os.path.join(folder, "other.md"),
+               '---\ntype: failure\napplies_to: [scripts/other.py]\n---\n')
+        # No frontmatter at all: an applies_to line in the text is not one.
+        _write(os.path.join(folder, "nofm.md"),
+               'intro\napplies_to: [scripts/loop/proof_accept.py]\n---\n')
+        _write(os.path.join(folder, "waived.md"),
+               '---\ntype: failure\napplies_to: []\n---\n')
+
+    def run_main(self, mod, argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = mod.main(argv)
+        return code, buf.getvalue()
+
+    def test_one_line_per_anchored_lesson_and_body_mentions_ignored(self):
+        for mod in self.MODULES:
+            code, out = self.run_main(mod, ["--file", "scripts/loop/proof_accept.py",
+                                            "--vault", self.vault])
+            self.assertEqual(code, 0)
+            self.assertEqual(out.strip().splitlines(), [
+                "[[anchored]]  applies_to: scripts/loop/proof_accept.py, "
+                "scripts/x.py  symptom: it broke"])
+
+    def test_a_bare_file_name_matches_the_anchor_path_suffix(self):
+        for mod in self.MODULES:
+            code, out = self.run_main(mod, ["--file", "proof_accept.py", "--vault", self.vault])
+            self.assertEqual(code, 0)
+            self.assertIn("[[anchored]]", out)
+
+    def test_a_partial_name_is_not_a_match(self):
+        for mod in self.MODULES:
+            code, out = self.run_main(mod, ["--file", "accept.py", "--vault", self.vault])
+            self.assertEqual(code, 1)
+            self.assertIn("no lesson", out)
+
+    def test_an_unanchored_file_exits_1(self):
+        for mod in self.MODULES:
+            code, _ = self.run_main(mod, ["--file", "scripts/none.py", "--vault", self.vault])
+            self.assertEqual(code, 1)
+
+    def test_a_missing_folder_is_NO_DATA_exit_2(self):
+        for mod in self.MODULES:
+            code, out = self.run_main(mod, ["--file", "x.py", "--vault",
+                                            os.path.join(self.vault, "nope")])
+            self.assertEqual(code, 2)
+            self.assertIn("NO-DATA", out)
+
+    def test_a_longer_given_path_matches_the_anchor(self):
+        for mod in self.MODULES:
+            code, out = self.run_main(mod, ["--file", "/r/scripts/loop/proof_accept.py",
+                                            "--vault", self.vault])
+            self.assertEqual(code, 0)
+            self.assertIn("[[anchored]]", out)
+
+    def test_names_file_rules(self):
+        for mod in self.MODULES:
+            nf = mod._names_file
+            self.assertTrue(nf("./scripts/x.py", "scripts/x.py"))
+            self.assertTrue(nf("scripts/x.py", "./scripts/x.py"))
+            self.assertFalse(nf("python3 scripts/x.py", "scripts/x.py"))
+            self.assertFalse(nf("python3 /r/scripts/x.py", "scripts/x.py"))
+            self.assertFalse(nf("x.py", "scripts/ax.py"))
+            self.assertFalse(nf("scripts/", ""))
+
+    def test_the_body_is_never_read(self):
+        folder = os.path.join(self.vault, "40-Failures")
+        for mod in self.MODULES:
+            self.assertNotIn("body", mod._frontmatter_only(os.path.join(folder, "anchored.md")))
+
+
 if __name__ == "__main__":
     unittest.main()

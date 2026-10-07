@@ -2518,7 +2518,7 @@ class TestDeliverEmptyFolderTreeRead(unittest.TestCase):
             r = _run(["deliver", "--project-id", "nope"], root)
             self.assertEqual(r.returncode, 2, r.stdout)
             self.assertIn("No Brother project here yet", r.stdout)
-            self.assertIn("Next: /brothermode:start", r.stdout)
+            self.assertIn("Next: /brother:brothermode-start", r.stdout)
 
     def test_deliver_in_an_initialized_but_projectless_store_prints_it_too(self):
         with tempfile.TemporaryDirectory() as root:

@@ -138,6 +138,25 @@ class ARoundIsOneScreenNotFourPopups(unittest.TestCase):
         self.assertIn("Named round", open(_LAST_SENTINEL[0],
                                           encoding="utf-8").read())
 
+    def test_a_secret_in_the_round_reaches_neither_the_screen_nor_the_sentinel(self):
+        """The round's title goes to the sentinel and the screen, each
+        decision's title and option names go to the screen and to stdout.
+        Every one of them is model written, so the whole round is redacted
+        once, right after it is loaded. Built by concatenation so no scanner
+        reads a live-looking key here."""
+        secret = "gh" + "p_" + "A1b2" * 5
+        d = a_decision("Decide about %s" % secret, top="Keep %s" % secret)
+        code, page, output = render({"title": "Round %s" % secret,
+                                     "decisions": [d]})
+        self.assertEqual(code, 0, output)
+        self.assertNotIn(secret, page)
+        self.assertIn("Round [REDACTED]", page)
+        self.assertIn("Keep [REDACTED]", page)
+        with open(_LAST_SENTINEL[0], encoding="utf-8") as fh:
+            stamp = json.load(fh)
+        self.assertEqual("Round [REDACTED]", stamp.get("title"))
+        self.assertNotIn(secret, output)
+
 
 if __name__ == "__main__":
     unittest.main()

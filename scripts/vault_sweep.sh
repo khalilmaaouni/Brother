@@ -18,7 +18,12 @@
 set -u
 
 VAULT="${1:-$HOME/Documents/Kay Vault}"
-TOOLS_DIR="${BM_TOOLS:-$(cd "$(dirname "$0")/.." && pwd)/products/brothermode/tools}"
+# BM_TOOLS is the PARENT of a tools/ subdirectory, matching the convention
+# the vault's own pre-commit hook and bootstrap.sh use (99-System/Scripts/) --
+# not the tools directory itself. Default to the same stable, non-repository
+# copy bootstrap.sh populates, so this script and the commit-time gate always
+# agree on which tool build they are reading.
+TOOLS_DIR="${BM_TOOLS:-$HOME/.claude/hooks/bm-vault-tools}"
 REPORT="$VAULT/90-Views/Sweep-Latest.md"
 TODAY="$(date +%Y-%m-%d)"
 STAMP="$(date "+%Y-%m-%d %H:%M %Z")"
@@ -36,7 +41,7 @@ run_check() {
   # NO-DATA print "Verdict: clean" -- caught by adversarial review the same
   # session this script was written.
   label="$1"; script="$2"; shift 2
-  path="$TOOLS_DIR/$script"
+  path="$TOOLS_DIR/tools/$script"
   if [ ! -f "$path" ]; then
     printf '%s: NO-DATA (tool not found at %s)\n' "$label" "$path"
     return 3
@@ -64,7 +69,7 @@ NODATA=0
 
 {
   echo "---"
-  echo "id: n-sweep-latest"
+  echo "id: n-f4ff80d7c10d37f6"
   echo "type: index"
   echo "authority: casual"
   echo "project: all"

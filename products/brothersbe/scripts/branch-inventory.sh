@@ -44,7 +44,9 @@ if ! MAIN_SHA=$(git rev-parse -q --verify origin/main 2>/dev/null); then
     exit 1
 fi
 
-WORKDIR=$(mktemp -d 2>/dev/null || echo "/tmp/sbe-branch-inventory-work.$$")
+# a template under TMPDIR, slash trimmed: bare `mktemp -d` ignores TMPDIR on macOS (see checksums.sh)
+TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+WORKDIR=$(mktemp -d "$TMPBASE/sbe-branch-inventory-work.XXXXXX" 2>/dev/null || echo "$TMPBASE/sbe-branch-inventory-work.$$")
 mkdir -p "$WORKDIR"
 trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 

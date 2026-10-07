@@ -3,7 +3,7 @@ name: brotherme-auto
 description: "Begin or resume the Full-Auto controller, which sequences a signed outcome to a checked deliverable"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-auto`.
+This is the Codex route for the existing Claude command `/brother:brotherme-auto`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

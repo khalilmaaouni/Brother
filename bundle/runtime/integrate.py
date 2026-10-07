@@ -66,12 +66,14 @@ forging that is a different and worse thing than labelling the commit.
 
 Python 3, standard library only, and git.
 """
+import hashlib
 import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import brother_paths
 import claim_store
@@ -98,6 +100,24 @@ REFUSED = "REFUSED"
 #: "I merged this just now" and "this was already here before I looked" are
 #: different facts, and collapsing them is what hid a real defect for a week.
 ALREADY_INTEGRATED = "ALREADY-INTEGRATED"
+
+#: A merge git refused only because ANOTHER process held canonical's index
+#: lock for a moment (a concurrent `git status` refreshing the index takes
+#: it) touched nothing and is not a conflict. Measured 2026-09-26: two
+#: concurrent resumes of one run, the loser's git reads racing the winner's
+#: merge, and "fatal: Unable to write index." read as CONFLICT, so the round
+#: released the unit as failed and ran its worker again over a lane that
+#: was already green. Retried, bounded (about 3 s in all); a lock that
+#: outlasts every retry is NO-DATA naming the lock, never CONFLICT.
+_INDEX_LOCK_MARKERS = ("index.lock", "Unable to write index")
+INDEX_LOCK_RETRIES = 5
+INDEX_LOCK_BACKOFF_S = 0.2
+
+
+def _index_locked(proc):
+    text = (proc.stderr or "") + (proc.stdout or "")
+    return proc.returncode != 0 and any(m in text for m in _INDEX_LOCK_MARKERS)
+
 
 #: Mirrors worktree_lane.BRANCH_PREFIX. Duplicated rather than imported,
 #: matching this module's existing choice to keep its own `_git` wrapper
@@ -507,8 +527,20 @@ def _interactive_fence_conflict(repo, before, lane_branch, runner=None):
     for path in touched:
         try:
             candidate = bs.canonicalize_path(root, path)
-        except Exception:  # noqa: BLE001
-            continue  # outside the fenced project; nothing to compare against
+        except Exception as e:  # noqa: BLE001
+            # The store's ONE known refusal, 'path-escape' (a path resolving
+            # outside the fenced project, a symlink out for instance), is the
+            # same case bm_fence_hook.canonical_target answers None for, and
+            # its docstring reads None as ALLOW: BrotherMode fences a
+            # project, not the filesystem. So the two fences agree and the
+            # path is skipped. ANY OTHER exception is an UNKNOWN, and unknown
+            # refuses: skipping it would read as no conflict (2026-09-30).
+            if getattr(e, "reason", None) == "path-escape":
+                continue
+            why = "uncomparable: %s: %s" % (type(e).__name__, e)
+            return {"path": path, "claim_path": "(%s)" % why,
+                    "name": "(%s)" % why, "lifecycle_uuid": "(unknown)",
+                    "session_id": None}, None
         for row in rows:
             if bs.paths_overlap(candidate, row["path"]):
                 return {"path": path, "claim_path": row["path"],
@@ -592,6 +624,13 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
         # a merge that then has to be unwound.
         fence_conflict, fence_note = _interactive_fence_conflict(
             repo, before, lane_branch, runner)
+        if fence_conflict is not None and fence_conflict["lifecycle_uuid"] == "(unknown)":
+            return {"verdict": REFUSED, "unit": unit_id, "canonical": before,
+                    "reason": "%s could not be compared against the active "
+                              "BrotherMode interactive fence %s; unknown "
+                              "refuses, so the autonomous engine does not "
+                              "land a write there"
+                              % (fence_conflict["path"], fence_conflict["name"])}
         if fence_conflict is not None:
             return {"verdict": REFUSED, "unit": unit_id, "canonical": before,
                     "reason": "%s is inside the active BrotherMode interactive "
@@ -608,12 +647,27 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
         # unwind is one reset to a recorded tip. The message is written here
         # rather than left to git's default (E45), so the commit itself says
         # a machine made it and which run to read.
-        merged = _git(["merge", "--no-ff", "-m",
-                       _merge_message(unit_id, lane_branch, run_id,
-                                      harness_revision), lane_branch],
-                      repo, runner)
+        merge_args = ["merge", "--no-ff", "-m",
+                      _merge_message(unit_id, lane_branch, run_id,
+                                     harness_revision), lane_branch]
+        merged = _git(merge_args, repo, runner)
+        for attempt in range(INDEX_LOCK_RETRIES):
+            # Retried only while nothing moved: the same tip, a clean tree.
+            if (not _index_locked(merged) or _tip(repo, runner) != before
+                    or not _clean(repo, runner)):
+                break
+            time.sleep(INDEX_LOCK_BACKOFF_S * (attempt + 1))
+            merged = _git(merge_args, repo, runner)
         if merged.returncode != 0:
             _git(["merge", "--abort"], repo, runner)
+            if _index_locked(merged):
+                return {"verdict": NODATA, "unit": unit_id, "canonical": before,
+                        "reason": "canonical's index stayed locked by another "
+                                  "process through %d retries, so the merge "
+                                  "never ran: %s"
+                                  % (INDEX_LOCK_RETRIES,
+                                     (merged.stderr or merged.stdout or "")
+                                     .strip()[:160])}
             return {"verdict": CONFLICT, "unit": unit_id, "canonical": before,
                     "reason": "the lane does not apply to the current canonical "
                               "revision: %s"
@@ -1324,3 +1378,206 @@ def integrate(repo, results, lanes, units, runner=None, check_runner=None,
                                 "canonical": (row.get("canonical") or "")[:12],
                                 "reason": str(row.get("reason") or "")[:100]})
     return out
+
+
+# ---------------------------------------------------------------------------
+# D1.7: integration history and attempt chain
+# ---------------------------------------------------------------------------
+
+ATTEMPT_CHAIN_REQUIRED_STATE = "done"
+
+
+def _hex_digest_is_valid(value):
+    """True for a non-empty string of hexadecimal characters, else False."""
+    if not isinstance(value, str) or not value:
+        return False
+    for ch in value:
+        if ch not in "0123456789abcdefABCDEF":
+            return False
+    return True
+
+
+def attempt_chain(store_path, unit_id):
+    """Walk the attempt chain backwards from the head, returning it head first.
+
+    (chain, "") on success; (None, problem) when any link is absent, a cycle is
+    found, or the head is missing. Never raises: a broken chain is NO-DATA and a
+    malformed argument is a named problem, never a bare interpreter error."""
+    if not isinstance(store_path, str) or not store_path:
+        return None, "attempt_chain needs a non-empty string store path"
+    if not isinstance(unit_id, str) or not unit_id:
+        return None, "attempt_chain needs a non-empty string unit id"
+    head_rec, problem = claim_store.head(store_path, unit_id)
+    if problem:
+        return None, problem
+    if head_rec is None:
+        return None, "the unit has no recorded head attempt"
+    records, problem = claim_store.history(store_path, unit_id)
+    if problem:
+        return None, problem
+    by_id = {}
+    for rec in records:
+        if isinstance(rec, dict) and isinstance(rec.get("attempt_id"), str):
+            by_id[rec["attempt_id"]] = rec
+    chain = []
+    seen = set()
+    current = head_rec
+    while current is not None:
+        aid = current.get("attempt_id")
+        if not isinstance(aid, str) or not aid:
+            return None, "an attempt record has no attempt_id"
+        if aid in seen:
+            return None, "a cycle was found in the attempt chain at %s" % aid
+        seen.add(aid)
+        rec = by_id.get(aid, current)
+        chain.append(dict(rec))
+        parent = current.get("parent_attempt_id")
+        if parent is None:
+            break
+        if not isinstance(parent, str) or not parent:
+            return None, "attempt %s has a non-string parent_attempt_id" % aid
+        current = by_id.get(parent)
+        if current is None:
+            return None, ("the parent attempt %s of %s is missing from the "
+                          "store" % (parent, aid))
+    return chain, ""
+
+
+def assert_integrable_chain(chain):
+    """Raise ValueError naming the defect unless every link is integrable.
+
+    Returns "" only when every link state is ATTEMPT_CHAIN_REQUIRED_STATE and
+    each link's evidence is a mapping carrying a non-empty command, an int exit
+    code, a non-empty hex output digest and a non-empty revision string. Any
+    other chain raises ValueError whose message names the missing or wrong
+    field, so a caller cannot mistake a broken chain for a good one. This is a
+    control that prevents rather than a check that reports."""
+    if not isinstance(chain, list):
+        raise ValueError(
+            "the chain must be a list, not %s" % type(chain).__name__)
+    if not chain:
+        raise ValueError("the chain is empty")
+    for index, link in enumerate(chain):
+        if not isinstance(link, dict):
+            raise ValueError("chain link %d is not a mapping" % index)
+        state = link.get("state")
+        if state != ATTEMPT_CHAIN_REQUIRED_STATE:
+            raise ValueError(
+                "chain link %d has state %r, not %r"
+                % (index, state, ATTEMPT_CHAIN_REQUIRED_STATE))
+        evidence = link.get("evidence")
+        if not isinstance(evidence, dict):
+            raise ValueError(
+                "chain link %d has no evidence mapping" % index)
+        command = evidence.get("command")
+        if not isinstance(command, str) or not command:
+            raise ValueError(
+                "chain link %d evidence is missing command" % index)
+        exit_code = evidence.get("exit_code")
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            raise ValueError(
+                "chain link %d evidence is missing int exit_code" % index)
+        digest = evidence.get("output_digest")
+        if not _hex_digest_is_valid(digest):
+            raise ValueError(
+                "chain link %d evidence is missing non-empty hex "
+                "output_digest" % index)
+        revision = evidence.get("revision")
+        if not isinstance(revision, str) or not revision:
+            raise ValueError(
+                "chain link %d evidence is missing non-empty revision"
+                % index)
+    return ""
+
+
+def chain_integrate_one(repo, lane_branch, unit, store_path, runner=None,
+                        check_runner=None, run_id=None, harness_revision=None):
+    """Chain-check a unit's attempts, then merge through the real integrate_one.
+
+    The chain is walked head first by attempt_chain and must be integrable; a
+    broken or incomplete chain is NO-DATA naming the defect, and the real merge
+    is never attempted. When the chain is integrable, integrate_one(), the
+    estate's sole lane-to-canonical merge entry point, is called exactly once
+    and takes its own _Lock internally; this function never reimplements the
+    merge. The wrapped verdict is DONE only when the chain is integrable AND
+    integrate_one returned INTEGRATED, else NO-DATA with a reason."""
+    if not isinstance(unit, dict):
+        return {"verdict": NODATA, "unit": None,
+                "reason": "chain_integrate_one needs a unit mapping",
+                "attempt_ids": [], "canonical_revision": None,
+                "revalidation": None}
+    unit_id = unit.get("id") or unit.get("unit_id") or "?"
+    if not isinstance(unit_id, str) or not unit_id:
+        unit_id = "?"
+    if not isinstance(store_path, str) or not store_path:
+        return {"verdict": NODATA, "unit": unit_id,
+                "reason": ("chain_integrate_one needs a non-empty string "
+                           "store path"),
+                "attempt_ids": [], "canonical_revision": None,
+                "revalidation": None}
+    chain, problem = attempt_chain(store_path, unit_id)
+    if problem:
+        return {"verdict": NODATA, "unit": unit_id, "reason": problem,
+                "attempt_ids": [], "canonical_revision": None,
+                "revalidation": None}
+    if chain is None:
+        return {"verdict": NODATA, "unit": unit_id,
+                "reason": "no attempt chain found",
+                "attempt_ids": [], "canonical_revision": None,
+                "revalidation": None}
+    attempt_ids = [link.get("attempt_id") for link in chain
+                   if isinstance(link, dict)
+                   and isinstance(link.get("attempt_id"), str)]
+    try:
+        assert_integrable_chain(chain)
+    except ValueError as exc:
+        return {"verdict": NODATA, "unit": unit_id, "reason": str(exc),
+                "attempt_ids": attempt_ids, "canonical_revision": None,
+                "revalidation": None}
+    try:
+        result = integrate_one(repo, lane_branch, unit, runner, check_runner,
+                               run_id, harness_revision)
+    except (TimeoutError, OSError) as exc:
+        return {"verdict": NODATA, "unit": unit_id,
+                "reason": ("the real integrate_one could not run: %s" % exc),
+                "attempt_ids": attempt_ids, "canonical_revision": None,
+                "revalidation": None}
+    if not isinstance(result, dict):
+        return {"verdict": NODATA, "unit": unit_id,
+                "reason": "integrate_one did not return a verdict mapping",
+                "attempt_ids": attempt_ids, "canonical_revision": None,
+                "revalidation": None}
+    canonical_revision = result.get("canonical")
+    if not isinstance(canonical_revision, str) or not canonical_revision:
+        canonical_revision = None
+    evidence = result.get("evidence")
+    if not isinstance(evidence, dict):
+        evidence = {}
+    output = evidence.get("output")
+    output_digest = None
+    if isinstance(output, str):
+        output_digest = hashlib.sha256(output.encode("utf-8")).hexdigest()
+    revalidation = {"check": evidence.get("check_command"),
+                    "exit_code": evidence.get("exit_code"),
+                    "output_digest": output_digest,
+                    "revision": evidence.get("canonical_rev")}
+    if result.get("verdict") == INTEGRATED:
+        if canonical_revision is None:
+            return {"verdict": NODATA, "unit": unit_id,
+                    "reason": ("integrate_one returned INTEGRATED without a "
+                               "canonical revision"),
+                    "attempt_ids": attempt_ids, "canonical_revision": None,
+                    "revalidation": revalidation}
+        return {"verdict": "DONE", "unit": unit_id,
+                "reason": result.get("reason", ""),
+                "attempt_ids": attempt_ids,
+                "canonical_revision": canonical_revision,
+                "revalidation": revalidation}
+    reason = result.get("reason")
+    if not isinstance(reason, str) or not reason:
+        reason = ("integrate_one returned %r, not %s"
+                  % (result.get("verdict"), INTEGRATED))
+    return {"verdict": NODATA, "unit": unit_id, "reason": reason,
+            "attempt_ids": attempt_ids,
+            "canonical_revision": canonical_revision,
+            "revalidation": revalidation}

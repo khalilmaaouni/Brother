@@ -100,4 +100,4 @@ for turning a run into a receipt a reviewer accepts. The command reference is
 ## Invoking it on purpose
 
 This skill is meant to arrive on its own, which is the whole point of it.
-Invoke as /brothersbe:prove-this-change. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.
+Invoke as /brother:brothersbe-prove-this-change. That is the deliberate way in, for somebody who wants it; it is not the way most people will meet this.

@@ -3,7 +3,7 @@ name: brotherme-next
 description: "Recommend the single best next step for the project"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-next`.
+This is the Codex route for the existing Claude command `/brother:brotherme-next`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

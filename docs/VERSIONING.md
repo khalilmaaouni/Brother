@@ -1,88 +1,33 @@
 # Versioning
 
-This is the release contract for Brother: what the three internal products
-are, what version each is at, and the gates that decide when this repository
-moves from a router into a merge. Every version figure below is copied from
-`.claude-plugin/marketplace.json`, not guessed.
+This is Brother's release contract. Version figures are copied from the version source manifests and are not guessed. The release contract in the current versioning document that remains true is retained here: version changes follow the manifests, a cut follows its required checks and owner decision, and release claims require verifiable evidence.
 
-## The three internal products
+## One plugin
 
-The single Brother install is a facade. Underneath it are three products,
-each with its own version and its own release cadence. Since the one-repo
-cutover of 2026-08-31 (M6), BrotherMode and BrotherSBE ship from this
-repository's `products/` tree. Source: `.claude-plugin/marketplace.json`'s
-`plugins` list.
+Brother 1.1.0 has one plugin named `brother`. The old plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog, leaving one catalog entry in each surviving catalog. Pinned installs of old plugins keep resolving; see `docs/how-to/migrate-to-one-plugin.md`.
 
-| Internal name | Ships from | Version | Covers | For |
-| :-- | :-- | :-- | :-- | :-- |
-| BrotherMode | products/brothermode (this repository) | 3.4.5 | execution provenance: what an assistant or teammate actually did, what checked it, what it is waiting on | whoever runs the project |
-| BrotherSBE | products/brothersbe (this repository) | 3.7.4 | change assurance: hard gates that refuse a change on evidence, not confidence | engineers |
-| BrotherDS | khalilmaaouni/BrotherDS | 0.1.0, EXPERIMENTAL | claim verification: whether a promised number turned out to be true | nobody yet, nothing to install |
+The target is one installable plugin tree and one plugin on each host: Claude Code, Codex, Cursor and Antigravity, with Cursor advisory until its signed in canary demonstrates a deny. In 1.1.0 Antigravity is experimental and unverified: its install path ships, but no Antigravity check gates the release and no parity or certification claim is made (owner scope decision, docs/decisions/scope-1.1.0-defer-to-1.1.1-2026-10-03.json); its certification is a 1.1.1 item. The accepted host proof specification says package level checks exist, but it also says no signed in real host hook fire has yet been recorded for any of those hosts.
 
-BrotherDS reports its own north star, Verified Claim Rate, as NO-DATA today:
-no claim has ever resolved. It is versioned and listed here for completeness,
-not as something to install.
+## Version numbers
 
-Each product keeps its own release notes and its own queue; this file does
-not restate them. Where a product's own document and this file disagree about
-that product's version, treat this file as stale and re-read
-`.claude-plugin/marketplace.json`, since that file is the source this file
-was built from.
+Current version: 1.1.0.
 
-## The umbrella itself
+Copy any version figure in this document from the updated version source manifests in the same change that updates those manifests. The manifests are the source of truth for version numbers.
 
-This repository (`brother`, the router plugin under `bundle/`) versions
-separately from the three products it fronts, because it is a marketplace and
-a facade, not a merge of their code. Its own version lives in
-`.claude-plugin/marketplace.json` and `bundle/.claude-plugin/plugin.json`.
-Current version: 1.0.21.
+## Release gates
 
-## Stage 0, Stage 1, Stage 2
+Before each merge to `main`, run `sh scripts/required_fast.sh` locally and require exit 0. This is the mandatory pre-merge check; it does not replace the full battery at a release candidate.
 
-Brother's own program moves through three stages, each gated on evidence, not
-on a date. Source: `docs/CHARTER.md` and `docs/MERGE-PLAN.md`.
+A release cut follows the required checks and remains an owner decision. The cut must keep the version manifests and their references aligned with the release tag, and stop before pushing or publishing.
 
-**Past Stage 0, not yet Stage 1.** The one-repo cutover (M6, 2026-08-31)
-already moved BrotherMode and BrotherSBE's code physically into this
-repository's `products/` tree, at the versions in the table above, which is
-more than the original Stage 0 promised (router only, no product code
-moved). The two Stage 1 gates below have not both cleared, so this
-repository's own version (0.9.11) has not bumped to 1.0.0 the way
-`docs/MERGE-PLAN.md` ties that number to Stage 1's completion.
+Release verification must use evidence produced after the last edit. A check that cannot run is NO-DATA, not PASS, and a release readiness result must expose PASS, FAIL or NO-DATA for each required row rather than passing by omission.
 
-**Stage 1, conditional.** The physical merge of BrotherMode and BrotherSBE
-begins only once two gates clear:
+## 1.1.0 work still required
 
-1. One claim has resolved end to end in BrotherDS.
-2. BrotherSBE's open pull request queue is drained to zero (a draft pull
-   request does not count against this gate).
+OP1, HP1 and U8 describe work for the 1.1.0 cut; their completion and evidence are recorded in the release note.
 
-Neither gate has a date; each has a check, in `docs/MERGE-PLAN.md`.
+The 1.1.0 cut establishes one catalog entry, `brother`; unreadable catalog input must not pass.
 
-**Stage 2, last.** BrotherDS joins by a clean extraction of its shippable
-files, never by carrying its history, and only after the Stage 1 surface cut
-is proven to hold.
+HP1, the live host proof (a signed in session on each host firing the shipped hooks), is NOT recorded for 1.1.0: `python3 scripts/host_live_verify.py docs/plan/evidence/hp1-real-2026-10-04` reads NO-DATA, and the release note says so. Package level evidence alone is not live host proof. Antigravity rows report NO-DATA and gate nothing in 1.1.0.
 
-## How a version bump here should read
-
-A change to any figure in this file should be a copy from an updated
-`.claude-plugin/marketplace.json`, in the same commit that updated the
-manifest, never the other way around. `.claude-plugin/marketplace.json` is
-the source of truth for these version numbers.
-
-## Before every merge into main
-
-Every merge into `main` runs `sh scripts/required_fast.sh` locally first,
-and passes it (exit 0). It is the cheap mandatory pre-merge contract: a
-fixed slice of the full battery (`scripts/check_all.sh`, 35 minutes) picked
-for signal per dollar of wall clock, deterministic, about 90 seconds on this
-machine. It is not a substitute for the full battery at a release candidate,
-only the floor nobody merges under. A GitHub Actions workflow
-(`.github/workflows/required-fast.yml`, `workflow_dispatch` only, per the
-dispatch-only law) runs the identical script on a clean `ubuntu-latest`
-runner for anyone who wants the same proof off this machine.
-
-The version cut itself (`scripts/cut_v1.0.0.sh`) is a separate, later, and
-still founder-only act: it bumps both manifests, points every ref at the
-tag, and stops before the push. required-fast is the gate before the merge
-that precedes a cut, not part of the cut script itself.
+Describe OP1, HP1 and U8 as shipped only where their evidence supports that claim.

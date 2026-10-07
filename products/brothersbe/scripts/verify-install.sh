@@ -98,7 +98,9 @@ else
     exit 1
 fi
 
-WORKDIR=$(mktemp -d 2>/dev/null || echo "/tmp/sbe-verify-install-work.$$")
+# a template under TMPDIR, slash trimmed: bare `mktemp -d` ignores TMPDIR on macOS (see checksums.sh)
+TMPBASE=${TMPDIR:-/tmp}; TMPBASE=${TMPBASE%/}
+WORKDIR=$(mktemp -d "$TMPBASE/sbe-verify-install-work.XXXXXX" 2>/dev/null || echo "$TMPBASE/sbe-verify-install-work.$$")
 mkdir -p "$WORKDIR"
 trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 

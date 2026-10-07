@@ -387,6 +387,39 @@ class SchemaAndCheckerAgree(unittest.TestCase):
                          os.path.normpath(os.path.abspath(SCHEMA)))
 
 
+class CheckedDispatcher(unittest.TestCase):
+    """checked(): the shared root-cause fix (2026-09-15 review of PR #709)
+    for a hand_rules callback that assumes shapes validate() has already
+    confirmed. A hand_rules_fn that would crash on a structurally invalid
+    instance must never be called; validate()'s own structural problems
+    are returned on their own instead."""
+
+    def test_hand_rules_fn_is_not_called_when_structural_problems_exist(self):
+        calls = []
+
+        def crashing_hand_rules():
+            calls.append(1)
+            raise AssertionError("hand_rules_fn must not run on a "
+                                  "structurally invalid instance")
+
+        schema = {"type": "object", "required": ["project"],
+                  "properties": {"project": {"type": "object"}}}
+        problems = cc.checked({}, schema, crashing_hand_rules)
+        self.assertEqual(calls, [])
+        self.assertTrue(any("project" in p for p in problems), problems)
+
+    def test_hand_rules_fn_runs_when_structurally_clean(self):
+        schema = {"type": "object", "properties": {}}
+        problems = cc.checked({}, schema, lambda: ["a hand-rule problem"])
+        self.assertEqual(problems, ["a hand-rule problem"])
+
+    def test_contract_check_own_check_routes_through_checked(self):
+        record = load_fixture("complete")
+        del record["project"]
+        problems = cc.check(record, load_schema())
+        self.assertTrue(any("project" in p for p in problems), problems)
+
+
 class ReadmeDocumentsTheStateMapping(unittest.TestCase):
     """F3/F6: the orchestrator ruling that Daybook's four display columns
     are derived, never stored, must be written into the README, not only

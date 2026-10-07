@@ -35,6 +35,23 @@ WHERE IT LIVES, AND WHY THERE
   treats an ABSENT baseline as a fail-closed condition rather than as
   permission, which is the half of the problem that is solvable here.
 
+WHICH SESSIONSTART MAY WRITE A FIRST BASELINE (owner ruling 2026-09-26,
+docs/decisions/sbe-baseline-mid-session-launder-2026-09-26.json)
+  SessionStart is registered with no matcher, so it fires on a resume and on
+  a compaction too, under the SAME session id. Refusing to OVERWRITE was not
+  enough: with the baseline deleted in between, the next resume wrote a fresh
+  one from the current tree, recording the session's own changes as
+  pre-session dirt, and the Stop reconciler cleared them. So a FIRST baseline
+  is written only when the payload's `source` begins a new session
+  (FRESH_START_SOURCES). A resume, a compaction, a missing source or one no
+  client documents writes nothing, the block on a dirty tree stands, and
+  stderr says why. Known consequence, fail-closed on purpose: a session that
+  never got a baseline (started above the repository, or a fork on a client
+  older than Claude Code v2.1.214, which reported source "resume") stays
+  blocked on a dirty tree, which is the 2026-09-06 ruling "leave it blocked,
+  no record written". Named limit: an agent that writes baseline.json itself
+  is not stopped by anything in this file.
+
 NULL DELIMITED GIT OUTPUT, EVERYWHERE
   Every git invocation that returns paths uses `-z`. A path containing a
   newline is legal on every filesystem this project supports, and a
@@ -68,6 +85,13 @@ MAX_DIGEST_BYTES = 64 * 1024 * 1024
 #: under a safe name, but it is sanitized so it can never escape the
 #: directory it belongs in.
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+#: SessionStart `source` values that BEGIN a session and so may write its first
+#: baseline. The client's hook reference defines "clear" and "fork" as the
+#: beginning of another session; "resume" and "compact" continue one that may
+#: already have written to the tree. Anything else, including no source at
+#: all, is refused.
+FRESH_START_SOURCES = ("startup", "clear", "fork")
 
 
 def _warn(s):
@@ -353,17 +377,29 @@ def build_baseline(cwd, session_id):
     }
 
 
-def write_baseline(cwd, session_id):
+def write_baseline(cwd, session_id, source):
     """Write the baseline and hand back its path.
 
     Written once per session and NEVER overwritten: a second SessionStart in
     the same session (a resume, a compaction restart) must not re-baseline a
     tree the session has already been writing to, because that would launder
     every change made so far into pre-session dirt. The existing file wins and
-    the caller is told so."""
+    the caller is told so.
+
+    And written FIRST only when `source` begins a new session: the same
+    launder happens when a resume finds the baseline deleted and writes a
+    fresh one. `source` is required, so no caller can reach the write without
+    saying which SessionStart it is."""
     path = baseline_path(cwd, session_id)
     if os.path.exists(path):
         return path
+    if source not in FRESH_START_SOURCES:
+        raise BaselineUnavailable(
+            "no baseline exists at %s and this SessionStart's source is %r, which "
+            "does not begin a new session (a first baseline is written only for %s). "
+            "Writing one now would record every change this session already made as "
+            "pre-session dirt, so none is written"
+            % (path, source, ", ".join(FRESH_START_SOURCES)))
     data = build_baseline(cwd, session_id)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -431,8 +467,12 @@ def _stdin_json():
 def _session_and_cwd(argv):
     """The session id and working directory, from the flags if given, else
     from the hook payload on stdin, else from the environment. Returns a dict
-    rather than a pair, for the reason stated on GitResult."""
-    session_id, cwd = "", ""
+    rather than a pair, for the reason stated on GitResult.
+
+    The SessionStart source comes from the payload ONLY: no flag and no
+    environment variable can supply one, so `write --session X --cwd Y` by
+    hand never creates a first baseline (owner ruling 2026-09-26)."""
+    session_id, cwd, source = "", "", ""
     rest = list(argv)
     while rest:
         a = rest.pop(0)
@@ -448,11 +488,13 @@ def _session_and_cwd(argv):
         if not cwd:
             c = payload.get("cwd")
             cwd = c.strip() if isinstance(c, str) and c.strip() else ""
+        s = payload.get("source")
+        source = s.strip() if isinstance(s, str) else ""
     if not session_id:
         session_id = os.environ.get("BROTHERSBE_SESSION_ID", "").strip()
     if not cwd:
         cwd = os.getcwd()
-    return {"session_id": session_id, "cwd": cwd}
+    return {"session_id": session_id, "cwd": cwd, "source": source}
 
 
 def cmd_write(argv):
@@ -464,7 +506,7 @@ def cmd_write(argv):
               "and fail closed on any surviving change.")
         return 0
     try:
-        path = write_baseline(args["cwd"], args["session_id"])
+        path = write_baseline(args["cwd"], args["session_id"], args["source"])
     except BaselineUnavailable as e:
         _warn("sbe_session_baseline: no baseline was written (%s). The Stop reconciler "
               "fails closed on a missing baseline rather than treating it as "
@@ -491,7 +533,9 @@ BASELINE_USAGE = (
     "usage: sbe_session_baseline.py [write|show] [--session ID] [--cwd DIR]\n"
     "  write: record the pre-session working-tree state under\n"
     "    <git-dir>/brothersbe/sessions/<session-id>/baseline.json. Always exits 0:\n"
-    "    it is called from SessionStart, which must never fail a session.\n"
+    "    it is called from SessionStart, which must never fail a session. A first\n"
+    "    baseline is written only when the stdin payload's source is startup, clear\n"
+    "    or fork; resume, compact, a missing source, or flags alone write nothing.\n"
     "  show:  print the baseline as JSON, or exit 1 with the reason there is none.\n"
     "  With no flags, the session id and cwd are read from the SessionStart hook\n"
     "  payload on stdin."

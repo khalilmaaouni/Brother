@@ -1,0 +1,10 @@
+{
+  "dry_run": true,
+  "toolCall": {
+    "name": "run_command",
+    "args": {
+      "CommandLine": "rm -rf docs/"
+    }
+  },
+  "stepIdx": 3
+}

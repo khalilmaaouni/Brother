@@ -238,5 +238,59 @@ class ItFeedsTheAttemptLedgerBecauseNothingElseCan(unittest.TestCase):
         self.assertEqual(self.ledger.read(self.store), [])
 
 
+class TheEvidenceCheckedLogReducerM36(unittest.TestCase):
+    """M3.6 R28-R34: a summary's quotations must exist verbatim in the full text."""
+
+    def test_quoted_spans_extracts_double_and_single_quotes(self):
+        self.assertEqual(R.quoted_spans('say "one" then \'two\''), ["one", "two"])
+
+    def test_quoted_spans_quote_free_text_is_empty(self):
+        self.assertEqual(R.quoted_spans("no quotes here"), [])
+
+    def test_verbatim_hits_only_true_when_all_found(self):
+        self.assertEqual(R.verbatim_hits("alpha beta", ["alpha", "beta"]), (True, []))
+        self.assertEqual(R.verbatim_hits("alpha beta", ["alpha", "gamma"]),
+                         (False, ["gamma"]))
+
+    def test_all_quotes_verbatim_accepts(self):
+        res = R.reduce_log("the value is 42 today", 'it said "42" and \'today\'')
+        self.assertEqual(res["verdict"], "ACCEPT")
+        self.assertEqual(res["missing"], [])
+
+    def test_missing_quote_blocks(self):
+        res = R.reduce_log("the value is 42 today", 'it said "99"')
+        self.assertEqual(res["verdict"], "BLOCK")
+        self.assertIn("99", res["missing"])
+
+    def test_quote_free_summary_refused(self):
+        with self.assertRaises(ValueError):
+            R.reduce_log("some words", "some words")
+
+    def test_empty_input_refused(self):
+        with self.assertRaises(ValueError):
+            R.reduce_log("", 'a "quote"')
+        with self.assertRaises(ValueError):
+            R.reduce_log("text", "")
+
+    def test_non_string_refused(self):
+        for bad in (None, 123, b"bytes", True, float("nan"), ["a"]):
+            with self.assertRaises(ValueError):
+                R.quoted_spans(bad)
+            with self.assertRaises(ValueError):
+                R.verbatim_hits(bad, ["x"])
+            with self.assertRaises(ValueError):
+                R.reduce_log(bad, 'a "quote"')
+            with self.assertRaises(ValueError):
+                R.reduce_log("text", bad)
+
+    def test_non_string_spans_refused(self):
+        for bad in (None, "not a list", 123, True, float("nan")):
+            with self.assertRaises(ValueError):
+                R.verbatim_hits("text", bad)
+        for bad_span in (None, 123, True, float("nan")):
+            with self.assertRaises(ValueError):
+                R.verbatim_hits("text", [bad_span])
+
+
 if __name__ == "__main__":
     unittest.main()

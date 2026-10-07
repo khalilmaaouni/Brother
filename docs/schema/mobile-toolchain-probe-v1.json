@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mobile-toolchain-probe-v1",
+  "title": "Mobile Toolchain Probe v1",
+  "description": "EPIC M1.02 of docs/plan/MOBILE-PLATFORM-ROADMAP-1.0.18.md. A factual, read-only record of what developer tool versions and executable paths actually resolve ON THIS MACHINE right now (xcodebuild, simctl, xcresulttool, and where present gradle/javac/adb). scripts/mobile_toolchain_probe.py is a sibling of scripts/mobile_project_profile.py (mobile-project-profile-v1), which answers a different question (what a PROJECT DIRECTORY'S files say about its stack). This probe never reads a project directory and never accepts a caller-supplied path or version override for any tool: every resolved_path and version comes only from shutil.which() against the real process PATH and from actually running the tool's own version flag. A tool not found, or whose invocation fails, is NO-DATA, never guessed. Only the keyword subset scripts/mobile_project_profile.py's own schema documents is used here (matching that convention): type, required, properties, enum, const, items, minItems, additionalProperties -- no $ref, this checker's enforced subset does not support it, so each tool entry is written out in full below.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "probed_at_revision", "tools",
+    "ios_toolchain_status", "android_toolchain_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mobile-toolchain-probe-v1",
+      "description": "Which shape this record follows, so a reader never has to guess."
+    },
+    "probed_at_revision": {
+      "type": "string",
+      "description": "The exact git revision of the Brother checkout the probe ran from (not a project's revision -- this module never inspects a project directory). NO-DATA if this checkout is not a git repository."
+    },
+    "tools": {
+      "type": "object",
+      "description": "One entry per probed tool: xcodebuild, simctl, xcresulttool, gradle, javac, adb. Each entry's resolved_path and version come only from shutil.which() and the tool's own --version-style output; never from a project directory or a caller override.",
+      "additionalProperties": false,
+      "required": ["xcodebuild", "simctl", "xcresulttool", "gradle", "javac", "adb"],
+      "properties": {
+        "xcodebuild": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved_path", "version", "status"],
+          "properties": {
+            "resolved_path": {"type": "string", "description": "shutil.which('xcodebuild') result, or NO-DATA."},
+            "version": {"type": "string", "description": "First line of `xcodebuild -version`, or NO-DATA."},
+            "status": {"type": "string", "enum": ["found", "no-data"]}
+          }
+        },
+        "simctl": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved_path", "version", "status"],
+          "properties": {
+            "resolved_path": {"type": "string", "description": "shutil.which('xcrun') result (simctl is invoked as `xcrun simctl`, never a standalone binary), or NO-DATA."},
+            "version": {"type": "string", "description": "First line of `xcrun simctl --version`, or NO-DATA."},
+            "status": {"type": "string", "enum": ["found", "no-data"]}
+          }
+        },
+        "xcresulttool": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved_path", "version", "status"],
+          "properties": {
+            "resolved_path": {"type": "string", "description": "shutil.which('xcrun') result (xcresulttool is invoked as `xcrun xcresulttool`), or NO-DATA."},
+            "version": {"type": "string", "description": "First line of `xcrun xcresulttool version`, or NO-DATA."},
+            "status": {"type": "string", "enum": ["found", "no-data"]}
+          }
+        },
+        "gradle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved_path", "version", "status"],
+          "properties": {
+            "resolved_path": {"type": "string", "description": "shutil.which('gradle') result, or NO-DATA. Never a project's own ./gradlew wrapper -- this module never reads a project directory."},
+            "version": {"type": "string", "description": "First line of `gradle --version`, or NO-DATA."},
+            "status": {"type": "string", "enum": ["found", "no-data"]}
+          }
+        },
+        "javac": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved_path", "version", "status"],
+          "properties": {
+            "resolved_path": {"type": "string", "description": "shutil.which('javac') result, or NO-DATA."},
+            "version": {"type": "string", "description": "First line of `javac -version` output (stdout or stderr, whichever is non-empty), or NO-DATA."},
+            "status": {"type": "string", "enum": ["found", "no-data"]}
+          }
+        },
+        "adb": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved_path", "version", "status"],
+          "properties": {
+            "resolved_path": {"type": "string", "description": "shutil.which('adb') result, or NO-DATA."},
+            "version": {"type": "string", "description": "First line of `adb --version`, or NO-DATA."},
+            "status": {"type": "string", "enum": ["found", "no-data"]}
+          }
+        }
+      }
+    },
+    "ios_toolchain_status": {
+      "type": "string",
+      "description": "'complete' only if xcodebuild, simctl and xcresulttool are all status 'found'; 'none' if all three are 'no-data'; otherwise 'partial'.",
+      "enum": ["complete", "partial", "none"]
+    },
+    "android_toolchain_status": {
+      "type": "string",
+      "description": "'complete' only if gradle, javac and adb are all status 'found'; 'none' if all three are 'no-data'; otherwise 'partial'.",
+      "enum": ["complete", "partial", "none"]
+    }
+  }
+}

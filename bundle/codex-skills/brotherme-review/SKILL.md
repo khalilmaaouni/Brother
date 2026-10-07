@@ -3,7 +3,7 @@ name: brotherme-review
 description: "Check the current work against the definition of done and report what passes and what does not"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-review`.
+This is the Codex route for the existing Claude command `/brother:brotherme-review`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

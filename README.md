@@ -1,5 +1,43 @@
 # Brother
 
+## Start in sixty seconds
+
+### Claude Code
+
+```bash reference
+claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
+```
+
+The marketplace this repository declares is named `brother`, in lower case, whatever case the repository slug you added it from carries. Use that spelling everywhere a command names the marketplace: `claude plugin marketplace update Brother` answers `Marketplace 'Brother' not found. Available marketplaces: brother` and exits 1.
+
+Open a repository and invoke Brother. With no unfinished work, the bare door asks what you are trying to do rather than making you choose BrotherMode, BrotherSBE, or another internal product.
+
+```text
+/brother make add() reject non-numeric input and prove the behavior with a test
+```
+
+If unfinished Brother work exists in that repository, the door should discover it and offer/resume the plain-language outcome instead of exposing a run id as the user experience.
+
+### Cursor
+
+Cursor loads a local plugin from `~/.cursor/plugins/local/brother`. From a Brother checkout:
+
+```bash
+python3 scripts/cursor_plugin_install.py
+```
+
+Then reload the window and invoke `/brother`. See [Install on Cursor](docs/how-to/install-cursor.md). Treat Cursor's limits as advisory until a signed-in Cursor Agent session demonstrates that it blocks an action outside the allowed scope. Installation and offline checks alone do not establish that boundary.
+
+### Codex
+
+Codex does not expose Brother through Claude's slash-command surface. Install the Brother plugin, wire the supported managed hooks/trust path, then use the installed Brother skill or runtime engine. See [Install on Codex](docs/how-to/install-codex.md).
+
+To upgrade an existing install, remove the configured marketplace first, then add it again at the new ref, joined so no step runs over a failed one:
+
+```bash reference
+codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json
+```
+
 ### Let AI work. Give it boundaries. Make it earn your trust.
 
 **When AI says done, Brother gives you proof.**
@@ -12,7 +50,14 @@ The goal is to let you step away for more useful work as the system earns confid
 
 [The problem](#why-brother) · [Who it is for](#who-brother-is-for) · [Why this approach](#what-makes-brother-different) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Get started](#start-in-sixty-seconds) · [Documentation](docs/README.md)
 
-**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [Where Brother fits](docs/explanation/choosing-a-workflow.md).
+**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [Where Brother fits](docs/explanation/choosing-a-workflow.md) or [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md).
+
+## Installation
+
+```bash
+claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
+python3 scripts/cursor_plugin_install.py
+```
 
 ## Why Brother?
 
@@ -80,6 +125,7 @@ Brother is for people who want to delegate meaningful work to an agent but canno
 | **Analysts and technical business analysts** | A number reaches a decision without a traceable derivation | Connect the reported figure to source data, calculations, and reconciliation evidence | Business definitions, source quality, and interpretation |
 | **QA engineers and reviewers** | “All tests pass” hides which requirements were actually checked | Inspect the commands and distinguish supported claims from missing evidence | Independent expected results and additional checks where needed |
 | **Technical leads and delivery owners** | Running more agents multiplies the work of supervising them | Use bounded outcomes, resumable work, and delivery evidence to assess delegation | Priorities, acceptance, and release authority |
+| **Mobile developers** | A native change can pass one check while its device, build, or release evidence is incomplete | Plan a journey, run bounded simulator checks, and keep native evidence separate from product acceptance | Device coverage, product quality, accessibility, and the decision to release |
 
 You do not need to learn the internal product names to begin. Describe the work through Brother's entry point. For role-specific examples, see the [professional guides](docs/README.md).
 
@@ -103,6 +149,10 @@ Brother's distinctive emphasis is the connection between these mechanisms, not a
 | **Authority separate from evidence** | A visible distinction between checked work, human acceptance, and release | You still own requirements, consequential decisions, and shipping |
 
 The intended loop is simple: **delegate within a boundary, inspect what happened, remember what mattered, and earn the next increment of autonomy.** Start with [what is enforced and what is not](docs/reference/safety-boundaries.md). For source-level detail, see the generated [system map](SYSTEM.md).
+
+## A calibrated second opinion, when you turn it on
+
+Jev gives a checked decision a second opinion from an outside model service. To turn it on, add the chosen check to the `modes` object in `data/jev-seams.json`, then supply the key for that outside service. Every check ships switched off. When switched on, it records a second opinion and leaves the normal check's outcome unchanged. The public copy ships the code without the registry file because the `data` directory is not in the export allowlist, so these checks cannot run from a public install yet. Read [how to use calibrated decisions](docs/how-to/use-calibrated-decisions.md) before enabling one.
 
 ## How it works
 
@@ -266,44 +316,6 @@ brother_run: receipt: ~/.claude/brother-run/docs/plan/runs/20260903T071356-make-
 
 </details>
 
-## Start in sixty seconds
-
-### Claude Code
-
-```bash reference
-claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
-```
-
-The marketplace this repository declares is named `brother`, in lower case, whatever case the repository slug you added it from carries. Use that spelling everywhere a command names the marketplace: `claude plugin marketplace update Brother` answers `Marketplace 'Brother' not found. Available marketplaces: brother` and exits 1.
-
-Open a repository and invoke Brother. With no unfinished work, the bare door asks what you are trying to do rather than making you choose BrotherMode, BrotherSBE, or another internal product.
-
-```text
-/brother make add() reject non-numeric input and prove the behavior with a test
-```
-
-If unfinished Brother work exists in that repository, the door should discover it and offer/resume the plain-language outcome instead of exposing a run id as the user experience.
-
-### Cursor
-
-Cursor loads a local plugin from `~/.cursor/plugins/local/brother`. From a Brother checkout:
-
-```bash
-python3 scripts/cursor_plugin_install.py
-```
-
-Then reload the window and invoke `/brother`. See [Install on Cursor](docs/how-to/install-cursor.md). Fence enforcement remains ADVISORY until a signed-in Cursor Agent turn demonstrates a deny. Installation and offline checks alone do not establish that boundary.
-
-### Codex
-
-Codex does not expose Brother through Claude's slash-command surface. Install the Brother plugin, wire the supported managed hooks/trust path, then use the installed Brother skill or runtime engine. See [Install on Codex](docs/how-to/install-codex.md).
-
-To upgrade an existing install, remove the configured marketplace first, then add it again at the new ref, joined so no step runs over a failed one:
-
-```bash reference
-codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json
-```
-
 ## Check what you installed
 
 BrotherMode and BrotherSBE ship `CHECKSUMS.sha256` and `verify-install.sh`. In either product directory, `bash scripts/verify-install.sh` re-hashes files and compares them with the shipped manifest, and changes nothing. Do not run `sh scripts/checksums.sh CHECKSUMS.sha256` first, because it rewrites the manifest from the current bytes and makes a tampered file agree with a fresh manifest. Regenerating the manifest is the maintainer's step when cutting a release, never the reader's step before verifying.
@@ -420,7 +432,7 @@ It is not an automatic source of truth, a secrets store, or proof that repeat er
 
 **Look up:** [Routing](docs/reference/routing.md) · [Outcome contract](docs/reference/outcome-contract.md) · [Verdicts](docs/reference/verdicts.md) · [Receipt](docs/reference/receipt-model.md) · [Work units](docs/reference/work-units.md) · [Hooks](docs/reference/hooks.md)
 
-**Professional lenses:** [Senior backend](docs/personas/senior-backend-engineer.md) · [Senior data engineering](docs/personas/senior-data-engineer.md) · [Infrastructure/SRE](docs/personas/senior-infrastructure-engineer.md) · [Architect](docs/personas/architect.md) · [Data analyst](docs/personas/data-analyst.md) · [Data scientist](docs/personas/data-scientist.md) · [BA](docs/personas/business-analyst.md) · [Technical BA](docs/personas/technical-business-analyst.md) · [QA automation](docs/personas/qa-automation-engineer.md) · [Manual QA/QC](docs/personas/manual-qa-qc.md) · [Solo founder](docs/personas/solo-founder.md)
+**Professional lenses:** [Senior backend](docs/personas/senior-backend-engineer.md) · [Senior data engineering](docs/personas/senior-data-engineer.md) · [Infrastructure/SRE](docs/personas/senior-infrastructure-engineer.md) · [Architect](docs/personas/architect.md) · [Data analyst](docs/personas/data-analyst.md) · [Data scientist](docs/personas/data-scientist.md) · [BA](docs/personas/business-analyst.md) · [Technical BA](docs/personas/technical-business-analyst.md) · [QA automation](docs/personas/qa-automation-engineer.md) · [Manual QA/QC](docs/personas/manual-qa-qc.md) · [Solo founder](docs/personas/solo-founder.md) · [Mobile developer](docs/personas/mobile-developer.md)
 
 ## Limits before adoption
 
@@ -440,6 +452,14 @@ Current behavioral claims are registered in [DOC-CLAIMS.md](docs/assurance/DOC-C
 **Tutorials teach. How-to guides solve tasks. Reference states the contract. Explanation gives reasoning. Persona pages apply the same evidence model to professional work.**
 
 Start at [docs/README.md](docs/README.md).
+
+## Version truth is checked
+
+Brother checks that the shipped version statements in its public documentation match the declared version source, including the plugin manifests that installation resolves.
+
+```text
+python3 scripts/test_version_truth.py
+```
 
 ## Mobile development and claim verification
 

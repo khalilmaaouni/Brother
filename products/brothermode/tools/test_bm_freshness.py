@@ -17,6 +17,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -322,14 +323,25 @@ class TestGrepOutlivesNothing(unittest.TestCase):
         self.assertFalse(alive, "the grep outlived its SIGKILLed parent by 8s: the orphan is back")
 
     def test_a_grep_killed_by_its_own_alarm_is_reported_skipped_not_absent(self):
+        greps = []
+        real_popen = subprocess.Popen
+
+        def recording_popen(cmd, **kw):
+            greps.append(real_popen(cmd, **kw))
+            return greps[-1]
+
         with mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), \
-                mock.patch.object(bf, "_GREP_CAP_S", 1):
-            t0 = time.time()
+                mock.patch.object(bf, "_GREP_CAP_S", 1), \
+                mock.patch.object(bf.subprocess, "Popen", side_effect=recording_popen):
             found, skipped = bf._symbol_resolves_any({"A.b"}, [self.dir], budget=None)
+        # The stub exits 0 (a hit) after 30s unless its alarm ends it first, so the grep dying of
+        # SIGALRM is the cap firing. An event, where the elapsed-time bound it replaces measured
+        # how busy this machine was.
+        self.assertEqual([p.returncode for p in greps], [-signal.SIGALRM],
+                         "the cap did not stop the grep")
         self.assertFalse(found)
         self.assertEqual(skipped, [self.dir],
                          "a grep that never finished must be named skipped, never read as a miss")
-        self.assertLess(time.time() - t0, 10, "the cap did not stop the grep")
 
 
 class TestResolveAnchorViaMap(unittest.TestCase):

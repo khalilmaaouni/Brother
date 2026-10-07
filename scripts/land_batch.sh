@@ -201,19 +201,26 @@ load15="$(fifteen_min_load)"
 if [ -n "$load15" ] && awk -v l="$load15" 'BEGIN{exit !(l>150)}'; then high_load=1; fi
 
 run_gate() {  # run_gate <worktree> <logfile> <label>: sets RED_NAMES, 0 green / 1 red
-  local wt="$1" log="$2" label="$3"
+  # Decided on each command's OWN exit status, kept in a variable. Printed text never decides: the
+  # old rule grepped the log for "## <name> exit 0", so a child that printed those words turned the
+  # gate green while the checks exited 1 and 2 (finding 6 of the landing audit, 2026-09-27). The brace
+  # group runs in this shell, so the variables survive its redirection; an unset one reads red.
+  local wt="$1" log="$2" label="$3" bundle_rc="" fast_rc="" board_rc=""
   {
     echo "=== BATCH GATE $label prs: ${MERGED[*]}"
-    (cd "$wt" && LAND_BATCH_PRS="${MERGED[*]}" python3 scripts/bundle_runtime.py --check); echo "## bundle exit $?"
-    (cd "$wt" && LAND_BATCH_PRS="${MERGED[*]}" sh scripts/required_fast.sh); echo "## required_fast exit $?"
+    (cd "$wt" && LAND_BATCH_PRS="${MERGED[*]}" python3 scripts/bundle_runtime.py --check); bundle_rc=$?
+    echo "## bundle exit $bundle_rc"
+    (cd "$wt" && LAND_BATCH_PRS="${MERGED[*]}" sh scripts/required_fast.sh); fast_rc=$?
+    echo "## required_fast exit $fast_rc"
     (cd "$wt" && LAND_BATCH_PRS="${MERGED[*]}" python3 scripts/gen_readiness_board.py --check) 2>&1 | tail -1
-    echo "## board-check exit ${PIPESTATUS[0]}"
+    board_rc=${PIPESTATUS[0]}
+    echo "## board-check exit $board_rc"
     echo "=== END BATCH GATE $label"
   } > "$log" 2>&1
   RED_NAMES=""
-  grep -q '## bundle exit 0' "$log" || RED_NAMES="$RED_NAMES bundle_runtime"
-  grep -q '## required_fast exit 0' "$log" || RED_NAMES="$RED_NAMES required_fast"
-  grep -q '## board-check exit 0' "$log" || RED_NAMES="$RED_NAMES board-check"
+  [ "$bundle_rc" = 0 ] || RED_NAMES="$RED_NAMES bundle_runtime"
+  [ "$fast_rc" = 0 ] || RED_NAMES="$RED_NAMES required_fast"
+  [ "$board_rc" = 0 ] || RED_NAMES="$RED_NAMES board-check"
   [ -z "$RED_NAMES" ]
 }
 

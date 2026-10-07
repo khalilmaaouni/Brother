@@ -75,6 +75,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import typing
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +88,16 @@ MARKETPLACE_JSON = os.path.join(ROOT, ".claude-plugin", "marketplace.json")
 FALLBACK_VERSION = "1.0.0"
 SHIMS_DIR = os.path.join(ROOT, "products", "brothermode", "commands")
 CUT_SCRIPT = os.path.join(ROOT, "scripts", "cut_v1.0.0.sh")
+
+#: T1.1: the release cut session's handover directory, relative to ROOT, and
+#: the transfer ledger inside it. Both are module constants because the
+#: transfer document is a fixed path in this repository's own record, never a
+#: value typed into the generator. The note's transfer sentence is measured
+#: from LEDGER_NAME's rows, never from a literal list in this source file.
+HANDOVER_DIR_REL = "docs/sessions/handover-to-launch-epic-2026-09-20"
+LEDGER_NAME = "transfer.md"
+ROW_MARKER = "- task:"
+MAX_LEDGER_BYTES = 1048576
 
 #: (prose label, suite path relative to ROOT). Order matches the note's own
 #: paragraph order. Grepped from docs/releases/1.0.0.md itself, never invented.
@@ -795,6 +806,28 @@ def build(version=None):
         problems.append("%s: %s does not declare TAG= and PUBLIC_REMOTE= "
                          "in a greppable shape" % (NODATA, CUT_SCRIPT))
 
+    # T1.1: the note's transfer sentence is measured from the ledger, never
+    # typed. A ledger that exists but carries a row the marker cannot parse
+    # refuses the whole note at NO-DATA, the same refusal path an unrunnable
+    # cited suite takes just above; an absent ledger (transfer_rows returns
+    # an empty list) drops the sentence entirely.
+    ledger_rel = os.path.join(HANDOVER_DIR_REL, LEDGER_NAME)
+    try:
+        transfer = transfer_rows(os.path.join(ROOT, ledger_rel))
+    except ValueError as exc:
+        problems.append("%s: %s refused the note: %s"
+                        % (NODATA, ledger_rel, exc))
+    else:
+        kept = []
+        for task_id, owning in transfer:
+            if os.path.isfile(os.path.join(ROOT, owning)):
+                kept.append((task_id, owning))
+            else:
+                print("transfer_rows: task %s owns %s, which no longer "
+                      "exists in the tree; dropped and never counted"
+                      % (task_id, owning), file=sys.stderr)
+        transfer = kept
+
     if problems:
         return None, problems
 
@@ -913,6 +946,10 @@ def build(version=None):
     A("")
     A("The %d legacy command shims remain in this cut, per decision D2." % shims)
     A("")
+    transfer_sentence = transfer_paragraph(transfer, version)
+    if transfer_sentence:
+        A(transfer_sentence)
+        A("")
     for line in render_files_table(version, file_rows):
         A(line)
     return "\n".join(L), []
@@ -994,6 +1031,112 @@ def main(argv=None):
 
     print(body, end="")
     return 0
+
+
+def transfer_rows(ledger_path):
+    """One task id and one owning path per open task, in file order. An
+    absent file returns an empty list. A file that exists but carries a row
+    the marker cannot parse, or that is larger than MAX_LEDGER_BYTES, raises
+    ValueError, so a corrupt ledger refuses the whole note rather than
+    shortening the list. A ledger whose size changes between the stat and the
+    read is refused too: two sessions writing one ledger is out of scope.
+
+    A line beginning with the marker is a row and must carry a task id before
+    a '|' separator and an owning path after it; blank lines and lines
+    beginning with '#' are ignored, and any other line is prose from the
+    handover document, not a row, so it is passed over and never counted."""
+    if not isinstance(ledger_path, str):
+        raise ValueError(
+            "%s: transfer_rows needs a ledger path string, got %s"
+            % (NODATA, type(ledger_path).__name__))
+    try:
+        st_before = os.stat(ledger_path)
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise ValueError("%s: %s could not be examined: %s"
+                         % (NODATA, ledger_path, exc))
+    if not os.path.isfile(ledger_path):
+        raise ValueError("%s: %s is not a regular file"
+                         % (NODATA, ledger_path))
+    if st_before.st_size > MAX_LEDGER_BYTES:
+        raise ValueError(
+            "%s: %s is %d bytes, over MAX_LEDGER_BYTES (%d); a transfer "
+            "document that size is not a transfer document"
+            % (NODATA, ledger_path, st_before.st_size, MAX_LEDGER_BYTES))
+    try:
+        with open(ledger_path, "rb") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        raise ValueError("%s: %s could not be read: %s"
+                         % (NODATA, ledger_path, exc))
+    try:
+        st_after = os.stat(ledger_path)
+    except OSError as exc:
+        raise ValueError("%s: %s vanished between the stat and the read: %s"
+                         % (NODATA, ledger_path, exc))
+    if (len(raw) != st_before.st_size
+            or (st_after.st_size, st_after.st_mtime_ns)
+            != (st_before.st_size, st_before.st_mtime_ns)):
+        raise ValueError(
+            "%s: %s changed between the stat and the read; a ledger that "
+            "moves under the reader is refused" % (NODATA, ledger_path))
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("%s: %s is not UTF-8: %s"
+                         % (NODATA, ledger_path, exc))
+    rows = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not stripped.startswith(ROW_MARKER):
+            continue
+        rest = stripped[len(ROW_MARKER):]
+        task_id, sep, owning = rest.partition("|")
+        if not sep:
+            raise ValueError("%s: %s line %d carries the row marker but no task id before a '|' separator: %r" % (NODATA, ledger_path, lineno, line))
+        task_id = task_id.strip()
+        owning = owning.strip()
+        if not task_id or not owning:
+            raise ValueError(
+                "%s: %s line %d carries an empty task id or an empty "
+                "owning path: %r" % (NODATA, ledger_path, lineno, line))
+        rows.append((task_id, owning))
+    return rows
+
+
+def transfer_paragraph(rows, version):
+    """The note's one transfer sentence, or None when rows is empty: an
+    absent ledger drops the sentence and the note never invents a count and
+    never invents a hash. Both arguments are checked, so a hostile caller
+    gets a ValueError rather than a crash or a wrong count."""
+    if not isinstance(rows, (list, tuple)):
+        raise ValueError(
+            "%s: transfer_paragraph needs a list of (task id, owning path) "
+            "pairs, got %s" % (NODATA, type(rows).__name__))
+    if not isinstance(version, str) or not version:
+        raise ValueError(
+            "%s: transfer_paragraph needs a non-empty version string, got %s"
+            % (NODATA, type(version).__name__))
+    checked = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            raise ValueError(
+                "%s: each transfer row is a (task id, owning path) pair, "
+                "got %r" % (NODATA, row))
+        task_id, owning = row
+        if not isinstance(task_id, str) or not isinstance(owning, str):
+            raise ValueError(
+                "%s: a transfer row's task id and owning path must both be "
+                "strings, got %r" % (NODATA, row))
+        checked.append((task_id, owning))
+    if not checked:
+        return None
+    return ("%d open task(s) were transferred from the release cut "
+            "session's handover at %s and ride into Brother %s."
+            % (len(checked), HANDOVER_DIR_REL, version))
 
 
 if __name__ == "__main__":

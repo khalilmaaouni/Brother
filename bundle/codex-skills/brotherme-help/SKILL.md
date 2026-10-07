@@ -3,7 +3,7 @@ name: brotherme-help
 description: "Explain what BrotherMode does and how to use it, in plain language"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-help`.
+This is the Codex route for the existing Claude command `/brother:brotherme-help`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

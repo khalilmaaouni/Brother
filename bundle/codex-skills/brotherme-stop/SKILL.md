@@ -3,7 +3,7 @@ name: brotherme-stop
 description: "Stop the Full-Auto controller run right now, draining in-flight work and releasing every held claim"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-stop`.
+This is the Codex route for the existing Claude command `/brother:brotherme-stop`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

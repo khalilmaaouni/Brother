@@ -56,6 +56,7 @@ import argparse
 import html
 import json
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -65,6 +66,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import brother_paths  # noqa: E402
 import annotations_store  # noqa: E402
+import tmp_sandbox  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -74,6 +76,81 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLOSE_MARGIN = 0.5
 
 NODATA = "NO-DATA"
+
+#: (bm_store module, None) or (None, why), loaded once per process.
+#: bm_store is not a package and a plain `import bm_store` could resolve
+#: against a different checkout on sys.path, so it is loaded by path, the
+#: same two candidates scripts/cut.py and scripts/integrate.py use.
+_BM_STORE_CACHE = []
+
+
+def _load_bm_store():
+    if _BM_STORE_CACHE:
+        return _BM_STORE_CACHE[0]
+    import importlib.util
+    for candidate in (
+        # hub dev layout: scripts/decide.py beside products/brothermode/tools/
+        os.path.join(ROOT, "products", "brothermode", "tools", "bm_store.py"),
+        # installed bundle layout: bundle/runtime/decide.py beside
+        # bundle/runtime/hooks/brothermode/tools/bm_store.py
+        os.path.join(HERE, "hooks", "brothermode", "tools", "bm_store.py"),
+    ):
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "bm_store_for_decide", candidate)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _BM_STORE_CACHE.append((mod, None))
+        except Exception as exc:  # noqa: BLE001
+            _BM_STORE_CACHE.append((None, "%s could not be loaded: %s: %s"
+                                    % (candidate, type(exc).__name__, exc)))
+        return _BM_STORE_CACHE[0]
+    _BM_STORE_CACHE.append((None, "no bm_store.py found under %s or %s"
+                            % (ROOT, HERE)))
+    return _BM_STORE_CACHE[0]
+
+
+def redact_spec(spec):
+    """(spec, None) with every string in it redacted, or (None, why).
+
+    THE SPEC IS MODEL WRITTEN AND THE SCREEN IS COMMITTED. A session authors
+    the title, the option names and their prose; the screen lands under
+    docs/decisions/, inside the tree git commits; the title also goes to the
+    intake sentinel and the top option's name to stdout. So both renderers
+    (this file's main() and decide_round.py's) call this once, right after
+    the spec is loaded and before any of those writes, and every sink
+    downstream receives the same redacted text.
+
+    Keys are redacted as well as values, so a criterion key and the `scores`
+    entry naming it stay equal and the arithmetic still matches them up.
+
+    ONE OWNER. The patterns are bm_telemetry's, reached through
+    bm_store.redact_text, which raises rather than return raw text when the
+    redactor is unavailable. That is the direction kept here: no redactor
+    means no screen, never an unredacted one."""
+    bs, why = _load_bm_store()
+    if bs is None:
+        return None, "%s: the decision cannot be redacted, so it is not " \
+                     "rendered: %s" % (NODATA, why)
+
+    def walk(o):
+        if isinstance(o, str):
+            return bs.redact_text(o)
+        if isinstance(o, dict):
+            return {walk(k): walk(v) for k, v in o.items()}
+        # A tuple too: a spec built in process (receipt_door.write_screen)
+        # can hold one, and json.dump writes it out as a list.
+        if isinstance(o, (list, tuple)):
+            return [walk(v) for v in o]
+        return o
+
+    try:
+        return walk(spec), None
+    except Exception as exc:  # noqa: BLE001
+        return None, "%s: the decision cannot be redacted, so it is not " \
+                     "rendered: %s" % (NODATA, exc)
 
 
 def normalise(criteria):
@@ -132,9 +209,41 @@ def excerpt(spec):
     """(text, note). The real file, at render time, or a loud NO-DATA.
 
     This is the promise the founder made explicit: a reader who wants to see the
-    code sees THIS code, not a copy of what it said when the page was written."""
+    code sees THIS code, not a copy of what it said when the page was written.
+
+    The path comes from a model authored spec and the page is committed, so it
+    is resolved (symlinks, "..", an absolute path) and refused unless it lands
+    inside this repository: otherwise a spec could copy an .env into the tree.
+    Inside it, git's own .git and any file git ignores are refused too, and
+    when git cannot answer the file is refused, never assumed clean."""
     path = spec.get("path", "")
-    full = os.path.join(ROOT, path)
+    try:
+        root = os.path.realpath(ROOT)
+        full = os.path.realpath(os.path.join(root, path))
+    except (TypeError, ValueError) as exc:
+        return None, "%s: %r could not be resolved: %s" % (NODATA, path, exc)
+    if os.path.commonpath([root, full]) != root:
+        return None, ("%s: %s resolves outside this repository, so it is not "
+                      "read into a page the tree commits" % (NODATA, path))
+    rel = os.path.relpath(full, root)
+    if ".git" in rel.split(os.sep):
+        return None, ("%s: %s is inside .git, git's own metadata, so it is "
+                      "not read into a committed page" % (NODATA, path))
+    env = dict(os.environ)
+    tmp_sandbox.drop_git_location(env)
+    try:
+        asked = subprocess.run(["git", "-C", root, "check-ignore", "-q", "--",
+                                rel], env=env, capture_output=True, timeout=10)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        # ValueError: Python 3.9's realpath lets a NUL byte through to here.
+        return None, "%s: could not ask git whether %r is ignored: %s" % (
+            NODATA, path, exc)
+    if asked.returncode == 0:
+        return None, ("%s: %s is a file git ignores, so it is not read into "
+                      "a committed page" % (NODATA, path))
+    if asked.returncode != 1:
+        return None, "%s: could not ask git whether %s is ignored (exit %d)" % (
+            NODATA, path, asked.returncode)
     if not os.path.isfile(full):
         return None, "%s: %s is not present, so no excerpt could be read" % (
             NODATA, path)
@@ -179,6 +288,17 @@ def rank(spec):
 E = html.escape
 
 
+def link(url, text):
+    """An anchor only for an http(s) url. E() stops a quote leaving href, not
+    a javascript: or data: scheme, which runs when the reader clicks, so any
+    other url is shown as text beside the label and never made clickable."""
+    url = str(url or "")
+    if not url.startswith(("https://", "http://")):
+        return ('%s <span class="checked">%s: not linked, the url is not '
+                'http(s): %s</span>' % (E(text), NODATA, E(url)))
+    return '<a href="%s" rel="noreferrer">%s</a>' % (E(url), E(text))
+
+
 def _pill(text, kind=""):
     return '<span class="pill %s">%s</span>' % (kind, E(text))
 
@@ -201,8 +321,11 @@ def render(spec, fragment=False):
     # 2026-09-08.md): a correction stored once by annotations_store.py is
     # shown beside the mark it corrects, so the same fix is never re-typed.
     # An absent or empty store loads as [] (annotations_store's own
-    # contract) and renders nothing extra.
-    annotations = annotations_store.load_annotations(ROOT)
+    # contract) and renders nothing extra. Read from the store's OWN root,
+    # never this file's: in an installed plugin the store lives per user
+    # (2026-10-06), and a reader that looked beside itself would never see
+    # what the writer kept.
+    annotations = annotations_store.load_annotations(annotations_store.ROOT)
     auto = bool(spec.get("auto_choose"))
     title = spec.get("title", "A decision")
     parts = []
@@ -406,6 +529,11 @@ def render_option(s, is_lead, annotations=()):
               % (E(src.get("what", "")), E(src.get("where", ""))))
             if src.get("found_in"):
                 A('<br><code>%s</code>' % E(src["found_in"]))
+            if src.get("url"):
+                A('<br>' + link(src["url"], src.get("title") or src["url"]))
+            if src.get("checked"):
+                A('<br><span class="checked">checked %s</span>'
+                  % E(src["checked"]))
             A('</li>')
         A('</ul>')
 
@@ -415,9 +543,8 @@ def render_option(s, is_lead, annotations=()):
         if o.get("repos"):
             A('<h4>The projects this was learned from</h4><ul class="links">')
             for r in o["repos"]:
-                A('<li><a href="%s" rel="noreferrer">%s</a> '
-                  '<span class="where">%s</span>%s</li>'
-                  % (E(r.get("url", "")), E(r.get("name", "")),
+                A('<li>%s <span class="where">%s</span>%s</li>'
+                  % (link(r.get("url", ""), r.get("name", "")),
                      E(r.get("what", "")),
                      ('<br><span class="checked">link resolved %s</span>'
                       % E(r["checked"])) if r.get("checked") else
@@ -427,9 +554,8 @@ def render_option(s, is_lead, annotations=()):
         if o.get("docs"):
             A('<h4>Further reading</h4><ul class="links">')
             for r in o["docs"]:
-                A('<li><a href="%s" rel="noreferrer">%s</a> '
-                  '<span class="where">%s</span>%s</li>'
-                  % (E(r.get("url", "")), E(r.get("title", "")),
+                A('<li>%s <span class="where">%s</span>%s</li>'
+                  % (link(r.get("url", ""), r.get("title", "")),
                      E(r.get("what", "")),
                      ('<br><span class="checked">link resolved %s</span>'
                       % E(r["checked"])) if r.get("checked") else
@@ -563,6 +689,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("spec", help="the decision, as JSON")
     ap.add_argument("-o", "--out", help="where to write the HTML")
+    ap.add_argument("--session-id", default="",
+                    help="the calling session's id, so the per session intake stamp the gate reads is written")
     ap.add_argument("--fragment", action="store_true",
                     help="render as a section of a round, with no document "
                          "shell and no repeated masthead")
@@ -575,6 +703,10 @@ def main(argv=None):
         print("%s: the decision could not be read: %s" % (NODATA, exc),
               file=sys.stderr)
         return 2
+    spec, why = redact_spec(spec)
+    if spec is None:
+        print(why, file=sys.stderr)
+        return 2
 
     body = render(spec, fragment=args.fragment)
     out = args.out or os.path.splitext(args.spec)[0] + ".html"
@@ -583,15 +715,19 @@ def main(argv=None):
     # THE ENFORCEMENT SENTINEL. The intake gate hook refuses a founder-facing
     # question when no decision screen was rendered recently; this stamp is
     # how the hook knows one was. Founder order 2026-08-30: "it should be
-    # enforced", after the eighth screen-less decision popup.
-    try:
-        sentinel = brother_paths.config_path("last-decision-screen.json")
-        with open(sentinel, "w", encoding="utf-8") as fh:
-            json.dump({"path": os.path.abspath(out),
-                       "title": spec.get("title", ""),
-                       "written_at_epoch": int(__import__("time").time())}, fh)
-    except OSError as exc:
-        print("decide: could not stamp the intake sentinel: %s" % exc,
+    # enforced", after the eighth screen-less decision popup. The path is
+    # resolved by brother_paths.stamp_decision_screen, which is also what
+    # decide_round.py calls: this file used to write the pre 2026-09-15
+    # global name that the gate stopped reading when it scoped itself per
+    # session, so a rendered and published screen was still refused.
+    # --session-id names the session explicitly; otherwise the resolver
+    # reads CLAUDE_CODE_SESSION_ID, the same id the gate receives.
+    stamp_env = (dict(os.environ, CLAUDE_CODE_SESSION_ID=args.session_id)
+                 if args.session_id else None)
+    if brother_paths.stamp_decision_screen(
+            out, spec.get("title", ""), env=stamp_env) is None:
+        print("decide: could not stamp the intake sentinel at %s"
+              % brother_paths.decision_sentinel_path(stamp_env),
               file=sys.stderr)
     _c, _n, scored, close = rank(spec)
     print("wrote %s: %d option(s), top is %s at %.2f%s"

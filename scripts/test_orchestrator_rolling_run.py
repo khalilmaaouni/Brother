@@ -88,6 +88,19 @@ except ImportError:
 import brother_run as BR  # noqa: E402
 import graph_loop  # noqa: E402
 import loop_bridge  # noqa: E402
+from hermetic_worker_env import worker_environment  # noqa: E402
+
+
+def setUpModule():
+    fixture = worker_environment()
+    env = fixture.__enter__()
+    unittest.addModuleCleanup(fixture.__exit__, None, None, None)
+    # This module imported the bridge before the environment was installed.
+    from unittest import mock
+    log = mock.patch.object(loop_bridge, "LOAD_REFUSALS_LOG",
+                            env["BROTHER_LOAD_REFUSALS_LOG"])
+    log.start()
+    unittest.addModuleCleanup(log.stop)
 
 
 def sh(args, cwd=None):

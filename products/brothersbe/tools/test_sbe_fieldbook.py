@@ -65,7 +65,7 @@ class TestCommandsRenderer(unittest.TestCase):
         expected = set(n for n in os.listdir(skills)
                        if os.path.isfile(os.path.join(skills, n, "SKILL.md")))
         section = book_mod.render_guided_commands(ROOT)
-        rendered = set(re.findall(r"<code>/brothersbe:([a-z-]+)</code>", section.html))
+        rendered = set(re.findall(r"<code>/brother:brothersbe-([a-z-]+)</code>", section.html))
         self.assertEqual(expected, rendered)
 
 

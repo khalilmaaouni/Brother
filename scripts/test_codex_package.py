@@ -278,9 +278,13 @@ class RepoMarketplace(unittest.TestCase):
     def test_claude_marketplace_is_untouched_by_this_lane(self):
         """The Codex marketplace is a SEPARATE file. Regressing Claude's own
         marketplace is the one thing ship gate 1 forbids by name, so this
-        asserts the Claude file still exists and still lists its three
+        asserts the Claude file still exists and still lists its four
         plugins; a lane that moved Brother into .agents/ and deleted the
-        Claude entry would go red here rather than silently."""
+        Claude entry would go red here rather than silently. brotherds is
+        the fourth: decision B of docs/decisions/brotherds-stage1-2026-09-10.json
+        wired it into this marketplace (PR 606). The set is exact on purpose,
+        so adding or dropping a plugin here is a deliberate edit to this line,
+        never a side effect."""
         claude = ROOT / ".claude-plugin" / "marketplace.json"
         self.assertTrue(claude.is_file(), "the Claude marketplace is missing")
         try:
@@ -288,7 +292,7 @@ class RepoMarketplace(unittest.TestCase):
         except (OSError, json.JSONDecodeError) as error:
             self.fail(f"{claude} is unreadable: {error}")
         names = {entry.get("name") for entry in payload.get("plugins") or []}
-        self.assertEqual(names, {"brothermode", "brothersbe", "brother"})
+        self.assertEqual(names, {"brothermode", "brothersbe", "brother", "brotherds"})
 
 
 class Night0912CodexSkills(unittest.TestCase):

@@ -1,0 +1,15 @@
+{
+ "applied_to": "a disposable git archive of HEAD by scripts/l5a_mutation_probe.py, never the live tree",
+ "edits": [
+  {
+   "file": "plugin/runtime/brother/core/openrouter_dispatch.py",
+   "find": "    elif info.st_uid != os.getuid():\n",
+   "replace": "    elif False:\n"
+  }
+ ],
+ "id": "M7",
+ "requirement": "REQ-03",
+ "test": "plugin.runtime.brother.core.test_l5a9c.TestCapGrantOwner.test_a_grant_owned_by_another_user_is_refused",
+ "threshold": "L5a spec section 10, T7",
+ "what": "a cap grant owned by another uid lifts the cap (the owner check deleted)"
+}

@@ -8874,6 +8874,56 @@ def cb6(root):
         {"name": "reconcile", "exit_code": 0, "duration_ms": 812}]})
 
 
+def _carry_fixture(root, dirty=False):
+    # A receipt bound to the FIRST commit, then a second commit that moves only
+    # y, a file the receipt never covered, so the reader's digest path says
+    # the tree moved and the carry-forward rule is what decides. The three
+    # cases below differ in exactly one field (dirty=None omits it). check.py, the script the
+    # command ran, is deliberately NOT covered: that is the documented
+    # ceiling (docs/KNOWN-LIMITS.md), so the control pins it too.
+    git_init(root)
+    write(root, "x", "1")
+    write(root, "y", "1")
+    write(root, "check.py", "print('ran')\n")
+    subprocess.run(["git", "-C", root, "add", "."], check=True)
+    subprocess.run(["git", "-C", root, "commit", "-qm", "first"], check=True)
+    old = _git_head(root)
+    receipt = {
+        "headCommit": old,
+        "argv": ["python3", "check.py"],
+        "workingTreeDirty": dirty,
+        "coveredFiles": [{"path": "x", "sha256": _sha256_of_file(os.path.join(root, "x"))}],
+        "checks": [{"name": "reconcile", "exit_code": 0, "duration_ms": 812}]}
+    if dirty is None:
+        del receipt["workingTreeDirty"]
+    write(root, "ran-receipt.json", receipt)
+    write(root, "y", "2")
+    subprocess.run(["git", "-C", root, "add", "."], check=True)
+    subprocess.run(["git", "-C", root, "commit", "-qm", "second"], check=True)
+
+
+@case("a-clean-receipt-whose-covered-files-are-unchanged-is-carried", "ran", "PASS")
+def cb7(root):
+    # The control (row E83): a receipt minted clean still binds after a
+    # commit to code it never covered.
+    _carry_fixture(root)
+
+
+@case("a-carried-receipt-minted-on-a-dirty-tree-is-refused", "ran", "FAIL")
+def cb8(root):
+    # The receipt says the tree was dirty when it ran, so the run may have seen
+    # code that exists at no commit, and a receipt never names which paths.
+    # Nothing ties it to the commit it names, so it is not carried.
+    _carry_fixture(root, dirty=True)
+
+
+@case("a-carried-receipt-that-never-recorded-a-clean-tree-is-refused", "ran", "FAIL")
+def cb9(root):
+    # No workingTreeDirty at all: nothing says the run saw committed code, and
+    # an absence never upgrades a verdict, so it is not carried either.
+    _carry_fixture(root, dirty=None)
+
+
 # Program-status doc truth: program/STATUS.md is a generated artifact, and a
 # generated artifact without a drift gate rots exactly like the hand-written
 # one it replaced. Three cases: the real repository's committed STATUS.md must

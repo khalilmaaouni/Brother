@@ -466,6 +466,36 @@ def _default_runner(argv, stdin_text):
         _unregister_proc(proc)
 
 
+def _load_transports_allowed():
+    """model_router.transports_allowed from scripts/loop beside this file: the ONE definition of the allowlist. A plain
+    import with the loop directory on sys.path (check_wave's pattern): the freeze manifest refuses a computed loader."""
+    loop = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop")
+    if loop not in sys.path:
+        sys.path.insert(0, loop)
+    import model_router
+    return model_router.transports_allowed
+
+
+def bridge_refused(env=None):
+    """Why the outside bridge may not be used under this run's transport allowlist (BROTHER_TRANSPORTS, owner
+    2026-09-30: a Claude only run), or '' when it may. Jev lives only on the bridge, so under an allowlist without
+    "bridge" every Jev call is SKIPPED and recorded as NO-DATA here, at the one place jev_brief, check_wave.jev_verdict,
+    unit_runner and jev_check converge, never routed to another model. FAIL DIRECTION: the setting present but the
+    allowlist unreadable (no model_router beside this file, a word that is not a transport) refuses too."""
+    env_map = os.environ if env is None else env
+    raw = env_map.get("BROTHER_TRANSPORTS")
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    try:
+        allowed = _load_transports_allowed()(env_map)
+    except Exception as exc:   # sbe: allow-silent the reason is returned, and the caller records NO-DATA with it
+        return "BROTHER_TRANSPORTS=%s is set but the transport allowlist could not be read (%s: %s): Jev skipped" % (
+            raw.strip(), type(exc).__name__, str(exc)[:120])
+    if allowed is not None and "bridge" not in allowed:
+        return "BROTHER_TRANSPORTS=%s allows no bridge transport: Jev (outside bridge) skipped" % raw.strip()
+    return ""
+
+
 def decide(state, questions, family, *, bridge=None, runner=None):
     """See the module docstring. Returns a list of Decision records on
     success, or (NO_DATA, reason) on any documented failure. Never raises
@@ -526,6 +556,9 @@ def decide(state, questions, family, *, bridge=None, runner=None):
     # DEFAULT_BRIDGE_PATH to exist exactly as before: a missing bridge is
     # still NO_DATA for a real call, never a subprocess aimed at nothing.
     call = runner if runner is not None else _default_runner
+    skipped = bridge_refused()   # the transport allowlist, before any bridge is resolved or any runner is called
+    if skipped:
+        return (NO_DATA, skipped)
     argv, reason = _resolve_bridge(bridge, require_default_file=(runner is None))
     if argv is None:
         return (NO_DATA, reason)

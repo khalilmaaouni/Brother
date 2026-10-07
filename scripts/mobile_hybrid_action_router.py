@@ -335,6 +335,38 @@ def select_driver(record, driver_descriptions, platform=None):
     return result
 
 
+def filter_authorized(descriptions, authorized):
+    """(kept, excluded): the descriptions whose driver_id is in `authorized`,
+    and an {'driver_id', 'reason': 'not in the authorized set'} entry for
+    every other one, in input order. A description that is not a dict, or
+    has no str driver_id, is excluded with that same reason (driver_id None
+    when it is not a str). Pure: neither argument is changed, and the
+    authorized set is never extended here.
+
+    descriptions: a list. authorized: a tuple or list of str. Anything else
+    (None, a bare str, a set, a non-str member) raises ValueError, because an
+    authorized set this function cannot read must refuse, never pass.
+
+    Lives beside select_driver() so the exclusion rule sits next to the
+    ranking it protects: a caller filters first, then ranks only the kept
+    descriptions (context_action_adapter.resolve does exactly that)."""
+    if not isinstance(descriptions, list):
+        raise ValueError("filter_authorized: descriptions must be a list, got %s"
+                         % type(descriptions).__name__)
+    if not isinstance(authorized, (tuple, list)) or not all(isinstance(a, str) for a in authorized):
+        raise ValueError("filter_authorized: authorized must be a tuple of str, got %r" % (authorized,))
+    allowed = frozenset(authorized)
+    kept, excluded = [], []
+    for desc in descriptions:
+        driver_id = desc.get("driver_id") if isinstance(desc, dict) else None
+        if isinstance(driver_id, str) and driver_id in allowed:
+            kept.append(desc)
+            continue
+        excluded.append({"driver_id": driver_id if isinstance(driver_id, str) else None,
+                         "reason": "not in the authorized set"})
+    return kept, excluded
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--record", required=True,

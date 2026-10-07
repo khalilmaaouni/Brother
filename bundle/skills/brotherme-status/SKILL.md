@@ -3,7 +3,7 @@ name: brotherme-status
 description: "Show where the project stands right now, in plain language"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-status`.
+This is the Codex route for the existing Claude command `/brother:brotherme-status`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

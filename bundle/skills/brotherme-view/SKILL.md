@@ -3,7 +3,7 @@ name: brotherme-view
 description: "Write the page that shows where this project stands, and offer it to the user"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-view`.
+This is the Codex route for the existing Claude command `/brother:brotherme-view`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

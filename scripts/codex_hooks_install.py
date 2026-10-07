@@ -55,6 +55,12 @@ import sys
 import threading
 import time
 
+# Loaded by path (doctor.py, test_doctor.py, sbe_hooks_wiring.py) as often
+# as run as a script, and only the script run puts this directory on
+# sys.path by itself; codex_smoke.py and brother_run.py carry the same line.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import brother_paths  # noqa: E402  (one Codex binary resolver, ACC5)
+
 #: Every hook event name Codex 0.153.0-alpha.5 knows, read from its own
 #: app-server protocol schema (`codex app-server generate-json-schema --out
 #: <dir>`, definition HookEventName) and cross-checked against the enum in the
@@ -74,7 +80,7 @@ PLUGIN_ROOT_CITATION = "${CLAUDE_PLUGIN_ROOT}"
 TRUST_BEGIN = "# >>> brother codex hook trust, written by scripts/codex_hooks_install.py"
 TRUST_END = "# <<< brother codex hook trust"
 
-CODEX_BIN_DEFAULT = "/Applications/ChatGPT.app/Contents/Resources/codex"
+CODEX_BIN_DEFAULT = brother_paths.codex_bin()
 
 
 def repo_root():
@@ -161,9 +167,65 @@ def build(products):
     return {"document": document, "skipped": skipped, "problems": problems}
 
 
+def account_home():
+    """The real user's home from the password database, never $HOME: a
+    caller that runs Codex in a throwaway home sets HOME to it
+    (scripts/host_live_proof.py does, 2026-10-04), and reading $HOME then
+    took that throwaway's .codex for the real one. Under sudo the uid is 0
+    and the password database answers /var/root, so the user who ran sudo
+    (SUDO_UID) is the account. None when the account cannot be read, uid 0
+    with no SUDO_UID included: an unknown account blocks, it never reads as
+    somebody else's."""
+    try:
+        import pwd
+        uid = os.getuid()
+        if uid == 0:
+            uid = int(os.environ.get("SUDO_UID", ""))
+        return pwd.getpwuid(uid).pw_dir
+    except (ImportError, KeyError, OSError, ValueError):
+        return None
+
+
+def _anchor(path):
+    """realpath(path) split into its nearest EXISTING ancestor and the
+    components below it (deepest first); "/" always exists, so the walk
+    ends."""
+    path = os.path.realpath(path)
+    below = []
+    while not os.path.exists(path):
+        path, name = os.path.split(path)
+        below.append(name)
+    return path, below
+
+
+def same_place(path, other):
+    """True when `path` and `other` are one directory by IDENTITY, never by
+    spelling: os.path.samefile (device and inode) when both exist, because
+    this volume keeps the case it was given and /USERS/<name> and
+    /System/Volumes/Data/Users/<name> are both /Users/<name>. For a path
+    that does not exist yet, its nearest existing ancestor is compared the
+    same way (realpath does not see through the data volume firmlink, so a
+    string compare there let the firmlink spelling of a not-yet-created
+    ~/.codex through) and the components below it casefolded. A stat that
+    fails answers True: an identity that cannot be read blocks."""
+    try:
+        if os.path.exists(path) and os.path.exists(other):
+            return os.path.samefile(path, other)
+        base, below = _anchor(path)
+        other_base, other_below = _anchor(other)
+        return (os.path.samefile(base, other_base)
+                and [n.casefold() for n in below] == [n.casefold() for n in other_below])
+    except OSError:
+        return True
+
+
 def resolve_home(named, allow_default):
-    """{"path": ..., "problem": None} or a refusal. The founder's own
-    ~/.codex is refused unless it was asked for by name AND allowed.
+    """{"path": ..., "problem": None} or a refusal. The account's own
+    .codex is refused unless it was asked for by name AND allowed, decided
+    by identity (same_place) so that no spelling of it slips past.
+    $HOME/.codex is in the protected set exactly when $HOME is the account's
+    home, which is what same_place answers; a throwaway HOME's own .codex is
+    accepted.
 
     The path is RESOLVED, not merely made absolute. On macOS /tmp and /var are
     symlinks and Codex canonicalizes CODEX_HOME before it reports a hook's
@@ -179,8 +241,12 @@ def resolve_home(named, allow_default):
         return {"path": None, "problem":
                 "no Codex home given: pass --codex-home <dir> or set CODEX_HOME"}
     path = os.path.realpath(os.path.expanduser(path))
-    default_home = os.path.realpath(os.path.expanduser(os.path.join("~", ".codex")))
-    if path == default_home and not allow_default:
+    account = account_home()
+    if account is None:   # the real Codex home cannot be told apart from any other: refuse, never guess
+        return {"path": None, "problem":
+                "refusing %s: the account's home could not be read, so the "
+                "real Codex home cannot be told apart from this one" % path}
+    if same_place(path, os.path.join(account, ".codex")) and not allow_default:
         return {"path": None, "problem":
                 "refusing to write %s, the real Codex home: a hooks file can "
                 "refuse every edit on this machine, so pass "

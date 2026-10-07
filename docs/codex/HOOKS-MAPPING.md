@@ -58,12 +58,13 @@ the commands behind BrotherMode's two chain entries. `stop` runs telemetry
 `precompact-brief`. The chain feeds each program the same stdin payload,
 runs each despite earlier failures, and returns the last program's exit code.
 
-The umbrella Claude manifest declares the two products as dependencies.
-The generated [bundle/hooks/union.json](../../bundle/hooks/union.json)
-contains their combined wiring, but is deliberately not named
-`bundle/hooks/hooks.json`. [bundle_runtime.py](../../scripts/bundle_runtime.py)
-explains and checks that choice: the conventional name would let Claude Code
-load the umbrella copy as well as the product hooks and fire them twice.
+From 1.1.0 the one plugin's Claude manifest declares no plugin dependencies.
+[bundle_runtime.py](../../scripts/bundle_runtime.py) writes the merged hooks
+of both products to [bundle/hooks/hooks.json](../../bundle/hooks/hooks.json),
+the name Claude Code loads by itself, and wraps every generated command in one
+guard. `union.json` is the retired name, and the generator's check refuses it.
+[The decision record](../architecture/ADR-ONE-PLUGIN-HOOKS.md) explains the
+choice.
 The separate `products/brothermode/hooks/cursor.hooks.json` is another host's
 adapter, not an input to the Codex installer.
 

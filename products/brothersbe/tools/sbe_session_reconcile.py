@@ -38,7 +38,9 @@ WHICH DIRECTION THIS FILE FAILS, AND WHY IT IS THE OPPOSITE OF ITS SIBLINGS
   baseline with a dirty tree blocks. That keeps "the agent deleted the
   baseline" from becoming permission (spec 1.4, last paragraph) without
   blocking every session that starts on a machine where SessionStart never
-  ran and nothing was changed.
+  ran and nothing was changed. No declaration clears that block: the tasks,
+  fences and break-glass records below are read only after a baseline is
+  found, so its refusal names a clean tree as the one route.
 
 WHAT COUNTS AS DECLARED
   Three things, and nothing else:
@@ -75,9 +77,14 @@ REPEAT SUPPRESSION (2026-08-29 amendment, measured in a live session)
   re-blocked; it is noted in one stderr line and the session may stop. The
   full block fires on the FIRST occurrence, on ANY change to the set (a path
   added or cleared, or a rule changed), after the cooldown, and for every
-  fail-closed Unusable condition, which this suppression never touches. A
-  clean stop deletes the memory, so a finding resolved and later re-made is
-  new information and blocks in full. Any error reading or writing the state
+  fail-closed Unusable condition but one, which this suppression never
+  touches. The one (an owner-deferred ruling, 2026-09-26) is BaselineUnreadable:
+  no readable baseline while the tree holds changes. Nothing inside the session
+  clears it without discarding work that may be a peer's, so it looped exactly
+  like the case above; it is keyed on (path, reason) and suppressed the same
+  way, never for a session with no id, since every id-less session would share
+  one memory. A clean stop deletes the memory, so a finding resolved and
+  later re-made is new information and blocks in full. Any error reading or writing the state
   fails toward blocking. `verify` and `report` never suppress.
 
 Python 3.9, standard library only, no network. Subprocess is used for git and
@@ -124,6 +131,17 @@ class Unusable(Exception):
     could not be read, so no decision can be made and the session is blocked
     with the reason. Named rather than returned so no code path can forget to
     check a sentinel and accidentally allow."""
+
+
+class BaselineUnreadable(Unusable):
+    """The one Unusable the Stop hook may repeat-suppress: no readable baseline
+    while the tree holds changes. `findings` names every changed path under
+    that reason, so an identical set is recognised and any path added or
+    cleared blocks in full again. Every other Unusable re-blocks every Stop."""
+
+    def __init__(self, message, findings):
+        Unusable.__init__(self, message)
+        self.findings = findings
 
 
 class TasksModuleMissing(Exception):
@@ -599,15 +617,29 @@ def reconcile_worktree(cwd, session_id):
                 "sbe_session_reconcile: %s, and the working tree holds no change relative "
                 "to HEAD, so there is nothing to attribute and nothing to be out of "
                 "scope. Nothing was checked and nothing is claimed." % e])
-        raise Unusable(
+        raise BaselineUnreadable(
             "%s, and the working tree holds %d changed path(s). Without the baseline "
             "there is no way to tell which of them this session made, so none of them "
             "can be cleared. A missing or deleted baseline is a fail-closed condition, "
             "never permission.\n"
-            "Recovery: restore the working tree to a clean state, or declare the changed "
-            "paths in .sbe/tasks.json and record a break-glass entry in "
-            ".sbe/break-glass.json explaining why this session ran without a baseline."
-            % (e, len(current)))
+            "It clears only when the working tree holds no change relative to HEAD, or "
+            "when a readable baseline for this session exists. Restore each change this "
+            "session made: git restore -- <path> for a tracked file, rm for a new one. A "
+            "change that is not this session's, such as a peer's work in a shared tree, "
+            "is not this session's to discard: tell the operator once. An unchanged set "
+            "is then noted on stderr, still unresolved, and blocks in full again when a "
+            "path is added or cleared, or after the cooldown.\n"
+            "An open task in .sbe/tasks.json, a live fence in STATE.md, or a record in "
+            ".sbe/break-glass.json does NOT clear it: all three are read only after a "
+            "baseline is found.\n"
+            "A baseline is written only by the SessionStart hook (tools/sbe_sessionstart.py "
+            "runs tools/sbe_session_baseline.py write), and only when none exists for the "
+            "session id and only on a startup, clear or fork SessionStart. One written after "
+            "this session's changes, by hand or by any later "
+            "SessionStart for the same session id, records them as pre-session dirt, which "
+            "is the laundering this block refuses, so writing one is not a recovery."
+            % (e, len(current)),
+            [Violation(c.path, "no readable baseline (%s)" % e, c.status) for c in current])
 
     recorded_root = str(baseline.get("repositoryRoot") or "")
     if os.path.realpath(recorded_root) != os.path.realpath(root):
@@ -728,10 +760,12 @@ def finding_fingerprint(violations):
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def repeat_verdict(session_id, violations):
+def repeat_verdict(session_id, violations,
+                   subject="path(s) are still outside declared scope"):
     """(suppress, note): whether this exact finding set was already reported
     in full this session and is still inside the cooldown. When it was not,
-    the state is updated to say a full report is being made now."""
+    the state is updated to say a full report is being made now. `subject`
+    says what is still unresolved, so the short form never reads as cleared."""
     fingerprint = finding_fingerprint(violations)
     state_path = _repeat_state_path(session_id)
     state = {}
@@ -749,12 +783,12 @@ def repeat_verdict(session_id, violations):
     if (state.get("fingerprint") == fingerprint and last_full > 0.0
             and 0.0 <= now - last_full < REPEAT_COOLDOWN_S):
         return True, (
-            "scope reconciliation UNCHANGED: %d path(s) are still outside declared "
-            "scope, identical to the finding already reported in full this session. "
+            "scope reconciliation UNCHANGED: %d %s, identical to the finding already "
+            "reported in full this session. "
             "Not re-blocking an unchanged finding; the full block returns the moment "
             "any path is added or cleared, or after the cooldown (%d s remaining). "
             "Paths: %s"
-            % (len(violations), int(REPEAT_COOLDOWN_S - (now - last_full)),
+            % (len(violations), subject, int(REPEAT_COOLDOWN_S - (now - last_full)),
                ", ".join(sorted(v.path for v in violations)[:10])))
     try:
         state_dir = os.path.dirname(state_path)
@@ -861,6 +895,23 @@ def cmd_hook(argv):
     except TasksModuleMissing as e:
         _warn("NO-DATA: sbe_session_reconcile cannot judge this session: %s; the turn is "
               "allowed, never blocked, per the NO-DATA law" % e)
+        return 0
+    except BaselineUnreadable as e:
+        # Owner-deferred ruling 2026-09-26: this Unusable alone is suppressed
+        # like a violation set, because nothing inside the session clears it
+        # without discarding work that may be a peer's. A session with no id is
+        # never suppressed: every id-less session would share one memory.
+        if session_id:
+            suppress, note = repeat_verdict(
+                session_id, e.findings,
+                subject="changed path(s) still have no readable baseline, so nothing "
+                        "was cleared and the session is still unreconciled")
+            if suppress:
+                _warn("sbe_session_reconcile: %s" % note)
+                return 0
+        _out(json.dumps(block_payload(
+            "BrotherSBE scope reconciliation could not clear this session, so it is "
+            "blocked rather than allowed. Reason: %s" % e)))
         return 0
     except Unusable as e:
         _out(json.dumps(block_payload(

@@ -523,6 +523,23 @@ py-modules = [
     # Declared here because the packaging gate refuses an undeclared
     # shipping tool, same lesson as every entry above.
     "_jevpath",
+    # The disk backed BrotherMode canary (2026-09-15): SessionStart plus
+    # PostToolUse(Skill) liveness detection and the activation nudge.
+    # Declared here because the packaging gate refuses an undeclared
+    # shipping tool, same lesson as every entry above.
+    "bm_brother_canary",
+    # 2026-09-30: three tools that landed without a declaration and were the
+    # packaging gate's inherited red on hub main 78fc9ce00 (tools/test_bm.py
+    # TestP17PackagingManifestMatchesTheRepository). bm_attempt_ledger.py, the
+    # attempt ledger; bm_clock_guard.py, the M1.1 clock guard both hook events
+    # in hooks/hooks.json wire; bm_vault_web_ui.py, the L3b-01 vault web UI
+    # command line and startup guards. Declared here because the packaging
+    # gate refuses an undeclared shipping tool, same lesson as every entry
+    # above. No console script for any of the three: the guard is wired by
+    # hook command path and the other two are reached by module path.
+    "bm_attempt_ledger",
+    "bm_clock_guard",
+    "bm_vault_web_ui",
 ]
 # brotherme/core/schema.py is library code tools/bm_store.py loads by path
 # (see _schema() there); without this the wheel/sdist never contain it and

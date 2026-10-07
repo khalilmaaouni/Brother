@@ -33,6 +33,10 @@ results = []
 def run(payload, home):
     env = dict(os.environ)
     env["HOME"] = home
+    # On Windows pathlib.Path.home() reads USERPROFILE and ignores HOME, so
+    # HOME alone isolated nothing there: every case wrote into the
+    # operator's real store. Same fix as test_bm_controller.py's F8.
+    env["USERPROFILE"] = home
     p = subprocess.run([sys.executable, HOOK], input=json.dumps(payload),
                        capture_output=True, text=True, env=env, timeout=60)
     return p.returncode, p.stdout, p.stderr
@@ -393,6 +397,37 @@ def main():
               (row2 or {}).get("ts"), None)
         check("17c the rest of the row is unaffected by the broken clock",
               (row2 or {}).get("ok"), True)
+
+        # 18. WINDOWS HOME. There pathlib.Path.home() reads USERPROFILE, not
+        #     HOME, so run() must isolate both or the hook writes into the
+        #     operator's real store. Emulated on any machine: a startup shim
+        #     gives the hook's Python the Windows reading, and a decoy
+        #     USERPROFILE stands in for the real profile.
+        win_cmd = "echo windows-home-check"
+        with tempfile.TemporaryDirectory() as shim, \
+                tempfile.TemporaryDirectory() as decoy:
+            with open(os.path.join(shim, "sitecustomize.py"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("import os, pathlib\n"
+                         "_p = os.environ.get('USERPROFILE')\n"
+                         "if _p:\n"
+                         "    pathlib.Path.home = classmethod("
+                         "lambda cls: cls(_p))\n")
+            saved = {k: os.environ.get(k) for k in ("PYTHONPATH", "USERPROFILE")}
+            os.environ["PYTHONPATH"] = shim
+            os.environ["USERPROFILE"] = decoy
+            try:
+                run(post(win_cmd, 0), home)
+            finally:
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+            check("18a under Windows home rules the real profile is untouched",
+                  state_dir(decoy).exists(), False)
+            check("18b and the row lands in the test's own home",
+                  last_row(home, pre(win_cmd)) is not None, True)
 
     real_logs.assert_unchanged(real_logs_before, context=__name__)
 

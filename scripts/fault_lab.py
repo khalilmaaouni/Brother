@@ -1153,6 +1153,165 @@ def scenario_boundary(name, timeout=30):
 
 
 # ---------------------------------------------------------------------------
+# RESUME-FIX F4 (2026-09-26): the resume variants around a captured worker
+# result. Not scenarios of their own (list prints exactly the six), but the
+# same real SIGKILL of the real brother_run.py, reusing scenario_boundary's
+# own pieces. Each returns MEASURED facts and asserts nothing, so the test
+# reading them states the expectation in one place.
+# ---------------------------------------------------------------------------
+
+#: Counts and writes like _COUNTING_WORKER, then, only when FAULT_LAB_STARTED
+#: is set, says so and blocks: a kill on that marker lands while the worker
+#: has written but not yet returned, so nothing could have checkpointed it.
+_COUNTING_BLOCKING_WORKER = """
+import os, time
+with open(os.environ["FAULT_LAB_COUNTER"], "a", encoding="utf-8") as fh:
+    fh.write(str(os.getpid()) + "\\n")
+with open("done.txt", "w", encoding="utf-8") as fh:
+    fh.write("done\\n")
+started = os.environ.get("FAULT_LAB_STARTED")
+if started:
+    with open(started, "w", encoding="utf-8") as fh:
+        fh.write(str(os.getpid()))
+    time.sleep(120)
+print("worker invocation wrote done.txt")
+"""
+
+RESUME_VARIANTS = ("mid_worker", "concurrent", "tampered")
+
+
+def _journal_events(runs_root, kind):
+    """Every journal line of type `kind` under runs_root, read as text (the
+    event names are mirrored literals, never imported, per this file's law)."""
+    found = []
+    for path in glob.glob(os.path.join(runs_root, "docs", "plan", "runs", "*",
+                                       "journal.jsonl")):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get("type") == kind:
+                    found.append(event)
+    return found
+
+
+def _lane_path(repo, unit_id):
+    """The worktree git itself has checked out on lane/<unit_id>, or None."""
+    out = _sh(["git", "worktree", "list", "--porcelain"], cwd=repo).stdout or ""
+    path = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line == "branch refs/heads/lane/%s" % unit_id:
+            return path
+    return None
+
+
+def resume_variant(variant, timeout=60):
+    """(facts, problem). Kill one run, then resume it three ways:
+
+    mid_worker   the kill lands while the worker has written but not
+                 returned (no barrier; the worker's own marker). Its
+                 completion is unproven, so the worker must run again.
+    concurrent   the kill lands at after_edit_before_check, then TWO bare
+                 resumes start at once. One recovers; the worker never
+                 runs a second time and the unit merges once.
+    tampered     the kill lands at after_edit_before_check, then a foreign
+                 commit is added to the lane before the resume. Recovery
+                 must be refused, the foreign write must never reach
+                 canonical, and the worker runs again instead.
+
+    problem is a NO-DATA string when the kill point was never reached."""
+    if variant not in RESUME_VARIANTS:
+        raise ValueError("unknown resume variant %r" % variant)
+    workdir = tempfile.mkdtemp(prefix="fault-lab-resume-%s-" % variant)
+    repo = fresh_repo()
+    runs_root = tempfile.mkdtemp(dir=workdir, prefix="runs-")
+    started = os.path.join(workdir, "started.marker")
+    counter = os.path.join(workdir, "worker_invocations.txt")
+    decomposer = _write(os.path.join(workdir, "decomposer.py"),
+                        _one_unit_decomposer("B1"))
+    worker = _write(os.path.join(workdir, "worker.py"), _COUNTING_BLOCKING_WORKER)
+    outcome = "prove the %s resume variant" % variant
+    if variant == "mid_worker":
+        extra = {"FAULT_LAB_STARTED": started}
+    else:
+        extra = {"BROTHER_FAULT_BARRIER": "after_edit_before_check",
+                 "BROTHER_FAULT_BARRIER_STARTED": started,
+                 "BROTHER_FAULT_BARRIER_RELEASE":
+                     os.path.join(workdir, "release.barrier")}
+    extra["FAULT_LAB_COUNTER"] = counter
+    p1 = subprocess.Popen(
+        launcher_cmd(_DIRECT_ARTIFACT, outcome, repo, runs_root),
+        env=run_env(None, decomposer, worker, extra=extra),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    if not _poll(lambda: os.path.exists(started), timeout=timeout):
+        _kill_group(p1)
+        return None, "%s: %s never reached its kill point" % (NODATA, variant)
+    blocked_pid = None
+    if variant == "mid_worker":
+        with open(started, encoding="utf-8") as fh:
+            blocked_pid = int(fh.read().strip() or 0)
+    _kill_group(p1)
+    if blocked_pid:
+        # bm_worker_spawn starts the worker in its OWN session (it times it
+        # out by group), so the launcher's group kill above never reaches
+        # it. Its group is killed too, model_worker.py with the stub, so it
+        # cannot go on to commit after the crash: a crash takes it with it.
+        try:
+            os.killpg(os.getpgid(blocked_pid), signal.SIGKILL)
+        except ProcessLookupError:  # sbe: allow-silent the worker group already exited
+            pass
+        _poll(lambda: not _pid_alive(blocked_pid), timeout=10)
+    invocations_before = _worker_invocations(counter)
+    if variant == "tampered":
+        lane = _lane_path(repo, "B1")
+        if not lane:
+            return None, "%s: no lane/B1 worktree to tamper with" % NODATA
+        _write(os.path.join(lane, "foreign.txt"), "nobody checkpointed this\n")
+        _sh(["git", "add", "foreign.txt"], cwd=lane)
+        _sh(["git", "commit", "-q", "-m", "foreign"], cwd=lane)
+    env2 = run_env(None, decomposer, worker, extra={"FAULT_LAB_COUNTER": counter})
+    # Each resume writes to its OWN file, never a pipe read one after the
+    # other: a second resume blocked on a full pipe while the first is
+    # waited on would be a deadlock this harness made, not the product.
+    resumes = []
+    for i in range(2 if variant == "concurrent" else 1):
+        log = open(os.path.join(workdir, "resume-%d.log" % i), "w+",
+                   encoding="utf-8")
+        resumes.append((subprocess.Popen(
+            launcher_cmd(_DIRECT_ARTIFACT, outcome, repo, runs_root), env=env2,
+            stdout=log, stderr=subprocess.STDOUT), log))
+    exits, outputs = [], []
+    for proc, log in resumes:
+        try:
+            proc.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        exits.append(proc.returncode)
+        with log:
+            log.seek(0)
+            outputs.append(log.read()[-3000:])
+    canonical = _sh(["git", "ls-files"], cwd=repo).stdout.split()
+    return {"invocations_before": invocations_before,
+            "invocations_after": _worker_invocations(counter),
+            "merges": _merge_message_count(repo, "B1"),
+            "resume_exits": exits,
+            "recovered": len(_journal_events(runs_root, "worker.recovered")),
+            "refused_whys": [(e.get("payload") or {}).get("why", "")
+                             for e in _journal_events(
+                                 runs_root, "worker.recovery_refused")],
+            "canonical_files": sorted(canonical),
+            "canonical_dirty": _sh(["git", "status", "--porcelain"],
+                                   cwd=repo).stdout.strip(),
+            "outputs": outputs}, None
+
+
+# ---------------------------------------------------------------------------
 # R27.1.3: driving it backwards. Each patch targets a FRESH, THROWAWAY
 # installed copy (a `claude plugin install` cache directory under a
 # temporary CLAUDE_CONFIG_DIR from install_artifact() above), never this

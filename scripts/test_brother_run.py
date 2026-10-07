@@ -82,6 +82,64 @@ _LOAD02_ENV_VARS = ("BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_L
 
 
 def setUpModule():
+    # Test-owned disk premise: worker admission reads this host's free
+    # disk, so a full disk would otherwise read as a failing suite.
+    from hermetic_worker_env import worker_environment
+    _disk = worker_environment()
+    _disk.__enter__()
+    unittest.addModuleCleanup(_disk.__exit__, None, None, None)
+    # Finding 31 (loop audit 2026-09-26), same source and fixture as
+    # test_board_status.py and test_export_public.py: unmocked calls read the
+    # tracked data/jev-seams.json, where J030, J063, J064, J102 and J117 sit in
+    # shadow, and jev_decide resolves the machine's real bridge
+    # (~/.claude/bin/or_ask.py) at import. A spy on jev_seam.consult counted
+    # 174 calls (J063 62, J102 62, J117 50), 166 of them in brother_run.py
+    # children, reaching a live shadow entry in one run of this module under
+    # an empty HOME. Pin an all-off seams config and a bridge path that does
+    # not exist, so only a case that patches its own config and runner calls
+    # out. The children re-import jev_seam and read the tracked config again,
+    # out of reach of the in-process patches, so the one bridge override a
+    # child does read is pinned too (the same subprocess half as LOAD-02
+    # below): a child's shadow call then ends as NO_DATA at launch instead of
+    # reaching the real bridge. These use module cleanups, which run after
+    # tearDownModule, so its index-based restore stays untouched; and this
+    # block runs first so the environment snapshot mock.patch.dict restores
+    # predates the LOAD-02 variables tearDownModule removes.
+    import jev_decide
+    import jev_seam
+    root = tempfile.mkdtemp(prefix="brother-jev-seams-test-")
+    unittest.addModuleCleanup(shutil.rmtree, root, ignore_errors=True)
+    seams = os.path.join(root, "jev-seams.json")
+    with open(seams, "w", encoding="utf-8") as fh:
+        json.dump({"modes": {}}, fh)
+    no_bridge = os.path.join(root, "no-bridge-in-tests")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_SEAMS_CONFIG_PATH", seams),
+                    mock.patch.object(jev_decide, "DEFAULT_BRIDGE_PATH", no_bridge)):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    # The processes these tests launch re-import jev_seam and read the
+    # tracked config afresh, out of reach of the patches above, and every
+    # consult, even an off one, writes attempt rows. So the children get
+    # BROTHER_JEV_SEAMS_OFF (the tracked file reads as every entry off), a
+    # temporary BROTHER_JEV_STATE_DIR (ledger and daily call budget) and a
+    # bridge command that cannot launch, quoted because the variable is
+    # parsed as a command line; this process gets the same ledger and
+    # budget paths, since its constants were fixed at import.
+    import shlex
+    import jev_checks
+    state = tempfile.mkdtemp(prefix="brother-jev-state-test-")
+    unittest.addModuleCleanup(shutil.rmtree, state, ignore_errors=True)
+    ledger = os.path.join(state, "ledger")
+    for patcher in (mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", ledger),
+                    mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                      os.path.join(state, "jev-budget.json")),
+                    mock.patch.dict(os.environ, {
+                        "BROTHER_JEV_SEAMS_OFF": "1",
+                        "BROTHER_JEV_STATE_DIR": state,
+                        "BROTHER_DECISION_BRIDGE": shlex.quote(jev_decide.DEFAULT_BRIDGE_PATH)})):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
     _sandbox = tempfile.mkdtemp(prefix="load-02-module-sandbox-")
     _LOAD02_MODULE_PATCHES.append(_sandbox)
     reservation_path = os.path.join(_sandbox, "machine-reservation.json")
@@ -2021,6 +2079,125 @@ class MachineReservationAcquiredAndReleasedAroundTheDrain(unittest.TestCase):
         # a reservation it does not hold.
         self.assertEqual(self._held_reservation().get("holder"),
                          "some-other-run")
+
+
+class TheProofCardIsWrittenAfterTheReceipt(unittest.TestCase):
+    """E-C2 (P0-D, ported from PR 607): scripts/proof_card.py existed,
+    passed its own selftest, and was registered in check_all.sh, but
+    nothing in main() ever called it, so a run never produced the one
+    screen it exists to project. Mirrors MachineReservationAcquiredAnd
+    ReleasedAroundTheDrain's harness (closest sibling: a stubbed run_loop
+    plus a real one-unit Work document), since that is the smallest real
+    drain through main() that reaches the receipt and, now, the card."""
+
+    def setUp(self):
+        import machine_reservation
+        # Same isolation MachineReservationAcquiredAndReleasedAroundTheDrain
+        # uses, for the same reason: never the real machine-wide store.
+        self.reservation_dir = tempfile.mkdtemp(prefix="proof-card-reservation-")
+        self.addCleanup(shutil.rmtree, self.reservation_dir, ignore_errors=True)
+        self._path_patch = mock.patch.object(
+            _br, "MACHINE_RESERVATION_PATH",
+            os.path.join(self.reservation_dir, "machine-reservation.json"))
+        self._path_patch.start()
+        self.addCleanup(self._path_patch.stop)
+        self._orig_run_loop = _br.run_loop
+        self.addCleanup(self._restore_run_loop)
+
+    def _restore_run_loop(self):
+        _br.run_loop = self._orig_run_loop
+
+    def _fresh_fixture(self, prefix):
+        """A brand-new repo plus a brand-new one-unit Work document, so two
+        drains in the same test never resume the same (already-settled) run
+        or share a git history."""
+        repo = tempfile.mkdtemp(prefix="%s-repo-" % prefix)
+        for args in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "a@b.c"],
+                    ["config", "user.name", "t"]):
+            sh(["git"] + args, repo)
+        with open(os.path.join(repo, "base.txt"), "w",
+                 encoding="utf-8") as fh:
+            fh.write("base\n")
+        sh(["git", "add", "-A"], repo)
+        sh(["git", "commit", "-q", "-m", "R0"], repo)
+
+        run_dir = tempfile.mkdtemp(prefix="%s-run-" % prefix)
+        rec, problems = WR.create(
+            "one plain piece of work", [{"id": "A1", "title": "create a1",
+                                        "done_check": "true",
+                                        "owns": ["A1.txt"]}],
+            store=run_dir)
+        self.assertEqual(problems, [])
+        return repo, run_dir
+
+    @staticmethod
+    def _one_unit_done_loop(repo):
+        def _loop(plan_path, claims_path, cwd, slots):
+            with open(os.path.join(repo, "A1.txt"), "w",
+                     encoding="utf-8") as fh:
+                fh.write("a1\n")
+            sh(["git", "add", "-A"], repo)
+            sh(["git", "commit", "-q", "-m", "A1"], repo)
+            claim_store.acquire(claims_path, "A1", "t")
+            claim_store.release(
+                claims_path, "A1", "t", state="done",
+                evidence={"check_command": "true", "exit_code": 0,
+                         "output": "ok", "output_truncated": False,
+                         "canonical_rev": _br._head(repo),
+                         "files_changed": ["A1.txt"]})
+            return 0, "A1 done scope=CLEAN integrated=True"
+        return _loop
+
+    def test_the_card_files_land_next_to_the_receipt_and_print(self):
+        import proof_card
+        repo, run_dir = self._fresh_fixture("proof-card")
+        _br.run_loop = self._one_unit_done_loop(repo)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", run_dir, "--cwd", repo])
+        printed = out.getvalue()
+        self.assertIn(proof_card.TITLE, printed, printed)
+        card_txt = os.path.join(run_dir, _br.PROOF_CARD_DIRNAME, _br.PROOF_CARD_TEXT_FILENAME)
+        card_json = os.path.join(run_dir, _br.PROOF_CARD_DIRNAME, _br.PROOF_CARD_JSON_FILENAME)
+        self.assertTrue(os.path.isfile(card_txt), printed)
+        self.assertTrue(os.path.isfile(card_json), printed)
+        with open(card_json, encoding="utf-8") as fh:
+            fields = json.load(fh)
+        self.assertIn("receipt", fields)
+        self.assertNotEqual(fields["receipt"]["value"], proof_card.NODATA,
+                            "the card could not find the receipt this same "
+                            "run just wrote: %r" % fields)
+
+    def test_a_broken_renderer_never_changes_the_exit_code(self):
+        """Best effort: proof_card is allowed to fail, the run's own exit
+        code is not. Compared against an unmocked twin run on its OWN fresh
+        repo/Work document (rather than a hardcoded exit code), since a
+        "true" done_check reads NO-DATA (it already passed before the work
+        began) whether or not the card renders, and that is a property of
+        the fixture, not of this fix."""
+        clean_repo, clean_run_dir = self._fresh_fixture("proof-card-clean")
+        _br.run_loop = self._one_unit_done_loop(clean_repo)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            baseline_code = _br.main(["ignored", "--resume", clean_run_dir,
+                                     "--cwd", clean_repo])
+
+        broken_repo, broken_run_dir = self._fresh_fixture("proof-card-broken")
+        _br.run_loop = self._one_unit_done_loop(broken_repo)
+        with mock.patch.object(_br.proof_card, "build_card",
+                               side_effect=RuntimeError("card boom")):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                broken_code = _br.main(["ignored", "--resume", broken_run_dir,
+                                       "--cwd", broken_repo])
+        self.assertEqual(broken_code, baseline_code,
+                         "a broken proof card changed the run's own exit "
+                         "code: baseline=%r broken=%r" % (baseline_code,
+                                                          broken_code))
+        self.assertIn("PROOF CARD: NO-DATA", out.getvalue())
+        self.assertFalse(os.path.isfile(
+            os.path.join(broken_run_dir, _br.PROOF_CARD_DIRNAME, _br.PROOF_CARD_TEXT_FILENAME)))
 
 
 class TheIntentScreenAsksOneProfessionAwareQuestion(unittest.TestCase):
@@ -7657,6 +7834,102 @@ class ParkSidecarSurvivesRestart(unittest.TestCase):
         self.assertTrue(os.path.exists(self.sidecar_path))
         with open(self.sidecar_path, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "{not json")
+
+
+def _git(args, cwd):
+    r = subprocess.run(['git'] + args, cwd=cwd, capture_output=True, text=True)
+    assert r.returncode == 0, (args, r.stdout, r.stderr)
+    return r.stdout
+
+
+class CheckWithoutBatchesTheFileRevertInsteadOfOnePairPerFile(unittest.TestCase):
+    """_check_without used to spend one `git cat-file -e` plus, for every
+    file that existed at the base revision, one more `git checkout` per
+    file: N files cost up to 2N subprocess spawns. It now batch-checks all
+    of them in one `git cat-file --batch-check` call and reverts every
+    existing one in a single `git checkout <base> -- <files...>` call, so
+    the spawn count for the revert step itself must stay flat as the file
+    count grows, and the resulting tree must be byte-identical either way."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="check-without-batch-")
+        _git(['init', '-q'], self.repo)
+        _git(['-c', 'user.email=a@b.c', '-c', 'user.name=t', 'config',
+              'commit.gpgsign', 'false'], self.repo)
+        for name, text in (('kept1.txt', 'base one\n'),
+                           ('kept2.txt', 'base two\n'),
+                           ('kept3.txt', 'base three\n')):
+            with open(os.path.join(self.repo, name), 'w', encoding='utf-8') as fh:
+                fh.write(text)
+        _git(['add', '-A'], self.repo)
+        _git(['-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-q',
+              '-m', 'base'], self.repo)
+        self.base_rev = _git(['rev-parse', 'HEAD'], self.repo).strip()
+        for name, text in (('kept1.txt', 'changed one\n'),
+                           ('kept2.txt', 'changed two\n'),
+                           ('kept3.txt', 'changed three\n')):
+            with open(os.path.join(self.repo, name), 'w', encoding='utf-8') as fh:
+                fh.write(text)
+        with open(os.path.join(self.repo, 'created.txt'), 'w', encoding='utf-8') as fh:
+            fh.write('did not exist at base\n')
+        _git(['add', '-A'], self.repo)
+        _git(['-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-q',
+              '-m', 'dep'], self.repo)
+        self.dep_rev = _git(['rev-parse', 'HEAD'], self.repo).strip()
+        self.unit_rev = self.dep_rev
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def test_files_present_at_base_are_restored_and_created_files_removed(self):
+        files = ['kept1.txt', 'kept2.txt', 'kept3.txt', 'created.txt']
+        code, note = _br._check_without(
+            self.repo, self.unit_rev, self.dep_rev, files,
+            'ls kept1.txt kept2.txt kept3.txt 2>/dev/null; test ! -e created.txt')
+        self.assertEqual(code, 0, note)
+
+    def test_the_revert_step_spawns_a_constant_number_of_processes_not_one_per_file(self):
+        real_run = subprocess.run
+        calls = []
+
+        def spy(cmd, *a, **k):
+            calls.append(cmd)
+            return real_run(cmd, *a, **k)
+
+        with mock.patch('subprocess.run', side_effect=spy):
+            code_one, note_one = _br._check_without(
+                self.repo, self.unit_rev, self.dep_rev, ['kept1.txt'], 'true')
+        one_file_git_calls = len([c for c in calls if c[0] == 'git'])
+
+        calls.clear()
+        with mock.patch('subprocess.run', side_effect=spy):
+            code_many, note_many = _br._check_without(
+                self.repo, self.unit_rev, self.dep_rev,
+                ['kept1.txt', 'kept2.txt', 'kept3.txt', 'created.txt'], 'true')
+        many_files_git_calls = len([c for c in calls if c[0] == 'git'])
+
+        self.assertEqual(code_one, 0, note_one)
+        self.assertEqual(code_many, 0, note_many)
+        self.assertEqual(
+            one_file_git_calls, many_files_git_calls,
+            "reverting 4 files spawned %d git processes but reverting 1 file "
+            "spawned %d: the revert step is still proportional to file count"
+            % (many_files_git_calls, one_file_git_calls))
+
+    def test_a_file_absent_at_base_but_present_now_is_removed_not_checked_out(self):
+        # created.txt did not exist at base_rev, so batch-check must mark it
+        # missing rather than routing it into the checkout call (which
+        # would fail: git checkout cannot restore a path that was never
+        # there at that revision).
+        code, note = _br._check_without(
+            self.repo, self.unit_rev, self.dep_rev,
+            ['kept1.txt', 'created.txt'], 'test ! -e created.txt')
+        self.assertEqual(code, 0, note)
+
+def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: object) -> unittest.TestSuite:
+    """ACC2: BROTHER_TEST_SHARD=k/n runs the k-th of n class shards (scripts/suite_shard.py); unset runs every test."""
+    import suite_shard
+    return suite_shard.select(tests, os.environ.get("BROTHER_TEST_SHARD"))
 
 
 if __name__ == "__main__":

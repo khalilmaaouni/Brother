@@ -1,6 +1,6 @@
 ---
 name: brothersbe-status
-description: "Use when someone wants to know where their work stands. Wraps the status command and the fence registry, and reframes the raw output as a plain answer with one next action, with technical detail kept below the summary rather than leading it. Invoke as /brothersbe:status."
+description: "Use when someone wants to know where their work stands. Wraps the status command and the fence registry, and reframes the raw output as a plain answer with one next action, with technical detail kept below the summary rather than leading it. Invoke as /brother:brothersbe-status."
 ---
 
 This is the Codex route for the `brothersbe` product skill.

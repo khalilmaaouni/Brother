@@ -17,35 +17,16 @@ LAUNCHER_DIR = os.path.dirname(os.path.abspath(__file__))
 BROTHER_RUN = os.path.join(LAUNCHER_DIR, "brother_run.py")
 
 
-def default_runs_root(launcher_dir=LAUNCHER_DIR, env=None):
-    """Where a run's Work document and claim store live when the caller does
-    not say with --runs-root. A dev checkout keeps them inside its own
-    repository, exactly as brother_run.py does by default when it is run
-    from scripts/ directly. An installed plugin has no such writable
-    repository beside it (the plugin cache is replaced on update, so writing
-    run state there would lose it at the next upgrade), so that case falls
-    back to a per-user state directory instead."""
-    env = os.environ if env is None else env
-    override = (env.get("BROTHER_RUNS_ROOT") or "").strip()
-    if override:
-        return override
-    try:
-        proc = subprocess.run(
-            ["git", "-C", launcher_dir, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10)
-    except OSError:
-        proc = None
-    if proc is not None and proc.returncode == 0:
-        top = proc.stdout.strip()
-        if top and os.access(top, os.W_OK):
-            return top
-    return os.path.expanduser(os.path.join("~", ".claude", "brother-run"))
-
-
 def main(argv=None):
+    """WHERE A RUN'S RECORDS LIVE IS THE ENGINE'S ONE RULE (brother_run.py,
+    default_runs_root), never a second one here. Until 2026-10-06 this
+    launcher computed a default of its own and passed it as --runs-root, so
+    it and `python3 <plugin root>/runtime/brother_run.py`, the form the
+    shipped skill gives, kept records in two places: runs started that way
+    sat inside the plugin folder, which an update replaces, and --continue
+    here never saw them. It now passes the caller's arguments and nothing
+    else; an explicit --runs-root still reaches the engine untouched."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if "--runs-root" not in args:
-        args = args + ["--runs-root", default_runs_root()]
     return subprocess.call([sys.executable, BROTHER_RUN] + args)
 
 

@@ -42,6 +42,8 @@ already ran, and is stored here only ever as non-authoritative.
 import hashlib
 import json
 import os
+import re
+from datetime import date, datetime
 
 #: Any one file, dependency output, or vault snippet is capped here before it
 #: ever reaches the bundle. This is a hard cut, not a summary.
@@ -117,9 +119,210 @@ def _shrink_to_budget(bundle, max_total_bytes):
     return bundle
 
 
+#: RL3.a: the keys every tagged vault_context entry carries. A missing one is
+#: malformed; an extra one is not.
+ENTRY_KEYS = ("snippet", "source", "authority", "kind", "scope",
+              "observed_at", "revoked", "authoritative")
+
+#: bm_vault_authority.LEVELS, mirrored: scripts/ ships without products/.
+AUTHORITY_LEVELS = ("casual", "derived", "source_of_record")
+
+KINDS = ("explicit_preference", "observation", "inferred_hypothesis")
+
+DEFAULT_HORIZON_DAYS = 90
+
+#: Reasons admit_context() withholds an entry, in the order they are tested.
+WITHHELD_REASONS = ("malformed", "revoked", "cross-scope", "stale")
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T.+)?$")
+
+
+def context_scope(node, cwd=None):
+    """{'account', 'project'} for one request. An empty account is kept empty
+    and matches only an entry whose account is also empty: absence is never a
+    wildcard. A non-str account or project is refused, never coerced."""
+    if not isinstance(node, dict):
+        raise ValueError("context_scope: node must be a dict, got %r"
+                         % type(node).__name__)
+    account = node.get("account") or ""
+    project = node.get("project") or os.path.realpath(cwd or os.getcwd())
+    if not isinstance(account, str) or not isinstance(project, str):
+        raise ValueError("context_scope: account and project must be str, "
+                         "got %r and %r" % (account, project))
+    return {"account": account, "project": project}
+
+
+def tag_entry(snippet, source, authority="casual", kind="observation",
+              scope=None, observed_at=None, revoked=False):
+    """One vault_context entry with every ENTRY_KEYS key present and
+    authoritative always False. The snippet is truncated by build_capsule's
+    byte cap, never here. Anything outside the vocabulary raises ValueError
+    naming the value."""
+    if not isinstance(snippet, str):
+        raise ValueError("tag_entry: snippet must be str, got %r" % (snippet,))
+    if not isinstance(source, str):
+        raise ValueError("tag_entry: source must be str, got %r" % (source,))
+    if not isinstance(authority, str) or authority not in AUTHORITY_LEVELS:
+        raise ValueError("tag_entry: unknown authority %r, not in %s"
+                         % (authority, "/".join(AUTHORITY_LEVELS)))
+    if not isinstance(kind, str) or kind not in KINDS:
+        raise ValueError("tag_entry: unknown kind %r, not in %s"
+                         % (kind, "/".join(KINDS)))
+    if scope is not None and not isinstance(scope, dict):
+        raise ValueError("tag_entry: scope must be a dict or None, got %r"
+                         % (scope,))
+    if observed_at is not None and not isinstance(observed_at, str):
+        raise ValueError("tag_entry: observed_at must be an ISO date str or "
+                         "None, got %r" % (observed_at,))
+    if not isinstance(revoked, bool):
+        raise ValueError("tag_entry: revoked must be a bool, got %r"
+                         % (revoked,))
+    return {"snippet": snippet, "source": source, "authority": authority,
+            "kind": kind, "scope": dict(scope) if scope is not None else None,
+            "observed_at": observed_at, "revoked": revoked,
+            "authoritative": False}
+
+
+def _parse_observed(value):
+    """The date in an ISO date or datetime string, or None when it cannot be
+    read. Strict on shape so Python 3.9 and later Pythons agree."""
+    if not isinstance(value, str) or not _ISO_DATE_RE.match(value):
+        return None
+    try:
+        day = date.fromisoformat(value[:10])
+        if len(value) > 10:
+            datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return day
+
+
+def _entry_malformed(entry):
+    if not isinstance(entry, dict):
+        return True
+    if any(key not in entry for key in ENTRY_KEYS):
+        return True
+    if entry["authoritative"] is not False:
+        return True
+    if not isinstance(entry["revoked"], bool):
+        return True
+    if not isinstance(entry["snippet"], str) or not isinstance(entry["source"], str):
+        return True
+    if entry["authority"] not in AUTHORITY_LEVELS or entry["kind"] not in KINDS:
+        return True
+    return False
+
+
+def _entry_cross_scope(entry_scope, scope):
+    if not isinstance(entry_scope, dict):
+        return True
+    for key in ("account", "project"):
+        if key not in entry_scope or entry_scope[key] != scope[key]:
+            return True
+    return False
+
+
+def _withhold_reason(entry, scope, today, horizon_days):
+    if _entry_malformed(entry):
+        return "malformed"
+    if entry["revoked"] is True:
+        return "revoked"
+    if _entry_cross_scope(entry["scope"], scope):
+        return "cross-scope"
+    observed = _parse_observed(entry["observed_at"])
+    if observed is None:
+        return "stale"
+    age = (today - observed).days
+    if age < 0 or age > horizon_days:
+        return "stale"
+    return None
+
+
+def _check_request(scope, today, horizon_days):
+    if not isinstance(scope, dict):
+        raise ValueError("admit_context: scope must be a dict, got %r"
+                         % (scope,))
+    for key in ("account", "project"):
+        if not isinstance(scope.get(key), str):
+            raise ValueError("admit_context: scope %s must be str, got %r"
+                             % (key, scope.get(key)))
+    if isinstance(today, datetime) or not isinstance(today, date):
+        raise ValueError("admit_context: today must be a date, got %r"
+                         % (today,))
+    if isinstance(horizon_days, bool) or not isinstance(horizon_days, int) \
+            or horizon_days < 0:
+        raise ValueError("admit_context: horizon_days must be a non negative "
+                         "int, got %r" % (horizon_days,))
+
+
+def admit_context(entries, scope, today, horizon_days=DEFAULT_HORIZON_DAYS):
+    """(kept, withheld). Each entry is judged in WITHHELD_REASONS order and the
+    first reason that fires decides; withheld items are {'source', 'reason'}.
+    Pure over its arguments: no clock read, nothing cached, so an entry
+    admitted on the last request is judged again on this one. A request that
+    is itself unreadable raises ValueError rather than admitting anything."""
+    if not isinstance(entries, list):
+        raise ValueError("admit_context: entries must be a list, got %r"
+                         % type(entries).__name__)
+    _check_request(scope, today, horizon_days)
+    kept, withheld = [], []
+    for entry in entries:
+        reason = _withhold_reason(entry, scope, today, horizon_days)
+        if reason is None:
+            kept.append(entry)
+            continue
+        source = entry.get("source") if isinstance(entry, dict) else None
+        withheld.append({"source": source if isinstance(source, str) else "",
+                         "reason": reason})
+    return kept, withheld
+
+
+def _tagged_or_withheld(item):
+    """(entry, None) ready for admit_context, or (None, withheld item) when the
+    raw snippet cannot even be tagged. A dict carrying any tag-only key is
+    taken as already tagged and judged as it stands."""
+    if isinstance(item, str):
+        return tag_entry(item, "vault"), None
+    if isinstance(item, dict):
+        if any(key in item for key in ENTRY_KEYS[2:]):
+            return item, None
+        try:
+            return tag_entry(item.get("snippet", ""),
+                             item.get("source", "vault")), None
+        except ValueError:
+            source = item.get("source")
+            return None, {"source": source if isinstance(source, str) else "",
+                          "reason": "malformed"}
+    return None, {"source": "", "reason": "malformed"}
+
+
+def _scoped_vault_context(vault_snippets, scope, max_file_bytes):
+    """(vault_context, vault_withheld) for build_capsule's scope keyword."""
+    if not isinstance(scope, dict):
+        raise ValueError("build_capsule: scope must be a dict or None, got %r"
+                         % (scope,))
+    if vault_snippets is not None and not isinstance(vault_snippets, list):
+        raise ValueError("build_capsule: vault_snippets must be a list, got %r"
+                         % type(vault_snippets).__name__)
+    tagged, refused = [], []
+    for item in vault_snippets or []:
+        entry, refusal = _tagged_or_withheld(item)
+        if entry is not None:
+            tagged.append(entry)
+        else:
+            refused.append(refusal)
+    kept, withheld = admit_context(tagged, scope, date.today())
+    vault_context = []
+    for entry in kept:
+        out = dict(entry)
+        out["snippet"] = _truncate(entry["snippet"], max_file_bytes)
+        vault_context.append(out)
+    return vault_context, refused + withheld
+
+
 def build_capsule(node, cwd=None, dependency_outputs=None, decisions=None,
                   vault_snippets=None, max_file_bytes=DEFAULT_MAX_FILE_BYTES,
-                  max_total_bytes=DEFAULT_MAX_TOTAL_BYTES):
+                  max_total_bytes=DEFAULT_MAX_TOTAL_BYTES, scope=None):
     """One deterministic, byte-bounded context bundle for one unit.
 
     Carries the same core keys as loop_bridge.run_node()'s own unit dict
@@ -140,6 +343,12 @@ def build_capsule(node, cwd=None, dependency_outputs=None, decisions=None,
     decisions: [{"decision"/"choice", "reason", "cost_if_wrong",
     "deciding_check", ...}], only those five keys are kept per entry.
     vault_snippets: [str] or [{"snippet": str, "source": str}].
+
+    scope (RL3.a): None keeps the body above unchanged. A dict, normally
+    context_scope(node, cwd), sends every vault snippet through
+    admit_context() with today's date: plain snippets are tagged with
+    tag_entry() defaults first, kept entries become vault_context, and the
+    rest are listed under vault_withheld as {'source', 'reason'}.
     """
     write_scope = list(node.get("owns") or node.get("write_scope") or [])
     read_scope = list(node.get("read_scope") or [])
@@ -155,14 +364,19 @@ def build_capsule(node, cwd=None, dependency_outputs=None, decisions=None,
         str(k): _truncate(str(v), max_file_bytes)
         for k, v in (dependency_outputs or {}).items()
     }
-    vault_context = [
-        {"snippet": _truncate(s if isinstance(s, str) else s.get("snippet", ""),
-                              max_file_bytes),
-         "source": (s.get("source", "vault") if isinstance(s, dict)
-                   else "vault"),
-         "authoritative": False}
-        for s in (vault_snippets or [])
-    ]
+    vault_withheld = None
+    if scope is None:
+        vault_context = [
+            {"snippet": _truncate(s if isinstance(s, str) else s.get("snippet", ""),
+                                  max_file_bytes),
+             "source": (s.get("source", "vault") if isinstance(s, dict)
+                       else "vault"),
+             "authoritative": False}
+            for s in (vault_snippets or [])
+        ]
+    else:
+        vault_context, vault_withheld = _scoped_vault_context(
+            vault_snippets, scope, max_file_bytes)
 
     capsule = {
         "unit_id": node["id"],
@@ -185,7 +399,32 @@ def build_capsule(node, cwd=None, dependency_outputs=None, decisions=None,
         "dependency_outputs": dependency_outputs_out,
         "vault_context": vault_context,
     }
+    if vault_withheld is not None:
+        capsule["vault_withheld"] = vault_withheld
     _shrink_to_budget(capsule, max_total_bytes)
     capsule["capsule_hash"] = hashlib.sha256(
         json.dumps(capsule, sort_keys=True).encode("utf-8")).hexdigest()
     return capsule
+
+
+#: RL3.c: the hosts brother_paths.client can name. Anything else is NO-DATA.
+HOSTS = ("claude", "codex", "cursor")
+
+
+def host_observation(env=None):
+    """{'host', 'observed'} for this process. host is brother_paths.client(env)
+    when it names one of HOSTS, else 'NO-DATA'; an ImportError (the export tree
+    ships without brother_paths) is NO-DATA too. Only the marker variables
+    client reads are consulted: no directory walk, no transcript, no process
+    list, no network. An env that is not a dict or None is refused."""
+    if env is not None and not isinstance(env, dict):
+        raise ValueError("host_observation: env must be a dict or None, got %r"
+                         % type(env).__name__)
+    try:
+        import brother_paths
+    except ImportError:
+        return {"host": "NO-DATA", "observed": False}
+    host = brother_paths.client(env)
+    if not isinstance(host, str) or host not in HOSTS:
+        host = "NO-DATA"
+    return {"host": host, "observed": host != "NO-DATA"}

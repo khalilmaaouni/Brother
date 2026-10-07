@@ -126,6 +126,8 @@ products/brothermode/tools/bm_vault_ids.py
 products/brothermode/tools/bm_vault_provenance.py
 products/brothermode/tools/bm_vault_retention.py
 docs/plan/BATTERY-EXPECTATIONS.json
+# The trigger corpus of scripts/one_plugin_readiness.py (OP1.f): the command ships, so the file it reads ships.
+docs/plan/one-plugin-trigger-corpus.json
 # The acceptance areas scripts/product_acceptance.py loads at import; the
 # README proof suite test_brother_run_continue.py imports it, and the 1.0.3
 # tag attempt was refused because the export did not carry it.
@@ -604,3 +606,36 @@ products/brotherds/docs/plan/QUEUE.json
 products/brotherds/research/C1-mdm-data-science-best-practice-2026-09-12.md
 products/brotherds/research/C2-harness-and-market-practice-2026-09-12.md
 products/brotherds/docs/PLAYBOOK-LOCATION-ANCHORED-MASTER.md
+
+# Added 2026-09-26, owner ruling 22:1x JST ("I follow your recommendation"): the plugin runtime modules in
+# the import closure of scripts/loop, which the pre-push hermetic check proved the public loop cannot run
+# without (No module named plugin). Named leaf by leaf, the four package initializers and the thirteen
+# modules the loop imports (computed from an ast walk of scripts/loop/*.py and each module in turn); the
+# module tests stay private. All seventeen scanned clean of the private terms, secrets, the first target
+# app name and home paths before being added (one fixed home path in or_dispatch_cli.py was removed first).
+plugin/__init__.py
+plugin/runtime/__init__.py
+plugin/runtime/brother/__init__.py
+plugin/runtime/brother/core/__init__.py
+plugin/runtime/brother/core/dispatch_semaphore.py
+plugin/runtime/brother/core/dream_gate.py
+plugin/runtime/brother/core/dream_gate_policy.py
+plugin/runtime/brother/core/dream_record.py
+plugin/runtime/brother/core/dream_report.py
+plugin/runtime/brother/core/model_capability_profile.py
+plugin/runtime/brother/core/openrouter_dispatch.py
+plugin/runtime/brother/core/openrouter_ledger.py
+plugin/runtime/brother/core/openrouter_prices.py
+plugin/runtime/brother/core/openrouter_strict.py
+plugin/runtime/brother/core/or_dispatch_cli.py
+plugin/runtime/brother/core/or_fanout.py
+plugin/runtime/brother/core/repo_paths.py
+# Six more, same ruling: modules the first thirteen import in turn (the freeze of the flat loop bin resolves
+# them; an ast walk that followed only direct imports missed them). Scanned clean the same way; product.py
+# carries the author name and the public repository address, both already public.
+plugin/runtime/brother/core/acceptance.py
+plugin/runtime/brother/core/evidence.py
+plugin/runtime/brother/core/product.py
+plugin/runtime/brother/core/receipt.py
+plugin/runtime/brother/core/run.py
+plugin/runtime/brother/core/state.py

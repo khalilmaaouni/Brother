@@ -12,7 +12,9 @@ path.
 """
 import contextlib
 import io
+import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -20,6 +22,27 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop_bridge as B  # noqa: E402
 import claim_store as C  # noqa: E402
+
+import graph_loop as _gl  # noqa: E402
+
+# main() reaches graph_loop.load(), which reads the live board, a plan document the export tree does not ship.
+needs_live_board = unittest.skipUnless(
+    os.path.isfile(_gl.ROADMAP), 'the live board is a plan file the export tree does not ship')
+
+
+class _SeamFilesStubbed(object):
+    """consult() loads data/jev-seams.json and the registry before it reaches the check. The export tree ships
+    neither, the advisory except swallows the miss, and the fake under test is never called. Same cause as the
+    two seam suites in test_lane_router.py."""
+
+    def setUp(self):
+        self._real_loaders = (B.jev_seam.load_seams_config, B.jev_seam.load_registry)
+        B.jev_seam.load_seams_config = lambda *a, **k: {}
+        B.jev_seam.load_registry = lambda *a, **k: {}
+
+    def tearDown(self):
+        B.jev_seam.load_seams_config, B.jev_seam.load_registry = self._real_loaders
+
 
 #: D5: a real dev checkout of the sibling tools, so a full B.main() call can
 #: load_parts() for real rather than needing a third fake stood up for it.
@@ -172,7 +195,9 @@ class RedGoesToRepairAndGreenDoesNot(unittest.TestCase):
     def test_a_failing_node_is_sent_to_repair(self):
         p = parts("FAIL")
         B.run(PLAN, p, Worker())
-        self.assertEqual(p["repair"].called, ["A", "B"])
+        # run() is concurrent: repairs happen in completion order, and only
+        # the result record is promised in batch order. Each node once.
+        self.assertEqual(sorted(p["repair"].called), ["A", "B"])
 
     def test_a_NO_DATA_node_is_still_handed_to_repair_which_refuses_it_itself(self):
         """The bridge does not second-guess the refusal: bm_repair owns the
@@ -180,7 +205,7 @@ class RedGoesToRepairAndGreenDoesNot(unittest.TestCase):
         why there is no copy of that rule here."""
         p = parts("NO-DATA")
         B.run(PLAN, p, Worker())
-        self.assertEqual(p["repair"].called, ["A", "B"])
+        self.assertEqual(sorted(p["repair"].called), ["A", "B"])
 
     def test_the_repaired_verdict_replaces_the_original_in_the_record(self):
         got = B.run({"batch": [node("A")], "deferred": [], "blocked": []},
@@ -251,6 +276,19 @@ class RealUsageReachesTheRecordAndTheSidecar(unittest.TestCase):
         self.assertEqual(B.read_usage_sidecar(path), data)
 
 
+def _fixture_plan(case):
+    """A one row plan in a temp file. main() loads the plan before anything
+    else, and the default is this checkout's own roadmap, which the export
+    tree does not ship: without this the CLI tests read live repo state."""
+    d = tempfile.mkdtemp(prefix="loop-bridge-plan-")
+    case.addCleanup(shutil.rmtree, d, True)
+    path = os.path.join(d, "plan.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"rows": [{"id": "R1", "title": "row one", "status": "OPEN",
+                             "depends_on": [], "owns": ["a.txt"]}]}, fh)
+    return path
+
+
 class TheSiblingSeamIsNoDataAndNotACrash(unittest.TestCase):
     """Those three modules live in the other repository. An agent already
     searched one repository today for a file that lives in the other and
@@ -261,8 +299,10 @@ class TheSiblingSeamIsNoDataAndNotACrash(unittest.TestCase):
         self.assertIsNone(got)
         self.assertIn("/no/such/tools/dir", problem)
 
+    @needs_live_board
     def test_the_CLI_exits_NO_DATA_rather_than_pretending(self):
-        self.assertEqual(B.main(["--tools", "/no/such/tools/dir"]), 2)
+        self.assertEqual(B.main(["--tools", "/no/such/tools/dir",
+                                 "--plan", _fixture_plan(self)]), 2)
 
     def test_the_real_sibling_actually_loads(self):
         """If this ever fails, the loop has no moving parts, and that is worth
@@ -273,9 +313,46 @@ class TheSiblingSeamIsNoDataAndNotACrash(unittest.TestCase):
             self.assertIn(key, got)
 
 
+class TheLifecycleBarriersSitWhereTheirNamesSay(unittest.TestCase):
+    """The fault lab kills a run at named barriers and judges what resume
+    does, so each barrier must sit at the point its name claims. The
+    after_claim_before_edit barrier once lived in the plugin-version sort
+    key, reached only when HOME held versioned installs."""
+
+    def test_after_claim_before_edit_fires_before_the_worker_edits(self):
+        from unittest.mock import patch
+        events = []
+
+        class _W(Worker):
+            def run(self, unit):
+                events.append("worker")
+                return Worker.run(self, unit)
+
+        class _V(FakeVerify):
+            def verify(self, unit, cwd=None):
+                events.append("check")
+                return FakeVerify.verify(self, unit, cwd)
+
+        p = parts()
+        p["verify"] = _V()
+        with patch.object(B, "_fault_barrier", events.append):
+            B.run_node(node("A"), p, _W())
+        order = [e for e in events if e in ("after_claim_before_edit", "worker",
+                                            "after_edit_before_check", "check")]
+        self.assertEqual(order, ["after_claim_before_edit", "worker",
+                                 "after_edit_before_check", "check"])
+
+    def test_sorting_plugin_installs_passes_no_barrier(self):
+        from unittest.mock import patch
+        with patch.object(B, "_fault_barrier") as barrier:
+            B._version_key("/plugins/brothermode/1.2.3/tools")
+        barrier.assert_not_called()
+
+
 class TheDryRunClaimsNothing(unittest.TestCase):
+    @needs_live_board
     def test_dry_run_exits_zero_and_touches_no_worker(self):
-        self.assertEqual(B.main(["--dry-run"]), 0)
+        self.assertEqual(B.main(["--dry-run", "--plan", _fixture_plan(self)]), 0)
 
 
 class TheProofSliceIsAProofAndNotADemo(unittest.TestCase):
@@ -1009,7 +1086,15 @@ class JevWave1SeamsAreRecordedOnlyNeverAVote(unittest.TestCase):
         (opus review, 2026-09-19): record["scope"] itself must carry no
         Jev-added key either -- not only the top-level "jev" key -- since
         _audit_scope() no longer passes "changed" through at all."""
-        rec = self._run(self._repo())
+        # PINNED OFF, never read from the live file: data/jev-seams.json moved these three to shadow on
+        # 2026-09-20 (d25002855), which is a legitimate rollout step and not this test's subject. A test that
+        # reads live config asserts the config, not the code.
+        real_seams_config_fn = B._jev_seams_config
+        B._jev_seams_config = lambda: {"modes": {"J063": "off", "J102": "off", "J117": "off"}}
+        try:
+            rec = self._run(self._repo())
+        finally:
+            B._jev_seams_config = real_seams_config_fn
         self.assertNotIn("jev", rec)
         self.assertNotIn("changed", rec["scope"])
 
@@ -1112,7 +1197,12 @@ class JevWave1SeamsAreRecordedOnlyNeverAVote(unittest.TestCase):
         missing), run_node()'s own verdict/integrable/scope/repair
         decision is still byte-identical to a run where these seams never
         fired at all. Only the additive record["jev"] key may differ."""
-        baseline = self._run(self._repo())
+        real_seams_config_fn = B._jev_seams_config
+        B._jev_seams_config = lambda: {"modes": {"J063": "off", "J102": "off", "J117": "off"}}   # pinned off, see test_off_mode_adds_no_jev_key
+        try:
+            baseline = self._run(self._repo())
+        finally:
+            B._jev_seams_config = real_seams_config_fn
 
         real_seams_config_fn = B._jev_seams_config
         real_registry_fn = B._jev_registry
@@ -1164,7 +1254,7 @@ class JevWave1SeamsAreRecordedOnlyNeverAVote(unittest.TestCase):
         self.assertAlmostEqual(shadow["jev"]["j102"]["jev_answer"], 0.98)
 
 
-class J035NeverChangesTheDeterministicFailureClass(unittest.TestCase):
+class J035NeverChangesTheDeterministicFailureClass(_SeamFilesStubbed, unittest.TestCase):
     """J035, wired self-containedly inside failure_class_of() itself (not
     through _jev_seams_config()/_jev_registry(), which are scoped to the
     three wave-1 ids only): 'other' is the one class _BREAKER_CLASSES never
@@ -1196,8 +1286,14 @@ class J035NeverChangesTheDeterministicFailureClass(unittest.TestCase):
             seen["current_answer"] = current_answer
             return None
         B.jev_checks.check_worker_failure_classification = fake
+        # The seam's own loaders pinned too: the arguments are built before
+        # the fake is reached, and data/jev-registry.json does not ship in
+        # the export tree, so the real load_registry() raises there first.
+        from unittest.mock import patch
         try:
-            result = B.failure_class_of({"note": "worker crashed, no token here"})
+            with patch.object(B.jev_seam, "load_seams_config", lambda *a, **k: {}), \
+                    patch.object(B.jev_seam, "load_registry", lambda *a, **k: []):
+                result = B.failure_class_of({"note": "worker crashed, no token here"})
         finally:
             B.jev_checks.check_worker_failure_classification = real_check
         self.assertEqual(result, "other")
@@ -2007,6 +2103,20 @@ class WholeUnitWorkerSafety(unittest.TestCase):
         self.assertEqual(len(spawn.calls), 1)
         self.assertEqual(B.failure_class_of(first), "timeout")
         self.assertFalse(second.get("retry_safe", True))
+
+    def test_in_flight_hold_is_not_itself_a_timeout(self):
+        """No worker ran on the held attempt, so its class is "other":
+        brother_run's W2 retry backs off on "timeout", and a timeout label
+        here made it sleep before every later attempt, each refused again."""
+        spawn = self.spawn({"status": "unavailable",
+                            "note": "failure_class=timeout; model timed out"})
+        unit = {"unit_id": "A", "write_scope": ["out"], "task_class": "implementation"}
+        B.LaneWorker(spawn, ["stub"]).run(unit)
+        held = B.LaneWorker(spawn, ["stub"]).run(unit)
+        self.assertEqual(len(spawn.calls), 1)
+        self.assertEqual(held["status"], "held")
+        self.assertIn("before any replay", held["note"])
+        self.assertEqual(B.failure_class_of(held), "other")
 
     def test_timeout_is_not_integrable_even_when_partial_output_passes(self):
         spawn = self.spawn({"status": "unavailable",

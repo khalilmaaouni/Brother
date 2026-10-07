@@ -502,6 +502,121 @@ class DocsCurrentBlocksAStaleSystemMd(unittest.TestCase):
             result = G.check_docs_current(cwd=tmp, runner=never_called)
         self.assertEqual(G.NODATA, result[0][0], result)
 
+    def test_another_checkout_that_carries_the_generator_is_checked_with_this_trees_generator_code(self):
+        """D13 (2026-10-02): the lander runs this gate from a frozen copy of the base commit with --cwd the landing tree.
+        That checkout carries scripts/system_doc.py, so it is checked: THIS tree's system_doc regenerates from the
+        checkout's files (compute_system_doc_diff) and the checkout's own generator is never run. Empty diff OK, a
+        diff BLOCK, a generator that raises NO-DATA; the runner is never called on this path."""
+        from unittest import mock
+        import system_doc
+        with tempfile.TemporaryDirectory(prefix="pre-push-gate-docs-other-") as tmp:
+            os.makedirs(os.path.join(tmp, "scripts"))
+            with open(os.path.join(tmp, "scripts", "system_doc.py"), "w", encoding="utf-8") as fh:
+                fh.write("raise SystemExit('the checkout generator must never run')\n")
+
+            def never_called(cmd, **kw):
+                raise AssertionError("no subprocess runs for another checkout")
+            seen = []
+
+            def fake_diff(root):
+                seen.append(root)
+                return fake_diff.answer
+            with mock.patch.object(system_doc, "compute_system_doc_diff", fake_diff):
+                fake_diff.answer = ""
+                self.assertEqual([(G.OK, "docs-current", "SYSTEM.md still describes the code")],
+                                 G.check_docs_current(cwd=tmp, runner=never_called))
+                fake_diff.answer = "--- regenerated/SYSTEM.md\n+++ checked-in/SYSTEM.md\n-new line\n"
+                verdict, name, detail = G.check_docs_current(cwd=tmp, runner=never_called)[0]
+                self.assertEqual((G.BLOCK, "docs-current"), (verdict, name))
+                self.assertIn("SYSTEM.md is stale", detail)
+            self.assertEqual(seen, [tmp, tmp], "the diff is computed for the checkout named, with this tree's code")
+            with mock.patch.object(system_doc, "compute_system_doc_diff", side_effect=RuntimeError("generator broke")):
+                verdict, name, detail = G.check_docs_current(cwd=tmp, runner=never_called)[0]
+            self.assertEqual((G.NODATA, "docs-current"), (verdict, name))
+            self.assertIn("generator broke", detail)
+
+
+class AChangedTestIsRunWhereThePublicRunnerRunsIt(unittest.TestCase):
+    """2026-09-20: three of six refusals of one release cut were tests green
+    on their author's machine only. The seam tested here is the gate's own:
+    a real repository's outgoing range picks the tests, and the verdicts map
+    onto the gate's levels. hermetic_test_check's own suite covers the run."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="gate-hermetic-")
+        self.addCleanup(__import__("shutil").rmtree, self.repo, True)
+        sh(["git", "init", "-q", "-b", "main"], self.repo)
+        sh(["git", "config", "user.email", "t@example.invalid"], self.repo)
+        sh(["git", "config", "user.name", "t"], self.repo)
+        os.makedirs(os.path.join(self.repo, "scripts"))
+        self.write("scripts/door.py", "A = 1\n")
+        self.write("scripts/test_door.py", "pass\n")
+        self.write("scripts/test_other.py", "pass\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-q", "-m", "base"], self.repo)
+        self.base = sh(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
+
+    def write(self, rel, text):
+        with open(os.path.join(self.repo, rel), "w") as fh:
+            fh.write(text)
+
+    def push_lines(self):
+        head = sh(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
+        return "refs/heads/main %s refs/heads/main %s\n" % (head, self.base)
+
+    def run_check(self, verdicts):
+        import hermetic_test_check as hermetic
+        from unittest import mock
+        seen = []
+
+        def fake(root, tests, **kw):
+            seen.append(list(tests))
+            return [(verdicts.get(t, hermetic.OK), t, "detail") for t in tests] or \
+                [(hermetic.OK, "hermetic-tests", "nothing touched")]
+        with mock.patch.object(hermetic, "check", fake):
+            found = G.check_hermetic_tests(cwd=self.repo, stdin_text=self.push_lines())
+        return found, seen
+
+    def test_a_changed_script_runs_its_test_and_only_its_test(self):
+        self.write("scripts/door.py", "A = 2\n")
+        sh(["git", "commit", "-qam", "change"], self.repo)
+        found, seen = self.run_check({})
+        self.assertEqual(seen, [["scripts/test_door.py"]])
+        self.assertEqual([f[0] for f in found], [G.OK])
+
+    def test_a_red_blocks_the_push_and_no_data_is_not_a_pass(self):
+        import hermetic_test_check as hermetic
+        self.write("scripts/test_door.py", "raise SystemExit(1)\n")
+        self.write("scripts/test_other.py", "pass  # touched\n")
+        sh(["git", "commit", "-qam", "change"], self.repo)
+        found, _ = self.run_check({"scripts/test_door.py": hermetic.REFUSED,
+                                   "scripts/test_other.py": hermetic.NODATA})
+        self.assertEqual(sorted(f[0] for f in found), sorted([G.BLOCK, G.NODATA]))
+        self.assertTrue(all(f[1] == "hermetic" for f in found))
+
+    def test_a_push_touching_no_test_runs_nothing(self):
+        self.write("README.md", "x\n")
+        sh(["git", "add", "-A"], self.repo)
+        sh(["git", "commit", "-qm", "docs"], self.repo)
+        found, seen = self.run_check({})
+        self.assertEqual(seen, [[]])
+        self.assertEqual([f[0] for f in found], [G.OK])
+
+    def test_an_unreadable_range_is_no_data(self):
+        found = G.check_hermetic_tests(
+            cwd=self.repo, stdin_text=self.push_lines(),
+            runner=lambda cmd, **kw: subprocess.CompletedProcess(
+                cmd, 0 if "cat-file" in cmd else 128, "", "fatal"))
+        self.assertEqual([f[0] for f in found], [G.NODATA])
+
+    def test_the_composed_gate_asks_it(self):
+        from unittest import mock
+        with mock.patch.object(G, "check_hermetic_tests",
+                               return_value=[(G.BLOCK, "hermetic", "x")]) as m:
+            found = G.gate(cwd=self.repo, stdin_text="")
+        self.assertTrue(m.called)
+        self.assertEqual(found[0][:2], (G.BLOCK, "hermetic"))
+
 
 class TheDriftBudgetIsReadFromTheEnvironment(unittest.TestCase):
     """check_drift's timeout was a literal 90 seconds; under a load average

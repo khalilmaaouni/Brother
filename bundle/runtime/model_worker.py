@@ -333,6 +333,140 @@ def model_client(env=None):
     return brother_paths.client(env) or brother_paths.CLAUDE
 
 
+WIRED_CLIENTS = frozenset((brother_paths.CLAUDE, brother_paths.CODEX, brother_paths.CURSOR))
+CLIENT_IDENTITIES = frozenset(WIRED_CLIENTS | frozenset(("unknown",)))
+
+
+def client_identity(env=None):
+    """Return the executed client identity, or "unknown" when no wired
+    adapter can be named. Never falls back to a paid default."""
+    if env is None:
+        env = os.environ
+        must_not_raise = True
+    else:
+        must_not_raise = False
+    if type(env) is not dict and env is not os.environ:
+        if must_not_raise:
+            return "unknown"
+        raise ValueError("env must be None or a dict")
+    try:
+        raw = env.get(MODEL_CLIENT_ENV)
+    except Exception:
+        if must_not_raise:
+            return "unknown"
+        raise ValueError("env must support get()")
+    if raw is not None and type(raw) is not str:
+        if must_not_raise:
+            return "unknown"
+        raise ValueError("BROTHER_MODEL_CLIENT must be a string or None")
+    named = (raw or "").strip().lower()
+    if named:
+        if named in WIRED_CLIENTS:
+            return named
+        return "unknown"
+    try:
+        host = brother_paths.client(env)
+    except Exception:
+        if must_not_raise:
+            return "unknown"
+        raise ValueError("could not identify client from env")
+    if host in WIRED_CLIENTS:
+        return host
+    return "unknown"
+
+
+def response_object(worker_claim, artifacts, done_check_exit, usage, attempt, client):
+    """The one stdout JSON object: existing keys preserved, attempt and
+    executed client added. Never invents usage counts for a None usage."""
+    if type(worker_claim) is not str:
+        raise ValueError("worker_claim must be a str")
+    if type(artifacts) is not list:
+        raise ValueError("artifacts must be a list")
+    if usage is None:
+        cost = {}
+    elif type(usage) is dict:
+        cost = dict(usage)
+    else:
+        raise ValueError("usage must be a dict or None")
+    if type(attempt) is bool:
+        raise ValueError("attempt must not be a bool")
+    try:
+        attempt_int = int(attempt)
+    except (TypeError, ValueError):
+        attempt_int = 1
+    if type(client) is not str:
+        raise ValueError("client must be a str")
+    if client not in CLIENT_IDENTITIES:
+        raise ValueError("client must be one of %s or unknown" % sorted(WIRED_CLIENTS))
+    return {
+        "worker_claim": worker_claim,
+        "artifacts": artifacts,
+        "cost": cost,
+        "attempt": attempt_int,
+        "client": client,
+    }
+
+
+#: THE MONEY CEILING, optional and OFF by default, so an unset variable
+#: leaves every argv byte-for-byte what it was.
+#:
+#: The installed claude CLI enforces this itself. Quoted verbatim from
+#: `claude --help` run on this machine 2026-09-10, whose output this file's
+#: author read before writing the flag down:
+#:
+#:   --max-budget-usd <amount>   Maximum dollar amount to spend on API
+#:                               calls (only works with --print)
+#:
+#: "only works with --print" is already satisfied: CLAUDE_ARGV above opens
+#: with -p. The flag is appended to the vendor argv, ahead of the prompt
+#: (the prompt is the final positional, added by _model_argv), so the CLI
+#: itself is what stops the spend rather than any bookkeeping in this file.
+#: A rule is not a control unless something enforces it, and this one is
+#: enforced by the binary that spends the money.
+#:
+#: THE CODEX HALF IS HONEST RATHER THAN SILENT, and this is the part that
+#: matters for an unattended run. `codex exec --help` on this machine
+#: (/Applications/ChatGPT.app/Contents/Resources/codex, exit 0, 109 lines,
+#: read 2026-09-10) contains no occurrence of budget, usd, cost or spend, so
+#: a ceiling simply cannot be enforced on a Codex worker. That path returns
+#: enforced=False with the reason in words, and main() prints it, because a
+#: ceiling reported as in force when nothing enforces it is worse than no
+#: ceiling: it is the one a person walks away from.
+BUDGET_ENV = "MODEL_WORKER_MAX_USD"
+
+
+def budget_ceiling(env=None):
+    """(ceiling_usd_or_None, enforced, reason_in_words).
+
+    `enforced` is True ONLY when this process will really append
+    --max-budget-usd to the vendor argv. Every other path says so and why,
+    in one plain sentence a person can act on. The ceiling is never applied
+    silently and never reported as applied when it is not."""
+    env = os.environ if env is None else env
+    raw = (env.get(BUDGET_ENV) or "").strip()
+    if not raw:
+        return None, False, "no ceiling asked for: %s is unset" % BUDGET_ENV
+    try:
+        usd = float(raw)
+    except ValueError:
+        return None, False, ("%s=%r is not a number, so no ceiling was passed "
+                             "to the model command" % (BUDGET_ENV, raw))
+    if usd <= 0:
+        return None, False, ("%s=%s is not a positive amount, so no ceiling "
+                             "was passed to the model command"
+                             % (BUDGET_ENV, raw))
+    if (env.get("MODEL_WORKER_CMD") or "").strip():
+        return usd, False, ("MODEL_WORKER_CMD replaces the whole vendor argv, "
+                            "and that command is not known to take a budget "
+                            "flag, so the ceiling was NOT passed to it")
+    if model_client(env) == brother_paths.CODEX:
+        return usd, False, ("the codex adapter has no budget flag at all "
+                            "(`codex exec --help` names none), so the ceiling "
+                            "is NOT enforced for this worker")
+    return usd, True, ("passed to the claude CLI as --max-budget-usd %g, "
+                       "which the CLI enforces itself" % usd)
+
+
 def _default_argv(env=None):
     """The vendor argv for THIS worker's own paid dispatch.
 
@@ -348,7 +482,12 @@ def _default_argv(env=None):
     founder-reported: Claude credits still spent when delegating to
     DeepSeek/Muse). Refusing here makes that misconfiguration visible
     instead: run_model() turns this ValueError into a named
-    failure_class=other rather than ever building the claude argv for it."""
+    failure_class=other rather than ever building the claude argv for it.
+
+    The claude path also applies budget_ceiling's own --max-budget-usd flag
+    when it says enforced: a night-run session (docs/plan/1.0.14) found this
+    ceiling computed and reported but never actually passed to the CLI,
+    which is a spend-guard control that stopped controlling anything."""
     env = os.environ if env is None else env
     named = (env.get(MODEL_CLIENT_ENV) or "").strip().lower()
     if named and named not in (
@@ -363,7 +502,11 @@ def _default_argv(env=None):
         return list(CODEX_ARGV)
     if client == brother_paths.CURSOR:
         return list(CURSOR_ARGV)
-    return _claude_argv(env)
+    argv = _claude_argv(env)
+    usd, enforced, _why = budget_ceiling(env)
+    if enforced:
+        argv += ["--max-budget-usd", "%g" % usd]
+    return argv
 
 
 #: usage's own keys (Anthropic's CLI JSON result), renamed to what
@@ -878,6 +1021,15 @@ def main(argv=None):  # noqa: ARG001 (argv kept for a hand-run --selftest shape)
     cwd = os.getcwd()
     prompt = build_prompt(brief)
 
+    # SAY IT OUT LOUD WHEN THE CEILING IS NOT REAL. A run left alone
+    # overnight under a ceiling that nothing enforces is the exact surprise
+    # bill this flag exists to prevent, so an asked-for ceiling that did not
+    # reach the model command is a warning, never a silence.
+    _usd, ceiling_on, ceiling_why = budget_ceiling()
+    if (os.environ.get(BUDGET_ENV) or "").strip() and not ceiling_on:
+        print("model_worker: WARNING, no spend ceiling is in force: %s"
+              % ceiling_why, file=sys.stderr)
+
     print("model_worker: invoking model for unit %s" % brief.get("id", ""),
           file=sys.stderr)
     ok, model_out, usage = run_model(prompt, cwd=cwd)
@@ -893,25 +1045,31 @@ def main(argv=None):  # noqa: ARG001 (argv kept for a hand-run --selftest shape)
         print("model_worker: %s" % commit_detail, file=sys.stderr)
 
     done_check = brief.get("done_check") or ""
+    done_check_exit = None
     claim_parts = [model_out or "(model produced no stdout)", commit_detail]
     if done_check:
         ran, code = run_done_check(done_check, cwd)
         if not ran:
             claim_parts.append("done_check could not be run: NO-DATA")
         else:
+            done_check_exit = code
             claim_parts.append("done_check exit code: %s" % code)
     else:
         claim_parts.append("no done_check was declared for this unit")
 
-    result = {
-        "worker_claim": " | ".join(claim_parts),
-        "artifacts": artifacts,
-        # THE REAL COUNT WHEN THE CLI GAVE ONE, never a fabricated one: {}
-        # when --output-format json's answer could not be read (a stub in a
-        # test, a malformed line), exactly as before this file read usage at
-        # all (see _parse_model_output).
-        "cost": usage or {},
-    }
+    try:
+        attempt = int(brief.get("attempt") or 1)
+    except (TypeError, ValueError):
+        attempt = 1
+    client = client_identity()
+    result = response_object(
+        " | ".join(claim_parts),
+        artifacts,
+        done_check_exit,
+        usage,
+        attempt,
+        client,
+    )
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -289,6 +289,120 @@ class TheToolPathFollowsTheRulingOfRecord(unittest.TestCase):
             self.assertIn("NO-DATA", err)
 
 
+class TheToolResolvesInTheLayoutTheOnePluginShips(unittest.TestCase):
+    """THE DEFECT (found 2026-10-06 by an outside review, confirmed by running
+    the hook's own resolution): every rung names a PRODUCT root and the index
+    was looked for only at <root>/tools/bm_vault.py. The one plugin ships this
+    hook at <root>/runtime/hooks/brothermode/tools/ beside bm_vault.py and
+    carries no <root>/tools, so under the plugin root Claude Code exports the
+    path named a file that does not exist and the hook returned 0 without a
+    word: point of need memory was off in every install of the one plugin.
+
+    Each case below isolates one condition of the resolution."""
+
+    BUNDLE_REL = os.path.join("runtime", "hooks", "brothermode", "tools")
+    _probes = [0]
+
+    @staticmethod
+    def _put(path, text):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def _load(self, hook_dir, env, with_index=True):
+        """A copy of the real hook in `hook_dir`, with a stub index beside it
+        unless told otherwise, imported under an environment that carries
+        nothing of this machine's: no tool override, no plugin root, and a
+        HOME that holds no installer config."""
+        with open(HOOK, encoding="utf-8") as src:
+            self._put(os.path.join(hook_dir, "vault_recall_hook.py"), src.read())
+        if with_index:
+            self._put(os.path.join(hook_dir, "bm_vault.py"), "# stub index\n")
+        saved = dict(os.environ)
+        os.environ.clear()
+        os.environ.update({k: v for k, v in saved.items()
+                           if k not in SILENT_ENVIRONMENT_DROPS + ("PLUGIN_ROOT",)})
+        os.environ.update(env)
+        self._probes[0] += 1
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "vault_recall_hook_install_probe_%d" % self._probes[0],
+                os.path.join(hook_dir, "vault_recall_hook.py"))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod._consented = lambda: True
+            return mod
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def test_the_one_plugin_layout_resolves_the_index_beside_the_hook(self):
+        for var in ("CLAUDE_PLUGIN_ROOT", "BROTHER_PLUGIN_ROOT", "PLUGIN_ROOT"):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = os.path.realpath(os.path.join(tmp, "plugin"))
+                hook_dir = os.path.join(root, self.BUNDLE_REL)
+                mod = self._load(hook_dir, {"HOME": tmp, var: root})
+                self.assertTrue(
+                    os.path.isfile(mod.TOOL),
+                    "%s names the one plugin's root and the index tool resolved "
+                    "to a file that does not exist: %r" % (var, mod.TOOL))
+                self.assertEqual(os.path.realpath(mod.TOOL),
+                                 os.path.join(hook_dir, "bm_vault.py"))
+
+    def test_the_product_root_layout_still_wins_when_it_exists(self):
+        """Both files present: <root>/tools/bm_vault.py is the layout every
+        rung names, so it is the answer, never the file beside the hook."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.realpath(os.path.join(tmp, "plugin"))
+            self._put(os.path.join(root, "tools", "bm_vault.py"), "# product index\n")
+            mod = self._load(os.path.join(root, self.BUNDLE_REL),
+                             {"HOME": tmp, "CLAUDE_PLUGIN_ROOT": root})
+            self.assertEqual(mod.TOOL, os.path.join(root, "tools", "bm_vault.py"))
+
+    def test_a_root_the_hook_does_not_sit_in_never_borrows_the_file_beside_it(self):
+        """D01 stays whole: a configured root that is somewhere else must not
+        fall back to whichever checkout this file happens to sit in."""
+        with tempfile.TemporaryDirectory() as tmp:
+            elsewhere = os.path.realpath(os.path.join(tmp, "elsewhere"))
+            os.makedirs(elsewhere)
+            hook_dir = os.path.join(os.path.realpath(tmp), "checkout", self.BUNDLE_REL)
+            mod = self._load(hook_dir, {"HOME": tmp, "CLAUDE_PLUGIN_ROOT": elsewhere})
+            self.assertEqual(mod.TOOL, os.path.join(elsewhere, "tools", "bm_vault.py"))
+            self.assertFalse(os.path.exists(mod.TOOL))
+
+    def test_no_root_at_all_stays_unconfigured_even_with_an_index_beside_the_hook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hook_dir = os.path.join(os.path.realpath(tmp), "plugin", self.BUNDLE_REL)
+            mod = self._load(hook_dir, {"HOME": tmp})
+            self.assertEqual(mod.TOOL, "")
+
+    def test_a_configured_root_with_no_index_anywhere_says_so_once(self):
+        """The direction of failure: a root that resolves to no tool is OFF,
+        and off must be audible once per session, still exit 0, never a
+        blocked edit and never silence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.realpath(os.path.join(tmp, "plugin"))
+            mod = self._load(os.path.join(root, self.BUNDLE_REL),
+                             {"HOME": tmp, "CLAUDE_PLUGIN_ROOT": root}, with_index=False)
+            self.assertFalse(os.path.exists(mod.TOOL))
+            mod.SEEN = os.path.join(tmp, "seen")
+            outs = []
+            for _ in range(2):
+                saved_in, saved_err = sys.stdin, sys.stderr
+                sys.stdin = io.StringIO(json.dumps(
+                    {"session_id": "s1", "tool_input": {"file_path": "/tmp/x.py"}}))
+                sys.stderr = io.StringIO()
+                try:
+                    rc = mod.main()
+                    outs.append(sys.stderr.getvalue())
+                finally:
+                    sys.stdin, sys.stderr = saved_in, saved_err
+                self.assertEqual(rc, 0)
+            self.assertIn("NO-DATA", outs[0])
+            self.assertIn("bm_vault.py", outs[0])
+            self.assertEqual(outs[1], "", "the refusal repeated inside one session")
+
+
 class TheToolPathDegradesOnAShapeInvalidConfig(unittest.TestCase):
     """VB-12 major: a config file shaped like {"tools": 5} used to reach
     os.path.join(5, "tools", "bm_vault.py") at IMPORT TIME, raising a
@@ -2133,6 +2247,191 @@ class D3TheHardTwoIsReplacedWithARankedBound(unittest.TestCase):
             self.assertEqual(len(titles), mod.RECALL_INJECT_MAX, context)
             self.assertIn("Vault: showing %d of 5 matched" % mod.RECALL_INJECT_MAX,
                           context, context)
+
+
+def _anchor_note(vault, name, applies_to=None, human_approved=None):
+    """A temp vault note carrying only the frontmatter the promotion reads."""
+    lines = ["---", "type: failure"]
+    if applies_to is not None:
+        lines.append("applies_to: [%s]" % applies_to)
+    if human_approved is not None:
+        lines.append("human_approved: %s" % ("true" if human_approved else "false"))
+    lines += ["---", "# %s" % name, ""]
+    path = os.path.join(vault, name + ".md")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
+def _anchor_block(title, path):
+    return "  %s  [lesson, vault]\n    body of %s\n    %s\n" % (title, title, path)
+
+
+class AnchoredLessonsRankFirst(unittest.TestCase):
+    """2026-10-04 owner order: a recalled lesson whose applies_to names the
+    touched file, and whose anchor resolves in the tree, is shown before
+    every other lesson, so the cut to RECALL_INJECT_MAX can never drop it
+    behind unanchored ones. One fixture per guard in _cap_served and its two
+    helpers; the end to end test drives cmd_check itself."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, ignore_errors=True)
+        self.tree = os.path.join(self.tmp, "repo")
+        self.vault = os.path.join(self.tmp, "vault")
+        os.makedirs(os.path.join(self.tree, "scripts"))
+        os.makedirs(self.vault)
+        for f in ("x.py", "y.py"):
+            open(os.path.join(self.tree, "scripts", f), "w").close()
+        self.mod = load_hook()
+
+    def cap(self, notes, records=None, touched="scripts/x.py", tree=None, max_served=2):
+        """notes: list of (title, path, state). Returns the served titles in order."""
+        out = "RECORDED FAILURES in the files you are about to touch:\n\n" + "".join(
+            _anchor_block(t, p) for t, p, _st in notes)
+        if records is None:
+            records = [{"slug": t, "path": p, "state": st} for t, p, st in notes]
+        out2, recs2, _dropped = self.mod._cap_served(
+            out, records, max_served, touched=touched, tree=tree or self.tree)
+        titles = [l.strip().split("  ")[0] for l in out2.split("\n")
+                  if self.mod._NOTE_START_RE.match(l)]
+        return titles, [r["slug"] for r in recs2]
+
+    def plain(self, n):
+        return ("plain%d" % n, _anchor_note(self.vault, "plain%d" % n), "unverified")
+
+    def test_an_anchored_lesson_is_promoted_past_the_cut(self):
+        anchored = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "unverified")
+        titles, slugs = self.cap([self.plain(1), self.plain(2), anchored])
+        self.assertEqual(titles, ["anch", "plain1"])
+        self.assertEqual(slugs, ["anch", "plain1"])  # records move in lockstep
+
+    def test_no_touched_path_keeps_the_tools_order(self):
+        anchored = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "unverified")
+        titles, _ = self.cap([self.plain(1), self.plain(2), anchored], touched=None)
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_a_stale_lesson_is_never_promoted(self):
+        stale = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "stale")
+        titles, _ = self.cap([self.plain(1), self.plain(2), stale])
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_a_lesson_a_human_did_not_approve_is_never_promoted(self):
+        refused = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py",
+                                        human_approved=False), "unverified")
+        titles, _ = self.cap([self.plain(1), self.plain(2), refused])
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_an_anchor_naming_another_file_is_not_promoted(self):
+        other = ("anch", _anchor_note(self.vault, "anch", "scripts/y.py"), "unverified")
+        titles, _ = self.cap([self.plain(1), self.plain(2), other])
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_an_anchor_that_does_not_resolve_in_the_tree_is_not_promoted(self):
+        anchored = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "unverified")
+        empty = os.path.join(self.tmp, "empty")
+        os.makedirs(empty)
+        titles, _ = self.cap([self.plain(1), self.plain(2), anchored], tree=empty)
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_records_that_do_not_pair_with_blocks_leave_the_order_alone(self):
+        anchored = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "unverified")
+        notes = [self.plain(1), self.plain(2), anchored]
+        records = [{"slug": t, "path": p, "state": st} for t, p, st in notes[:2]]
+        titles, _ = self.cap(notes, records=records)
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_order_is_stable_inside_each_group(self):
+        a1 = ("a1", _anchor_note(self.vault, "a1", "scripts/x.py"), "unverified")
+        a2 = ("a2", _anchor_note(self.vault, "a2", "./scripts/x.py"), "unverified")
+        titles, _ = self.cap([self.plain(1), a1, self.plain(2), a2], max_served=4)
+        self.assertEqual(titles, ["a1", "a2", "plain1", "plain2"])
+
+    def test_names_file_is_an_exact_path_match(self):
+        nf = self.mod._names_file
+        self.assertTrue(nf("scripts/x.py", "scripts/x.py"))
+        self.assertTrue(nf("./scripts/x.py", "scripts/x.py"))
+        self.assertTrue(nf("scripts/x.py", "./scripts/x.py"))
+        self.assertFalse(nf("x.py", "scripts/x.py"))  # root file never names a nested one
+        self.assertFalse(nf("repo/scripts/x.py", "scripts/x.py"))
+        self.assertFalse(nf("python3 scripts/x.py", "scripts/x.py"))
+        self.assertFalse(nf("", ""))
+
+    def test_a_root_anchor_does_not_promote_a_nested_file_of_the_same_name(self):
+        open(os.path.join(self.tree, "x.py"), "w").close()
+        root = ("anch", _anchor_note(self.vault, "anch", "x.py"), "unverified")
+        titles, _ = self.cap([self.plain(1), self.plain(2), root])
+        self.assertEqual(titles, ["plain1", "plain2"])
+
+    def test_a_symbol_anchor_is_never_grepped_for_ranking(self):
+        calls = []
+        self.mod._anchor_resolves = lambda a, t: calls.append(a) or True
+        anchored = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "unverified")
+        self.cap([self.plain(1), self.plain(2), anchored])
+        self.assertEqual(calls, [])
+
+    def test_only_the_first_anchor_rank_max_anchors_are_read(self):
+        many = ", ".join("scripts/n%d.py" % i for i in range(self.mod.ANCHOR_RANK_MAX))
+        late = ("anch", _anchor_note(self.vault, "anch", many + ", scripts/x.py"), "unverified")
+        titles, _ = self.cap([self.plain(1), self.plain(2), late])
+        self.assertEqual(titles, ["plain1", "plain2"])
+        early = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py, " + many), "unverified")
+        titles, _ = self.cap([self.plain(1), self.plain(2), early])
+        self.assertEqual(titles, ["anch", "plain1"])
+
+    def test_a_policy_conflict_or_no_data_lesson_is_never_promoted(self):
+        for state in ("policy-conflict", "no-data"):
+            bad = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), state)
+            titles, _ = self.cap([self.plain(1), self.plain(2), bad])
+            self.assertEqual(titles, ["plain1", "plain2"], state)
+
+    def test_a_withheld_block_keeps_its_slot(self):
+        anchored = ("anch", _anchor_note(self.vault, "anch", "scripts/x.py"), "unverified")
+        notes = [self.plain(1), anchored]
+        withheld = ("  WITHHELD (stale)  gone  [lesson, vault]\n    reason: x\n    /v/gone.md\n"
+                    + self.mod._WITHHELD_MARKER_LINE + "\n")
+        out = ("RECORDED FAILURES in the files you are about to touch:\n\n" + withheld
+               + "".join(_anchor_block(t, p) for t, p, _st in notes))
+        records = [{"slug": t, "path": p, "state": st} for t, p, st in notes]
+        out2, recs2, _ = self.mod._cap_served(out, records, 4, touched="scripts/x.py",
+                                               tree=self.tree)
+        titles = [l.strip().split("  ")[0] for l in out2.split("\n")
+                  if self.mod._NOTE_START_RE.match(l)]
+        self.assertEqual(titles, ["WITHHELD (stale)", "anch", "plain1"])
+        self.assertEqual([r["slug"] for r in recs2], ["anch", "plain1"])
+
+    def test_end_to_end_the_hook_shows_the_anchored_lesson_first(self):
+        # A real repository, so the hook's touched path is repo-relative
+        # (scripts/x.py) the way it is on a real edit.
+        subprocess.run(["git", "init", "-q", self.tree], check=True)
+        self.tree = os.path.realpath(self.tree)  # git reports the resolved root
+        anchored = _anchor_note(self.vault, "anch", "scripts/x.py")
+        blocks = [_anchor_block("plain%d" % n, _anchor_note(self.vault, "plain%d" % n))
+                  for n in range(1, 6)] + [_anchor_block("anch", anchored)]
+        tool = os.path.join(self.tmp, "bm_vault.py")
+        with open(tool, "w", encoding="utf-8") as fh:
+            fh.write("print('RECORDED FAILURES in the files you are about to touch:')\n"
+                     "print(%r, end='')\n" % ("\n" + "".join(blocks)))
+        mod = load_hook({"BM_TOOLS": self.tmp,
+                         "BM_HOOK_OUTCOMES": os.path.join(self.tmp, "outcomes.jsonl")})
+        mod.TOOL = tool
+        mod.SEEN = os.path.join(self.tmp, "seen")
+        mod.bm_vault_heat_temporal = None
+        mod._load_bm_vault_read_audit = lambda: None
+        saved_in, saved_out = sys.stdin, sys.stdout
+        sys.stdin = io.StringIO(json.dumps({
+            "session_id": "anchor-rank", "cwd": self.tree,
+            "tool_input": {"file_path": os.path.join(self.tree, "scripts", "x.py")}}))
+        sys.stdout = io.StringIO()
+        try:
+            mod.main()
+            raw = sys.stdout.getvalue()
+        finally:
+            sys.stdin, sys.stdout = saved_in, saved_out
+        context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+        shown = [l for l in context.split("\n") if "recall attribution" in l]
+        self.assertEqual(len(shown), mod.RECALL_INJECT_MAX, context)
+        self.assertIn("anch.md", shown[0], context)
 
 
 if __name__ == "__main__":

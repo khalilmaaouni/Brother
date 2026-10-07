@@ -30,8 +30,10 @@ Usage:
 Exit 0 every row checked is NEW, 1 at least one is MODIFY, 2 NO-DATA.
 """
 import argparse
+import glob
 import json
 import os
+import re
 import sys
 
 
@@ -118,5 +120,127 @@ def main(argv=None):
     return 1 if modify else 0
 
 
+# ---------------------------------------------------------------------------
+# A SPECIFICATION THAT ORDERS WHAT A GATE REFUSES IS UNWINNABLE, added 2026-09-21.
+#
+# Measured that day on L5f-c: its spec said "Stdlib `urllib` plus `json` plus `hashlib` only", while the build
+# safety screen in scripts/loop/grade_build.py refuses `urllib` outright. Every worker that obeyed the sentence
+# was failed on the screen BEFORE A SINGLE TEST RAN. All six grades across three exhausted rounds are safety
+# screen refusals and not one is a test failure. Three rounds of model spend bought nothing, and the loop
+# reported it as "needs one fact about the real tree" when the real fact was that the lane could not be won.
+#
+# This is a different class from the NEW-versus-exists check above. There the spec is wrong about the TREE; here
+# the spec is wrong about our own GATES, and no amount of worker skill can satisfy both.
+#
+# The refused list is IMPORTED from the screen rather than copied, so the two can never drift apart. A copy
+# would be a second source of truth and would go stale the first time the screen changed.
+def refused_modules():
+    """The modules the build safety screen refuses, read from the screen itself. Returns None when it cannot be
+    read, which the caller reports as NO-DATA: a check that silently finds nothing is worse than one that says
+    it could not look."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "loop", "grade_build.py")
+    try:
+        spec = importlib.util.spec_from_file_location("_gb_precheck", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return tuple(getattr(mod, "NET_MODULES")) + ("urllib",)
+    except (OSError, AttributeError, ImportError, SyntaxError, ValueError):
+        return None
+
+
+def gate_conflicts(spec_text, refused):
+    """[(module, quoted line)] for every refused module this spec text tells a worker to USE.
+
+    THE PREDICATE IS THE WHOLE DIFFICULTY, and a first version of it cried wolf on 17 lines of which most were
+    English rather than instructions: "concurrent requests", "without a socket ever opening", "import of
+    `urllib.parse` does not count as a network import". A check whose findings are mostly false is worse than no
+    check at all, because it teaches its reader to skip it.
+
+    So a line counts only when it is an IMPORT or a direct USE: an import statement, a dotted call into the
+    module, or a phrase that hands the module to the worker as the thing to build with. A line that merely names
+    the module while DENYING it, describing a mutation, or explaining that something does not count, is not an
+    instruction and is skipped."""
+    if not refused or not isinstance(spec_text, str):
+        return []
+    deny = re.compile(r"refus|screen|must not|never|no network|denied|deny|instead of|imports no|does not count|"
+                      r"trap|amended|without a|fails inside|flagged|remove |delete|forbidden|mutation", re.I)   # delete/forbidden: 2026-09-22, two L5f and L3b lines describing a mutation and a refusal test read as orders
+    out = []
+    for line in spec_text.splitlines():
+        if deny.search(line):
+            continue
+        for m in refused:
+            q = re.escape(m)
+            use = (r"^\s*(from|import)\s+%s\b" % q,          # import statement
+                   r"\bimport\s+%s\b" % q,                    # inline import
+                   r"\b%s\.[a-z_]+\s*\(" % q,                # a dotted call into it
+                   r"[Ss]tdlib\s+`?%s`?" % q,                   # "Stdlib urllib"
+                   r"\buse\s+`?%s`?" % q)                      # "use requests"
+            if any(re.search(u, line) for u in use):
+                out.append((m, line.strip()[:110]))
+                break
+    return out
+
+
+def units_with_command_runners(plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
+    """Unit ids whose plan record names command_runners (grade_build.allowed_runners reads the same field), plus DONE units.
+    Unreadable plan: the empty set, so every subprocess conflict is still reported."""
+    try:
+        with open(plan_path, encoding="utf-8") as fh:
+            units = json.load(fh).get("units") or []
+        return {u["id"] for u in units if isinstance(u, dict) and u.get("id")
+                and (u.get("command_runners") or u.get("state") == "DONE")}   # a DONE unit's spec orders nothing to anyone any more
+    except (OSError, ValueError, AttributeError, TypeError):
+        return set()
+
+
+def malformed_runners(plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
+    """[(unit id, entry)] for every command_runners entry that is not a .py or .sh path. grade_build.allowed_runners
+    admits subprocess for listed PATHS only, so a module name ("subprocess", "os": all six H units on 2026-09-24)
+    allows nothing while the brief tells the worker it may run commands. Unreadable plan: [] (the scan below still
+    reports every conflict, since no unit is then exempt)."""
+    try:
+        with open(plan_path, encoding="utf-8") as fh:
+            units = json.load(fh).get("units") or []
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+    return [(u.get("id"), e) for u in units if isinstance(u, dict) for e in (u.get("command_runners") or [])
+            if not (isinstance(e, str) and e.strip() == e and e.endswith((".py", ".sh")) and " " not in e)]
+
+
+def main_gate_scan(specs_dir="docs/plan/specs", plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
+    refused = refused_modules()
+    if refused is None:
+        print("NO-DATA: the build safety screen could not be read, so no spec was checked against it")
+        return 2
+    bad = 0
+    for unit, entry in malformed_runners(plan_path):
+        print("MALFORMED %-8s command_runners names %r, which is not a .py or .sh path: the build screen allows nothing for it" % (unit, entry))
+        bad += 1
+    runners_units = units_with_command_runners(plan_path)
+    for path in sorted(glob.glob(os.path.join(specs_dir, "*.md"))):
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError as exc:
+            print("UNREADABLE %-26s could not be read (%s), so it was not checked" % (os.path.basename(path), type(exc).__name__))
+            bad += 1
+            continue
+        hits = gate_conflicts(text, refused)
+        if os.path.basename(path)[:-3] in runners_units:
+            # owner ruling 2026-09-22: a unit that names command runners in the plan may order subprocess for them
+            hits = [(m, l) for m, l in hits if m != "subprocess"]
+        for mod, line in hits:
+            print("CONFLICT %-28s orders `%s`, which the build screen refuses: %s"
+                  % (os.path.basename(path), mod, line))
+            bad += 1
+    print("%d spec(s) scanned against %d refused module(s); %d conflict(s)"
+          % (len(glob.glob(os.path.join(specs_dir, "*.md"))), len(refused), bad))
+    return 1 if bad else 0
+
+
+if __name__ == "__main__" and "--gate-scan" in sys.argv:
+    # intercepts BEFORE the argparse main below, which requires --plan and would refuse this call
+    sys.exit(main_gate_scan())
 if __name__ == "__main__":
     sys.exit(main())

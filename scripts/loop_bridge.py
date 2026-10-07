@@ -54,6 +54,7 @@ fh.write(SLICE_WORKER)` inside prove_slice(), a few lines below the
 SLICE_WORKER string constant.
 """
 import argparse
+import collections.abc
 import glob
 import hashlib
 import math
@@ -65,15 +66,44 @@ import os
 import sys
 import threading
 import time
+from typing import Mapping, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import brother_paths  # noqa: E402
-import fault_barrier  # noqa: E402
+# D1.5: the fault-injection hook is a diagnostic, not a dispatch authority,
+# but a barrier that is NOT there must never read as "no fault happened".
+# A missing module leaves the name None, and the barrier call site then
+# refuses through run_node's own NO-DATA guard rather than approving.
+try:
+    import fault_barrier  # noqa: E402
+except ImportError:  # sbe: allow-silent the barrier is absent, so every call site refuses rather than approves
+    fault_barrier = None
 import graph_loop  # noqa: E402
 import journal  # noqa: E402
 import resource_gate  # noqa: E402  (sibling module, scripts/resource_gate.py; graph_loop.py already relies on it unconditionally)
 import run_heartbeat  # noqa: E402
+
+#: D15-C: the scheduling policy module owns the three hashes a contract carries
+#: and the one function that re-derives them. The import is OPTIONAL, and a
+#: missing import is a REFUSAL, never an approval: recompute_scheduling_hashes
+#: below answers SCHEDULING-VALIDATOR-MISSING, so a contract can never pass on
+#: the strength of a validator that is not there.
+_PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
+try:
+    from plugin.runtime.brother.core.dream_policy import (
+        SchedulingConstraints as _SchedulingConstraints,
+        SchedulingLimits as _SchedulingLimits,
+        SchedulingPolicy as _SchedulingPolicy,
+        hash_scheduling_inputs as _hash_scheduling_inputs,
+    )
+except ImportError:  # sbe: allow-silent the absence becomes SCHEDULING-VALIDATOR-MISSING below, never an approval
+    _SchedulingConstraints = None
+    _SchedulingLimits = None
+    _SchedulingPolicy = None
+    _hash_scheduling_inputs = None
 
 
 def _fault_barrier(name):
@@ -169,7 +199,6 @@ def _version_key(tools_path):
     """Numeric ordering for a versioned install dir (…/<version>/tools), so
     1.10.0 outranks 1.2.3; a non-numeric name sorts last, not crashes."""
     name = os.path.basename(os.path.dirname(tools_path))
-    _fault_barrier("after_claim_before_edit")
     try:
         return tuple(int(x) for x in name.split("."))
     except ValueError:
@@ -281,22 +310,298 @@ def load_parts(tools_dir=None, env=None):
     return None, not_found_message(looked, skipped)
 
 
+# ---------------------------------------------------------------------------
+# D15-C: the scheduling contract gate.
+#
+# graph_loop builds a plan that names the order it chose, the width it chose and
+# the three hashes of the policy, limits and constraints it chose. THIS module is
+# where that plan becomes claims and then processes, so this is the one place
+# that decides whether the plan it was handed is the plan that was built.
+#
+# THREE PROPERTIES, each of which a reviewer can break on purpose:
+#
+#   The batch is exactly chosen_order[:width], in that order. Nothing is filtered,
+#   re-sorted or topped up on the way to a claim.
+#   The three hashes are RE-DERIVED from the raw policy, limits and constraints
+#   the plan carries, not merely read back. A hash nobody re-derives binds
+#   nothing, and a mismatch between the raw inputs and the hashes is a refusal.
+#   A missing dependency is a REFUSAL, never a pass: when the scheduling policy
+#   module cannot be imported, recompute_scheduling_hashes refuses, and no caller
+#   turns that refusal into an approval.
+#
+# Every public function below answers a plan that is not a mapping with its own
+# refusal value rather than a raw AttributeError. An exception a caller cannot
+# classify is not a refusal, and dispatchable()/refused() below are handed
+# whatever the caller happened to have.
+# ---------------------------------------------------------------------------
+
+
+class SchedulingContractError(ValueError):
+    """A scheduling contract this bridge will not accept.
+
+    The gate below answers with (False, reason) rather than raising, so this
+    type exists for a caller that wants a typed refusal it can catch. This
+    module never raises it itself.
+    """
+
+    code: str
+
+
+_D15C_ABSENT = object()
+
+_D15C_CONSTRAINT_TUPLE_FIELDS = (
+    "conflict_free_ids",
+    "dependency_satisfied_ids",
+    "founder_authorized_ids",
+    "lease_held_ids",
+    "starvation_guaranteed_ids",
+)
+
+_D15C_LIMIT_INT_FIELDS = (
+    "max_width",
+    "max_cpu_seconds",
+    "max_wall_seconds",
+    "max_memory_mb",
+    "max_disk_mb",
+    "max_network_bytes",
+    "max_tokens",
+    "max_cost_micros",
+)
+
+#: The three hash fields a contract carries, and the three raw inputs those
+#: hashes are re-derived from, in the same order.
+_D15C_HASH_FIELDS = ("policy_hash", "limits_hash", "constraints_hash")
+_D15C_RAW_FIELDS = ("policy_raw", "limits_raw", "constraints_raw")
+
+#: A hash is 64 lowercase hex characters and nothing else. Uppercase hex is a
+#: DIFFERENT string and is refused: a comparison that read it case-insensitively
+#: would accept a hash this module never produced.
+_D15C_HASH_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+
+
+def _d15c_plain_int(value):
+    """An int that is not a bool. True is 1 to Python and a lie here."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _d15c_rebuild_policy(raw):
+    """The typed policy `raw` names, or None when it cannot be rebuilt."""
+    policy_id = raw.get("policy_id")
+    priority_key = raw.get("priority_key")
+    tie_breaker = raw.get("tie_breaker")
+    width = raw.get("requested_width")
+    if not isinstance(policy_id, str) or not policy_id:
+        return None
+    if not isinstance(priority_key, str) or not isinstance(tie_breaker, str):
+        return None
+    if not _d15c_plain_int(width):
+        return None
+    try:
+        return _SchedulingPolicy(policy_id=policy_id, requested_width=width,
+                                 priority_key=priority_key,
+                                 tie_breaker=tie_breaker)
+    except (TypeError, ValueError):
+        return None
+
+
+def _d15c_rebuild_limits(raw):
+    """The typed limits `raw` names, or None. Every field is required."""
+    values = {}
+    for name in _D15C_LIMIT_INT_FIELDS:
+        value = raw.get(name)
+        if not _d15c_plain_int(value):
+            return None
+        values[name] = value
+    try:
+        return _SchedulingLimits(**values)
+    except (TypeError, ValueError):
+        return None
+
+
+def _d15c_rebuild_constraints(raw):
+    """The typed constraints `raw` names, or None. Lists come back as tuples."""
+    values = {}
+    for name in _D15C_CONSTRAINT_TUPLE_FIELDS:
+        value = raw.get(name)
+        if not isinstance(value, (list, tuple)):
+            return None
+        for item in value:
+            if not isinstance(item, str):
+                return None
+        values[name] = tuple(value)
+    for name in ("canonical_base_known", "contention_known"):
+        value = raw.get(name)
+        if not isinstance(value, bool):
+            return None
+        values[name] = value
+    try:
+        return _SchedulingConstraints(**values)
+    except (TypeError, ValueError):
+        return None
+
+
+def recompute_scheduling_hashes(
+        plan: Mapping[str, object]
+) -> Tuple[bool, str, Optional[Tuple[str, str, str]]]:
+    """(ok, reason, (policy_hash, limits_hash, constraints_hash)).
+
+    Re-derives the three hashes from the raw policy, limits and constraints the
+    plan carries. Every failure is a refusal with a reason: a plan or contract
+    that is not a mapping, a raw input that is missing, a raw input that cannot
+    be rebuilt into its typed value, a scheduling policy module that cannot be
+    imported, or a hasher that refuses these values. A missing validator is
+    never an approval.
+    """
+    if not isinstance(plan, collections.abc.Mapping):
+        return False, "SCHEDULING-RAW-MISSING", None
+    scheduling = plan.get("scheduling")
+    if not isinstance(scheduling, collections.abc.Mapping):
+        return False, "SCHEDULING-RAW-MISSING", None
+    raws = []
+    for name in _D15C_RAW_FIELDS:
+        value = scheduling.get(name)
+        if not isinstance(value, collections.abc.Mapping):
+            return False, "SCHEDULING-RAW-MISSING", None
+        raws.append(value)
+    if (_SchedulingPolicy is None or _SchedulingLimits is None
+            or _SchedulingConstraints is None
+            or _hash_scheduling_inputs is None):
+        return False, "SCHEDULING-VALIDATOR-MISSING", None
+    policy = _d15c_rebuild_policy(raws[0])
+    limits = _d15c_rebuild_limits(raws[1])
+    constraints = _d15c_rebuild_constraints(raws[2])
+    if policy is None or limits is None or constraints is None:
+        return False, "SCHEDULING-RAW-CORRUPT", None
+    try:
+        triple = _hash_scheduling_inputs(policy, limits, constraints)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a hasher that refuses these values is a refusal here, never an approval
+        return False, "SCHEDULING-RAW-CORRUPT", None
+    if not isinstance(triple, tuple) or len(triple) != 3:
+        return False, "SCHEDULING-RAW-CORRUPT", None
+    for item in triple:
+        if not isinstance(item, str) or not _D15C_HASH_RE.match(item):
+            return False, "SCHEDULING-RAW-CORRUPT", None
+    return True, "", (triple[0], triple[1], triple[2])
+
+
+def validate_scheduling_contract(
+        plan: Mapping[str, object]) -> Tuple[bool, str]:
+    """(ok, reason). The one gate every start passes through.
+
+    Refuses, in this order: a plan that is not a mapping, an absent contract
+    (NO-DATA, no starts), a contract that is not a mapping, a status that is not
+    OK, a chosen_order that is not a list of string ids, a width that is not an
+    int inside that list, a batch that is missing or is not a list of mappings
+    with string ids, a batch that is not exactly the chosen prefix, a unit id
+    repeated in chosen_order or batch, a hash field that is missing or
+    malformed, and raw inputs that are missing, corrupt or do not re-derive
+    those hashes.
+
+    A refusal is always a reason. It is never an empty string, and it is never a
+    pass: a caller that ignores this gate starts work the plan did not
+    authorise.
+    """
+    if not isinstance(plan, collections.abc.Mapping):
+        return False, "BLOCKS: plan is not a mapping"
+    scheduling = plan.get("scheduling", _D15C_ABSENT)
+    if scheduling is _D15C_ABSENT:
+        return False, "NO-DATA: scheduling contract is absent"
+    if not isinstance(scheduling, collections.abc.Mapping):
+        return False, "BLOCKS: scheduling contract is not a mapping"
+    status = scheduling.get("status")
+    if status != "OK":
+        return False, "BLOCKS: scheduling status is %s" % (status,)
+    chosen = scheduling.get("chosen_order")
+    if not isinstance(chosen, list):
+        return False, "BLOCKS: chosen_order is not a list of unit ids"
+    for unit_id in chosen:
+        if not isinstance(unit_id, str):
+            return False, "BLOCKS: chosen_order is not a list of unit ids"
+    width = scheduling.get("width")
+    if not _d15c_plain_int(width):
+        return False, "BLOCKS: width is not an integer"
+    if width < 0 or width > len(chosen):
+        return False, ("BLOCKS: width %d is outside chosen_order of length %d"
+                       % (width, len(chosen)))
+    batch = plan.get("batch")
+    if not isinstance(batch, list):
+        return False, "BLOCKS: batch is missing or is not a list"
+    batch_ids = []
+    for node in batch:
+        if not isinstance(node, collections.abc.Mapping):
+            return False, "BLOCKS: batch node is not a mapping"
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            return False, "BLOCKS: batch node has no string id"
+        batch_ids.append(node_id)
+    if batch_ids != chosen[:width]:
+        return False, ("BLOCKS: batch does not equal the chosen_order prefix "
+                       "of length %d" % width)
+    if len(set(chosen)) != len(chosen) or len(set(batch_ids)) != len(batch_ids):
+        return False, "BLOCKS: duplicate unit id in chosen_order or batch"
+    hashes = []
+    for name in _D15C_HASH_FIELDS:
+        value = scheduling.get(name)
+        if not isinstance(value, str) or not _D15C_HASH_RE.match(value):
+            return False, "BLOCKS: %s is missing or malformed" % name
+        hashes.append(value)
+    ok, reason, triple = recompute_scheduling_hashes(plan)
+    if not ok:
+        return False, reason
+    if tuple(hashes) != triple:
+        return False, "SCHEDULING-HASH-MISMATCH"
+    return True, ""
+
+
 def dispatchable(plan):
     """Exactly the batch, as given. Not filtered, not re-sorted, not topped up.
 
     Written as a named function with nothing in it so that any future change
     which widens the set has to happen HERE, in front of this docstring, rather
-    than by quietly appending to a list somewhere in the run loop."""
+    than by quietly appending to a list somewhere in the run loop.
+
+    A plan that is not a mapping, or whose batch is not a list or tuple, has no
+    batch to dispatch: this returns the empty list rather than raising, because
+    no batch IS the refusal and a hostile plan must not crash a caller that is
+    only asking what it may start."""
+    if not isinstance(plan, collections.abc.Mapping):
+        return []
+    batch = plan.get("batch")
+    if batch is not None and not isinstance(batch, (list, tuple)):
+        return []
     return list(plan.get("batch") or [])
 
 
 def refused(plan):
     """Every node the scheduler declined, with its reason. Returned so a caller
     can SAY what was not dispatched: silent truncation reads as full coverage,
-    which is how a deferred node looks identical to a node nobody had."""
-    out = [(n["id"], why) for n, why in (plan.get("deferred") or [])]
-    out += [(n["id"], "BLOCKED-BY " + ", ".join(unmet))
-            for n, unmet in (plan.get("blocked") or [])]
+    which is how a deferred node looks identical to a node nobody had.
+
+    A plan that is not a mapping, or a deferred/blocked entry whose shape is not
+    (node mapping, reason), is refused rather than raised on: this is a reporting
+    function, and an AttributeError a caller cannot classify is not a report."""
+    if not isinstance(plan, collections.abc.Mapping):
+        return []
+    out = []
+    deferred = plan.get("deferred")
+    if isinstance(deferred, (list, tuple)):
+        for entry in deferred:
+            if (isinstance(entry, (list, tuple)) and len(entry) == 2
+                    and isinstance(entry[0], collections.abc.Mapping)
+                    and isinstance(entry[1], str)):
+                node_id = entry[0].get("id")
+                if isinstance(node_id, str):
+                    out.append((node_id, entry[1]))
+    blocked = plan.get("blocked")
+    if isinstance(blocked, (list, tuple)):
+        for entry in blocked:
+            if (isinstance(entry, (list, tuple)) and len(entry) == 2
+                    and isinstance(entry[0], collections.abc.Mapping)
+                    and isinstance(entry[1], (list, tuple))):
+                unmet = [item for item in entry[1] if isinstance(item, str)]
+                node_id = entry[0].get("id")
+                if isinstance(node_id, str) and len(unmet) == len(entry[1]):
+                    out.append((node_id, "BLOCKED-BY " + ", ".join(unmet)))
     return out
 
 
@@ -364,6 +669,11 @@ def machine_wide_refusal(plan):
     and belongs in front of a person. Reports only the second case, so the
     alert cannot become noise that gets tuned out.
     """
+    contract_ok, contract_why = validate_scheduling_contract(plan)
+    if (not contract_ok
+            and (not isinstance(plan, collections.abc.Mapping)
+                 or "scheduling" in plan)):
+        return "SCHEDULING-CONTRACT: %s" % contract_why
     if dispatchable(plan):
         return ""
     reasons = [why for _nid, why in refused(plan)]
@@ -678,7 +988,433 @@ def _jev_completion_second_opinions(worker_result, changed_paths, registry, seam
     return out
 
 
-def run_node(node, parts, worker, cwd=None, max_attempts=3):
+#: The usage fields accumulate_usage reports totals for. A field nobody
+#: reported is omitted entirely, because an absent total means "not
+#: reported" and a real zero means "reported as zero": they are different
+#: facts and must never collapse into one another.
+_USAGE_FIELDS: tuple = ("tokens_in", "tokens_out", "tokens_cached",
+                        "tokens_cache_write")
+
+#: The keyword-only acquire() fields recording threads through. Filtering
+#: to this closed set means a recording mapping carrying anything else can
+#: never reach acquire() as an unexpected keyword and raise TypeError.
+_RECORDING_KEYWORD_FIELDS: tuple = (
+    "parent_attempt_id", "ready_set_fingerprint", "advised_lane",
+    "content_class", "content_class_source", "checker",
+    "dependency_parents", "prior_failure_note")
+
+#: D1.5: the ONE value that means recording was NOT requested. It is the
+#: default of run_node's store_path, so every pre-D1 caller keeps today's
+#: behaviour exactly. It is deliberately NOT None: None means recording WAS
+#: requested with no place to record, which refuses rather than silently
+#: doing nothing.
+RECORDING_DISABLED: object = object()
+
+#: D1.5: the verdict string this module reads as a passing check when it
+#: decides whether a release may be state "done". Anything else, NO-DATA
+#: included, is released as "failed".
+_PASS_VERDICT: str = "PASS"
+
+
+def _nodata_record(unit_id, reason):
+    """A NO-DATA record naming why a dispatch was refused.
+
+    Never raises: a reason that is not a string is still reported as a
+    string, because a caller reading result["reason"] must never get a
+    TypeError out of a refusal path.
+    """
+    if not isinstance(reason, str):
+        reason = NODATA
+    return {"id": unit_id, "worker_status": None, "verdict": NODATA,
+            "reason": reason, "repair": None}
+
+
+def _usage_number(value):
+    """True only for a real, finite number that is not a bool.
+
+    isinstance(True, int) is True in Python, so a bool is excluded by name.
+    A NaN or an infinity poisons a sum without ever being a count, so both
+    are refused here rather than summed and reported as a real total.
+    """
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    try:
+        return not math.isnan(value) and not math.isinf(value)
+    except (TypeError, ValueError):
+        return False
+
+
+def accumulate_usage(records):
+    """D1.5: per-field usage totals with their coverage counters.
+
+    Only a present, real, finite, non-bool number is summed, and a
+    fractional number (a mean of integer deltas) is summed as such, never
+    rounded. A missing field, a None usage block, a string, a bool and a
+    NaN all count toward the "of" denominator only, so a field nobody
+    actually reported is OMITTED rather than written as a real zero.
+
+    Never raises: a records argument that is not a list is refused as the
+    empty report, which is the restrictive answer, never a permissive one.
+    """
+    if not isinstance(records, list):
+        return {}
+    totals = dict((field, [0.0, 0, 0]) for field in _USAGE_FIELDS)
+    for record in records:
+        for field in _USAGE_FIELDS:
+            totals[field][2] += 1
+        if not isinstance(record, dict):
+            continue
+        for field in _USAGE_FIELDS:
+            try:
+                value = record.get(field)
+            except Exception:  # noqa: BLE001  # sbe: allow-silent a mapping whose own get raises counts toward "of" only, never as a total
+                continue
+            if not _usage_number(value):
+                continue
+            totals[field][0] += float(value)
+            totals[field][1] += 1
+    out = {}
+    for field in _USAGE_FIELDS:
+        total, covered, of = totals[field]
+        if covered > 0:
+            out[field] = total
+            out[field + "_covered"] = covered
+            out[field + "_of"] = of
+    return out
+
+
+def _ready_set_fingerprint(plan):
+    """The ready-set fingerprint for one dispatch, from graph_loop.
+
+    A fingerprint that cannot be computed is the empty string, which the
+    release-time control in _run_node_recorded refuses: an empty string
+    never reads as a recorded fingerprint.
+    """
+    try:
+        fingerprint = graph_loop.plan_fingerprint(plan)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a hostile plan is fingerprinted as the empty plan below, never accepted as itself
+        fingerprint = ""
+    if not isinstance(fingerprint, str) or not fingerprint:
+        try:
+            fingerprint = graph_loop.plan_fingerprint({})
+        except Exception:  # noqa: BLE001  # sbe: allow-silent no fingerprint can be computed here, so nothing is recorded
+            return ""
+    return fingerprint
+
+
+def dispatch_recording_kwargs(node, plan, lane, owner):
+    """D1.5: the ONE place that derives an acquire() call's kwargs.
+
+    Returns (kwargs, refusal). A non-empty refusal means the caller must NOT
+    take the claim lock, which is how R5's advised-side outside control acts
+    BEFORE acquire() ever runs. Unknown content is private and names which
+    kind of unknown it was: undeclared-default when the value is missing,
+    invalid-default when the value is not in CONTENT_CLASSES.
+
+    Never raises: a hostile node, owner, lane, plan or content class is
+    refused by name rather than escaping as a TypeError, and no hostile
+    value is ever read as the safe case.
+    """
+    if lane_router is None:
+        return {}, "the lane router is unavailable, so no lane can be advised"
+    if not isinstance(owner, str) or not owner:
+        return {}, "recording needs a non-empty string owner"
+    if not isinstance(node, collections.abc.Mapping):
+        return {}, "recording needs a node mapping, and this node is not a mapping"
+    try:
+        declared = node.get("content_class")
+        raw_parents = node.get("dependency_parents")
+        checker = node.get("checker")
+        prior_failure_note = node.get("prior_failure_note")
+        node_parent = node.get("parent_attempt_id")
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a node whose own get raises is refused by name, never read as undeclared
+        return {}, "recording could not read the node it was given"
+    if isinstance(declared, str) and declared in lane_router.CONTENT_CLASSES:
+        content_class = declared
+        source = "declared"
+    elif declared is None:
+        content_class = "private"
+        source = "undeclared-default"
+    else:
+        content_class = "private"
+        source = "invalid-default"
+    if raw_parents is None:
+        dependency_parents = None
+    elif isinstance(raw_parents, (list, tuple)):
+        dependency_parents = list(raw_parents)
+    else:
+        return {}, "dependency_parents must be a list of unit ids, or absent"
+    advised = lane_router.lane_dict(lane)
+    advised_lane = advised.get("advised") if isinstance(advised, dict) else None
+    fingerprint = _ready_set_fingerprint(plan)
+    outside_lane = (isinstance(advised_lane, str)
+                    and advised_lane in lane_router.OUTSIDE_LANES)
+    if outside_lane and content_class not in lane_router.OUTSIDE_OK:
+        return {}, ("outside lane %s may not run on %s content: only %s may "
+                    "leave the machine" %
+                    (advised_lane, content_class,
+                     ", ".join(sorted(lane_router.OUTSIDE_OK))))
+    return {
+        "parent_attempt_id": node_parent,
+        "ready_set_fingerprint": fingerprint,
+        "advised_lane": advised_lane,
+        "content_class": content_class,
+        "content_class_source": source,
+        "checker": checker,
+        "dependency_parents": dependency_parents,
+        "prior_failure_note": prior_failure_note,
+    }, ""
+
+
+def _record_repair_children(store_path, unit_id, owner, parent_attempt_id,
+                            children, recording):
+    """D1.5: record every repair child as its own attempt, in order.
+
+    Returns (attempt_ids, problem). A child that cannot be recorded is NAMED
+    in the accumulated problem and the loop continues, so one bad child
+    never hides the children behind it and never disappears silently. A
+    missing path, an empty unit id, an empty owner, a non-list children
+    argument and an absent claim store are each refused by name, never read
+    as "nothing to record".
+    """
+    if not isinstance(store_path, str) or not store_path:
+        return [], "no claim store path, recording requested but path missing"
+    if not isinstance(unit_id, str) or not unit_id:
+        return [], "recording needs a non-empty string unit id"
+    if not isinstance(owner, str) or not owner:
+        return [], "recording needs a non-empty string owner"
+    if not isinstance(children, list):
+        return [], "repair children must be a list"
+    if claim_store is None:
+        return [], "the claim store is unavailable, so repair children were not recorded"
+    recording = dict(recording) if isinstance(recording, dict) else {}
+    attempt_ids = []
+    problems = []
+    for index, repair_child in enumerate(children):
+        if not isinstance(repair_child, dict):
+            problems.append("repair child %d is not a mapping" % index)
+            continue
+        acquire_kwargs = {}
+        for field in _RECORDING_KEYWORD_FIELDS:
+            if field in recording:
+                acquire_kwargs[field] = recording[field]
+        acquire_kwargs["parent_attempt_id"] = parent_attempt_id
+        try:
+            claim, problem = claim_store.acquire(store_path, unit_id, owner,
+                                                 **acquire_kwargs)
+        except Exception as exc:  # noqa: BLE001  # sbe: allow-silent an acquire that raises is reported as this child's refusal, never skipped
+            problems.append("repair child %d was not recorded: %s: %s"
+                            % (index, type(exc).__name__, exc))
+            continue
+        if problem or not isinstance(claim, dict):
+            problems.append("repair child %d was not recorded: %s"
+                            % (index, problem or "the claim store returned no claim"))
+            continue
+        attempt_ids.append(claim.get("attempt_id"))
+        try:
+            _, release_problem = claim_store.release(
+                store_path, unit_id, owner,
+                state=repair_child.get("state") or "done",
+                evidence=repair_child.get("evidence"),
+                attempt=claim.get("attempt"),
+                executed_lane=repair_child.get("executed_lane"),
+                usage=repair_child.get("usage"),
+                lane_divergence=repair_child.get("lane_divergence"))
+        except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a release that raises is reported as this child's refusal, never skipped
+            problems.append("repair child %d was acquired but not closed: %s: %s"
+                            % (index, type(exc).__name__, exc))
+            continue
+        if release_problem:
+            problems.append("repair child %d was acquired but not closed: %s"
+                            % (index, release_problem))
+    return attempt_ids, "; ".join(problems)
+
+
+def _run_node_input_refusal(node, parts):
+    """D1.5: the ONE validation every run_node call routes through.
+
+    The node runner indexes parts["verify"] and parts["repair"] directly and
+    reads node["id"], so a caller that supplied no node mapping or no parts
+    mapping used to get a raw KeyError or TypeError back. This check runs
+    before EVERY path, the RECORDING_DISABLED path included, and its answer
+    is a named NO-DATA refusal rather than an interpreter exception:
+    unknown, corrupt or missing input BLOCKS. A node or a parts mapping
+    whose own get raises is refused by that same name instead of escaping.
+    """
+    try:
+        if not isinstance(node, collections.abc.Mapping):
+            return "run_node needs a node mapping, and this node is not a mapping"
+        unit_id = node.get("id")
+        if not isinstance(unit_id, str) or not unit_id:
+            return "run_node needs a node with a non-empty string id"
+        if not isinstance(parts, collections.abc.Mapping):
+            return "run_node needs a parts mapping with verify and repair"
+        if parts.get("verify") is None:
+            return "run_node needs a verify part, and none was supplied"
+        if parts.get("repair") is None:
+            return "run_node needs a repair part, and none was supplied"
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a node or parts whose own get raises is refused by name, never an interpreter exception
+        return "run_node could not read the node and parts it was given"
+    return ""
+
+
+def _fingerprint_for_attempt(store_path, unit_id, attempt_id):
+    """(record, problem) for the attempt this run just took.
+
+    head first (the common case: this attempt IS the head), then history,
+    matching on attempt id so a different attempt that has since become the
+    head can never lend its fingerprint to this one. An absent record is
+    reported with a problem, never as an empty fingerprint that reads like
+    a recorded one.
+    """
+    record, problem = claim_store.head(store_path, unit_id)
+    if isinstance(record, dict) and record.get("attempt_id") == attempt_id:
+        return record, ""
+    records, history_problem = claim_store.history(store_path, unit_id)
+    for candidate in reversed(records):
+        if isinstance(candidate, dict) and candidate.get("attempt_id") == attempt_id:
+            return candidate, ""
+    return None, (problem or history_problem or "no attempt record was found")
+
+
+def _run_node_recorded(node, parts, worker, cwd, max_attempts, store_path,
+                       owner, plan, lane, parent_attempt_id, unit_id):
+    """The recording half of run_node: acquire, run, close, honestly.
+
+    Split out so the refusal paths above stay readable and so the single
+    try/except in run_node still covers every store call this makes.
+    """
+    if claim_store is None:
+        return _nodata_record(
+            unit_id,
+            "the claim store is unavailable, so the attempt was not recorded")
+    recording, refusal = dispatch_recording_kwargs(node, plan, lane, owner)
+    if refusal:
+        return _nodata_record(unit_id, refusal)
+    if parent_attempt_id is not None:
+        recording["parent_attempt_id"] = parent_attempt_id
+    claim, problem = claim_store.acquire(store_path, unit_id, owner, **recording)
+    if problem or not isinstance(claim, dict):
+        return _nodata_record(
+            unit_id, problem or "the claim store returned no claim")
+    attempt_id = claim.get("attempt_id")
+    result = _run_node_impl(node, parts, worker, cwd, max_attempts)
+    if not isinstance(result, dict):
+        result = _nodata_record(
+            unit_id, "the node runner returned a record that is not a mapping")
+    else:
+        result = dict(result)
+    children = result.get("repair_children")
+    repair_block = result.get("repair")
+    if children is None and isinstance(repair_block, dict):
+        children = repair_block.get("children")
+    child_usages = ([child for child in children if isinstance(child, dict)]
+                    if isinstance(children, list) else [])
+    usage_records = []
+    if isinstance(result.get("usage"), dict):
+        usage_records.append(result["usage"])
+    usage_records.extend(child_usages)
+    totals = accumulate_usage(usage_records)
+    if totals:
+        result["usage_totals"] = totals
+    result["attempt_id"] = attempt_id
+    result["parent_attempt_id"] = recording["parent_attempt_id"]
+    result["advised_lane"] = recording["advised_lane"]
+    result["content_class"] = recording["content_class"]
+    result["content_class_source"] = recording["content_class_source"]
+    result["checker"] = recording["checker"]
+    result["ready_set_fingerprint"] = recording["ready_set_fingerprint"]
+    executed_lane = result.get("executed_lane")
+    result["executed_lane"] = executed_lane
+    divergence = lane_router.lane_divergence(recording["advised_lane"],
+                                             executed_lane)
+    result["lane_divergence"] = divergence
+    outside_executed = (
+        isinstance(executed_lane, str)
+        and executed_lane in lane_router.OUTSIDE_LANES
+        and recording["content_class"] not in lane_router.OUTSIDE_OK)
+    if outside_executed:
+        result["integrable"] = False
+        result["verdict"] = NODATA
+        result["reason"] = (
+            "executed lane %s may not run on %s content, so this unit's done "
+            "release is refused"
+            % (executed_lane, recording["content_class"]))
+    if isinstance(children, list) and children:
+        recorded_ids, child_problem = _record_repair_children(
+            store_path, unit_id, owner, attempt_id, children, recording)
+        result["repair_attempt_ids"] = recorded_ids
+        if child_problem:
+            result["repair_recording_problem"] = child_problem
+    state = "done" if (result.get("verdict") == _PASS_VERDICT
+                       and not outside_executed) else "failed"
+    if state == "done":
+        head_record, head_problem = _fingerprint_for_attempt(
+            store_path, unit_id, attempt_id)
+        recorded = (head_record.get("ready_set_fingerprint")
+                    if isinstance(head_record, dict) else None)
+        if not isinstance(recorded, str) or not recorded:
+            state = "failed"
+            result["verdict"] = NODATA
+            result["reason"] = ("a done release needs a recorded ready set "
+                                "fingerprint for this attempt (%s)"
+                                % (head_problem or "none recorded",))
+    _, release_problem = claim_store.release(
+        store_path, unit_id, owner, state=state,
+        evidence=result.get("evidence"),
+        attempt=claim.get("attempt"),
+        executed_lane=executed_lane,
+        usage=result.get("usage"),
+        lane_divergence=divergence)
+    if release_problem:
+        result["verdict"] = NODATA
+        result["reason"] = release_problem
+    return result
+
+
+def run_node(node, parts, worker, cwd=None, max_attempts=3, *,
+             store_path=RECORDING_DISABLED, owner=None, plan=None, lane=None,
+             parent_attempt_id=None):
+    """D1.5: record the attempt around the unchanged pre-D1 node runner.
+
+    store_path is RECORDING_DISABLED (the default) means recording was NOT
+    requested: the pre-D1 body runs exactly as it always did and no D1 key
+    is computed. store_path is None means recording WAS requested with no
+    place to record, which is a configuration defect and refuses with
+    NO-DATA before any key is computed. Any other value takes the claim
+    before the worker is spawned and closes it after the run.
+
+    NEVER RAISES on any path, which is this function's own long-standing
+    promise: a parts mapping whose verify or repair is not the object this
+    function expects, a worker whose run() fails, or a store call that
+    returns something unusable is refused as a named NO-DATA record rather
+    than escaping as an AttributeError, an interpreter exception a caller
+    cannot classify.
+    """
+    refusal = _run_node_input_refusal(node, parts)
+    if refusal:
+        return _nodata_record(None, refusal)
+    unit_id = node.get("id")
+    try:
+        if store_path is RECORDING_DISABLED:
+            return _run_node_impl(node, parts, worker, cwd, max_attempts)
+        if store_path is None:
+            return _nodata_record(
+                unit_id,
+                "no claim store path, recording requested but path missing")
+        return _run_node_recorded(node, parts, worker, cwd, max_attempts,
+                                  store_path, owner, plan, lane,
+                                  parent_attempt_id, unit_id)
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent an unusable part, worker or store becomes a named NO-DATA record, never a raw interpreter exception
+        return _nodata_record(
+            unit_id,
+            "run_node refused a node it could not run: %s: %s"
+            % (type(exc).__name__, exc))
+
+
+def _run_node_impl(node, parts, worker, cwd=None, max_attempts=3):
     """One node through spawn, verify and (if red) repair. Never raises."""
     verify, repair = parts["verify"], parts["repair"]
     unit = {"unit_id": node["id"],
@@ -731,19 +1467,39 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
     # that starts it, and because a run that is not narrating gets a silent
     # heartbeat, so there is nothing to branch on here.
     beat = run_heartbeat.current()
-    beat.phase(node["id"], "the worker is running",
-               worker=run_heartbeat.worker_name(worker))
 
-    # THE WORKER RUNS IN THE LANE, not beside it. Found 2026-08-29 while
-    # proving the spine end to end: the spawning worker takes ONE cwd at
-    # construction, so every worker wrote wherever that pointed and the lanes
-    # isolated only verify and repair. A worker that supports a per-run cwd
-    # gets the lane; one that does not keeps its old behaviour, so every
-    # existing caller stays green.
-    try:
-        worker_result = worker.run(unit, cwd=cwd)
-    except TypeError:
-        worker_result = worker.run(unit)
+    # RESUME-FIX F4 (2026-09-26): a worker that already RETURNED in this lane
+    # before a kill is not run again. The kill can land after the edit but
+    # before its check, or after a green check but before integration; its
+    # write is committed in the reused lane either way, and running the
+    # worker a second time threw that captured work away (measured: fault
+    # lab invocations 1->2 at both boundaries). recover_worker_result() hands
+    # back the worker's own recorded result only when every binding in its
+    # checkpoint still holds, and the scope audit and the check below then
+    # run against the ORIGINAL pre-edit baseline it recorded, never against
+    # the lane's current HEAD, which already includes the edit.
+    recovered = recover_worker_result(unit, cwd)
+    if recovered is not None:
+        before = recovered["base"]
+        worker_result = dict(recovered["worker_result"])
+        beat.phase(node["id"], "recovered the worker's result from before "
+                   "the kill; not running it again",
+                   worker=run_heartbeat.worker_name(worker))
+    else:
+        beat.phase(node["id"], "the worker is running",
+                   worker=run_heartbeat.worker_name(worker))
+        # THE WORKER RUNS IN THE LANE, not beside it. Found 2026-08-29 while
+        # proving the spine end to end: the spawning worker takes ONE cwd at
+        # construction, so every worker wrote wherever that pointed and the
+        # lanes isolated only verify and repair. A worker that supports a
+        # per-run cwd gets the lane; one that does not keeps its old
+        # behaviour, so every existing caller stays green.
+        # The unit is claimed and its lane is open; nothing has edited it yet.
+        _fault_barrier("after_claim_before_edit")
+        try:
+            worker_result = worker.run(unit, cwd=cwd)
+        except TypeError:
+            worker_result = worker.run(unit)
 
     if worker_result.get("retry_safe") is False:
         reason = worker_result.get("note", "worker replay requires review")
@@ -752,6 +1508,10 @@ def run_node(node, parts, worker, cwd=None, max_attempts=3):
                 "verdict": "NO-DATA", "reason": reason, "repair": None,
                 "scope": None, "integrable": False, "integration_block": reason,
                 "failure_class": failure_class_of(worker_result)}
+    if recovered is None:
+        # Written BEFORE the after_edit_before_check barrier below, so a kill
+        # anywhere from here on leaves a checkpoint a resume can recover.
+        write_worker_checkpoint(unit, cwd, before, worker_result)
 
     # WHAT ACTUALLY CHANGED, from git, not from what the worker says it changed.
     # A worker reporting "I only touched X" is a claim; the diff is evidence.
@@ -1197,6 +1957,189 @@ def worker_budget_refusal(root, unit_id):
     return None
 
 
+#: RESUME-FIX F4 (2026-09-26): run_node's record of a worker that RETURNED
+#: in its lane, one file per unit beside worker-budgets/ and keyed the same
+#: way. Sealed and bound to this run, the unit, the lane path, its branch,
+#: the commit the worker left, the pre-edit baseline, the budget attempt
+#: and the fence session the worker ran under, so a resume can prove all of
+#: them still hold before it skips the worker. The seal catches a corrupt
+#: or hand-edited file; it is not a defence against a writer who can also
+#: rewrite claims.json and the journal beside it, which is out of scope.
+WORKER_CHECKPOINT_VERSION = 1
+
+
+def worker_checkpoint_path(root, unit_id):
+    key = hashlib.sha256(str(unit_id).encode("utf-8")).hexdigest()
+    return os.path.join(root, "worker-checkpoints", key + ".json")
+
+
+def _checkpoint_seal(body):
+    text = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _process_identity():
+    """(pid, host) of the process running this node, which is the claim's
+    own owner: loop_bridge.main runs in-process under brother_run. One seam
+    so a test can stand a dead process in for a killed one."""
+    return os.getpid(), claim_store._hostname()
+
+
+def _git_out(args, cwd):
+    """(returncode, stripped stdout), or (None, "") when git could not run."""
+    try:
+        proc = subprocess.run(["git"] + list(args), cwd=cwd,
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    return proc.returncode, (proc.stdout or "").strip()
+
+
+def _budget_attempts(root, unit_id):
+    """(attempts, why): the budget's attempt count once its worker came back
+    (in_flight False), or None with the reason it cannot say so."""
+    try:
+        with open(worker_budget_path(root, unit_id), encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "worker budget unreadable (%s)" % type(exc).__name__
+    if not isinstance(state, dict) or state.get("in_flight") is not False:
+        return None, "worker budget says a worker may still be writing"
+    attempts = state.get("attempts")
+    if not isinstance(attempts, int) or isinstance(attempts, bool):
+        return None, "worker budget carries no attempt count"
+    return attempts, ""
+
+
+def write_worker_checkpoint(unit, cwd, before, worker_result):
+    """Record a returned worker for recover_worker_result(). Only a worker
+    that ran under a fence session in a lane of a run gets one (LaneWorker's
+    route); every other shape writes nothing and resumes exactly as before.
+    A write that fails leaves no checkpoint, so the worker simply runs again
+    on a resume: the direction that costs a worker, never captured proof."""
+    uid = str(unit.get("unit_id") or "")
+    root = journal.run_dir_from_env()
+    session = worker_result.get("fence_session")
+    if not (uid and cwd and root and before and session) or claim_store is None:
+        return
+    head_code, head = _git_out(["rev-parse", "HEAD"], cwd)
+    branch_code, branch = _git_out(["symbolic-ref", "--short", "-q", "HEAD"], cwd)
+    attempts, why = _budget_attempts(root, uid)
+    if head_code != 0 or branch_code != 0 or attempts is None:
+        print("%s: no resume checkpoint for %s (lane HEAD, branch or budget "
+              "unreadable: %s)" % (NODATA, uid, why or "git"), file=sys.stderr)
+        return
+    pid, host = _process_identity()
+    body = {"version": WORKER_CHECKPOINT_VERSION,
+            "run": os.path.basename(os.path.abspath(root)), "unit_id": uid,
+            "lane": os.path.realpath(cwd), "branch": branch, "commit": head,
+            "base": before, "attempts": attempts, "owner_pid": pid,
+            "owner_host": host, "fence_session": session,
+            "worker_result": {k: worker_result[k] for k in
+                              ("status", "note", "usage", "worker_claim",
+                               "artifacts", "cost") if k in worker_result}}
+    path = worker_checkpoint_path(root, uid)
+    tmp = None
+    try:
+        text = json.dumps({"body": body, "seal": _checkpoint_seal(body)})
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError) as exc:
+        print("%s: no resume checkpoint for %s: %s" % (NODATA, uid, exc),
+              file=sys.stderr)
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def _checkpoint_refusal(unit, cwd, root):
+    """(why, body): why is None only when every binding holds, in which case
+    the prior fence session has just been adopted. Checks run cheapest first
+    and the one that mutates (the fence adoption) runs last."""
+    uid = str(unit.get("unit_id"))
+    try:
+        with open(worker_checkpoint_path(root, uid), encoding="utf-8") as fh:
+            saved = json.load(fh)
+    except FileNotFoundError:  # sbe: allow-silent returned as a refusal, never swallowed
+        return "no checkpoint: the worker never reported back before the kill", None
+    except (OSError, ValueError) as exc:
+        return "checkpoint unreadable (%s)" % type(exc).__name__, None
+    body = saved.get("body") if isinstance(saved, dict) else None
+    if not isinstance(body, dict) or saved.get("seal") != _checkpoint_seal(body):
+        return "checkpoint seal does not match its body", None
+    if (body.get("version") != WORKER_CHECKPOINT_VERSION
+            or body.get("unit_id") != uid
+            or body.get("run") != os.path.basename(os.path.abspath(root))):
+        return "checkpoint names a different run, unit or version", None
+    if body.get("lane") != os.path.realpath(cwd):
+        return "this attempt is not in the lane the worker wrote in", None
+    code, head = _git_out(["rev-parse", "HEAD"], cwd)
+    if code != 0 or head != body.get("commit"):
+        return "lane HEAD is not the commit the worker left", None
+    code, branch = _git_out(["symbolic-ref", "--short", "-q", "HEAD"], cwd)
+    if code != 0 or branch != body.get("branch"):
+        return "lane branch is not the one the worker wrote on", None
+    base = body.get("base")
+    if (not isinstance(base, str) or not base or base == head
+            or _git_out(["merge-base", "--is-ancestor", base, head], cwd)[0] != 0):
+        return "checkpoint base is not a proper ancestor of the lane commit", None
+    code, dirt = _git_out(["status", "--porcelain"], cwd)
+    if code != 0 or dirt:
+        return "lane holds uncommitted changes beyond the worker's commit", None
+    attempts, why = _budget_attempts(root, uid)
+    if attempts is None:
+        return why, None
+    if attempts != body.get("attempts"):
+        return "another worker attempt ran after this checkpoint", None
+    pid, host = body.get("owner_pid"), body.get("owner_host")
+    if (claim_store is None or host != claim_store._hostname()
+            or not isinstance(pid, int) or isinstance(pid, bool)
+            or claim_store.pid_alive(pid)):
+        return "the process that ran the worker is not proven dead", None
+    import managed_safety  # local: managed_safety imports this module
+    ok, why = managed_safety.adopt(cwd, unit, body.get("fence_session"))
+    if not ok:
+        return "fence session not adopted: %s" % why[:160], None
+    return None, body
+
+
+def recover_worker_result(unit, cwd):
+    """The checkpoint body of a worker that returned before a kill in this
+    same lane, or None, in which case the worker runs as it always did.
+
+    Only a crash resume is a candidate at all: worktree_lane's own
+    journal latch must say the unit's last claim was killed, never released
+    (an ordinary PASS, FAIL or QUARANTINE release clears it), so a lane kept
+    for a person to look at is never read back as delivered. Then every
+    binding in _checkpoint_refusal() must hold. Each refusal is journalled
+    by reason and printed, and costs exactly what today's resume costs: the
+    worker runs again. Nothing here ever integrates anything itself."""
+    uid = str(unit.get("unit_id") or "")
+    root = journal.run_dir_from_env()
+    if not (uid and cwd and root) or worktree_lane is None:
+        return None
+    if not worktree_lane._crash_orphaned_claim(uid):
+        return None
+    why, body = _checkpoint_refusal(unit, cwd, root)
+    if why is not None:
+        journal.append(root, "worker.recovery_refused",
+                       parent_ids=journal.previous(root), unit_id=uid,
+                       payload={"why": why})
+        print("loop_bridge: %s's worker runs again, its result from before "
+              "the kill was not recovered: %s" % (uid, why), file=sys.stderr)
+        return None
+    journal.append(root, "worker.recovered", parent_ids=journal.previous(root),
+                   unit_id=uid, payload={"commit": body["commit"][:12],
+                                         "base": body["base"][:12],
+                                         "attempts": body["attempts"]})
+    return body
+
+
 class LaneWorker(object):
     """A spawning worker that runs each unit IN ITS LANE.
 
@@ -1364,9 +2307,15 @@ class LaneWorker(object):
                 # it (the exact orphan this state exists to prevent).
                 orphaned = bool(worktree_lane) and \
                     worktree_lane._crash_orphaned_claim(uid)
+                # Class "other", not "timeout": no worker ran on THIS attempt,
+                # and brother_run's W2 retry reads only this token, so a
+                # "timeout" here made it sleep a growing backoff before every
+                # later attempt, each one refused here again (a hung unit
+                # with a 5s timeout took 237s to report). The earlier real
+                # timeout is still recorded as "timeout" by the hold below.
                 if not orphaned:
                     return held("earlier worker may have written; inspect "
-                                "the lane before any replay", "timeout")
+                                "the lane before any replay")
             if remaining <= 0 or attempts >= 3:
                 return held("whole-unit time or attempt allowance exhausted")
             state.update(attempts=attempts + 1, in_flight=True)
@@ -1463,7 +2412,13 @@ class LaneWorker(object):
         environ = dict(environ, BM_FENCE_MODE="enforced",
                       BM_FENCE_STRICT="1", BROTHERMODE_ROOT=cwd,
                       BM_FENCE_SESSION_ID=session_id)
-        return launch()
+        result = launch()
+        # RESUME-FIX F4: the session this worker ran under travels with its
+        # result, so run_node's checkpoint can name the fence a resume must
+        # adopt (managed_safety.adopt) before it may skip the worker.
+        if isinstance(result, dict):
+            result = dict(result, fence_session=session_id)
+        return result
 
 
 
@@ -2049,7 +3004,12 @@ def rolling_run(doc, parts, worker, cwd, cap, store, owner=None, work_id="",
     def integrate_fn(unit, result):
         uid = unit["id"]
         node = by_id[uid]
-        claim = result.get("claim")
+        # GAP 1 (night-2026-09-10 Codex read): wait_any() fabricates a
+        # {"claim": None, ...} result when a worker's future raised, but
+        # _claim_and_run already recorded the REAL claim in `claims` before
+        # that exception happened. Falling back to it here is what makes
+        # this release rather than leak the claim until its TTL expires.
+        claim = result.get("claim") or claims.get(uid)
         record = result.get("record") or {}
         # FL-1.4: every dispatched unit leaves exactly one trace line, written
         # here (before claim_store.release() below) rather than in run_node(),
@@ -2251,6 +3211,174 @@ def assert_unattended(trace):
     return True, ""
 
 
+# ---------------------------------------------------------------------------
+# M5.4: stall alarm in loop bridge.
+#
+# R12 stage start stores start time per stage.
+# R13 stage end stores duration sample.
+# R14 stall reports STALLED when age is over 3 medians, STALLED-NODATA when
+#     timing is missing, never healthy on missing data.
+# R15 alarm names process and waited file.
+#
+# STATE SHAPE (owned by the caller, mutated in place and returned):
+#   state["starts"]       dict stage -> {"lane": str, "now": float}
+#   state["samples"]      dict stage -> list[float], longest 100 entries
+#   state["processes"]    dict lane -> str  (optional; R15)
+#   state["waited_files"] dict lane -> str  (optional; R15)
+# A missing or corrupt entry is NO-DATA, never a silent pass.
+# ---------------------------------------------------------------------------
+
+STALL_SAMPLE_LIMIT = 100
+STALL_MULTIPLIER = 3.0
+
+
+def _is_real_number(value):
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    if value != value:
+        return False
+    if value in (float("inf"), float("-inf")):
+        return False
+    return True
+
+
+def record_stage_start(state: dict, stage: str, lane: str, now: float) -> dict:
+    """Store the start time for `stage` under `lane`; overwrite any prior start.
+
+    Refuses a non-dict state, a non-str stage or lane, or a non-real now with
+    ValueError so a hostile caller never reaches a raw TypeError."""
+    if not isinstance(state, dict):
+        raise ValueError("state must be a dict")
+    if not isinstance(stage, str):
+        raise ValueError("stage must be a str")
+    if not isinstance(lane, str):
+        raise ValueError("lane must be a str")
+    if not _is_real_number(now):
+        raise ValueError("now must be a real number")
+    starts = state.setdefault("starts", {})
+    if not isinstance(starts, dict):
+        raise ValueError("state['starts'] must be a dict")
+    starts[stage] = {"lane": lane, "now": float(now)}
+    return state
+
+
+def record_stage_end(state: dict, stage: str, secs: float) -> dict:
+    """Store a duration sample for `stage`, then clear its running start.
+
+    An end without a matching start is ignored. Refuses hostile input with
+    ValueError rather than a TypeError."""
+    if not isinstance(state, dict):
+        raise ValueError("state must be a dict")
+    if not isinstance(stage, str):
+        raise ValueError("stage must be a str")
+    if not _is_real_number(secs):
+        raise ValueError("secs must be a real number")
+    secs = float(secs)
+    if secs < 0:
+        raise ValueError("secs must not be negative")
+    starts = state.get("starts")
+    if not isinstance(starts, dict) or stage not in starts:
+        return state
+    samples = state.setdefault("samples", {})
+    if not isinstance(samples, dict):
+        raise ValueError("state['samples'] must be a dict")
+    bucket = samples.setdefault(stage, [])
+    if not isinstance(bucket, list):
+        raise ValueError("state['samples'][%r] must be a list" % stage)
+    bucket.append(secs)
+    if len(bucket) > STALL_SAMPLE_LIMIT:
+        del bucket[0:len(bucket) - STALL_SAMPLE_LIMIT]
+    del starts[stage]
+    return state
+
+
+def stage_median(state: dict, stage: str) -> "float | None":
+    """Median of the duration samples for `stage`, or None when timing is
+    missing or corrupt. Never raises: a corrupt sample list is NO-DATA."""
+    if not isinstance(state, dict):
+        return None
+    if not isinstance(stage, str):
+        return None
+    samples = state.get("samples")
+    if not isinstance(samples, dict):
+        return None
+    bucket = samples.get(stage)
+    if not isinstance(bucket, list) or not bucket:
+        return None
+    for value in bucket:
+        if not _is_real_number(value):
+            return None
+    ordered = sorted(float(v) for v in bucket)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def check_stall(state: dict, now: float) -> list:
+    """Report every running stage whose age is over 3 medians, or STALLED-NODATA
+    when timing is missing or corrupt. Never healthy on missing data."""
+    if not isinstance(state, dict):
+        raise ValueError("state must be a dict")
+    if not _is_real_number(now):
+        raise ValueError("now must be a real number")
+    now = float(now)
+    starts = state.get("starts")
+    if not isinstance(starts, dict):
+        return []
+    processes = state.get("processes")
+    if not isinstance(processes, dict):
+        processes = {}
+    waited = state.get("waited_files")
+    if not isinstance(waited, dict):
+        waited = {}
+    reports = []
+    for stage in starts:
+        start = starts[stage]
+        lane = None
+        start_now = None
+        corrupt = False
+        if isinstance(start, dict):
+            lane = start.get("lane")
+            start_now = start.get("now")
+        if not isinstance(lane, str) or not _is_real_number(start_now):
+            corrupt = True
+        median = stage_median(state, stage)
+        samples = state.get("samples")
+        if isinstance(samples, dict):
+            bucket = samples.get(stage)
+            count = len(bucket) if isinstance(bucket, list) else 0
+        else:
+            count = 0
+        if corrupt:
+            status = "STALLED-NODATA"
+            age = None
+        elif median is None or count < 3:
+            status = "STALLED-NODATA"
+            age = now - float(start_now)
+        else:
+            age = now - float(start_now)
+            if age > STALL_MULTIPLIER * median:
+                status = "STALLED"
+            else:
+                continue
+        safe_lane = lane if isinstance(lane, str) else "UNKNOWN"
+        report = {
+            "stage": stage,
+            "lane": safe_lane,
+            "age": age,
+            "median": median,
+            "status": status,
+            "process": processes.get(safe_lane) or "UNKNOWN",
+            "waited_file": waited.get(safe_lane) or "UNKNOWN",
+        }
+        reports.append(report)
+    return reports
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dry-run", action="store_true",
@@ -2386,6 +3514,14 @@ def main(argv=None):
                       % (o["classification"], o["unit_id"] or worktree_lane.NODATA,
                          o["path"], o.get("owner") or worktree_lane.NODATA,
                          o["detail"]))
+
+    if isinstance(plan, collections.abc.Mapping) and "scheduling" in plan:
+        contract_ok, contract_why = validate_scheduling_contract(plan)
+        if not contract_ok:
+            print("SCHEDULING-CONTRACT: %s" % contract_why, file=sys.stderr)
+            print("nothing was claimed: this plan may not start any worker",
+                  file=sys.stderr)
+            return 2
 
     batch = dispatchable(plan)
     claimed, blocked = [], []

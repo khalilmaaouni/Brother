@@ -66,7 +66,18 @@ def runs_it(script_text, guard_path):
     pattern = re.compile(
         r"^\s*run_check\b[^\n]*(?<![\w./-])%s(?![\w./-])"
         % re.escape(guard_path), re.M)
-    return bool(pattern.search(script_text))
+    if pattern.search(script_text):
+        return True
+    # THE MODULE FORM RUNS IT TOO (2026-09-28): the battery runs product suites
+    # as `python3 -B -m unittest products.brothermode.tools.test_x`, so the
+    # clock guard read "never runs it" while check_all.sh ran it on every pass.
+    if not guard_path.endswith(".py"):
+        return False
+    dotted = guard_path[:-3].replace("/", ".")
+    module = re.compile(
+        r"^\s*run_check\b[^\n]*-m\s+unittest\b[^\n]*(?<![\w.])%s(?![\w.])"
+        % re.escape(dotted), re.M)
+    return bool(module.search(script_text))
 
 
 def load_registry(path=None):
@@ -234,6 +245,20 @@ def selftest():
             body = "\n".join(lines)
             hit = code == want_code and needle in body
             print("%-22s %s" % (name, "caught" if hit else "MISSED"))
+            ok = ok and hit
+        # THE MODULE FORM (2026-09-28): run as a module counts; a longer module
+        # name or a comment naming the module does not.
+        for label, text, want in (
+                ("module form runs it", 'run_check "real" python3 -B -m unittest scripts.test_real_tool\n', 0),
+                ("longer module is not", 'run_check "x" python3 -m unittest scripts.test_real_tool_m2\n', 1),
+                ("module comment is not", '# python3 -m unittest scripts.test_real_tool\n', 1)):
+            alt = os.path.join(tmp, "scripts", "module_form.sh")
+            with open(alt, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            write([dict(good)])
+            code, lines = check(root=tmp, registry_path=reg, battery_path=alt)
+            hit = code == want
+            print("%-22s %s" % (label, "caught" if hit else "MISSED"))
             ok = ok and hit
         # THE TWO CLAUSES ADDED 2026-09-10, each driven backwards.
         write([dict(good)])

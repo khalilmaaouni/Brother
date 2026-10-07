@@ -107,6 +107,36 @@ WALL_FACTOR = int(os.environ.get("BROTHER_PERTURB_WALL_FACTOR", "3"))
 #: suite path -> seconds its last completed run took.
 _LAST_DURATION = {}
 
+#: C0.1: the ownership marker perturb_pool.py writes beside a work copy it
+#: made (its own MARKER_SUFFIX constant, duplicated here as a literal on
+#: purpose: this module reads the pool's evidence, it does not import the
+#: pool, per the build boundary in docs/plan/specs/C0.md).
+_C01_MARKER_SUFFIX = ".made-by-perturb-pool"
+_C01_DETACHED_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
+#: (realpath(root), suite_rel) -> seconds a PLAIN green run of that suite took
+#: in that exact work copy. Separate from _LAST_DURATION on purpose: this is
+#: TIMING PROVENANCE keyed by root as well as suite, so one copy can never
+#: lend its calibration to another (R-C01-03). It is never fail-fast
+#: permission, which is observed afresh in every covers() call. A runner run
+#: never writes here, only a plain green one in a verified work copy.
+_C01_CALIBRATED = {}
+#: Sentinel distinguishing "was absent" from "was None" when snapshotting a
+#: dict entry to restore it later.
+_C01_MISSING = object()
+#: The in-process fail-fast runner, BESIDE this module: the pool worker
+#: imports this module from inside its copy, so this is the copy's runner.
+#: A missing runner prints no status line and reads as unproved.
+_C01_RUNNER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "c01_failfast_runner.py")
+_C01_STATUS_PREFIX = "C0.1 fail-fast:"
+#: The tail run_suite returns for a runner run whose output carries zero or
+#: several status lines. _c01_parse_status rejects it.
+_C01_STATUS_ABSENT = "C0.1 runner status absent or duplicated"
+_C01_STATUS_RE = re.compile(
+    r"^C0\.1 fail-fast: (?:(engaged); result: "
+    r"(error|failure|unexpected-success|success|unknown)"
+    r"|(not-engaged); result: (plain))$")
+
 
 def wall_for(suite_rel):
     """Seconds to allow this suite, from its own last measured runtime. Falls
@@ -195,6 +225,7 @@ def reset_ledger():
     measured runtimes go with it: they calibrate a wall for THIS tree."""
     _RESTORE_LEDGER.clear()
     _LAST_DURATION.clear()
+    _C01_CALIBRATED.clear()
 
 
 def check_ledger():
@@ -250,59 +281,373 @@ def perturbed_source(text):
             + "\n".join(lines[line - 1:]))
 
 
-def run_suite(rel_path, root=ROOT, timeout=None):
+def _c01_kill_group(pgid):
+    """Kill process group `pgid`, using the SAVED value from spawn time, never
+    a fresh `os.getpgid(pid)` lookup: once the session leader has already
+    exited and been reaped, `os.getpgid` can fail even while a grandchild it
+    spawned is still alive in the same group, which would hide exactly the
+    orphan this exists to catch (R-C01-08). Returns None when the kill either
+    landed or found nothing there (an already-gone group is the ordinary
+    case, not a failure); returns a diagnostic string for any other error, so
+    the caller can turn that into NO-DATA rather than a verdict."""
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return None
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
+def run_suite(rel_path, root=ROOT, timeout=None, *, fail_fast=False):
     """(returncode, tail). A suite that cannot be spawned, or that runs past
     `timeout` seconds, returns (None, why): both are a failure to reach a
     verdict, never a pass and never a red. A perturbed module CAN hang a
     suite (a retry loop that never terminates once its helper raises), so
-    this boundary needs a wall, not patience."""
+    this boundary needs a wall, not patience.
+
+    `fail_fast`, C0.1 (default False, today's command unchanged): run the
+    SAME suite path through `_C01_RUNNER` (`[sys.executable, _C01_RUNNER,
+    path]`), which switches unittest's fail fast on inside the process and
+    leaves the suite's own argv exactly `[path]`. Nothing is appended to the
+    suite's command and nothing is passed through the environment. The tail
+    of such a run is the one output line starting `C0.1 fail-fast:` when
+    exactly one exists, else `_C01_STATUS_ABSENT`. A runner run never
+    calibrates `wall_for`'s timing or the per-copy calibration (R-C01-06):
+    stopping early says nothing about how long the whole suite takes."""
     if timeout is None:
         timeout = wall_for(rel_path)
     path = os.path.join(root, rel_path)
     if not os.path.isfile(path):
         return None, "%s does not exist" % rel_path
+    argv = ([sys.executable, _C01_RUNNER, path] if fail_fast
+            else [sys.executable, path])
     started = time.monotonic()
-    # start_new_session puts the suite in its own process GROUP, and the
-    # timeout path kills the whole group rather than the one child.
+    # start_new_session puts the suite in its own process GROUP, and every
+    # return path below kills the whole group rather than the one child.
     # subprocess.run's own timeout kills only the direct child, and these
     # suites spawn their subject as a subprocess: an orphaned grandchild
-    # outliving the wall can write into the tree AFTER this function has
-    # restored the perturbed file, which turns a clean run into a dirty one
-    # with nothing raised. That is not hypothetical, it is what left
-    # scripts/decide.py carrying an injected block on the first full run.
+    # outliving the wall, or outliving a suite that simply finished on its
+    # own, can write into the tree AFTER this function has restored the
+    # perturbed file, which turns a clean run into a dirty one with nothing
+    # raised. That is not hypothetical, it is what left scripts/decide.py
+    # carrying an injected block on the first full run.
     try:
-        proc = subprocess.Popen([sys.executable, path], cwd=root,
+        proc = subprocess.Popen(argv, cwd=root,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT,
                                 start_new_session=True)
     except OSError as exc:
         return None, "could not run %s: %s" % (rel_path, exc)
+    # start_new_session makes this pid both the session leader and the
+    # process group id: saved now, so cleanup never depends on the leader
+    # still being alive later to answer os.getpgid().
+    pgid = proc.pid
+    out_bytes = b""
+    comm_error = None
     try:
         out_bytes = proc.communicate(timeout=timeout)[0]
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (OSError, ProcessLookupError) as exc:
+        cleanup_error = _c01_kill_group(pgid)
+        if cleanup_error:
             return None, ("%s did not finish within %ds and its process group "
-                          "could not be killed: %s" % (rel_path, timeout, exc))
+                          "could not be killed: %s" % (rel_path, timeout, cleanup_error))
         try:
             proc.communicate(timeout=30)
         except subprocess.TimeoutExpired:  # sbe: allow-silent documented (None, why) sentinel per this function's own docstring, read by covers() which propagates it as its own NO-DATA verdict
             return None, ("%s did not finish within %ds and did not die when "
                           "its process group was killed" % (rel_path, timeout))
         return None, ("%s did not finish within %ds" % (rel_path, timeout))
-    # Only a GREEN run calibrates the wall, and the reason is a runaway this
-    # tool actually had: a perturbed run that finished slowly recorded its own
-    # duration, which widened the wall for the next perturbation, which was
-    # then allowed to run longer still. The brother_run block of this tree's
-    # table ran for over an hour on that feedback loop. A perturbed run's
-    # duration says nothing about how long the suite takes when it is
-    # behaving, and a timed out run says nothing at all.
-    if proc.returncode == 0:
-        _LAST_DURATION[rel_path] = time.monotonic() - started
+    except (OSError, ValueError) as exc:
+        comm_error = exc
+
+    # The child already exited (or communicate() itself failed), but a
+    # grandchild it spawned and never reaped can outlive it even though
+    # proc.returncode is already set: cleanup runs here too, on every
+    # completed path, not only the timeout one (R-C01-08).
+    cleanup_error = _c01_kill_group(pgid)
+    if comm_error is not None:
+        reap = ""
+        try:
+            proc.wait(timeout=30)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            reap = "; the suite could not be reaped: %s" % exc
+        return None, ("%s: communication with the suite failed: %s%s%s"
+                      % (rel_path, comm_error,
+                         "; group cleanup failed: %s" % cleanup_error
+                         if cleanup_error else "", reap))
+    if cleanup_error:
+        return None, ("%s finished but its process group could not be "
+                      "confirmed clean: %s" % (rel_path, cleanup_error))
+    # Only a GREEN, UNFLAGGED run calibrates the wall, and the reason is a
+    # runaway this tool actually had: a perturbed run that finished slowly
+    # recorded its own duration, which widened the wall for the next
+    # perturbation, which was then allowed to run longer still. The
+    # brother_run block of this tree's table ran for over an hour on that
+    # feedback loop. A perturbed run's duration says nothing about how long
+    # the suite takes when it is behaving, a timed out run says nothing at
+    # all, and a flagged run stops before the suite has really finished.
+    if not fail_fast and proc.returncode == 0:
+        duration = time.monotonic() - started
+        _LAST_DURATION[rel_path] = duration
+        if _c01_work_copy(root):
+            _C01_CALIBRATED[(os.path.realpath(root), rel_path)] = duration
     out = out_bytes.decode("utf-8", "replace")
+    if fail_fast:
+        found = [ln for ln in out.split("\n")
+                 if ln.startswith(_C01_STATUS_PREFIX)]
+        return proc.returncode, (found[0] if len(found) == 1
+                                 else _C01_STATUS_ABSENT)
     tail = [ln for ln in out.strip().split("\n") if ln.strip()]
     return proc.returncode, (tail[-1] if tail else "(no output)")
+
+
+def _c01_work_copy(root):
+    """True when `root` is a genuine perturb_pool work copy: a real, non
+    symlink `.git` directory, a detached HEAD, and a sibling ownership marker
+    (perturb_pool's own MARKER_SUFFIX) whose recorded commit matches that
+    HEAD exactly. Absent, unreadable, malformed or mismatching evidence is
+    False, never a guess (R-C01-02). Never compares against this module's own
+    ROOT constant: the worker that calls this imports the module from inside
+    its own copy, where ROOT legitimately equals `root`."""
+    if not root:
+        return False
+    stripped = root.rstrip(os.sep)
+    if os.path.islink(stripped):
+        return False
+    git_dir = os.path.join(root, ".git")
+    if not os.path.isdir(git_dir) or os.path.islink(git_dir):
+        return False
+    head_path = os.path.join(git_dir, "HEAD")
+    if os.path.islink(head_path):
+        return False
+    try:
+        with open(head_path, encoding="utf-8") as fh:
+            head = fh.read().strip()
+    except (OSError, UnicodeDecodeError):  # non UTF-8 bytes are malformed
+        return False
+    if not _C01_DETACHED_HEAD_RE.match(head):
+        return False  # a symbolic ref (attached HEAD) never matches this
+    marker = stripped + _C01_MARKER_SUFFIX
+    if os.path.islink(marker):
+        return False
+    try:
+        with open(marker, encoding="utf-8") as fh:
+            recorded = fh.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(recorded) and recorded == head
+
+
+def _c01_safe_rel(root, rel):
+    """The resolved absolute path of `rel` under `root`, or None when `rel`
+    is absolute, escapes `root` by `..` traversal, or resolves through a
+    symlink to somewhere outside `root`. Only meaningful once
+    `_c01_work_copy(root)` has already confirmed `root` itself is genuine;
+    this guards one file inside it before any candidate write (R-C01-02)."""
+    if not rel or os.path.isabs(rel):
+        return None
+    real_root = os.path.realpath(root)
+    candidate = os.path.realpath(os.path.join(root, rel))
+    if candidate != real_root and not candidate.startswith(real_root + os.sep):
+        return None
+    return candidate
+
+
+def _c01_flag_safe(source):
+    """A conservative pre-filter before the fail-fast runner is tried, NOT a
+    proof of equivalence (R-C01-05). Uses `ast`, never a substring search: a
+    comment, docstring or unused string literal that happens to contain
+    `-f`, `--failfast` or `sys.argv` (this estate's own fixture-model strings
+    do exactly that) does not decline, while a suite that genuinely reads
+    `sys.argv` itself, under any import alias, or builds its own argument
+    parser, declines to the plain path. Unparseable source declines."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return False
+    sys_aliases = {"sys"}
+    argv_aliases = set()
+    hostile = [False]
+    parser_names = {"ArgumentParser", "OptionParser", "getopt", "gnu_getopt"}
+
+    class _ArgvReader(ast.NodeVisitor):
+        def visit_Import(self, node):
+            for alias in node.names:
+                if alias.name == "sys":
+                    sys_aliases.add(alias.asname or alias.name)
+            self.generic_visit(node)
+
+        def visit_ImportFrom(self, node):
+            if node.module == "sys":
+                for alias in node.names:
+                    if alias.name == "argv":
+                        argv_aliases.add(alias.asname or alias.name)
+            self.generic_visit(node)
+
+        def visit_Attribute(self, node):
+            if (node.attr == "argv" and isinstance(node.value, ast.Name)
+                    and node.value.id in sys_aliases):
+                hostile[0] = True
+            self.generic_visit(node)
+
+        def visit_Name(self, node):
+            if node.id in argv_aliases:
+                hostile[0] = True
+            self.generic_visit(node)
+
+        def visit_Call(self, node):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else (
+                func.id if isinstance(func, ast.Name) else None)
+            if name in parser_names:
+                hostile[0] = True
+            self.generic_visit(node)
+
+    _ArgvReader().visit(tree)
+    return not hostile[0]
+
+
+class _C01TimingGuard(object):
+    """Snapshots `_LAST_DURATION[suite_rel]` and the per-copy calibration
+    entry for `(canon_root, suite_rel)` on entry, restoring both on exit
+    whatever happened inside, including an exception or a green perturbation
+    (R-C01-06). A runner run never writes either dict, but a green plain
+    fallback or plain comparison run does, and while a candidate is being
+    measured neither may leave a calibration behind."""
+
+    def __init__(self, suite_rel, canon_root):
+        self.suite_rel = suite_rel
+        self.canon_root = canon_root
+
+    def __enter__(self):
+        self._dur = _LAST_DURATION.get(self.suite_rel, _C01_MISSING)
+        self._calib = _C01_CALIBRATED.get(
+            (self.canon_root, self.suite_rel), _C01_MISSING)
+        return self
+
+    def __exit__(self, *exc_info):
+        if self._dur is _C01_MISSING:
+            _LAST_DURATION.pop(self.suite_rel, None)
+        else:
+            _LAST_DURATION[self.suite_rel] = self._dur
+        key = (self.canon_root, self.suite_rel)
+        if self._calib is _C01_MISSING:
+            _C01_CALIBRATED.pop(key, None)
+        else:
+            _C01_CALIBRATED[key] = self._calib
+        return False
+
+
+def _c01_parse_status(tail):
+    """(engagement, result) when `tail` is exactly one runner status line in
+    the grammar c01_failfast_runner.py writes, else None. The fixed
+    absent-or-duplicated tail, a plain run's tail and anything malformed are
+    all None."""
+    m = _C01_STATUS_RE.fullmatch(tail or "")
+    if not m:
+        return None
+    if m.group(1):
+        return m.group(1), m.group(2)
+    return m.group(3), m.group(4)
+
+
+def _c01_wall(canon_root, suite_rel):
+    """wall_for's own floor and factor, applied to this root's calibration."""
+    return max(60, int(_C01_CALIBRATED[(canon_root, suite_rel)]
+                       * WALL_FACTOR) + 1)
+
+
+def baseline_probe(suite_rel, root=ROOT, timeout=None):
+    """(baseline_rc, flag_accepted, tail), taken on the CLEAN tree before any
+    perturbation (R-C01-04). The flagged probe runs only in a verified work
+    copy, on a suite path inside it, whose source parses and does not read
+    argv itself, with this root's calibration present (its wall is the
+    timeout when none is given). flag_accepted is True only for an observed
+    integer exit 0 whose status reads `engaged; result: success`. Every other
+    outcome (not engaged, another token, nonzero, absent, duplicated or
+    malformed status, timeout, spawn failure, missing runner, missing or
+    unsafe source) never enables fail fast: the ordinary baseline is taken
+    with one plain run and that run's rc is returned with False. Nothing is
+    remembered: the next candidate probes again."""
+    def plain():
+        rc, tail = run_suite(suite_rel, root=root, timeout=timeout)
+        return rc, False, tail
+
+    if not _c01_work_copy(root):
+        return plain()
+    safe_suite = _c01_safe_rel(root, suite_rel)
+    if safe_suite is None:
+        return plain()
+    canon_root = os.path.realpath(root)
+    if timeout is None:
+        if (canon_root, suite_rel) not in _C01_CALIBRATED:
+            return plain()
+        timeout = _c01_wall(canon_root, suite_rel)
+    try:
+        with open(safe_suite, encoding="utf-8") as fh:
+            source = fh.read()
+    except (OSError, UnicodeDecodeError):
+        return plain()
+    if not _c01_flag_safe(source):
+        return plain()
+    rc, tail = run_suite(suite_rel, root=root, timeout=timeout, fail_fast=True)
+    if (type(rc) is int and rc == 0
+            and _c01_parse_status(tail) == ("engaged", "success")):
+        return 0, True, tail
+    return plain()
+
+
+def _c01_restore(path, file_rel, original, digest):
+    """Put the original bytes back and prove it, or raise RestoreFailed."""
+    restore_failure = None
+    try:
+        with open(path, "wb") as fh:
+            fh.write(original)
+        with open(path, "rb") as fh:
+            back = fh.read()
+        if sha256_bytes(back) != digest:
+            restore_failure = ("%s did not restore byte-identically "
+                               "(sha256 %s, expected %s)"
+                               % (file_rel, sha256_bytes(back), digest))
+        else:
+            _RESTORE_LEDGER[path] = digest
+    except OSError as exc:
+        restore_failure = "%s could not be restored: %s" % (file_rel, exc)
+    if restore_failure:
+        raise RestoreFailed(restore_failure)
+
+
+def _c01_decide(suite_rel, root, wall):
+    """R-C01-07's decision table, run while the candidate is perturbed:
+    (verdict, detail). Each row is named where it is decided."""
+    rc, tail = run_suite(suite_rel, root=root, timeout=wall, fail_fast=True)
+    if rc is None:  # row 1: never retried
+        return None, tail
+    status = _c01_parse_status(tail)
+    if rc != 0:
+        if status in (("engaged", "failure"), ("engaged", "error"),
+                      ("engaged", "unexpected-success")):  # row 3
+            return True, "%s exit %s: %s" % (suite_rel, rc, tail)
+        if status == ("not-engaged", "plain"):  # row 4: it ran plainly
+            return True, "%s exit %s: %s" % (suite_rel, rc, tail)
+    # rows 2 and 5: the plain run on the same perturbed bytes decides.
+    rc2, tail2 = run_suite(suite_rel, root=root, timeout=wall)
+    if rc == 0:  # row 2
+        if rc2 == 0:
+            return False, "%s stayed green (exit 0: %s)" % (suite_rel, tail2)
+        if rc2 is None:
+            return None, ("%s: the runner run stayed green (%s) but the plain "
+                          "comparison could not reach a verdict: %s"
+                          % (suite_rel, tail, tail2))
+        return None, ("%s: the runner run stayed green (%s) but the plain "
+                      "comparison went red (exit %s: %s), a divergence"
+                      % (suite_rel, tail, rc2, tail2))
+    if rc2 is None:  # row 5
+        return None, tail2
+    if rc2 != 0:
+        return True, "%s exit %s: %s" % (suite_rel, rc2, tail2)
+    return False, "%s stayed green (exit 0: %s)" % (suite_rel, tail2)
 
 
 def covers(suite_rel, file_rel, root=ROOT, baseline=None):
@@ -310,10 +655,21 @@ def covers(suite_rel, file_rel, root=ROOT, baseline=None):
 
     Returns (verdict, detail). verdict is True (covered), False (the suite
     stayed green with the file perturbed) or None (NO-DATA: a file that
-    cannot be read or parsed, a suite that cannot be run, or a suite already
-    red before the perturbation). A FAILED RESTORE raises RestoreFailed: it
-    is never folded into a verdict about coverage."""
+    cannot be read or parsed, a suite that cannot be run, a suite already red
+    before the perturbation, or, inside a verified work copy, missing
+    calibration, an escaping path, or a red or unavailable clean probe). A
+    FAILED RESTORE raises RestoreFailed: it is never folded into a verdict.
+
+    C0.1: only inside a verified perturb_pool work copy may a run go through
+    the fail-fast runner, and only after baseline_probe accepted it on the
+    clean tree in this same call. Outside a copy this is the original plain
+    path, unconditionally (R-C01-03)."""
     check_ledger()
+    in_copy = _c01_work_copy(root)
+    if in_copy and (_c01_safe_rel(root, file_rel) is None
+                    or _c01_safe_rel(root, suite_rel) is None):
+        return None, ("%s or %s escapes the work copy %s"
+                      % (file_rel, suite_rel, root))
     path = os.path.join(root, file_rel)
     try:
         with open(path, "rb") as fh:
@@ -337,35 +693,53 @@ def covers(suite_rel, file_rel, root=ROOT, baseline=None):
                       % (suite_rel, baseline))
 
     digest = sha256_bytes(original)
-    try:
-        with open(path, "wb") as fh:
-            fh.write(new_text.encode("utf-8"))
-    except OSError as exc:
-        return None, "%s could not be perturbed: %s" % (file_rel, exc)
-    try:
-        rc, tail = run_suite(suite_rel, root=root)
-    finally:
-        restore_failure = None
+    if not in_copy:
         try:
             with open(path, "wb") as fh:
-                fh.write(original)
-            with open(path, "rb") as fh:
-                back = fh.read()
-            if sha256_bytes(back) != digest:
-                restore_failure = ("%s did not restore byte-identically "
-                                   "(sha256 %s, expected %s)"
-                                   % (file_rel, sha256_bytes(back), digest))
-            else:
-                _RESTORE_LEDGER[path] = digest
+                fh.write(new_text.encode("utf-8"))
         except OSError as exc:
-            restore_failure = "%s could not be restored: %s" % (file_rel, exc)
-        if restore_failure:
-            raise RestoreFailed(restore_failure)
-    if rc is None:
-        return None, tail
-    if rc != 0:
-        return True, "%s exit %s: %s" % (suite_rel, rc, tail)
-    return False, "%s stayed green (exit 0: %s)" % (suite_rel, tail)
+            return None, "%s could not be perturbed: %s" % (file_rel, exc)
+        try:
+            rc, tail = run_suite(suite_rel, root=root)
+        finally:
+            _c01_restore(path, file_rel, original, digest)
+        if rc is None:
+            return None, tail
+        if rc != 0:
+            return True, "%s exit %s: %s" % (suite_rel, rc, tail)
+        return False, "%s stayed green (exit 0: %s)" % (suite_rel, tail)
+
+    canon_root = os.path.realpath(root)
+    if (canon_root, suite_rel) not in _C01_CALIBRATED:
+        return None, ("NO-DATA: no calibration recorded for %s in %s; a "
+                      "plain green run of it in this copy supplies one"
+                      % (suite_rel, root))
+    wall = _c01_wall(canon_root, suite_rel)
+    with _C01TimingGuard(suite_rel, canon_root):
+        probe_rc, flag_ok, probe_tail = baseline_probe(suite_rel, root=root,
+                                                       timeout=wall)
+        # Whichever run produced it, a clean baseline that is not integer 0
+        # stops here, before the candidate write; the caller's baseline=0
+        # never overrides it.
+        if type(probe_rc) is not int or probe_rc != 0:
+            return None, ("%s is not green on the clean probe (exit %s: %s)"
+                          % (suite_rel, probe_rc, probe_tail))
+        try:
+            with open(path, "wb") as fh:
+                fh.write(new_text.encode("utf-8"))
+        except OSError as exc:
+            return None, "%s could not be perturbed: %s" % (file_rel, exc)
+        try:
+            if flag_ok:
+                return _c01_decide(suite_rel, root, wall)
+            rc, tail = run_suite(suite_rel, root=root, timeout=wall)
+        finally:
+            _c01_restore(path, file_rel, original, digest)
+        if rc is None:
+            return None, tail
+        if rc != 0:
+            return True, "%s exit %s: %s" % (suite_rel, rc, tail)
+        return False, "%s stayed green (exit 0: %s)" % (suite_rel, tail)
 
 
 def sibling_suite(file_rel, root=ROOT):

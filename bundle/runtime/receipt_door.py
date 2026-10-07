@@ -684,7 +684,12 @@ NUMBERS_MANIFEST_FIELD = "numbers_manifest"
 #: on the far side of the mount), so the same four lines are computed here
 #: from receipt_door.py's own path instead of copying its logic.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SBE_TOOLS = os.path.join(_ROOT, "products", "brothersbe", "tools")
+# the source checkout, then the installed bundle (runtime/hooks/brothersbe/tools beside this file): the bundle has
+# no products/ directory, so an installed receipt's numbers gate read NO-DATA every time (review 2026-10-05)
+_SBE_TOOLS = next((d for d in (
+    os.path.join(_ROOT, "products", "brothersbe", "tools"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "brothersbe", "tools"))
+    if os.path.isfile(os.path.join(d, "sbe_gate.py"))), os.path.join(_ROOT, "products", "brothersbe", "tools"))
 
 
 def _sbe_gate_numbers():
@@ -2195,7 +2200,19 @@ def write_screen(spec, out_path):
     """The spec beside the page, both. The JSON is what a later session can
     re-render or argue with; the HTML is what a person opens. Returns
     (html_path, "") or (None, why); never raises, because a screen that fails
-    to render must not fail the delivery it describes."""
+    to render must not fail the delivery it describes.
+
+    REDACTED ONCE, BEFORE EITHER WRITE. The spec quotes the outcome a person
+    typed and the objectives and check commands a model wrote, and a screen
+    is the page people open and pass on. Every caller (render_run_screens,
+    the delivery receipt, brother_run's human moments) routes through here,
+    so decide.redact_spec runs here and both files get the same text. The
+    record itself is not redacted: the receipt contract keeps the exact
+    command a reviewer re-runs. No redactor means no screen, never an
+    unredacted one (decide.redact_spec's own direction)."""
+    spec, why = decide.redact_spec(spec)
+    if spec is None:
+        return None, why
     try:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(os.path.splitext(out_path)[0] + ".json", "w",

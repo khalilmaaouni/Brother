@@ -452,6 +452,22 @@ class Area5RealTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("NO-DATA", evidence)
 
+    def test_area_5_no_data_when_the_hung_worker_never_records_its_pid(self):
+        """A pid the test never read proves nothing about termination, so
+        it is NO-DATA, never a PASS by omission."""
+        import acceptance_5
+
+        def silent_hang(tmp):
+            worker = str(pathlib.Path(tmp) / "hang.sh")
+            acceptance_5._write(worker, "#!/bin/sh\ncat >/dev/null\n"
+                                        "exec sleep 9999\n")
+            return worker, str(pathlib.Path(tmp) / "never-written.pid")
+
+        with mock.patch.object(acceptance_5, "build_hanging_worker", silent_hang):
+            code, evidence = acceptance_5.run()
+        self.assertEqual(code, 2, evidence)
+        self.assertIn("never recorded its pid", evidence)
+
 
 class Area6RealTest(unittest.TestCase):
     """scripts/acceptance_6.py: dirty trees and rebases preserving

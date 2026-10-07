@@ -945,9 +945,9 @@ class TestTheWireContract(GuardCase):
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertTrue(out["permissionDecisionReason"].strip())
 
-    def test_the_refusal_names_all_three_recoveries(self):
+    def test_the_refusal_names_both_recoveries(self):
         run = self.run_guard("printf 'x' > CLAUDE.md")
-        for fragment in ("sbe task open", "Edit or Write", ".sbe/break-glass.json"):
+        for fragment in ("sbe task open", "Edit or Write"):
             self.assertIn(fragment, run.reason,
                           "the refusal does not name the recovery %r" % fragment)
 
@@ -1035,6 +1035,101 @@ class TheRepoConfigCannotSwitchOffThisGuard(GuardCase):
         self.assertFalse(run.denied,
                          "an ordinary read-only command was refused: %s"
                          % run.stdout)
+
+
+class TheRefusalOffersOnlyExitsThatExist(GuardCase):
+    """Both refusals used to end on a third route: record the exception in
+    .sbe/break-glass.json "which the Stop reconciler reads". Nothing in this
+    guard reads that file, so an operator who followed the route wrote a
+    valid record and was refused again. And the reconciler judges changed
+    FILES, so for a push it never even names the record. Found 2026-09-26
+    against the installed 3.7.4 copy.
+
+    Each test isolates one condition. The record written here is VALID by the
+    reconciler's own reader (asserted, not assumed), so a refusal that follows
+    it is a refusal of a valid record, not of a malformed one. The routes are
+    read out of the numbered block under the refusal's "nothing else" line,
+    and a block that cannot be found fails the test rather than passing it
+    with nothing to check."""
+
+    RECORD = {"records": [{
+        "id": "bg-reviewed-exception",
+        "reason": "a reviewed exception, written exactly as the refusal asked",
+        "owner": "owner-1",
+        "expiry": "2099-12-31",
+        "approval": {"approver": "approver-1"},
+        "paths": ["CLAUDE.md"],
+        "remote": "origin",
+        "branch": "feature",
+    }]}
+
+    def setUp(self):
+        super().setUp()
+        git = os.path.join(self.root, ".git")
+        os.makedirs(os.path.join(git, "refs", "remotes", "origin"))
+        write(os.path.join(git, "HEAD"), "ref: refs/heads/feature\n")
+        write(os.path.join(git, "refs", "remotes", "origin", "HEAD"),
+              "ref: refs/remotes/origin/main\n")
+        write(os.path.join(self.root, ".sbe", "break-glass.json"),
+              json.dumps(self.RECORD))
+
+    def test_the_fixture_record_is_valid_by_the_reconcilers_own_reader(self):
+        path = os.path.join(HERE, "sbe_session_reconcile.py")
+        spec = importlib.util.spec_from_file_location("sbe_session_reconcile_bg", path)
+        rec = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rec)
+        bg_records = rec.read_break_glass(self.root)
+        self.assertEqual([r["id"] for r in bg_records.valid],
+                         ["bg-reviewed-exception"], bg_records.refused)
+
+    def _routes(self, reason):
+        lines = reason.splitlines()
+        for i, line in enumerate(lines):
+            # The routes header, not the push `why` text, which also says
+            # "nothing else in this session would record" mid-sentence.
+            if "nothing else" in line and line.rstrip().endswith(":"):
+                block = []
+                for nxt in lines[i + 1:]:
+                    if not nxt.lstrip()[:1].isdigit():
+                        break
+                    block.append(nxt)
+                return block
+        return []
+
+    def _assert_no_dead_route(self, run):
+        self.assertTrue(run.denied, "the fixture command was allowed: %s" % run.stderr)
+        routes = self._routes(run.reason)
+        self.assertTrue(routes, "no numbered route block under a 'nothing else' "
+                                "line in: %s" % run.reason)
+        for route in routes:
+            self.assertNotIn("break-glass", route,
+                             "the refusal still offers a break-glass route this "
+                             "guard never honors: %s" % route)
+        self.assertNotIn("which the Stop reconciler reads", run.reason)
+        self.assertIn("No record in .sbe/break-glass.json unlocks this", run.reason)
+        self.assertIn("not through this session's tools", run.reason)
+
+    def test_a_valid_record_does_not_unlock_a_no_verify_push(self):
+        run = self.run_guard("git push --no-verify origin feature")
+        self.assertTrue(run.denied, "a valid break-glass record let a no-verify "
+                                    "push through: %s" % run.stderr)
+
+    def test_the_push_refusal_offers_no_route_it_cannot_honor(self):
+        self._assert_no_dead_route(self.run_guard("git push --no-verify origin feature"))
+
+    def test_the_default_branch_push_refusal_offers_no_route_it_cannot_honor(self):
+        self._assert_no_dead_route(self.run_guard("git push origin main"))
+
+    def test_the_path_write_refusal_offers_no_route_it_cannot_honor(self):
+        self._assert_no_dead_route(self.run_guard("printf 'x' > CLAUDE.md"))
+
+    def test_the_stated_push_unlock_really_unlocks(self):
+        # The refusal now says what DOES unlock a push: a branch other than
+        # the default, and no flag that skips the pre-push hooks. Followed
+        # literally, that must be allowed, or the text is a promise again.
+        run = self.run_guard("git push origin feature")
+        self.assertFalse(run.denied, "the push the refusal says is allowed was "
+                                     "refused: %s" % run.reason)
 
 
 class Night0912SbeBashWriteGuard(unittest.TestCase):

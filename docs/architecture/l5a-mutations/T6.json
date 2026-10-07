@@ -1,0 +1,15 @@
+{
+ "applied_to": "a disposable git archive of HEAD by scripts/l5a_mutation_probe.py, never the live tree",
+ "edits": [
+  {
+   "file": "scripts/brother_antigravity_hook.py",
+   "find": "    if tool_name not in KNOWN_TOOLS:\n",
+   "replace": "    if False:\n"
+  }
+ ],
+ "id": "M6",
+ "requirement": "REQ-02",
+ "test": "plugin.runtime.brother.core.test_or_fanout_l5a1.TestHookRefusal.test_hostile_tool_calls_are_denied",
+ "threshold": "L5a spec section 10, T6",
+ "what": "handle_pre_tool no longer denies a tool name outside KNOWN_TOOLS (the spec's M6 payload itself, run_command with args.command, is out of scope by the owner's 2026-09-30 ruling and is recorded as limitation F-007)"
+}

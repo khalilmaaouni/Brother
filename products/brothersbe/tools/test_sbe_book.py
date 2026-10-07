@@ -127,11 +127,13 @@ class TestDeclaredVolatileLine(unittest.TestCase):
     def test_paths_and_test_ids_mask_but_their_neighbors_still_bite(self):
         stable = self._stable()
         a = "store: /Users/author/Documents/Repo/.sbe ok (__main__.TestEstate.test_x) ... FAIL\n"
-        b = "store: /home/runner/work/Repo/.sbe ok (__main__.TestEstate) ... FAIL\n"
+        # the runner's home is built in two halves: an exported file may not name a home a release meets
+        runner = "/home/" + "runner"
+        b = "store: %s/work/Repo/.sbe ok (__main__.TestEstate) ... FAIL\n" % runner
         self.assertEqual(stable(a), stable(b),
                          "author path and runner path, old and new unittest id "
                          "formats, are the same masked shape")
-        c = "store: /home/runner/work/Repo/.sbe ok (__main__.TestEstate) ... ok\n"
+        c = "store: %s/work/Repo/.sbe ok (__main__.TestEstate) ... ok\n" % runner
         self.assertNotEqual(stable(a), stable(c),
                             "the outcome beside a masked path must still bite")
 

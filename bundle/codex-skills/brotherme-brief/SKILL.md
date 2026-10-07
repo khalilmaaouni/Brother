@@ -3,7 +3,7 @@ name: brotherme-brief
 description: "Ask for the short catch-up on where the work stands, what it cost, and what is waiting on you"
 ---
 
-This is the Codex route for the existing Claude command `/brothermode:brotherme-brief`.
+This is the Codex route for the existing Claude command `/brother:brotherme-brief`.
 
 Codex has no slash command surface. Invoke this skill by name in a bounded outcome. The shared `using-brother` route remains the entry point when the outcome is ambiguous.
 

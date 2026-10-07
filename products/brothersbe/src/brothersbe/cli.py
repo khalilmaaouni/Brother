@@ -2045,7 +2045,7 @@ def _doctor_checks(target=None):
 
     # SETUP, never FAIL and never a silent PASS: B-010, softened for the
     # fresh-install case only. The marketplace install path never runs
-    # `sbe init`, so a beginner's first `/brothersbe:start` lands in a
+    # `sbe init`, so a beginner's first `/brother:brothersbe-start` lands in a
     # repository with no local footprint. That state is not breakage, it
     # is the ordinary shape of a brand new project, so a missing footprint
     # reads SETUP: a third, setup-class verdict beside PASS and FAIL. The

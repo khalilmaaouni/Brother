@@ -996,6 +996,12 @@ step that surfaces any design waiver as something a human is shown:
         run: python3 tools/test_sbe_approval_concentration.py
       - name: Tier outcome fixtures (a tier's later defect links back to the closure that shipped it, H5)
         run: python3 tools/test_sbe_tier_outcome.py
+      # tools/test_sbe_score.py: per-check tests for the sbe_score.py lints
+      # (agent-brief-hygiene, agent-brief-cache-order). Added the same day as
+      # the lints themselves so TestEverySuiteIsWiredIntoAGate in
+      # tools/test_sbe.py never has to catch this one unwired.
+      - name: Score lint fixtures (agent-brief-hygiene, agent-brief-cache-order)
+        run: python3 tools/test_sbe_score.py
 ```
 
 None of it forces ceremony on small work. A T0 change writes no dossier at all,

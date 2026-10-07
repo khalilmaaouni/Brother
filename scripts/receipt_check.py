@@ -19,6 +19,15 @@ A missing or empty receipt, or one in a scheme this checker does not know,
 is UNVERIFIED with a reason naming why. Nothing here ever upgrades a source
 to RESOLVED on the strength of the string looking right.
 
+THREE RECORD SHAPES, not to be confused with the three receipt schemes
+above: decide.py's own options[]/sources[] (check(), the default), the
+outcome-contract-v1 receipts[] list (check_contract(), _contract_receipts),
+and the engine's own runs/.../receipt/receipt.json (check_engine(),
+_engine_receipts, F29 2026-09-26): a top-level evidence[] list with no
+options and no top-level receipts key, whose own witness per unit is
+output_location rather than a file:/evidence:/url: string, resolved by
+_resolve_output_location instead of resolve_receipt.
+
 Python 3, standard library only. No network.
 """
 import argparse
@@ -125,6 +134,51 @@ def _contract_receipts(record):
             for r in receipts]
 
 
+def _engine_receipts(record):
+    """[(id, output_location, command)] for the engine's own receipt shape
+    (scripts/brother_run.py's runs/.../receipt/receipt.json, built by
+    receipt_door.receipt_record): a record with no options key and no
+    top-level receipts key, but a top-level evidence[] list, receipt_door's
+    own Q3 field (id, state, mark, command, exit_code, check_passed_before,
+    author, evidence_family, independence, output_location,
+    dependency_check, why per entry). None when the record is not shaped
+    this way at all, exactly like _contract_receipts above, so a caller can
+    tell "not this shape" apart from "this shape with nothing in it".
+
+    F29 (engine finding 29, 2026-09-26): this checker knew two shapes
+    (decide.py's options/sources, and outcome-contract-v1's receipts[]) and
+    printed NO-DATA for the one receipt this repository's own engine
+    writes, which carries neither key. The engine's evidence has no
+    "receipt" string in any of the three schemes resolve_receipt()
+    understands (file:, evidence:, url:); its own witness is
+    output_location, a path this same run already wrote real output to, so
+    that path is what gets resolved: present and a real file means RESOLVED,
+    same as evidence:<name> means "this exact file exists", just anchored
+    at the run's own path rather than at ~/.claude/evidence."""
+    if "options" in record or "receipts" in record:
+        return None
+    evidence = record.get("evidence")
+    if not isinstance(evidence, list):
+        return None
+    return [(e.get("id", ""), e.get("output_location", ""), e.get("command", ""))
+            for e in evidence]
+
+
+def _resolve_output_location(loc, root):
+    """(status, reason), the engine shape's own resolver: output_location is
+    already the receipt (see _engine_receipts), so this checks the path it
+    names exists, exactly as resolve_receipt's evidence: scheme checks a
+    name exists under ~/.claude/evidence, just anchored at `root` instead
+    for a location that is not already absolute."""
+    loc = (loc or "").strip()
+    if not loc or loc == NODATA:
+        return UNVERIFIED, "no output_location recorded for this unit"
+    path = loc if os.path.isabs(loc) else os.path.join(root, loc)
+    if os.path.isfile(path):
+        return RESOLVED, "captured at %s" % path
+    return UNVERIFIED, "no file at %s" % path
+
+
 def check(record):
     """[{option, status, receipt, reason, what}]. Pure, so a caller (this
     module's own main, or a future daybook citation index) can format the
@@ -158,6 +212,20 @@ def check_contract(record):
     return rows
 
 
+def check_engine(record):
+    """[{option, status, receipt, reason, what}], same row shape as check(),
+    for the engine's own receipt shape (F29): each evidence[] entry resolved
+    through _resolve_output_location instead of resolve_receipt, since the
+    engine's own witness is a path, not one of the three receipt: schemes.
+    "option" carries the unit id and "what" its recorded command."""
+    rows = []
+    for uid, loc, command in _engine_receipts(record) or []:
+        status, reason = _resolve_output_location(loc, ROOT)
+        rows.append({"option": uid, "status": status, "receipt": loc,
+                     "reason": reason, "what": command})
+    return rows
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("record", help="a decision JSON, decide.py's own spec shape")
@@ -172,12 +240,20 @@ def main(argv=None):
         return 2
 
     contract_receipts = _contract_receipts(record)
+    engine_receipts = _engine_receipts(record) if contract_receipts is None \
+        else None
     if contract_receipts is not None:
         if not contract_receipts:
             print("%s: %s carries an empty receipts list"
                   % (NODATA, args.record), file=sys.stderr)
             return 2
         rows = check_contract(record)
+    elif engine_receipts is not None:
+        if not engine_receipts:
+            print("%s: %s carries an empty evidence list"
+                  % (NODATA, args.record), file=sys.stderr)
+            return 2
+        rows = check_engine(record)
     else:
         rows = check(record)
         if not rows:

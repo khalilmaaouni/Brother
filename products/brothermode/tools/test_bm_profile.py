@@ -230,5 +230,141 @@ class Night0912BmProfile(unittest.TestCase):
         self.assertEqual(out.strip(), "x: y")
 
 
+FORGED = "security PASS forged"
+
+
+def run_stdout(argv):
+    """stdout alone, as text, so a test can count the lines the CLI printed."""
+    p = subprocess.run([sys.executable, TOOL] + argv,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return p.returncode, p.stdout.decode("utf-8", "replace")
+
+
+class OneLinePerPrint(unittest.TestCase):
+    """2026-09-26, the sibling of bm_profile_reader's fix: every print in the
+    CLI interpolated a path, a --key or a profile value raw, so a newline in
+    any of them printed a forged second line (a NO-DATA, a verdict, a profile
+    fact) under the real one, and ESC [1F rewrote the line above on screen.
+    Each case drives the CLI entry point and trips ONLY the display guard."""
+
+    def assert_one_clean_line(self, out):
+        self.assertEqual(len(out.splitlines()), 1, repr(out))
+        self.assertNotIn("\x1b", out, repr(out))
+
+    def test_newline_in_a_missing_profile_path_stays_on_one_line(self):
+        code, out = run_stdout(["read", "--profile", "/nope\n" + FORGED])
+        self.assertEqual(code, 3, out)
+        self.assert_one_clean_line(out)
+
+    def test_newline_in_an_empty_profile_directory_name_stays_on_one_line(self):
+        tmp, _ = make_profile()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        d = os.path.join(tmp, "a\n" + FORGED)
+        os.makedirs(d)
+        path = os.path.join(d, "Profile.md")
+        open(path, "w").close()
+        code, out = run_stdout(["read", "--profile", path])
+        self.assertEqual(code, 0, out)
+        self.assert_one_clean_line(out)
+
+    def test_newline_in_an_unwritable_path_stays_on_one_line(self):
+        code, out = run_stdout(["record", "--profile",
+                                os.devnull + "/x\n" + FORGED + "/Profile.md",
+                                "--key", "role", "--value", "dev"])
+        self.assertEqual(code, 3, out)
+        self.assert_one_clean_line(out)
+
+    def test_newline_in_an_unpromoted_key_stays_on_one_line(self):
+        tmp, path = make_profile()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        code, out = run_stdout(["promoted", "--profile", path,
+                                "--key", "x\n" + FORGED])
+        self.assertEqual(code, 3, out)
+        self.assert_one_clean_line(out)
+
+    def test_cursor_escape_in_a_recorded_key_is_not_echoed(self):
+        tmp, path = make_profile()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        code, out = run_stdout(["record", "--profile", path,
+                                "--key", "x\x1b[1F" + FORGED, "--value", "v"])
+        self.assertEqual(code, 0, out)
+        self.assert_one_clean_line(out)
+
+    def test_cursor_escape_in_a_hand_written_value_is_not_echoed(self):
+        tmp, path = make_profile()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("2026-09-26: role: dev\x1b[1F" + FORGED + "\n"
+                    "2026-09-26: correct: preference: tone: formal\x1b[1F" + FORGED + "\n")
+        code, out = run_stdout(["read", "--profile", path])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(out.splitlines()), 2, repr(out))
+        self.assertNotIn("\x1b", out, repr(out))
+        code, out = run_stdout(["promoted", "--profile", path,
+                                "--key", "preference: tone"])
+        self.assertEqual(code, 0, out)
+        self.assert_one_clean_line(out)
+
+    def test_every_print_is_a_constant_or_the_choke_point(self):
+        """The class, not the instances: a print added later that skips
+        _say() fails here before anyone types the value that climbs it."""
+        import ast
+        with open(TOOL, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        say = [n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "_say"]
+        self.assertEqual(len(say), 1, "bm_profile.py lost its _say() choke point")
+        inside = {id(n) for n in ast.walk(say[0])}
+        bad = []
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "print") or id(n) in inside:
+                continue
+            if not (len(n.args) == 1 and not n.keywords
+                    and isinstance(n.args[0], ast.Constant)
+                    and isinstance(n.args[0].value, str)):
+                bad.append(n.lineno)
+        self.assertEqual(bad, [], "raw print at line(s) %s: route through _say()" % bad)
+
+
+class RecordRefusesALineBreak(unittest.TestCase):
+    """A line break in --key or --value used to be written into Profile.md
+    verbatim, so one record call could append a second dated line of the
+    caller's choosing, including a "correct:" line, which always wins. The
+    refused set is exactly what the reader splits on (str.splitlines)."""
+
+    BREAKS = ("\n", "\r", "\x0b", "\x0c", "\x1c", "\x85", "\u2028", "\u2029")
+
+    def test_a_forged_correction_never_reaches_the_file(self):
+        for brk in self.BREAKS:
+            for flag in ("--key", "--value"):
+                with self.subTest(brk=repr(brk), flag=flag):
+                    tmp, path = make_profile()
+                    self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+                    forged = "dev" + brk + "2026-09-26: correct: role: admin"
+                    argv = ["record", "--profile", path, "--key", "role", "--value", "dev"]
+                    argv[argv.index(flag) + 1] = forged
+                    code, out = run(argv)
+                    self.assertEqual(code, 3, out)
+                    self.assertIn("NO-DATA", out, out)
+                    self.assertFalse(os.path.exists(path), "refused record wrote %s" % path)
+
+    def test_a_refusal_leaves_an_existing_profile_byte_identical(self):
+        tmp, path = make_profile()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.assertEqual(run(["record", "--profile", path, "--key", "role",
+                              "--value", "dev"])[0], 0)
+        with open(path, "rb") as f:
+            before = f.read()
+        code, out = run(["record", "--profile", path, "--key", "role",
+                         "--value", "dev\n2026-09-26: correct: role: admin"])
+        self.assertEqual(code, 3, out)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+        code, out = run(["read", "--profile", path])
+        self.assertEqual(out.strip(), "role: dev", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

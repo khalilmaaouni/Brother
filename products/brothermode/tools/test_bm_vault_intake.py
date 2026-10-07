@@ -313,6 +313,9 @@ class TheAirlockContract(unittest.TestCase):
         self.assertEqual(code, 1, out + err)
         self.assertIn("class=credential-shape", out)
         self.assertNotIn(FAKE_KEY, out)
+        # 2026-09-24: the refusal names the rule and the place, never the value (a landing gate quarantined a build
+        # on this class alone and nothing could say which pattern or where)
+        self.assertRegex(out, r"class=credential-shape pattern=\d+ view=(raw|normalized) offset=\d+ length=\d+")
         after = set(os.listdir(os.path.join(self.vault, "00-Inbox")))
         self.assertEqual(before, after, "a hard-rejected file must write nothing")
 
@@ -477,6 +480,24 @@ class NormalizationBypassCalibrationDirect(unittest.TestCase):
         hit, no_data = intake.credential_hit(fullwidth)
         self.assertIsNone(no_data)
         self.assertTrue(hit, "credential_hit must still catch it via the normalized view")
+
+
+class DateTimesAreNotCredentialShapes(unittest.TestCase):
+    """2026-09-30. credential_hit runs bm_telemetry.SECRET_PATTERNS itself,
+    so the card pattern's old reading of a date-time as a card number made a
+    git describe such as preflight/20260926-182529-663-g78fc9ce00 a
+    credential shape here too. Pinned at this entry point, both ways."""
+
+    def test_a_date_time_tag_is_not_a_credential(self):
+        hit, no_data = intake.credential_hit(
+            "built from preflight/20260926-182529-663-g78fc9ce00")
+        self.assertIsNone(no_data)
+        self.assertFalse(hit)
+
+    def test_a_card_number_still_is(self):
+        hit, no_data = intake.credential_hit("card 4111 1111 1111 1111")
+        self.assertIsNone(no_data)
+        self.assertTrue(hit)
 
 
 class EncodingBlindnessRegression(unittest.TestCase):

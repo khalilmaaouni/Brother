@@ -49,6 +49,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 RECONCILE_PATH = os.path.join(HERE, "sbe_session_reconcile.py")
 BASELINE_PATH = os.path.join(HERE, "sbe_session_baseline.py")
+SESSIONSTART_PATH = os.path.join(HERE, "sbe_sessionstart.py")
 
 
 def _load(alias, path):
@@ -159,7 +160,7 @@ class ReconcileCase(unittest.TestCase):
         return rec
 
     def baseline(self, session=MY_SESSION):
-        return sb.write_baseline(self.root, session)
+        return sb.write_baseline(self.root, session, "startup")
 
     def reconcile(self, session=MY_SESSION):
         return sr.reconcile_worktree(self.root, session)
@@ -183,6 +184,21 @@ class ReconcileCase(unittest.TestCase):
         proc = subprocess.run([sys.executable, RECONCILE_PATH], input=payload,
                               capture_output=True, text=True)
         return proc
+
+    def run_sessionstart(self, source, session=MY_SESSION):
+        """The REGISTERED SessionStart hook (hooks/hooks.json names
+        tools/sbe_sessionstart.py, not the baseline writer) as a SUBPROCESS,
+        the way Claude Code runs it, pointed at a temp vault so it reads
+        nothing real. source=None sends a payload with no source field."""
+        payload = {"session_id": session, "cwd": self.root,
+                   "hook_event_name": "SessionStart"}
+        if source is not None:
+            payload["source"] = source
+        vault = os.path.join(self._state_tmp.name, "vault")
+        os.makedirs(os.path.join(vault, "99-System", "telemetry"), exist_ok=True)
+        env = dict(os.environ, BROTHERSBE_VAULT=vault)
+        return subprocess.run([sys.executable, SESSIONSTART_PATH], input=json.dumps(payload),
+                              capture_output=True, text=True, env=env, timeout=120)
 
 
 class TestWhatCommandParsingCannotSee(ReconcileCase):
@@ -400,6 +416,119 @@ class TestFailClosed(ReconcileCase):
                          "change into pre-session dirt")
 
 
+class TestAMidSessionStartCannotLaunderADeletedBaseline(ReconcileCase):
+    """Found 2026-09-26. SessionStart is registered with no matcher, so it
+    fires again on a resume and on a compaction under the SAME session id (the
+    client documents both sources, and one real transcript on the build
+    machine carries startup, resume and compact under one id). The writer
+    refused only to OVERWRITE a baseline; when the baseline had been deleted
+    in between, the second SessionStart wrote a fresh one from the CURRENT
+    tree, recording the session's own change as pre-session dirt, and the Stop
+    hook then cleared it. Driven through the two registered hooks as
+    subprocesses, never through the helpers they call."""
+
+    def _delete_the_baseline_then_restart(self, source):
+        started = self.run_sessionstart("startup")
+        self.assertEqual(started.returncode, 0, "SessionStart must always exit 0")
+        path = sb.baseline_path(self.root, MY_SESSION)
+        self.assertTrue(os.path.exists(path),
+                        "the startup SessionStart wrote no baseline, so this fixture "
+                        "proves nothing: %s" % started.stderr)
+        write(os.path.join(self.root, "CLAUDE.md"), "changed by this session\n")
+        os.remove(path)
+        again = self.run_sessionstart(source)
+        self.assertEqual(again.returncode, 0, "SessionStart must always exit 0")
+        return self.run_stop_hook()
+
+    def _assert_blocked_on_the_session_change(self, stop, source):
+        self.assertEqual(stop.returncode, 0, stop.stderr)
+        self.assertTrue(stop.stdout.strip(),
+                        "a SessionStart with source %r after the baseline was deleted "
+                        "let the Stop hook ALLOW an undeclared CLAUDE.md change: the "
+                        "session's own write was laundered into pre-session dirt. "
+                        "stderr: %s" % (source, stop.stderr))
+        data = json.loads(stop.stdout)
+        self.assertEqual(data["decision"], "block")
+
+    def test_a_resume_after_the_baseline_was_deleted_still_blocks(self):
+        stop = self._delete_the_baseline_then_restart("resume")
+        self._assert_blocked_on_the_session_change(stop, "resume")
+
+    def test_a_compaction_after_the_baseline_was_deleted_still_blocks(self):
+        stop = self._delete_the_baseline_then_restart("compact")
+        self._assert_blocked_on_the_session_change(stop, "compact")
+
+    def test_a_resume_keeps_the_existing_baseline_and_still_blocks(self):
+        """The case that already held, now held at the entry point: with the
+        baseline present, a resume leaves it byte for byte and the change made
+        before the resume is still this session's."""
+        self.run_sessionstart("startup")
+        path = sb.baseline_path(self.root, MY_SESSION)
+        first = read(path)
+        write(os.path.join(self.root, "CLAUDE.md"), "changed by this session\n")
+        self.run_sessionstart("resume")
+        self.assertEqual(read(path), first, "a resume rewrote an existing baseline")
+        self._assert_blocked_on_the_session_change(self.run_stop_hook(), "resume")
+
+
+class TestWhichSessionStartWritesAFirstBaseline(ReconcileCase):
+    """Owner ruling 2026-09-26: a first baseline is written only when the
+    payload's source begins a session (startup, clear, fork). Each fixture
+    below isolates ONE source against the baseline writer as a subprocess
+    on a clean tree, so the only thing that can decide it is the source."""
+
+    def write_from_payload(self, payload):
+        proc = subprocess.run([sys.executable, BASELINE_PATH, "write"],
+                              input=json.dumps(payload), capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0,
+                         "the writer runs on SessionStart and must always exit 0")
+        self.assertEqual(proc.stdout, "", "SessionStart injects stdout into context")
+        return proc
+
+    def payload(self, session, **extra):
+        body = {"session_id": session, "cwd": self.root,
+                "hook_event_name": "SessionStart"}
+        body.update(extra)
+        return body
+
+    def test_clear_writes_a_first_baseline(self):
+        self.write_from_payload(self.payload("s-clear", source="clear"))
+        self.assertTrue(os.path.exists(sb.baseline_path(self.root, "s-clear")),
+                        "/clear begins a session and must get a baseline")
+
+    def test_fork_writes_a_first_baseline(self):
+        self.write_from_payload(self.payload("s-fork", source="fork"))
+        self.assertTrue(os.path.exists(sb.baseline_path(self.root, "s-fork")),
+                        "a fork begins a session and must get a baseline")
+
+    def _assert_refused(self, session, proc):
+        self.assertFalse(os.path.exists(sb.baseline_path(self.root, session)),
+                         "a first baseline was written: %s" % proc.stderr)
+        self.assertIn("does not begin a new session", proc.stderr,
+                      "the refusal was silent about why: %r" % proc.stderr)
+
+    def test_a_payload_with_no_source_writes_no_first_baseline(self):
+        proc = self.write_from_payload(self.payload("s-none"))
+        self._assert_refused("s-none", proc)
+
+    def test_an_undocumented_source_writes_no_first_baseline(self):
+        proc = self.write_from_payload(self.payload("s-odd", source="restart"))
+        self._assert_refused("s-odd", proc)
+
+    def test_a_non_string_source_writes_no_first_baseline(self):
+        proc = self.write_from_payload(self.payload("s-num", source=7))
+        self._assert_refused("s-num", proc)
+
+    def test_flags_alone_write_no_first_baseline(self):
+        """The manual late-baseline route declined on 2026-09-06: flags carry
+        no source, and nothing else may supply one."""
+        proc = subprocess.run([sys.executable, BASELINE_PATH, "write",
+                               "--session", "s-flags", "--cwd", self.root],
+                              input="", capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self._assert_refused("s-flags", proc)
+
+
 class TestDeclaredScopeIsAllowed(ReconcileCase):
 
     def test_a_protected_change_inside_an_open_task_ownedpaths_is_allowed(self):
@@ -529,6 +658,106 @@ class TestTheNamedRecoveryWorks(ReconcileCase):
                          % outcome.reason)
 
 
+class TestAMissingBaselineOffersOnlyTheRouteThatClearsIt(ReconcileCase):
+    """A missing baseline with a dirty tree used to end its refusal on a route
+    the code never takes: declare the paths in .sbe/tasks.json and record a
+    break-glass entry. reconcile_worktree raises on the missing baseline BEFORE
+    read_declarations or judge run, so neither declaration is ever read, and
+    an operator who followed the route exactly was blocked again on every
+    Stop, because an Unusable condition is never repeat-suppressed. Seen
+    2026-09-05, 2026-09-06 (twelve identical block turns) and 2026-09-26.
+
+    Every test drives the Stop hook as a SUBPROCESS, the entry point where the
+    block is issued. Each fixture isolates one condition: the declarations are
+    shown valid by the reconciler's own readers, and each one is shown to clear
+    the same change once a baseline exists, so a block without one is the
+    missing baseline and nothing else."""
+
+    RECORD = {"id": "bg-1", "reason": "a reviewed exception, written as the refusal asked",
+              "owner": "owner-1", "expiry": "2099-12-31",
+              "approval": {"approver": "approver-1", "reference": "PR 1"},
+              "paths": ["CLAUDE.md"]}
+
+    def _declare(self, task=True, break_glass=True):
+        if task:
+            self.set_tasks([self.owning_task("CLAUDE.md")])
+        if break_glass:
+            write(os.path.join(self.root, ".sbe", "break-glass.json"),
+                  json.dumps({"schemaVersion": "1.0", "records": [self.RECORD]}))
+        self.git("add", "-A")
+        self.commit("declare CLAUDE.md")
+
+    def _change(self):
+        write(os.path.join(self.root, "CLAUDE.md"), "changed, declared twice over\n")
+
+    def _block_reason(self, proc):
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(proc.stdout.strip(),
+                        "the Stop hook allowed; stderr: %s" % proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["decision"], "block")
+        return data["reason"]
+
+    def test_the_fixture_declarations_are_valid_by_the_reconcilers_own_readers(self):
+        self._declare()
+        declarations = sr.read_declarations(self.root, MY_SESSION)
+        self.assertEqual([r["id"] for r in declarations.break_glass.valid], ["bg-1"],
+                         declarations.break_glass.refused)
+        self.assertEqual([t["id"] for t in declarations.live_tasks], ["t1"])
+
+    def test_an_open_task_alone_clears_the_change_once_a_baseline_exists(self):
+        self._declare(task=True, break_glass=False)
+        self.baseline()
+        self._change()
+        proc = self.run_stop_hook()
+        self.assertEqual(proc.stdout, "", "the positive control blocked: %s" % proc.stdout)
+
+    def test_a_break_glass_record_alone_clears_the_change_once_a_baseline_exists(self):
+        self._declare(task=False, break_glass=True)
+        self.baseline()
+        self._change()
+        proc = self.run_stop_hook()
+        self.assertEqual(proc.stdout, "", "the positive control blocked: %s" % proc.stdout)
+
+    def test_without_a_baseline_neither_declaration_clears_it(self):
+        self._declare()
+        self._change()
+        reason = self._block_reason(self.run_stop_hook())
+        self.assertIn("no baseline exists", reason)
+
+    def test_the_refusal_offers_no_route_it_cannot_honor(self):
+        self._declare()
+        self._change()
+        reason = self._block_reason(self.run_stop_hook())
+        self.assertNotIn("record a break-glass entry", reason)
+        promised = [line for line in reason.splitlines()
+                    if ("break-glass" in line or "tasks.json" in line or "fence" in line)
+                    and "does NOT clear" not in line]
+        self.assertEqual(promised, [], "a declaration is still offered as a way out: %s"
+                                       % promised)
+        self.assertIn("does NOT clear", reason,
+                      "the dead route is omitted but never named as dead, so an operator "
+                      "who already knows it has nothing telling them it will not work")
+        # How a baseline gets written, read out of sbe_sessionstart.py and
+        # write_baseline, and why writing one now is not a recovery.
+        self.assertIn("sbe_session_baseline.py write", reason)
+        self.assertIn("not a recovery", reason)
+        # The text follows the suppression below, never the behaviour it replaced.
+        self.assertNotIn("repeats on every Stop", reason)
+        self.assertIn("still unresolved", reason)
+
+    def test_the_named_route_really_clears_it(self):
+        self._declare()
+        self._change()
+        reason = self._block_reason(self.run_stop_hook())
+        self.assertIn("git restore", reason)
+        self.git("restore", "--", "CLAUDE.md")
+        proc = self.run_stop_hook()
+        self.assertEqual(proc.stdout, "",
+                         "the route the refusal named did not clear it: %s" % proc.stdout)
+        self.assertIn("nothing to attribute", proc.stderr)
+
+
 class TestTheStopHookWireContract(ReconcileCase):
 
     def test_the_hook_blocks_through_stdout_and_exits_0(self):
@@ -652,6 +881,63 @@ class TestRepeatSuppression(ReconcileCase):
                       "in full so a standing violation is never silent forever")
 
 
+class TestAMissingBaselineRepeatIsSuppressed(ReconcileCase):
+    """Owner-deferred ruling 2026-09-26: no readable baseline with a dirty tree
+    is the one Unusable condition suppressed like a violation set, because
+    nothing inside the session clears it without discarding work that may be a
+    peer's, and it re-blocked every Stop (twelve identical turns on
+    2026-09-06). Scoped by the same ruling: the full block still fires first
+    and on any change to the path set, a session with no id is never
+    suppressed, and every other Unusable still re-blocks every Stop. Each test
+    drives the Stop hook as a subprocess."""
+
+    def dirty(self, *rels):
+        for rel in rels:
+            write(os.path.join(self.root, rel), "changed with no baseline\n")
+
+    def test_an_unchanged_missing_baseline_set_does_not_reblock_the_second_stop(self):
+        self.dirty("CLAUDE.md")
+        first = self.run_stop_hook()
+        self.assertTrue(first.stdout.strip(), "the FIRST occurrence was not blocked")
+        self.assertIn("no baseline exists", json.loads(first.stdout)["reason"])
+        second = self.run_stop_hook()
+        self.assertEqual(second.stdout.strip(), "",
+                         "an unchanged missing-baseline set re-blocked the next Stop, "
+                         "the loop this ruling ends: %r" % second.stdout)
+        self.assertIn("UNCHANGED", second.stderr)
+        self.assertIn("still unreconciled", second.stderr,
+                      "the short form must never read as a cleared session")
+
+    def test_a_changed_path_set_blocks_in_full_again(self):
+        self.dirty("CLAUDE.md")
+        self.run_stop_hook()
+        self.dirty("docs/notes.md")
+        again = self.run_stop_hook()
+        self.assertTrue(again.stdout.strip(),
+                        "a NEW path joined the set and the hook stayed silent")
+        self.assertIn("2 changed path(s)", json.loads(again.stdout)["reason"])
+
+    def test_a_session_with_no_id_is_never_suppressed(self):
+        self.dirty("CLAUDE.md")
+        for n in (1, 2):
+            proc = self.run_stop_hook(session="")
+            self.assertTrue(proc.stdout.strip(),
+                            "Stop %d of a session with no id was not blocked; every "
+                            "id-less session shares one memory" % n)
+
+    def test_every_other_unusable_still_reblocks_every_stop(self):
+        path = self.baseline()
+        data = json.loads(read(path))
+        data["repositoryRoot"] = os.path.join(self.root, "docs")
+        write(path, json.dumps(data))
+        self.dirty("CLAUDE.md")
+        for n in (1, 2):
+            proc = self.run_stop_hook()
+            self.assertTrue(proc.stdout.strip(),
+                            "Stop %d of a repository-root mismatch was suppressed" % n)
+            self.assertIn("repository root", json.loads(proc.stdout)["reason"])
+
+
 class TestTheBaselineItself(ReconcileCase):
 
     def test_the_baseline_carries_every_key_the_spec_names(self):
@@ -685,7 +971,7 @@ class TestTheBaselineItself(ReconcileCase):
         """The wiring tools/sbe_sessionstart.py uses, exercised end to end
         rather than by calling the Python function the hook never calls."""
         payload = json.dumps({"session_id": "from-stdin-1234", "cwd": self.root,
-                              "hook_event_name": "SessionStart"})
+                              "hook_event_name": "SessionStart", "source": "startup"})
         proc = subprocess.run([sys.executable, BASELINE_PATH, "write"], input=payload,
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)

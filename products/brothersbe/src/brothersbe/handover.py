@@ -514,7 +514,7 @@ def _evidence_entries(dossier, root, head):
 # check, then receipts, then in-flight, then not-started), the FOURTH
 # hand-rolled next-action ladder `lifecycle.py`'s own module docstring names
 # (`status.build_report`'s old `_next_action`, `build_team_report`'s raw
-# severity-number pick, and `/brothersbe:next`'s prose ladder were the other
+# severity-number pick, and `/brother:brothersbe-next`'s prose ladder were the other
 # three). It now builds a list of candidates the identical way `status.py`'s
 # own `_next_action` does -- one `lifecycle.candidate(rung, reason)` per
 # outstanding fact, calling `status.py`'s OWN approval/task/review candidate

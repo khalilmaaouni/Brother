@@ -50,7 +50,7 @@ def event(minute, kind, payload=None, unit_id=None):
 
 
 def claim(unit_id, claimed_min, released_min, exit_code=0, state="done",
-          attempt=1):
+          attempt=1, check_command="python3 -c pass"):
     """A claims.json entry, epoch stamped like claim_store.release() writes
     one: claimed_at/released_at as epoch floats (safe_unwatched_time._epoch
     is the reader), state the lane ended in, evidence carrying the check's
@@ -60,9 +60,18 @@ def claim(unit_id, claimed_min, released_min, exit_code=0, state="done",
     entry = {"unit_id": unit_id, "state": state, "attempt": attempt,
              "claimed_at": claimed_at, "released_at": released_at}
     if exit_code is not None:
-        entry["evidence"] = {"check_command": "python3 -c pass",
+        entry["evidence"] = {"check_command": check_command,
                               "exit_code": exit_code}
     return entry
+
+
+def open_claim(unit_id, claimed_min):
+    """A claims.json entry for a unit still claimed and never released:
+    claimed_at only, no released_at at all (the shape a live claim
+    actually has on disk, not a claim() call with a fabricated end)."""
+    return {"unit_id": unit_id, "state": "claimed", "attempt": 1,
+           "claimed_at": (BASE + datetime.timedelta(minutes=claimed_min))
+           .timestamp()}
 
 
 def receipt_entry(file, unit, check_command="python3 -m unittest x -v",
@@ -375,6 +384,306 @@ class TestReuseAgreesWithCodexBattery(Sandbox):
         label, _reason = pc.file_proof_label(entry)
         self.assertEqual(label, "PROVES CHANGE")
 
+
+
+class TheReceiptGate(Sandbox):
+    """CRITICAL 2 (REVIEW-QA-607.md): Outcome must never read PASS on an
+    empty changed-file list, whether that emptiness comes from no receipt
+    at all or from a receipt naming no changed files."""
+
+    def test_all_claims_done_with_an_oracle_event_and_no_receipt_reads_no_data(self):
+        events = GREEN_EVENTS + [
+            event(21, "oracle.recorded", {"exit_code": 0, "command": "make check"})]
+        run = write_run(self.root, "oracle-no-receipt", events, GREEN_CLAIMS,
+                        GREEN_ROWS, receipt=None)
+        fields = pc.build_card(run)
+        self.assertEqual(fields["outcome"]["value"], pc.NODATA)
+        self.assertEqual(fields["top_level_oracle"]["value"], "PASS")
+        self.assertEqual(fields["receipt"]["value"], pc.NODATA)
+
+    def test_a_receipt_with_an_empty_changed_list_reads_unit_complete_not_pass(self):
+        events = GREEN_EVENTS + [
+            event(21, "oracle.recorded", {"exit_code": 0, "command": "make check"})]
+        run = write_run(self.root, "oracle-empty-receipt", events, GREEN_CLAIMS,
+                        GREEN_ROWS, receipt={"scope": {"changed": []}})
+        fields = pc.build_card(run)
+        self.assertEqual(fields["outcome"]["value"], "UNIT-COMPLETE")
+        self.assertEqual(fields["files_changed"]["value"], "0")
+        self.assertEqual(fields["proven"]["value"], "0")
+
+    def test_the_existing_pass_fixture_still_reads_pass(self):
+        """Driven alongside the two cases above so the fix cannot be read
+        as merely refusing to print PASS ever again."""
+        events = GREEN_EVENTS + [
+            event(21, "oracle.recorded", {"exit_code": 0, "command": "make check"})]
+        run = write_run(self.root, "still-pass", events, GREEN_CLAIMS,
+                        GREEN_ROWS, GREEN_RECEIPT)
+        fields = pc.build_card(run)
+        self.assertEqual(fields["outcome"]["value"], "PASS")
+
+
+class TheLabelOrderAudit1c(Sandbox):
+    """audit 1c (REVIEW-EVIDENCE-AUDIT-607.md): a state other than
+    "verified" must never read PROVES CHANGE just because the exit code
+    happened to be 0. file_proof_label already reads check_passed_before
+    before state; this pins the remaining, untested branch of that
+    ordering down."""
+
+    def test_exit_zero_state_not_verified_check_not_green_before_reads_no_data(self):
+        entry = receipt_entry("a.py", "u1", exit_code=0,
+                              check_passed_before=False, state="pending")
+        label, _reason = pc.file_proof_label(entry)
+        self.assertEqual(label, pc.NODATA)
+        self.assertNotEqual(label, "PROVES CHANGE")
+
+
+class TheCheapNegativeCases(Sandbox):
+    """MAJOR 5 (REVIEW-QA-607.md): the two cheapest missing negative
+    cases, both already handled by the existing NO-DATA discipline; these
+    pin that down rather than leave it untested."""
+
+    def test_a_receipt_with_no_scope_changed_key_reads_no_data_without_a_crash(self):
+        run = write_run(self.root, "no-changed-key", GREEN_EVENTS, GREEN_CLAIMS,
+                        GREEN_ROWS, receipt={"scope": {}})
+        fields = pc.build_card(run)
+        self.assertEqual(fields["files_changed"]["value"], "0")
+        self.assertEqual(fields["no_data_files"]["value"], "0")
+        self.assertEqual(pc.changed_files({"scope": {}}), [])
+
+    def test_a_journal_whose_events_carry_no_timestamps_reads_wall_clock_no_data(self):
+        run_dir = os.path.join(self.root, "no-timestamps")
+        os.makedirs(run_dir)
+        with open(os.path.join(run_dir, "journal.jsonl"), "w",
+                 encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "run.opened", "unit_id": None,
+                                 "payload": {}}) + "\n")
+            fh.write(json.dumps({"type": "receipt.issued", "unit_id": None,
+                                 "payload": {}}) + "\n")
+        fields = pc.build_card(run_dir)
+        self.assertEqual(fields["wall_clock"]["value"], pc.NODATA)
+
+
+class TheNumericHonestyFixes(Sandbox):
+    """ADDENDUM B (16-CODEX-REVIEW-607.md): four numeric rows that used to
+    print a confident-looking wrong number instead of NO-DATA or the
+    truth. Each test here fails on the pre-fix code."""
+
+    def test_peak_concurrency_bounds_two_open_claims_by_the_observed_horizon(self):
+        """Before the fix, two claims with no released_at at all each
+        collapsed to a zero-length interval at their own start (open_end
+        None falling back to `or start` inside _max_overlap), and this
+        printed 0. Both are live by the time the second one starts, so
+        the honest peak is 2."""
+        claims = {"a": open_claim("a", 0), "b": open_claim("b", 5)}
+        self.assertEqual(pc.peak_concurrency(claims), 2)
+
+    def test_a_dead_owner_reclaim_is_never_counted_as_duplicate_work(self):
+        """Unit x claimed by W1 at minute 0, never released (its owner
+        died); W2 reclaims the SAME unit at minute 7 (reclaimed_from W1);
+        W2 releases at minute 25. Before the fix, FIFO-by-unit-id pairing
+        matched W1's abandoned acquire to W2's eventual release
+        (0..25) and left W2's own acquire as a second, overlapping open
+        interval, printing 1 duplicate for a run that never raced."""
+        events = [event(0, "claim.acquired", {"owner": "W1", "attempt": 1,
+                                              "reclaimed_from": None}, unit_id="x"),
+                 event(7, "claim.acquired", {"owner": "W2", "attempt": 2,
+                                             "reclaimed_from": "W1"}, unit_id="x"),
+                 event(25, "claim.released", {"owner": "W2", "attempt": 2,
+                                              "state": "done"}, unit_id="x")]
+        run = write_run(self.root, "dead-owner-reclaim", events, claims=None,
+                        rows=None, receipt=None)
+        fields = pc.build_card(run)
+        self.assertEqual(fields["duplicate_work"]["value"], "0")
+
+    def test_recoveries_reads_no_data_not_a_flattering_zero_with_no_records(self):
+        """Before the fix this returned (0, NO-DATA), which build_card
+        rendered as the misleading "0 (NO-DATA)"."""
+        count, source = pc.recoveries({}, None)
+        self.assertIsNone(count)
+        self.assertEqual(source, pc.NODATA)
+
+    def test_the_card_row_for_recoveries_prints_bare_no_data_with_no_records(self):
+        """E-9c at the row a customer reads, not only at recoveries():
+        a run with no journal and no claims.json must print the bare
+        NO-DATA value, never "0 (NO-DATA)" or any other zero."""
+        run = write_run(self.root, "recoveries-no-records", events=None,
+                        claims=None, rows=GREEN_ROWS, receipt=None)
+        fields = pc.build_card(run)
+        self.assertEqual(fields["recoveries"]["value"], pc.NODATA)
+
+    def test_recoveries_counts_an_attempt_traced_repair_the_claim_alone_would_miss(self):
+        """claims.json here shows attempt 1 (its own attempt field was
+        never bumped), so only the journal's own attempt.traced event at
+        attempt 2 proves a repair happened. Before the fix this source
+        did not exist and the count read 0."""
+        claims = {"u1": claim("u1", 0, 10, attempt=1)}
+        events = [event(0, "run.opened"),
+                 event(5, "attempt.traced", {"attempt": 2}, unit_id="u1")]
+        count, source = pc.recoveries(claims, events)
+        self.assertEqual(count, 1)
+        self.assertIn("attempt.traced", source)
+
+    def test_sequential_estimate_labels_a_retried_claim_as_a_partial_sum(self):
+        """u1 completed cleanly on attempt 1; u2's claims.json record is
+        its SECOND attempt, so the time its first, overwritten attempt
+        spent is not in this sum at all. Before the fix this printed the
+        ordinary "measured from unit durations" phrase over a sum that
+        silently excluded that lost time."""
+        claims = {"u1": claim("u1", 0, 10, attempt=1),
+                 "u2": claim("u2", 10, 20, attempt=2)}
+        seconds, partial = pc.sequential_estimate(claims)
+        self.assertEqual(seconds, 20 * 60.0)
+        self.assertTrue(partial)
+
+        # Backwards: the same two claims both on attempt 1 read as a
+        # full, non-partial estimate.
+        claims_clean = {"u1": claim("u1", 0, 10, attempt=1),
+                        "u2": claim("u2", 10, 20, attempt=1)}
+        seconds2, partial2 = pc.sequential_estimate(claims_clean)
+        self.assertEqual(seconds2, 20 * 60.0)
+        self.assertFalse(partial2)
+
+
+#: Three units, one killed and reclaimed (u2, dead owner W2 at minute 6,
+#: reclaimed by W2b at minute 7), two integrations (u1 and u2 merged; u3
+#: failed and never integrated), one NO-DATA file (u3.py, exit 1), real
+#: timestamps throughout (CRITICAL 3, REVIEW-QA-607.md).
+RICH_ROWS = [{"id": "u1", "files_changed_by_unit": ["u1.py"]},
+            {"id": "u2", "files_changed_by_unit": ["u2.py"]},
+            {"id": "u3", "files_changed_by_unit": ["u3.py"]}]
+
+RICH_CLAIMS = {
+    "u1": claim("u1", 0, 10, exit_code=0, state="done", attempt=1,
+               check_command="python3 -m unittest u1_check"),
+    "u2": claim("u2", 7, 25, exit_code=0, state="done", attempt=2,
+               check_command="python3 -m unittest u2_check"),
+    "u3": claim("u3", 20, 30, exit_code=1, state="failed", attempt=1,
+               check_command="python3 -m unittest u3_check"),
+}
+
+RICH_EVENTS = [
+    event(0, "run.opened", {"units": 3}),
+    event(0, "claim.acquired", {"owner": "W1", "attempt": 1,
+                                "reclaimed_from": None}, unit_id="u1"),
+    event(0, "claim.acquired", {"owner": "W2", "attempt": 1,
+                                "reclaimed_from": None}, unit_id="u2"),
+    event(6, "claim.orphaned_by_kill", {"owner": "W2"}, unit_id="u2"),
+    event(7, "claim.acquired", {"owner": "W2b", "attempt": 2,
+                                "reclaimed_from": "W2"}, unit_id="u2"),
+    event(7, "attempt.traced", {"attempt": 2}, unit_id="u2"),
+    event(10, "claim.released", {"owner": "W1", "attempt": 1,
+                                 "state": "done"}, unit_id="u1"),
+    event(20, "claim.acquired", {"owner": "W3", "attempt": 1,
+                                 "reclaimed_from": None}, unit_id="u3"),
+    event(25, "claim.released", {"owner": "W2b", "attempt": 2,
+                                 "state": "done"}, unit_id="u2"),
+    event(26, "integrate.merged", {"unit": "u1"}, unit_id="u1"),
+    event(27, "integrate.merged", {"unit": "u2"}, unit_id="u2"),
+    event(30, "claim.released", {"owner": "W3", "attempt": 1,
+                                 "state": "failed"}, unit_id="u3"),
+    event(31, "receipt.issued", {"receipts": 3, "unproven": 1}),
+]
+
+RICH_RECEIPT = {"scope": {"changed": [
+    receipt_entry("u1.py", "u1", check_command="python3 -m unittest u1_check",
+                 exit_code=0, check_passed_before=False, state="verified"),
+    receipt_entry("u2.py", "u2", check_command="python3 -m unittest u2_check",
+                 exit_code=0, check_passed_before=True, state="verified"),
+    receipt_entry("u3.py", "u3", check_command="python3 -m unittest u3_check",
+                 exit_code=1, check_passed_before=False, state="refused",
+                 reason="check did not run to a verdict"),
+]}}
+
+
+class TheHandComputedFixture(Sandbox):
+    """CRITICAL 3 (REVIEW-QA-607.md): every numeric row checked against a
+    value computed by hand from this fixture's own records, so stubbing
+    any one row to a fabricated constant fails this test (the QA
+    reviewer's own finding: stubbing eight rows today leaves 16 tests
+    OK)."""
+
+    def test_every_numeric_row_matches_the_fixtures_own_arithmetic(self):
+        run = write_run(self.root, "rich", RICH_EVENTS, RICH_CLAIMS,
+                        RICH_ROWS, RICH_RECEIPT)
+        fields = pc.build_card(run)
+
+        # units done/total: u1 and u2 read "done" in claims.json, u3
+        # reads "failed" -- 2 of 3.
+        self.assertEqual(fields["units"]["value"], "2/3")
+
+        # recoveries: u2 alone needed a repair, corroborated three
+        # independent ways (claims attempt 2, the orphaned-by-kill
+        # event, the attempt.traced event) -- one unit, not three.
+        self.assertEqual(fields["recoveries"]["value"],
+                         "1 (claims attempt > 1, claim.orphaned_by_kill "
+                         "events, attempt.traced repairs)")
+
+        # integrated: claims state "done" count is 2, and the two
+        # integrate.merged events carry distinct timestamps (minute 26
+        # and 27), so the "serially" qualifier applies.
+        self.assertEqual(fields["integrated"]["value"], "2 units, serially")
+
+        # files changed/proven/green/NO-DATA: three scope.changed
+        # entries, one PROVES CHANGE (u1, ordinary green), one GREEN
+        # ONLY (u2, check_passed_before True), one NO-DATA (u3, exit 1).
+        self.assertEqual(fields["files_changed"]["value"], "3")
+        self.assertEqual(fields["proven"]["value"], "1")
+        self.assertEqual(fields["green_only"]["value"], "1")
+        self.assertEqual(fields["no_data_files"]["value"], "1")
+
+        # checks rerunnable: three distinct check_command values in
+        # claims.json, each with a captured exit_code.
+        self.assertEqual(fields["checks_rerunnable"]["value"], "3 rerunnable")
+
+        # scope violations: no integrate.refused event exists at all, so
+        # the journal-backed zero is provable, not a default.
+        self.assertEqual(fields["scope_violations"]["value"], "0")
+
+        # duplicate work: u2's dead-owner reclaim (t0..t7) and its live
+        # replacement (t7..t25) touch at minute 7 and never overlap, so
+        # this reads 0, not 1 (the exact false positive addendum 9b
+        # fixes).
+        self.assertEqual(fields["duplicate_work"]["value"], "0")
+
+        # wall clock: first event (run.opened, minute 0) to last
+        # (receipt.issued, minute 31) is 31 minutes.
+        self.assertEqual(fields["wall_clock"]["value"], "%.1f sec" % (31 * 60))
+
+        # sequential estimate: claims.json intervals sum to
+        # (10-0)+(25-7)+(30-20) minutes = 38 minutes, but u2's own
+        # record is its SECOND attempt, so this is a partial sum, not a
+        # full sequential estimate.
+        self.assertEqual(fields["sequential_est"]["value"],
+                         "%.1f sec (partial sum of complete intervals)"
+                         % (38 * 60))
+
+        # human interrupts: no event type in this fixture (or this
+        # estate's vocabulary) names a human moment.
+        self.assertEqual(fields["human_interrupts"]["value"], pc.NODATA)
+
+        # peak concurrency: u1 [0,10] and u2 [7,25] overlap for [7,10);
+        # u2 and u3 [20,30] overlap for [20,25); u1 and u3 never
+        # overlap; no instant ever holds all three. Peak is 2.
+        self.assertEqual(fields["peak_concurrency"]["value"], "2 workers")
+
+
+class TheRenderForRunFunction(Sandbox):
+    """Unit 1 (REVIEW-EVIDENCE-AUDIT-607.md, "BUILT AND UNWIRED"): the one
+    function brother_run.py's own delivery step calls."""
+
+    def test_a_full_fixture_renders_the_title_and_agrees_with_build_card(self):
+        run = write_run(self.root, "wired", GREEN_EVENTS, GREEN_CLAIMS,
+                        GREEN_ROWS, GREEN_RECEIPT)
+        text, fields = pc.render_for_run(run)
+        self.assertTrue(text.startswith(pc.TITLE))
+        self.assertEqual(fields, pc.build_card(run))
+
+    def test_a_run_with_no_receipt_still_renders_without_raising(self):
+        run = write_run(self.root, "wired-no-receipt", GREEN_EVENTS,
+                        GREEN_CLAIMS, GREEN_ROWS, receipt=None)
+        text, fields = pc.render_for_run(run)
+        self.assertTrue(text.startswith(pc.TITLE))
+        self.assertEqual(fields["receipt"]["value"], pc.NODATA)
 
 if __name__ == '__main__':
     unittest.main()

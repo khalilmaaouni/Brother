@@ -1,0 +1,7 @@
+{
+  "toolCall": {
+    "name": "dangerous_unknown_tool",
+    "args": {}
+  },
+  "stepIdx": 2
+}

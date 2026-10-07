@@ -58,6 +58,7 @@ import json
 import os
 import posixpath
 import secrets
+import shlex
 import subprocess
 import sys
 
@@ -71,6 +72,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: init`, and running it verbatim from that root raised Errno 2, because
 #: that relative path only resolves from this file's own directory).
 _BM_STORE_PATH = os.path.join(HERE, "bm_store.py")
+
+
+def _shell_path(path):
+    """A tool path as the model can run it from any cwd, shown with ~ for the
+    home directory so an enforced reason never carries it, and shell-quoted
+    after the ~ so a space in an install path cannot split the command."""
+    home = os.path.expanduser("~")
+    if home not in ("", os.sep) and path.startswith(home + os.sep):
+        return "~/" + shlex.quote(path[len(home) + 1:])
+    return shlex.quote(path)
+
+
+#: The two fix-it commands an enforced reason may name (E123). Only this
+#: file's own install path, identical for every payload, so the reason still
+#: quotes nothing from the write being refused.
+_BM_STORE_CMD = _shell_path(_BM_STORE_PATH)
+_BM_HOOK_CMD = _shell_path(os.path.join(HERE, "bm_fence_hook.py"))
 
 # Loaded by path rather than by package import: tools/ is not a package, and
 # the hook is invoked by Claude Code with an arbitrary cwd, so a plain
@@ -698,8 +716,9 @@ ADVISORY = MODE_ADVISORY
 _ALLOW_EVEN_WHEN_ENFORCED = frozenset(("no-root",))
 
 #: Enforced-mode deny copy, keyed by the code carried on _FailOpen. Every
-#: value is a LITERAL, and that is a security property rather than a style
-#: choice. The stderr note is read by the operator and may name paths; this
+#: value is a LITERAL (the only substitution is this file's own install
+#: path, identical for every payload), and that is a security property
+#: rather than a style choice. The stderr note is read by the operator and may name paths; this
 #: reason is read by the model and lands in a transcript, and at the moment it
 #: is produced NOTHING has been verified, so nothing verified justifies
 #: quoting a path, a record name, a claim label or any payload content. The
@@ -721,8 +740,7 @@ _FAIL_REASONS = {
     "no-store": (
         "this project has no BrotherMode store, so there is no fence to check "
         "against",
-        "run bm_store.py's own `init` command; the runnable command, with "
-        "its full path, is on stderr just above this message"),
+        "run `python3 %s init` from the project root" % _BM_STORE_CMD),
     "store-unreadable": (
         "the BrotherMode store could not be opened read-only: it is missing, "
         "empty, busy or corrupt",
@@ -733,9 +751,10 @@ _FAIL_REASONS = {
     "no-active-claims": (
         "the BrotherMode store holds no active claims, so no fence exists, "
         "and enforced mode requires a claim before an edit",
-        "claim the paths first with bm_store.py's own `claim` command; the "
-        "runnable command, with its full path, is on stderr just above "
-        "this message"),
+        "claim the paths you will edit with `python3 %s claim NAME "
+        "--lifetime ephemeral --objective TEXT --files PATH --session LABEL`, "
+        "where LABEL is printed by `python3 %s session-label --session-id "
+        "SESSION_ID`" % (_BM_STORE_CMD, _BM_HOOK_CMD)),
     "no-identity": (
         "this session's fence token could not be read or created, so its "
         "ownership label could not be derived",
@@ -1151,6 +1170,16 @@ def decide(payload):
         battery = _battery_decision(root, raw_targets, cwd, notes)
         if battery is not None:
             return battery, notes
+
+        # E122: the fence governs a project, not the machine (the loop below
+        # skips outside-root targets). A write with no target inside the root
+        # must leave here, before the store checks, or an empty store refuses
+        # it under enforcement.
+        if all(canonical_target(root, raw, cwd) is None for raw in raw_targets):
+            notes.append("bm_fence_hook: every target is outside the project "
+                         "root %s, so the fence does not govern this write"
+                         % root)
+            return None, notes
 
         rows = active_claims(root)
         if not rows:

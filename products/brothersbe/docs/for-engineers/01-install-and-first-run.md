@@ -112,7 +112,7 @@ Real tail:
   the-approval-verdict-names-which-approval-file-it-read want=named    got=named    ok
   an-empty-directory-cannot-print-the-report-of-a-dossier-somewhere-else want=disclosed got=disclosed ok
 
-547 evals: 547 passed, 0 regressions.
+550 evals: 550 passed, 0 regressions.
 ```
 
 Exit code 0. Each case is a real defect turned into a fixture, plus an assertion
@@ -146,25 +146,20 @@ whitespace and nulls, requiring that none of it produces a PASS.
 $ python3 evals/test_no_data_class.py
 ```
 
-The summary line. It quotes below what it once was, the true last line the
-command prints: with failures present, this run also prints each one, by
-name, underneath it.
+The summary line. This is the true last line the command prints:
 
 ```
-38 checks discovered from 6 registries in 134 module(s), 4258 scenarios run, 2 waived by declared exemption, 58 failure(s).
+40 checks discovered from 6 registries in 138 module(s), 4302 scenarios run, 2 waived by declared exemption, 0 failure(s).
 ```
 
-Exit code 1: this run finds real gaps in the tools right now (twelve check functions
-sitting outside any registry, thirty report lines that bypass the print choke
-point, spread across install.py, sbe_system_doc.py, sbe_decision_record.py and
-test_ba_status_page.py, and twenty seven hollowed-out clarify scenarios), and the
-meta-test's whole point is to fail loudly on exactly that rather than average it
-away. The two waivers are printed above that line with their stated
-reasons, so a waiver is never silent:
+The run exits 0. When the meta-test finds a gap, it prints each failure by
+name under the summary line and exits 1. Its whole point is to fail loudly
+rather than average a gap away. The two waivers are printed above the summary
+line with their stated reasons, so a waiver is never silent:
 
 ```
-  sbe_intake.py: excused 11 print(s); an interactive interview: its prompts, echoes and refusals are dialogue with the operator, and nothing machine-parses them as verdict lines
-  sbe_telemetry.py: excused 80 print(s); operator status lines and hook JSON, never parsed as gate verdicts; its ledger writes are data, not report lines
+  sbe_intake.py: excused 25 print(s); an interactive interview: its prompts, echoes and refusals are dialogue with the operator, and nothing machine-parses them as verdict lines
+  sbe_telemetry.py: excused 81 print(s); operator status lines and hook JSON, never parsed as gate verdicts; its ledger writes are data, not report lines
 ```
 
 And the tool tests:
