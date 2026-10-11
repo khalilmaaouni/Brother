@@ -799,6 +799,13 @@ NOT_A_VERDICT = {
         "one citation-inventory line found in that output, the full stdout plus stderr), so "
         "the verdict word inside that line is the scorer's, selected here and never formed "
         "here; the same shape as test_sbe_design_fingerprint.py's run_check",
+    # brother_paths.py, unit C10 (2026-10-10): a program lookup. It hands back where the Claude Code CLI
+    # is, or why none was found; scripts/required_fast.sh's plugin-manifest row runs the returned path,
+    # and that row's own exit code is the verdict.
+    ("brother_paths.py", "claude_for_check"):
+        "returns (the Claude Code CLI's absolute path, None) or (None, why none was found), a "
+        "program lookup and never a verdict; the plugin-manifest row that runs the returned path "
+        "forms the verdict",
 }
 
 

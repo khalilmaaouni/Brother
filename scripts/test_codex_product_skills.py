@@ -103,9 +103,11 @@ class ShippedSkillInventory(unittest.TestCase):
             self.assertEqual(built["skills"], expected)
             # A snapshot, not a truth: it read 34 long after the tree held 82, because no gate ran
             # this file. Now that a gate does, a changed count is a prompt to confirm the change
-            # was meant, then update the number in the same commit.
+            # was meant, then update the number in the same commit. 82 was 33 product skills plus
+            # 49 bundle skills; 40 is 33 plus the seven of release 1.1.1 (U1, the owner withdrew
+            # C3 and C4 on 2026-10-10: the door and six verb skills, the 1.1.0 names routed).
             shipped = sum(map(len, expected.values())) + len(list((source / "bundle/skills").glob("*/SKILL.md")))
-            self.assertEqual(shipped, 82, "shipped skill count changed: confirm it was meant, then update this number")
+            self.assertEqual(shipped, 40, "shipped skill count changed: confirm it was meant, then update this number")
             policies = list(Path(built["marketplace_root"]).glob("plugins/*/skills/*/agents/openai.yaml"))
             self.assertEqual(len(policies), 7)
             for name in CPS.PRODUCTS:

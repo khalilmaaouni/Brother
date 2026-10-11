@@ -5,8 +5,16 @@
    "sha256": "16eacad8afb3b5aa1fe54a87032d58b560f2ac762bc24b6ea7966ad61164932b"
   },
   {
+   "path": "brothermode/scripts/doctor.py",
+   "sha256": "9d1fb84b24d072f3570531374f7beff8558d4ea06253d62444d7156d8b54292d"
+  },
+  {
+   "path": "brothermode/scripts/install.py",
+   "sha256": "70c0ef3ebe976ecc576add3a475e9163deddac9c551678b54f6f0a02068d6aef"
+  },
+  {
    "path": "brothermode/scripts/setup.py",
-   "sha256": "18f07d39db24cc343ba9e1a460662b4204357cebe56405305ab3b2864d32de29"
+   "sha256": "a22cdc5af3f158e33f637657f5fe0c64e3084c1d8b387c2b0ed08f0c0848badf"
   },
   {
    "path": "brothermode/tools/_jevpath.py",
@@ -134,7 +142,7 @@
   },
   {
    "path": "brothermode/tools/bm_lead.py",
-   "sha256": "99bfcc46236f4bba965e607b865534c4dc4be99216797a9535632e0d38c77536"
+   "sha256": "e7e511471781056a3f00cad4e621b62f27c479a0d92c769dda15e47858ea5be9"
   },
   {
    "path": "brothermode/tools/bm_learn.py",
@@ -198,11 +206,11 @@
   },
   {
    "path": "brothermode/tools/bm_project.py",
-   "sha256": "eeb597691591549b9f3ab6890f8e6d538e371e28db65067fca48921a07c5ee32"
+   "sha256": "4c91e75efc6f2f6527864c2aaee26e39c84f73e6054a7a8654fdbd28704ad904"
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "ea1bc08f517949e0caa5b26427092fe2613ad0d3648c949f827acac82d44ab35"
+   "sha256": "f510cebc511dac66314ffe622c6fc33e885ce977c849e463c9a18b4e41fa56d2"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -258,7 +266,7 @@
   },
   {
    "path": "brothermode/tools/bm_sessionstart.py",
-   "sha256": "e9cd8fef6235b1807df955f65210e04396321229149290c998a3eb1fb00168cb"
+   "sha256": "34f37c105d3a3d31de0d8fd4ca3941dd85511bd7a0a7f80ad599facb9156319a"
   },
   {
    "path": "brothermode/tools/bm_stall.py",
@@ -290,7 +298,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault.py",
-   "sha256": "e97a877de3f76fb80a1d618af71687b33d179422ba71c27adf3af13d48849153"
+   "sha256": "6542d0a9491ca549f386b2017072352d87a135e81cf4597c85bd319c4f0382fb"
   },
   {
    "path": "brothermode/tools/bm_vault_analyzer.py",
@@ -554,7 +562,7 @@
   },
   {
    "path": "brothermode/tools/bm_view.py",
-   "sha256": "a119be4bedab5e62ab8935be3a7bc908afb9a03079a6e17ff5ba20ac07e1fe60"
+   "sha256": "5b441e14836929c1027e143d6773ec36627caa837c9455e5a6a7b5d53dcb6dc1"
   },
   {
    "path": "brothermode/tools/bm_visual.py",
@@ -566,7 +574,7 @@
   },
   {
    "path": "brothermode/tools/brother_paths.py",
-   "sha256": "d1703e769d3108ec05f54c4b16df0f6d456fdaf568b7f4303a83028dd8d0a528"
+   "sha256": "205d58b5f033b14e0125374091a8d8804bc45ba2ab0d0d1af5c78cd5b117ccab"
   },
   {
    "path": "brothermode/tools/brothermode_cli.py",
@@ -602,7 +610,7 @@
   },
   {
    "path": "brothersbe/tools/brother_paths.py",
-   "sha256": "d4540f32ede8de8deb4788d5ce956de6b81f76e1fcec04c3cde2f884bfccaf98"
+   "sha256": "1b76661b55fa2ee161ea54da27b741f926ce1aa09557f68a7caf24c73b91fea1"
   },
   {
    "path": "brothersbe/tools/sbe_authority_hook.py",

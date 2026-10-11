@@ -136,10 +136,22 @@ if run is None:
 # THE TAG CARRIES THE CLAIM TIME (review 2026-10-04): a folder name has no date, so a pruned folder's name reused on a
 # later day would inherit the old run's rows; RUN-TAG holds the exact tag the ledger rows carry, read by native_usd
 _unit_run_tag = "%s@%d" % (os.path.basename(run), int(time.time()))
+
+
+def _take_back(run_dir):
+    """A refusal after the claim removes what this run wrote and its own folder: a folder with neither PID nor STATUS
+    reads RUNNING to the pool and DEAD to salvage for ever. ONE take back for every refusal after the claim; the run
+    tag refusal had none and left its folder behind (found red on main 2026-10-10, unit U0c)."""
+    for _gone in (os.path.join(run_dir, "RUN-TAG"), os.path.join(run_dir, "PID"), run_dir):
+        try: (os.rmdir if _gone == run_dir else os.remove)(_gone)
+        except OSError: pass   # sbe: allow-silent best effort removal of this run's own files and empty folder; the refusal printed next is the result
+
+
 try:
     with open(os.path.join(run, "RUN-TAG"), "w", encoding="utf-8") as _fh:
         _fh.write(_unit_run_tag + "\n")
 except OSError as _exc:   # no tag file means spend this run could never be attributed: refuse before any call is made
+    _take_back(run)
     print("REFUSED %s: the run tag could not be written in %s (%s: %s); nothing was started" % (sub, run, type(_exc).__name__, _exc), flush=True); sys.exit(2)
 os.environ["BROTHER_UNIT_RUN"] = _unit_run_tag
 # THIS RUNNER IS FINDABLE FROM ITS OWN FOLDER (R4, 2026-09-22): runner_pool counted live runners by grepping the
@@ -148,10 +160,7 @@ os.environ["BROTHER_UNIT_RUN"] = _unit_run_tag
 try:
     with open(os.path.join(run, "PID"), "w") as _f: _f.write("%d\n" % os.getpid())
 except OSError as _exc:
-    # A folder with neither PID nor STATUS reads RUNNING to the pool and DEAD to salvage for ever: take it back.
-    for _gone in (os.path.join(run, "PID"), run):
-        try: (os.rmdir if _gone == run else os.remove)(_gone)
-        except OSError: pass   # sbe: allow-silent best effort removal of this run's own empty folder; the refusal below is the result
+    _take_back(run)   # the same take back as the run tag refusal above
     print("REFUSED %s: the PID file cannot be written (%s)" % (sub, _exc), flush=True); sys.exit(2)
 # The private-name list is NOT read here. It was, into a module level `names` that nothing ever used, and the
 # single reader of that list is grade_build.private_hits, reached through private() below. A dead read still

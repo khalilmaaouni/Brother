@@ -24,6 +24,13 @@ And its inventory found the reason namespaces must survive: FIVE COLLIDING
 SKILL NAMES across the three trees. Collapsing to one namespace would have to
 rename them, which C4 forbids and which would break every user's muscle memory.
 
+AMENDED 2026-10-10 (release 1.1.1, U1, docs/plan/specs/U1.md): the owner
+withdrew C3 and C4. One plugin ships the door and six verb skills
+(brother-<verb>), and every 1.1.0 skill name routes as an argument to the
+door for one release. This file never counted skills, so no assertion here
+changes; the skill surface is held by scripts/test_codex_surface.py and
+scripts/test_door_routing_prose.py.
+
 So the caps are withdrawn. A cap that forces deletion is the wrong control for
 a repository whose chosen architecture keeps three surfaces deliberately
 separate. What this file asserts instead is the SHAPE that architecture

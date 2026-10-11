@@ -592,10 +592,16 @@ run_check "loop-wiring"          python3 scripts/test_loop_wiring.py --max 4
 # entry (REQUIRED_FOR_RELEASE); the release stage blocks on it until the cut.
 # Any FAIL is red in both stages, and a missing bar is never green.
 run_check "one-plugin-readiness-static" python3 -B scripts/one_plugin_readiness.py --static
-if command -v claude >/dev/null 2>&1; then
-  run_check "plugin-manifest"   claude plugin validate .
+# C10 (2026-10-10): the merge gate pins PATH to the system directories
+# (scripts/gate_merge_seq.sh), so `command -v claude` read NO-DATA there and
+# every verified merge read a contradiction. The CLI now comes from the
+# estate's resolver (scripts/brother_paths.py --claude-for-check: the owner's
+# BROTHER_CLAUDE_BIN pin, the proven program, then the installed copies), and
+# PATH is widened for nothing. No CLI found stays NO-DATA, never a pass.
+if claude_for_check=$(python3 -B scripts/brother_paths.py --claude-for-check 2>/dev/null); then
+  run_check "plugin-manifest"   "$claude_for_check" plugin validate .
 else
-  run_check "plugin-manifest"   sh -c 'echo "NO-DATA: claude binary not found on PATH"; exit 2'
+  run_check "plugin-manifest"   sh -c 'echo "${1:-NO-DATA: the Claude Code CLI could not be resolved}"; exit 2' sh "$claude_for_check"
 fi
 
 done

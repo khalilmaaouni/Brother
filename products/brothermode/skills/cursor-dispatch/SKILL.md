@@ -34,7 +34,7 @@ python3 <checkout>/tools/bm_cursor.py dispatch \
   --project <absolute project path>
 ```
 
-Hand the printed `packet_id` to the Cursor side (ask the user to open Cursor on the project, or continue if a Cursor agent is already watching the mailbox). The `cursor-execute` skill covers the claim, and it is Cursor's job to run, not yours.
+Hand the printed `packet_id` to the Cursor side (ask the user to open Cursor on the project, or continue if a Cursor agent is already watching the mailbox). The `brother-next` skill covers the claim (its instructions ship as the cursor-execute reference beside the door skill), and it is Cursor's job to run, not yours.
 
 When Cursor returns:
 

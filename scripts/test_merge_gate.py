@@ -553,6 +553,13 @@ class TestRunGate(GateCase):
         self.assertEqual(self.world.gate_env, {"PATH": "/usr/bin", "HOME": "/h", "LANG": "C"})
         self.assertTrue(set(self.world.gate_env) <= set(merge_gate.CHILD_ENV_ALLOW))
 
+    def test_the_owners_claude_pin_crosses_and_path_stays_as_given(self):
+        # C10, 2026-10-10: the plugin-manifest row resolves the Claude Code CLI through BROTHER_CLAUDE_BIN when the
+        # gate's PATH is the system's; the pin crosses on its own and PATH is never widened to reach the CLI.
+        self.gate({"PATH": "/usr/bin:/bin", "HOME": "/h", "BROTHER_CLAUDE_BIN": "/opt/pinned/claude"})
+        self.assertEqual(self.world.gate_env.get("BROTHER_CLAUDE_BIN"), "/opt/pinned/claude")
+        self.assertEqual(self.world.gate_env.get("PATH"), "/usr/bin:/bin")
+
     def test_the_row_carries_the_exit_code_the_child_gave(self):
         self.world.gate_code = 1
         self.world.gate_out = "pass 3   fail 0   no-data 0\n"

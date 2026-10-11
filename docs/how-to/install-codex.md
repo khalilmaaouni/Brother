@@ -68,17 +68,6 @@ The hook command removes only Brother-owned registrations. The lifecycle tool re
 
 ## BrotherMode and BrotherSBE on Codex
 
-Codex has skills, not Claude-style slash commands. The Brother umbrella package
-now exposes namespaced routes in its `skills/` directory so the product
-surfaces are visible in one install:
+Codex has skills, not slash commands. The `brother` plugin ships seven skills: `using-brother` is the door, and `brother-start`, `brother-status`, `brother-next`, `brother-review`, `brother-deliver` and `brother-help` are verbs. Invoke the installed Brother skill and say what you want done; for this release, asking for a name from 1.1.0 prints a one-line pointer, then routes through the door.
 
-- `brothermode-*` exposes BrotherMode execution, delivery, recovery and native
-  workflow capabilities.
-- `brothersbe-*` exposes assurance, review, design, verification and handoff
-  capabilities.
-- `brotherme-*` exposes the existing compatibility command names as Codex
-  skills, while routing to the canonical BrotherMode skill.
-
-The aliases are generated from the product skills and command inventory. They
-use the same Brother engine and receipt contract; the Claude source skills keep
-their client-specific invocation controls.
+The full instructions for the older plugins' individual verb skills remain under `products/` in the repository and cannot be installed through the one plugin in 1.1.0. The older plugins are retired from the catalog. For migration details, see the [migration guide](migrate-to-one-plugin.md) and the [1.1.0 release note](../releases/1.1.0.md).

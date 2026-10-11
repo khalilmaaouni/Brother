@@ -103,9 +103,9 @@ Finally, the same command scans the main transcript's short human messages again
 
 **`rate`** appends one founder felt-outcome rating (1 to 5) with the task it applies to. Skipped ratings stay unrated. Nothing is inferred.
 
-**`review-mark`** appends a weekly-review marker; the startup nag reads it to know when the review is overdue.
+**`review-mark`** appends a weekly-review marker; the startup nag, printed only when `BROTHER_VERBOSE_START=1` is set, reads it to know when the review is overdue.
 
-**`startup-nags`** prints at most a few lines for session-start injection: overdue review, yesterday's spend, telemetry heartbeat silence, and any active day missing its session log.
+**`startup-nags`** prints at most a few lines for session-start injection: overdue review, yesterday's spend, telemetry heartbeat silence, and any active day missing its session log. Since 1.1.1 the session-start hook runs it only when `BROTHER_VERBOSE_START=1` (or `BROTHERMODE_MAINTAINER=1`) is set, so by default those lines are not printed.
 
 **`stop-warn`** is a Stop-hook target that fires on every assistant turn, so it is built to be near-free: it short-circuits on a per-session marker file kept under the vault's telemetry folder, then on transcript size, then on whether any session log was written today. It never parses the transcript and it only warns; exit 0 cannot block.
 

@@ -23,11 +23,12 @@ WHAT THIS CHECKS, on the live generated trees (read-only, writes nothing):
   1. bundle/skills/<name>/SKILL.md body == bundle/codex-skills/<name>/SKILL.md
      body, for every <name> present in both. This is the codex_skills.py
      projection boundary.
-  2. For each entry in codex_surface.REAL_CONTENT_SKILLS, the
-     bundle/skills body == the canonical products/<product>/skills/<dir>/
-     SKILL.md body it claims to mirror. This is the codex_surface.py
-     projection boundary, closing the loop back to the canonical capability
-     the roadmap diagram names as the source node.
+  2. For each entry in codex_surface.REAL_CONTENT_REFERENCES, the body of
+     bundle/skills/using-brother/references/<stem>.md == the canonical
+     products/<product>/skills/<dir>/SKILL.md body it claims to mirror (until
+     1.1.1 these shipped as skills of their own; U1 moved them beside the
+     door). This is the codex_surface.py projection boundary, closing the
+     loop back to the canonical capability the roadmap names as the source.
 
 WHAT THIS DOES NOT CHECK: codex_product_skills.py's built export packages.
 That generator writes into a caller-supplied output directory outside this
@@ -92,6 +93,12 @@ def check_codex_skills_boundary(bundle_skills=None, codex_skills_dir=None):
     return problems, checked
 
 
+def reference_path(bundle_skills, stem):
+    """Where a REAL_CONTENT_REFERENCES body ships: beside the door, since
+    1.1.1 (U1), no longer as a skill of its own."""
+    return os.path.join(bundle_skills, codex_surface.DOOR, 'references', '%s.md' % stem)
+
+
 def check_real_content_boundary(repo_root=None, bundle_skills=None):
     """(problems, checked_count) for invariant 2."""
     repo_root = REPO_ROOT if repo_root is None else repo_root
@@ -99,10 +106,10 @@ def check_real_content_boundary(repo_root=None, bundle_skills=None):
     problems = []
     checked = 0
     for canonical, (product, skill_dir) in sorted(
-            codex_surface.REAL_CONTENT_SKILLS.items()):
+            codex_surface.REAL_CONTENT_REFERENCES.items()):
         source_path = os.path.join(repo_root, 'products', product, 'skills',
                                     skill_dir, 'SKILL.md')
-        bundle_md = os.path.join(bundle_skills, canonical, 'SKILL.md')
+        bundle_md = reference_path(bundle_skills, canonical)
         if not os.path.isfile(source_path):
             problems.append('NO-DATA: %s not found' % source_path)
             continue
@@ -117,7 +124,7 @@ def check_real_content_boundary(repo_root=None, bundle_skills=None):
         elif source_body != bundle_body:
             problems.append(
                 '%s: body differs between the canonical product skill and its '
-                'bundle/skills mirror, capability meaning changed' % canonical)
+                'reference beside the door, capability meaning changed' % canonical)
     return problems, checked
 
 
@@ -140,7 +147,7 @@ def run_check():
         return 1, lines
     lines.append(
         'PASS: %d bundle/skills<->codex-skills bodies identical, '
-        '%d REAL_CONTENT_SKILLS mirror(s) identical to their canonical source'
+        '%d REAL_CONTENT_REFERENCES mirror(s) identical to their canonical source'
         % (checked1, checked2))
     return 0, lines
 

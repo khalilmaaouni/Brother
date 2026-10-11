@@ -254,9 +254,9 @@ class SessionStartPostConsentCase(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _sessionstart_stdout(self):
+    def _sessionstart_stdout(self, env=None):
         r = subprocess.run(
-            [sys.executable, SESSIONSTART], cwd=self.project, env=self.env,
+            [sys.executable, SESSIONSTART], cwd=self.project, env=env or self.env,
             input="{}", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             universal_newlines=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -269,10 +269,10 @@ class SessionStartPostConsentCase(unittest.TestCase):
         law and six demands about handover packs, close packs, a queue file,
         a calibration history and an upstream branch, none of which a brand
         new project can have, and NOT ONE line saying what to do. README.md
-        names /brother:brothermode-start as the first thing to type and the product's
+        names /brother as the first thing to type and the product's
         own first words never did."""
         out = self._sessionstart_stdout()
-        self.assertIn("/brother:brothermode-start", out,
+        self.assertIn("To begin, say what you want done (in Claude Code: /brother).", out,
                       "a new project's first session does not name the "
                       "command its own README tells a newcomer to run")
 
@@ -314,12 +314,19 @@ class SessionStartPostConsentCase(unittest.TestCase):
         os.makedirs(os.path.dirname(queue))
         with io.open(queue, "w", encoding="utf-8") as fh:
             fh.write("{}")
-        out = self._sessionstart_stdout()
-        self.assertNotIn("/brother:brothermode-start", out,
+        # QS1 (2026-10-10): the owed line is routine output, opt in with
+        # BROTHER_VERBOSE_START=1; with the switch the gate's property holds
+        # exactly as before, and without it the established project is quiet.
+        out = self._sessionstart_stdout(dict(self.env, BROTHER_VERBOSE_START="1"))
+        self.assertNotIn("BrotherMode: new project", out,
                          "an established project is being greeted as new")
         self.assertIn("no close pack exists in this checkout at all", out,
                       "suppression outlived the first run, so a real debt "
                       "is now hidden")
+        quiet = self._sessionstart_stdout()
+        self.assertNotIn("no close pack exists in this checkout at all", quiet,
+                         "the quiet start (QS1) printed a routine owed line")
+        self.assertNotIn("BrotherMode: new project", quiet)
 
     def test_consented_sessionstart_still_prints_the_digest(self):
         digest_first_line = _read_text(DIGEST).splitlines()[0]
@@ -353,7 +360,7 @@ class SessionStartPostConsentCase(unittest.TestCase):
         session start says nothing about the baton at all, which is exactly the
         regression that would silently un-wire the opening half again."""
         r = subprocess.run(
-            [sys.executable, SESSIONSTART], cwd=self.project, env=self.env, input="{}",
+            [sys.executable, SESSIONSTART], cwd=self.project, env=dict(self.env, BROTHER_VERBOSE_START="1"), input="{}",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             universal_newlines=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

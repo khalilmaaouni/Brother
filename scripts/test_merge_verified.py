@@ -1010,7 +1010,7 @@ class TheRefusalReadsTheCallersNames(unittest.TestCase):
         self.assertEqual(self.refuse(" PATH LANG  TERM\nSHLVL ")[0], 0)
 
     def test_a_steering_name_among_the_callers_is_refused_by_name(self):
-        for name in ("GH_HOST", "GIT_DIR", "MERGE_GATE_LEDGER", "MERGE_ALL_X", "PR_PARK_REPO", "GIT_SSH_COMMAND"):
+        for name in ("GH_HOST", "GIT_DIR", "MERGE_GATE_LEDGER", "MERGE_ALL_X", "PR_PARK_REPO", "PR_PARK_NOW", "GIT_SSH_COMMAND"):
             code, said = self.refuse("PATH %s TERM" % name)
             self.assertEqual(code, 2, name)
             self.assertIn("%s is set" % name, said)

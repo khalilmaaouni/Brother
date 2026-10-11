@@ -105,10 +105,17 @@ class DependenciesTest(unittest.TestCase):
         tools = os.path.join(BUNDLE, "runtime", "hooks", "brothermode", "tools")
         self.assertEqual([m for m in ("bm_worker_spawn.py", "bm_verify.py", "bm_repair.py") if not os.path.isfile(os.path.join(tools, m))], [])
 
-    def test_every_capability_a_dependency_used_to_supply_is_a_bundle_skill(self):
+    def test_every_capability_a_dependency_used_to_supply_routes_through_the_door(self):
+        """Until 1.1.1 these three shipped as bundle skills. The owner withdrew C3 and C4 on 2026-10-10 (U1): the
+        bundle ships the door and six verb skills, and every 1.1.0 name routes as an argument to the door through
+        the generated table beside it."""
         skills = {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(BUNDLE, "skills", "*", "SKILL.md"))}
+        self.assertEqual(skills, {"using-brother", "brother-start", "brother-status", "brother-next", "brother-review",
+                                  "brother-deliver", "brother-help"})
+        table = _read(os.path.join(BUNDLE, "skills", "using-brother", "references", "retired-names.md"))
         for want in ("brothermode-start", "brothersbe-verify", "brotherme-start"):
-            self.assertIn(want, skills, "%s was reachable through a dependency and must ship in the one plugin" % want)
+            self.assertRegex(table, r"(?m)^\| %s \| `/brother [a-z]+`" % re.escape(want),
+                             "%s was reachable through a dependency and must route through the door" % want)
 
 
 class NamespaceTest(unittest.TestCase):

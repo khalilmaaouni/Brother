@@ -56,7 +56,8 @@ FORBIDDEN_PREFIXES = ("MERGE_GATE_", "MERGE_ALL_")
 # base a real run verifies and merges against (review round 17, 2026-10-04: a clone it controls carries its own ledger
 # and key, so a forged PASS would merge): honoured by a dry run only.
 # and (review round 19) the names that re-point gh at another host or identity, or git at another configuration
-FORBIDDEN_NAMES = ("PR_PARK_REPO", "MERGE_CLONE", "MERGE_REPO", "MERGE_REMOTE", "MERGE_BASE_BRANCH",
+# PR_PARK_NOW pins the park check's clock for its hermetic suite (2026-10-10, unit U0c); a real run must read the clock.
+FORBIDDEN_NAMES = ("PR_PARK_REPO", "PR_PARK_NOW", "MERGE_CLONE", "MERGE_REPO", "MERGE_REMOTE", "MERGE_BASE_BRANCH",
                    "GH_HOST", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
                    "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
                    "GIT_EXEC_PATH", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT")
@@ -389,7 +390,11 @@ SCHEMA = 1
 GATE_SCRIPT = "scripts/required_fast.sh"
 MAIN_REF = "refs/remotes/hub/main"   # never the short name: a fetched tag refs/tags/hub/main outranks it
 LOGS_DIR = "logs"
-CHILD_ENV_ALLOW = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TERM", "USER", "SHELL")
+# BROTHER_CLAUDE_BIN (C10, 2026-10-10): the owner's pin for the Claude Code CLI the plugin-manifest row runs, read by
+# brother_paths.claude_for_check (an absolute path to an executable file, else that row reads NO-DATA). It crosses on
+# its own, so PATH stays the system's; it grants nothing HOME does not already decide (the proven program record and
+# the package directories both live under HOME).
+CHILD_ENV_ALLOW = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TERM", "USER", "SHELL", "BROTHER_CLAUDE_BIN")
 MAX_AGE_ENV = "MERGE_GATE_MAX_AGE_H"
 TRUSTED_ENV = "MERGE_GATE_TRUSTED_HOSTS"
 DEFAULT_MAX_AGE_H = 48.0

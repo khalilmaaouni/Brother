@@ -546,7 +546,9 @@ def _turn_reason(host, row, scripts):
 #: The skills the door routes to on Codex: the shared door and the status verb it was asked for. Measured in the
 #: 2026-10-04 Codex run: the door thread's PreToolUse hook stdin carried `cat <CODEX_HOME>/plugins/cache/brother/
 #: brother/1.1.0/skills/brothermode-status/SKILL.md`, while the `codex exec --json` stream logged no tool item at all.
-DOOR_SKILLS = ("using-brother", "brothermode-status")
+#: Since 1.1.1 (U1, owner ruling 2026-10-10) the status verb ships as brother-status; brothermode-status routes
+#: to it through the door, so a load of the verb skill is what proves the route.
+DOOR_SKILLS = ("using-brother", "brother-status")
 #: The status skill prints no fixed heading; the one shape it fixes is that the answer keeps PASS, FAIL and NO-DATA
 #: distinct, so a routed answer carries one of them as a word (the 2026-10-04 door answer read "**NO-DATA**"). This
 #: adds little over the skill load row, which is what proves the door routed; it is kept as a cheap second filter.

@@ -756,6 +756,9 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    "scripts/loop/model_call.py", "scripts/loop/model_reachability.py", "scripts/loop/model_router.py",
                    "scripts/loop/or_ask.py", "scripts/loop/proof_ledger.py", "scripts/reproduce_export.py",
                    "scripts/retire_catalogs.py", "scripts/version_source.py",
+                   # imported by retire_catalogs.py since OP1.e (6c02d3cc6, 2026-10-06) without its protection; found red
+                   # on main by scripts/test_grade_build_guard.py on 2026-10-10 (unit U0c)
+                   "scripts/donecheck_u8.py",
                    # what the frozen builder exports is the landing tree's own allowlist (cut_preflight.export_tree_builder)
                    "docs/plan/export-allowlist.txt",
                    # EVERY MODULE THE LANDER ITSELF RUNS OR IMPORTS FROM THE FROZEN COPY OUTSIDE boxed() (review 16, 2026-10-03):

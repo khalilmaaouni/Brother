@@ -44,22 +44,14 @@ installed skill, not a Claude-style slash command.
 
 ### Standalone product or pinned clone
 
-To install BrotherMode alone, choose this alternative to the umbrella:
+As of 1.1.0, BrotherMode is no longer installable alone from the catalog. Install `brother@brother` as shown above. If you already have the older `brothermode` plugin, see the [migration guide](../../docs/how-to/migrate-to-one-plugin.md).
 
-```bash
-claude plugin marketplace add khalilmaaouni/Brother
-claude plugin install brothermode@brother
-```
-
-The root marketplace's `brothermode` entry names this product and pins its
-source ref. It is distinct from the product-local compatibility marketplace.
-The generated `install_command_plugin` fact still uses that local marketplace
-identity; it is not the hub install command above.
+The generated `install_command_plugin` fact comes from the product-local compatibility marketplace identity. It is not the hub install command above.
 
 For a pinned source copy, the clone sequence from `bm_project_facts.py` is:
 
 ```bash
-git clone --branch v1.1.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.1 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```
@@ -159,8 +151,9 @@ canary.
 
 ## Updating and removing an install
 
-For the standalone plugin, use `/brothermode:update` in Claude Code, or the
-plugin manager for the identity you installed (`brothermode` versus `brother`).
+In Claude Code, ask `/brother help` (a standalone `brothermode` install still
+answers `/brothermode:update`), or use the plugin manager for the identity you
+installed (`brothermode` versus `brother`).
 For a clone, run the reviewed source's installer with `--upgrade --dry-run`,
 then `--upgrade`, preserving the same target and settings path. Restart the
 host and rerun doctor. Upgrades add or overwrite files; they do not remove

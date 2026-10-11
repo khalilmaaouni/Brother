@@ -143,7 +143,10 @@ def main(argv=None):
             closed_comment[number] = comment if comment is not None else ""
     errors = park_errors(open_numbers, park_rows, closed_comment)
     listed = {number: reason for number, reason in park_rows}
-    for row in T.triage(prs, listed, main_ref):
+    # THE CLOCK IS PINNABLE, as pr_park_triage's own --now is (2026-10-10, unit U0c): without it this script alone read
+    # the wall clock, so its hermetic suite went red the day its fixture dates aged past IDLE_DAYS. A real merge run
+    # refuses PR_PARK_NOW (merge_gate.FORBIDDEN_NAMES), so it cannot make an idle pull request look fresh there.
+    for row in T.triage(prs, listed, main_ref, os.environ.get("PR_PARK_NOW", "")):
         if row["class"] in ("IDLE-UNCLASSIFIED", "NO-DATA") and int(row["number"]) not in listed:
             errors.append("#%s reads %s and is not on the park list: %s" % (row["number"], row["class"], row["reason"]))
     for error in errors:
