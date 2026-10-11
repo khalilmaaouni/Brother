@@ -36,6 +36,25 @@ def load_spec(path=None):
     return None
 
 
+FIXTURE_PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"   # N2 (2026-10-11): the plan every current fixture was specified in
+
+
+def fixture_plan(fx):
+    """The plan a fixture's sub unit was specified in: fx["plan"] through plan_path.validate (ValueError on a bad value),
+    else FIXTURE_PLAN. Never the run's plan (BROTHER_WBS): the fixture's base commit need not hold it, which refused
+    every intake under a newer plan (2026-10-11 00:54, 'CANARY REFUSED at spec gate')."""
+    if "plan" not in fx:
+        return FIXTURE_PLAN
+    import plan_path
+    return plan_path.validate(fx["plan"])
+
+
+def read_fixture_plan(spec, root):
+    """The plan document the spec gate reads: the fixture's own plan, inside `root` (the sandbox at its base commit)."""
+    with open(os.path.join(root, fixture_plan(spec)), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def stages(spec, run, keep=False, spec_gate=None):
     """[(stage, state, detail)] in order; stops at the first refusal. `run(argv, cwd)` -> (rc, text). Pure but for the
     sandbox, which is created and removed here."""
@@ -81,8 +100,7 @@ def stages(spec, run, keep=False, spec_gate=None):
         # it, every older fixture read red on a test module the build itself adds)
         import land_batch
         def real_gate(sub, root):
-            with open(os.path.join(root, land_batch.PLAN), encoding="utf-8") as fh: plan = json.load(fh)
-            return land_batch.spec_gate(sub, plan, root=root)
+            return land_batch.spec_gate(sub, read_fixture_plan(spec, root), root=root)
         gate = spec_gate or real_gate
         try:
             why = gate(spec["sub"], os.path.join(box, "tree"))
@@ -219,6 +237,29 @@ def _selftest_body():
                         "sys.stderr.write('NO-DATA: a claim was not recorded\\n')"], d)
     cases += [("a stderr note never replaces the verdict as the last line", rc == 0 and txt.strip().splitlines()[-1] == "PASS x"
                and "NO-DATA: a claim was not recorded" in txt)]
+    r = tempfile.mkdtemp(prefix="canary-plan-"); os.makedirs(os.path.join(r, "docs", "plan"))
+    with open(os.path.join(r, FIXTURE_PLAN), "w", encoding="utf-8") as fh: json.dump({"units": [{"id": "x"}]}, fh)
+    # a real run sets BROTHER_WBS before land_batch is imported, so land_batch.PLAN IS the run's plan: model both
+    import land_batch
+    saved = os.environ.get("BROTHER_WBS"); saved_plan = land_batch.PLAN
+    os.environ["BROTHER_WBS"] = land_batch.PLAN = "docs/plan/OTHER.json"
+    try:
+        read = read_fixture_plan(spec, r)
+    except OSError:
+        read = None
+    finally:
+        land_batch.PLAN = saved_plan
+        if saved is None: os.environ.pop("BROTHER_WBS", None)
+        else: os.environ["BROTHER_WBS"] = saved
+    try:
+        fixture_plan(dict(spec, plan="/etc/x.json")); bad_refused = False
+    except ValueError:
+        bad_refused = True
+    bad_rows = _stages(dict(spec, plan="/etc/x.json"), ok, False, None)
+    shutil.rmtree(r, ignore_errors=True)
+    cases += [("the spec gate reads the fixture's plan, not BROTHER_WBS (N2, the 00:54 refusal)", read == {"units": [{"id": "x"}]}),
+              ("a bad fixture plan is refused by the selector, never read", bad_refused),
+              ("a bad fixture plan reads REFUSED at the spec gate stage", (st(bad_rows, "spec gate") or ("",))[0] == "REFUSED")]
     failed = [n for n, good in cases if not good]
     print("selftest: %d cases, %s" % (len(cases), "OK" if not failed else "FAILED: " + ", ".join(failed)))
     return 1 if failed else 0

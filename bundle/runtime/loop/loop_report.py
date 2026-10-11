@@ -35,7 +35,8 @@ EV = os.path.expanduser("~/.claude/evidence")
 STAGES = os.path.join(EV, "brother-stages.jsonl")
 FAILURES = os.path.join(EV, "brother-failures.jsonl")
 LEDGER = DEFAULT_LEDGER = os.path.expanduser("~/.claude/brother-or-dispatch-state/openrouter-ledger.jsonl")
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected()
 
 
 def rows(path, since=None, until=None):

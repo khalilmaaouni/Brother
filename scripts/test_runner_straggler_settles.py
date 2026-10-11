@@ -21,7 +21,7 @@ SCRATCH = os.path.join(os.path.expanduser("~"), ".claude", "brother-scratch")
 #: The REAL loop modules every runner harness copies beside unit_runner.py (the rest are STUBS). ONE list: three harnesses
 #: each kept their own and all three went red together when unit_runner began importing loop_roles (FX-11.6, 2026-10-02).
 REAL_LOOP = ("unit_runner.py", "bounded.py", "fanout_verdict.py", "loop_hold.py", "plan_store.py", "diag_notes.py", "loop_switches.py",
-             "loop_roles.py")
+             "loop_roles.py", "plan_path.py")   # plan_path: the one plan selector unit_runner reads at import (2026-10-10)
 
 STUBS = {
     "probe_build.py": "import re\nclass G(object):\n    @staticmethod\n    def private_hits(text): return []\n"

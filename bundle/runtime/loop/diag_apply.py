@@ -6,6 +6,7 @@ no redirection, 10 second limit. Anything else is REFUSED (never run). UNKNOWN, 
 import glob, json, os, re, shlex, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # THIS file's own directory: the copies installed beside it
 from runner_pool import admissible
+import plan_path as _PP  # noqa: E402  the one plan selector: BROTHER_WBS or the default, an invalid value refuses
 
 
 from diag_notes import write_note  # noqa: E402  the note format lives in one module
@@ -61,7 +62,7 @@ def main(argv=None):
     if "--selftest" in args:
         return selftest()
     D = os.path.expanduser(args[0])
-    with open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8") as fh:
+    with open(_PP.selected(), encoding="utf-8") as fh:
         plan = json.load(fh)
     n = {"PROVEN": 0, "UNPROVEN": 0, "REFUSED": 0, "NO-DATA": 0}
     for f in sorted(glob.glob(D + "/out/*.json")):

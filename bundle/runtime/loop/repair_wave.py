@@ -17,7 +17,8 @@ if "--selftest" not in sys.argv: _LH.gate(where="repair_wave")
 BIN = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, BIN)
 import probe_build as P
 import worker_mix as WM, ev_gate as EV, repair_advisor as RA
-GENERATED = ("bundle/", "SYSTEM.md", "scripts/check_all.sh", "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json")
+import plan_path as _PP  # the one plan selector: BROTHER_WBS or the default, an invalid value refuses
+GENERATED = ("bundle/", "SYSTEM.md", "scripts/check_all.sh", _PP.selected())
 
 
 def touch_paths(build_path):

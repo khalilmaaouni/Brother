@@ -27,6 +27,7 @@ REAL_SIBLINGS = ("land_batch.py", "plan_store.py", "spec_check.py", "grade_build
                  "provenance.py", "plan_lint.py", "ev_gate.py", "breaker.py", "claude_ledger.py", "freeze_manifest.py",
                  "loop_receipt.py", "model_call.py", "model_reachability.py", "worker_mix.py",
                  "loop_hold.py",   # the one reader of the loop's stop controls, asked first by main()
+                 "plan_path.py",   # the one plan selector every reader and writer imports (2026-10-10)
                  "sandbox.sb")   # neighbours run under the sandbox (2026-10-02)
 SUB, UNIT, BRANCH = "U1.a", "U1", "main"
 

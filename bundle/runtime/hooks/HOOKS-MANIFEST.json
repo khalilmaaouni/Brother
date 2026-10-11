@@ -210,7 +210,7 @@
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "f510cebc511dac66314ffe622c6fc33e885ce977c849e463c9a18b4e41fa56d2"
+   "sha256": "4753b8f417eef06062000f1addc18ff9a97176a10cc43cdad2f9a0aa8487a202"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -578,7 +578,7 @@
   },
   {
    "path": "brothermode/tools/brothermode_cli.py",
-   "sha256": "c505d39db0f9ade8955d0cfa3da54fbffe131d2e365225af8d9471e2e3aab776"
+   "sha256": "85d0f59c7e849ed96d1274906257aaa23f4a720b4594de94b0b9ec690cfddb28"
   },
   {
    "path": "brothermode/tools/find_out.py",

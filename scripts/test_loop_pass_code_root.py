@@ -107,6 +107,7 @@ class PassCodeRoot(unittest.TestCase):
             w(os.path.join(self.bin, name), body, 0o755)
         shutil.copy2(os.path.join(HERE, "loop", "loop_procs.py"), self.bin)   # the one ownership rule, deployed beside the pass
         shutil.copy2(os.path.join(HERE, "loop", "loop_switches.py"), self.bin)   # plan E switches: sizing runs only under BROTHER_TUNING=on
+        shutil.copy2(os.path.join(HERE, "loop", "plan_path.py"), self.bin)   # the plan selector the pass asks before the closure diff (2026-10-10)
 
     def tearDown(self):
         shutil.rmtree(self.box, ignore_errors=True)

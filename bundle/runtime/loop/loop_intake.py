@@ -8,7 +8,7 @@ between two files, no end to end proof was run, and the first sign of trouble re
 
 usage (repo root):
   loop_intake.py guide                      plain words: each role, what it does, WHICH MODELS QUALIFY RIGHT NOW, an example
-  loop_intake.py prepare finisher=<model> documenter=<model> [role=model ...] --deadline HH:MM --budget-usd N [--scope REGEX] [--words "<his answer verbatim>"] [--pair]
+  loop_intake.py prepare finisher=<model> documenter=<model> [role=model ...] --deadline HH:MM --budget-usd N [--scope REGEX] [--plan docs/plan/X.json] [--words "<his answer verbatim>"] [--pair]
   (--pair: ONE record for the proof pair RB then RC; the deadline is the pair's end, it must cover both runs, the
    budget is per run and the grant carries two of them)
   (every value may be his words: "deepseek at xhigh", "6pm", "80USD"; the tool prints a READ line for each reading it made)
@@ -29,7 +29,7 @@ READY. The plan lint is one LINT line (FX-13.5): in report mode, the default, it
 verdict; with BROTHER_RUNFLOW_LINT=block a lint that is not clean is ADVISABLE, waived with --accept lint.
 Roots are overridable for tests: INTAKE_EVIDENCE, and every outside check is injected through `probes`.
 """
-import datetime, json, os, re, shutil, subprocess, sys, tempfile, time
+import datetime, json, os, re, shlex, shutil, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # THIS file's own directory: the copies installed beside it
@@ -107,8 +107,43 @@ def pass_tool(name, args, ok_codes, read=None):
     return probe
 
 
-LINT_PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"   # the plan the pool reads, relative to the launch tree the pass tools run in
+import plan_path as _PP  # noqa: E402  the one plan selector (BROTHER_WBS or the default; an invalid value refuses)
+LINT_PLAN = _PP.selected()   # the plan the pool reads, relative to the launch tree the pass tools run in; prepare --plan moves it
 LINT_SUMMARY = re.compile(r"LINT SUMMARY blocking ([0-9]+) advisory ([0-9]+) no-data ([0-9]+) \|")
+
+
+def plan_unit_ids(path):
+    """([unit ids], {sub unit ids}) of the plan file at `path`. ValueError naming the reason when the file cannot be read,
+    is not JSON, has no non empty `units` list, or holds a unit without a text id. Never a guess, never an empty default."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            plan = json.load(fh)
+    except OSError as exc:
+        raise ValueError("%s cannot be read (%s)" % (path, type(exc).__name__))
+    except ValueError as exc:
+        raise ValueError("%s is not JSON (%s)" % (path, str(exc)[:80]))
+    units = plan.get("units") if isinstance(plan, dict) else None
+    if not isinstance(units, list) or not units:
+        raise ValueError("%s has no non empty units list" % path)
+    ids = [u.get("id") for u in units if isinstance(u, dict) and isinstance(u.get("id"), str) and u.get("id")]
+    if len(ids) != len(units):
+        raise ValueError("%s holds a unit without a text id" % path)
+    subs = {s for u in units for s in (u.get("sub_units") or []) if isinstance(s, str)}
+    return ids, subs
+
+
+def plan_collisions(selected_ids, default_ids, default_subs, scope):
+    """THE COLLISION RULE (2026-10-10). The ids the scope admits among `selected_ids` (plan_lint's own test, re.search on
+    the unit id; no scope admits every id) that the default plan ALSO holds, as a unit id or as the prefix of one of its
+    sub unit ids (M1 and U8 live in both plans today). The spec scores, the council, the unit ledger and the run folders
+    key on these ids, so a second plan reusing one would read and write the first plan's records. Sorted, possibly []."""
+    try:
+        rx = re.compile(scope) if scope else None
+    except re.error:   # sbe: allow-silent a scope that is not a regular expression is refused by its own check; here it admits every id, the wider refusal
+        rx = None
+    admitted = [i for i in selected_ids if rx is None or rx.search(i)]
+    default_ids = set(default_ids)
+    return sorted(set(i for i in admitted if i in default_ids or any(s.startswith(i + ".") for s in default_subs)))
 
 
 def lint_answer(code, out, err):
@@ -428,9 +463,12 @@ def role_plan(roles, reg, env=None):
 AFTER_RUN = ("after_run", "after_final_check")   # a role that acts only after the loop has exited cannot stop a run from working
 
 
-def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), accepted_by="", pair=False, env=None):
+def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), accepted_by="", pair=False, env=None, plan=None, tree_root=None):
     """(record, lines). Every check appends exactly one line; the verdict is derived from the states, nowhere else.
-    pair=True makes the record the proof pair's: its deadline is the pair's end and must cover RB and RC."""
+    pair=True makes the record the proof pair's: its deadline is the pair's end and must cover RB and RC.
+    plan: the --plan value, the plan file this run reads and writes (through plan_path, the one selector); None keeps
+    the selected plan (BROTHER_WBS or the default). tree_root: the launch tree the plan is read in (default: the
+    checkout this file lives in)."""
     lines, states, waived = [], [], []
     def add(state, text, hint=""):
         states.append(state); lines.append("%-8s %s%s" % (state, text, ("  HINT: " + hint) if hint and state != "OK" else ""))
@@ -479,6 +517,34 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
             re.compile(scope); add("OK", "scope %s" % scope)
         except re.error:
             add("REFUSED", "scope %r is not a regular expression" % scope, "leave --scope out to use the pool's default")
+    # THE PLAN (2026-10-10): the file every pass tool reads and writes, named once, through plan_path (the one selector).
+    # --plan is REFUSED when the selector refuses it (absolute, climbing, outside docs/plan/, not .json), when the launch
+    # tree lacks the file or it has no non empty units list, and, when it is not the default plan, when any unit the
+    # scope admits carries an id the default plan also holds (plan_collisions): those records are shared by id. An
+    # unreadable default plan refuses too (nothing can prove the ids are distinct). FAIL DIRECTION: every refusal here
+    # is REQUIRED (never waived) and the record still names the plan it was asked for, so the reader sees what was tried.
+    tree_root = tree_root or os.path.dirname(os.path.dirname(HERE))
+    plan_sel, plan_refused = plan, ""
+    try:
+        if plan is None:
+            plan_sel = _PP.selected(os.environ if env is None else env)
+        else:
+            plan_sel = _PP.validate(plan)
+            sel_ids, _sel_subs = plan_unit_ids(os.path.join(tree_root, plan_sel))
+            if plan_sel != _PP.DEFAULT:
+                try:
+                    def_ids, def_subs = plan_unit_ids(os.path.join(tree_root, _PP.DEFAULT))
+                except ValueError as exc:
+                    raise ValueError("the default plan cannot be read, so nothing proves the ids are distinct: %s" % exc)
+                shared = plan_collisions(sel_ids, def_ids, def_subs, scope if scope else None)
+                if shared:
+                    raise ValueError("unit id(s) %s exist in both %s and the default plan %s; the score, council, ledger and run folder "
+                                     "records key on these ids, so they are refused by name" % (", ".join(shared), plan_sel, _PP.DEFAULT))
+            add("OK", "plan %s (%d unit(s))" % (plan_sel, len(sel_ids)))
+    except ValueError as exc:
+        plan_refused = str(exc)
+        add("REFUSED", "plan %s: %s" % (plan_sel, exc), "name a .json plan under docs/plan/, relative to the launch tree, whose unit ids the default plan does not hold")
+    lines.append("PLAN     %s" % plan_sel)
     # THE ALLOWLIST IS PARSED ONCE, BY THE ROUTER (attack 3, 2026-09-30): a malformed value is REFUSED here, never
     # sanitized into a valid token; the record and the launch settings carry the parser's own canonical text.
     import model_router
@@ -568,6 +634,8 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
     verdict = "NOT READY" if required_bad else "NEEDS YOUR DECISION" if "ASK" in states else ("HELD" if held else "READY")
     lines.append("INTAKE %s" % verdict)
     rec = {"verdict": verdict, "at": now.isoformat(timespec="seconds"), "epoch": time.time(), "deadline": deadline, "budget_usd": budget, "scope": scope,
+           "plan": plan_sel,   # the plan file this run reads and writes (plan_path): the run's plan identity, on disk
+           "plan_refused": plan_refused,   # "" or why the plan above was refused: launch_env exports nothing for a refused plan
            "transports": _transports,   # the canonical allowlist text the driver runs under, or None
            "roles": {r: choices.get(r) or roles[r].get("default") for r in roles}, "waived": waived, "accepted_by": accepted_by.strip() if waived else "", "pins": pins, "lines": lines,
            "reach": reach, "programs": programs, "proven": sorted(MR.cache_key(b) for b in reach)}   # the proven bindings startable() revalidates, and the programs the run uses
@@ -600,6 +668,16 @@ def launch_env(rec, roles, authority=None):
             out.append("export %s=%s" % (spec["mode_setting"], earned_mode(role, rec["roles"][role], authority)))
     if rec.get("scope"):
         out.append("export BROTHER_SCOPE='%s'" % rec["scope"].replace("'", ""))
+    if rec.get("plan_refused"):
+        # a plan the intake REFUSED (collision, unreadable, not a plan path) is never exported: the record says why
+        out.append("# BROTHER_WBS NOT exported: the intake refused the plan: %s" % str(rec["plan_refused"]).replace("\n", " ")[:200])
+    elif rec.get("plan"):
+        # THE PLAN THE RUN READS AND WRITES (2026-10-10): the selector's validated path, shell quoted, so every pass tool the
+        # driver starts (they all read plan_path.selected) opens the plan this intake was prepared for and no other
+        try:
+            out.append("export BROTHER_WBS=%s" % shlex.quote(_PP.validate(str(rec["plan"]))))
+        except ValueError as exc:   # never a substitution: a record whose plan the selector refuses exports nothing, and says so
+            out.append("# BROTHER_WBS NOT exported: %s" % str(exc).replace("\n", " ")[:200])
     if rec.get("transports"):
         import model_router
         try:   # the parser again, never a substitution: a record that does not parse exports nothing
@@ -864,9 +942,19 @@ def main():
                 read.append("READ     %s %r understood as no choice: the check asks about it" % (k.strip().lower(), v)); continue
             if m != v.strip(): read.append("READ     %s %r understood as %s" % (k.strip().lower(), v, m))
             choices[k.strip().lower()] = m
+    # THE PLAN (2026-10-10): a valid --plan reaches the probes through the environment, the way every pass tool reads it
+    # (plan_path.selected), so the lint, the digest, the pool's dry run and loop_done all read the plan this run is for.
+    # An invalid value exports nothing: prepare refuses it by name and the probes keep reading the plan already selected.
+    global LINT_PLAN
+    plan_opt = opt("--plan")
+    if plan_opt is not None:
+        try:
+            os.environ[_PP.ENV] = _PP.validate(plan_opt); LINT_PLAN = _PP.selected()
+        except ValueError:   # sbe: allow-silent prepare() below refuses the same value with its reason, as a REFUSED line and a NOT READY verdict
+            pass
     rec, lines = prepare(choices, deadline, budget, opt("--scope"), roles, reg, real_probes(),
                          accept=tuple(x for x in (opt("--accept") or "").split(",") if x), accepted_by=opt("--accepted-by") or "",
-                         pair="--pair" in a)
+                         pair="--pair" in a, plan=plan_opt)
     if opt("--words") is not None:
         rec["owner_words"] = str(opt("--words"))[:2000]                        # his answer verbatim, beside what was made of it
     lines = read + lines; rec["lines"] = lines

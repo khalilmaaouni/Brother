@@ -10,9 +10,13 @@ So the property under test is not "it runs a command". It is that nothing this
 module does can lose the original.
 """
 import os
+import re
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,15 +38,46 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 
-class Proc(object):
-    def __init__(self, stdout="", stderr="", returncode=0):
-        self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
-
-
-def runner_for(**kw):
-    def _run(argv, **_ignored):
-        return Proc(**kw)
+def runner_for(stdout="", stderr="", returncode=0, midrun=None):
+    """A stub with the streaming runner contract: every line of stdout, then
+    of stderr (merged order), goes through emit; midrun runs before return."""
+    def _run(argv, cwd=None, env=None, emit=None):
+        for text in (stdout, stderr):
+            for line in text.splitlines(True):
+                emit(line)
+        if midrun is not None:
+            midrun()
+        return returncode
     return _run
+
+
+#: Copied from scripts/lesson_repeat_trial.py line 69 (CAPTURE_EXIT).
+CAPTURE_EXIT = re.compile(r"^\[exit (-?\d+) after [\d.]+s\]")
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SCRIPT = os.path.join(HERE, "run_evidence.py")
+
+
+def isolate_default_store(case):
+    """The CLI tests write to DEFAULT_STORE; point it at a temp folder so no
+    test writes under the real home."""
+    old = R.DEFAULT_STORE
+    tmp = tempfile.mkdtemp()
+    R.DEFAULT_STORE = tmp
+
+    def _restore():
+        R.DEFAULT_STORE = old
+        shutil.rmtree(tmp, ignore_errors=True)
+    case.addCleanup(_restore)
+
+
+def read_single(store):
+    """The text of the one capture file in store, read through its own handle."""
+    names = os.listdir(store)
+    if len(names) != 1:
+        raise AssertionError("expected one capture file, found %r" % (names,))
+    with open(os.path.join(store, names[0]), encoding="utf-8") as fh:
+        return fh.read()
 
 
 class TheOriginalAlwaysSurvives(unittest.TestCase):
@@ -150,6 +185,9 @@ class TheAlertsFireOnTheShapesThatFooledUs(unittest.TestCase):
 
 
 class TheExitCodeIsTheCommandsOwn(unittest.TestCase):
+    def setUp(self):
+        isolate_default_store(self)
+
     def test_it_is_passed_through_unchanged(self):
         store = tempfile.mkdtemp()
         try:
@@ -187,6 +225,7 @@ class ItFeedsTheAttemptLedgerBecauseNothingElseCan(unittest.TestCase):
     runner can, because it reads proc.returncode itself."""
 
     def setUp(self):
+        isolate_default_store(self)
         self.dir = tempfile.mkdtemp()
         self.store = os.path.join(self.dir, "ledger.jsonl")
         self.old = os.environ.get("ATTEMPT_LEDGER")
@@ -236,6 +275,250 @@ class ItFeedsTheAttemptLedgerBecauseNothingElseCan(unittest.TestCase):
         failure this whole tool exists to avoid."""
         R.main(["--json", "--", "sh", "-c", "exit 3"])
         self.assertEqual(self.ledger.read(self.store), [])
+
+
+class TheRecordGrowsWhileTheCommandRuns(unittest.TestCase):
+    """N12.a: the capture file is written while the command runs, so a run
+    that is stopped still leaves every line it printed."""
+
+    def setUp(self):
+        self.store = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.store, True)
+        self.seen = []
+
+    def mid_run(self, **kw):
+        kw.setdefault("stdout", "first line\nsecond line\n")
+        runner = runner_for(midrun=lambda: self.seen.append(read_single(self.store)), **kw)
+        R.capture(["echo", "hi"], store=self.store, runner=runner)
+        self.assertEqual(len(self.seen), 1)
+        return self.seen[0]
+
+    def finished(self, **kw):
+        r = R.capture(["echo", "hi"], store=self.store, runner=runner_for(**kw))
+        with open(r["path"], encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_mid_run_the_first_line_is_already_on_disk(self):
+        self.assertIn("first line\n", self.mid_run())
+
+    def test_mid_run_line_two_reads_exit_unfinished(self):
+        self.assertTrue(self.mid_run().split("\n")[1].startswith("[exit unfinished]"))
+
+    def test_mid_run_there_is_no_end_marker(self):
+        self.assertNotIn(R.END_MARK, self.mid_run())
+
+    def test_after_the_run_line_two_holds_the_exit_code(self):
+        line_two = self.finished(stdout="out\n", returncode=5).split("\n")[1]
+        self.assertRegex(line_two, r"^\[exit 5 after [\d.]+s\]")
+
+    def test_line_two_still_satisfies_capture_exit_with_the_right_code(self):
+        line_two = self.finished(stdout="out\n", returncode=5).split("\n")[1]
+        self.assertEqual(CAPTURE_EXIT.match(line_two).group(1), "5")
+
+    def test_the_status_overwrite_keeps_the_structure_intact(self):
+        lines = self.finished(stdout="out one\nout two\n", returncode=5).split("\n")
+        self.assertEqual(lines[2], "")
+        self.assertTrue(lines[3].startswith("--- output"), lines[3])
+        self.assertEqual(lines[4], "out one")
+
+    def test_a_finished_file_ends_with_the_end_marker_then_the_exit_line(self):
+        body = self.finished(stdout="out\n", returncode=5)
+        self.assertRegex(body, r"\n--- end ---\n\[exit 5 after [\d.]+s\]\n\Z")
+
+    def test_output_with_no_final_newline_still_puts_the_end_marker_on_its_own_line(self):
+        self.assertIn("abc\n--- end ---", self.finished(stdout="abc"))
+
+    def test_lines_and_bytes_describe_the_whole_file(self):
+        r = R.capture(["x"], store=self.store, runner=runner_for(stdout="a\nb\n"))
+        with open(r["path"], "rb") as fh:
+            raw = fh.read()
+        self.assertEqual(r["bytes"], len(raw))
+        self.assertEqual(r["lines"], raw.count(b"\n") + 1)
+        self.assertEqual(r["stdout"], "a\nb\n")
+        self.assertEqual(r["stderr"], "")
+
+    def test_status_line_has_the_same_width_before_and_after(self):
+        self.assertEqual(len(R.status_line(None, 0.0)), R.STATUS_WIDTH)
+        self.assertEqual(len(R.status_line(5, 1.25)), R.STATUS_WIDTH)
+        self.assertTrue(R.status_line(None, 0.0).startswith("[exit unfinished]"))
+        self.assertTrue(R.status_line(5, 1.25).startswith("[exit 5 after 1.2s]"))
+
+    PRINT_UNBUF = ["sh", "-c", 'printf %s "$PYTHONUNBUFFERED"']
+
+    def test_the_child_sees_PYTHONUNBUFFERED_1_by_default(self):
+        r = R.capture(self.PRINT_UNBUF, store=self.store,
+                      env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        self.assertEqual(r["stdout"], "1\n")
+
+    def test_a_caller_supplied_PYTHONUNBUFFERED_wins(self):
+        r = R.capture(self.PRINT_UNBUF, store=self.store,
+                      env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                           "PYTHONUNBUFFERED": "0"})
+        self.assertEqual(r["stdout"], "0\n")
+
+    def test_the_parent_environment_is_never_modified(self):
+        saved = os.environ.get("PYTHONUNBUFFERED")
+        os.environ.pop("PYTHONUNBUFFERED", None)
+
+        def _restore():
+            os.environ.pop("PYTHONUNBUFFERED", None)
+            if saved is not None:
+                os.environ["PYTHONUNBUFFERED"] = saved
+        self.addCleanup(_restore)
+        before = dict(os.environ)
+        r = R.capture(self.PRINT_UNBUF, store=self.store, env=None)
+        self.assertEqual(dict(os.environ), before)
+        self.assertEqual(r["stdout"], "1\n")
+
+    def test_a_failing_write_never_stops_the_run(self):
+        class FullDisk(object):
+            def __init__(self):
+                self.writes = 0
+
+            def write(self, data):
+                self.writes += 1
+                if self.writes > 1:
+                    raise OSError(28, "No space left on device")
+                return len(data)
+
+            def flush(self):
+                pass
+
+            def seek(self, offset):
+                return offset
+
+            def close(self):
+                pass
+
+        handle = FullDisk()
+        old = R.open_capture
+        R.open_capture = lambda path: handle
+
+        def _restore():
+            R.open_capture = old
+        self.addCleanup(_restore)
+        r = R.capture(["x"], store=self.store,
+                      runner=runner_for(stdout="one\ntwo\nthree\n", returncode=3))
+        self.assertEqual(r["exit_code"], 3)
+        self.assertEqual(r["stdout"], "one\ntwo\nthree\n")
+        self.assertIsNotNone(r["write_error"])
+        self.assertIn("No space left on device", r["write_error"])
+        first = R.findings(r)[0]
+        self.assertEqual(first[0], "ALERT")
+        self.assertIn("INCOMPLETE", first[1])
+        self.assertNotIn("-", first[1])
+
+
+class RealProcessesStreamThroughTheDefaultRunner(unittest.TestCase):
+    def setUp(self):
+        self.store = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.store, True)
+
+    def test_invalid_utf8_is_kept_with_replacement_characters(self):
+        r = R.capture(["sh", "-c", "printf '\\377\\n'"], store=self.store)
+        self.assertEqual(r["exit_code"], 0, r["stdout"])
+        self.assertIn("\ufffd", r["stdout"])
+        self.assertTrue(os.path.exists(r["path"]))
+
+    def test_stdout_and_stderr_both_reach_the_file(self):
+        r = R.capture(["sh", "-c", "echo to-out; echo to-err >&2"], store=self.store)
+        with open(r["path"], encoding="utf-8") as fh:
+            body = fh.read()
+        self.assertIn("to-out\n", body)
+        self.assertIn("to-err\n", body)
+
+    def test_a_store_that_cannot_be_opened_stops_the_run_before_it_starts(self):
+        blocker = os.path.join(self.store, "a-regular-file")
+        with open(blocker, "w") as fh:
+            fh.write("not a directory")
+        marker = os.path.join(self.store, "marker")
+        code = R.main(["--store", blocker, "--", "sh", "-c", "touch '%s'" % marker])
+        self.assertEqual(code, 1)
+        self.assertFalse(os.path.exists(marker))
+
+    def test_a_killed_run_keeps_what_it_printed_and_reads_unfinished(self):
+        proc = subprocess.Popen([sys.executable, "-B", SCRIPT, "--store", self.store,
+                                 "--", "sh", "-c", "echo first; sleep 30"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        body = ""
+        deadline = time.time() + 20
+        try:
+            while time.time() < deadline:
+                names = os.listdir(self.store)
+                if names:
+                    with open(os.path.join(self.store, names[0]), encoding="utf-8") as fh:
+                        body = fh.read()
+                    if "first" in body:
+                        break
+                time.sleep(0.1)
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except PermissionError:
+                proc.kill()
+            proc.wait()
+        body = read_single(self.store)
+        self.assertIn("first", body)
+        self.assertTrue(body.split("\n")[1].startswith("[exit unfinished]"))
+        self.assertNotIn(R.END_MARK, body)
+
+
+class HostileInputIsRefusedNeverCrashes(unittest.TestCase):
+    HOSTILE = (None, 0, True, -1, float("nan"), "", "x", b"x", [], ["x"], {},
+               {"a": 1}, (), {1, 2}, object())
+
+    def setUp(self):
+        isolate_default_store(self)
+        self.store = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.store, True)
+
+    def refuses_or_returns(self, fn, *args):
+        try:
+            fn(*args)
+        except (ValueError, LookupError, SystemExit, R.CaptureRefused):
+            pass
+
+    def test_every_new_public_function_refuses_hostile_values(self):
+        here = os.getcwd()
+        os.chdir(self.store)  # open_capture("x") makes its file here
+        self.addCleanup(os.chdir, here)
+        for bad in self.HOSTILE:
+            with self.subTest(bad=bad):
+                self.refuses_or_returns(R.status_line, bad, bad)
+                self.refuses_or_returns(R.open_capture, bad)
+                self.refuses_or_returns(R.stream_runner, bad, bad, bad, bad)
+                self.refuses_or_returns(R.main, bad)
+
+    def test_an_unopenable_capture_path_is_refused(self):
+        with self.assertRaises(R.CaptureRefused):
+            R.open_capture(self.store)
+
+    def test_capture_refuses_a_hostile_value_in_every_parameter(self):
+        for bad in self.HOSTILE:
+            with self.subTest(bad=bad):
+                self.refuses_or_returns(R.capture, bad, bad, bad, bad, bad, bad)
+                self.refuses_or_returns(R.capture, ["x"], self.store, bad, None,
+                                        runner_for(), None)
+
+    def test_a_wrong_argv_is_refused_not_run(self):
+        for bad in (None, "sh", [], [1], ["x", None], ("x",)):
+            with self.assertRaises(ValueError):
+                R.capture(bad, store=self.store, runner=runner_for())
+        for bad in (0, b"x", object(), "x", ["x", 1]):
+            with self.assertRaises(SystemExit):
+                R.main(bad)
+
+    def test_a_runner_that_returns_no_exit_code_is_not_a_pass(self):
+        for bad in (None, True, "0", 0.0):
+            r = R.capture(["x"], store=self.store, runner=lambda a, **kw: bad)
+            self.assertEqual(r["exit_code"], 127)
+
+    def test_status_line_refuses_bad_codes_and_seconds(self):
+        for code, seconds in ((True, 1.0), ("5", 1.0), (5, float("nan")),
+                              (5, -1.0), (5, True), (5, None), (5, 1e300)):
+            with self.assertRaises(ValueError):
+                R.status_line(code, seconds)
 
 
 class TheEvidenceCheckedLogReducerM36(unittest.TestCase):

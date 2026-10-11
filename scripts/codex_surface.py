@@ -93,7 +93,8 @@ VERBS = (
      "specification with acceptance criteria (the outcome contract), never a build. `/brother start "
      "dispatch` writes a packet for Cursor to execute, following "
      "`${CLAUDE_PLUGIN_ROOT}/skills/using-brother/references/cursor-dispatch.md`; it REPLACES the engine "
-     "run for that work and does not run brother_run.py."),
+     "run for that work and does not run brother_run.py."
+     " A run until a time or on a budget, such as \"start a run until 22:00 with 40 dollars\" or \"run the loop overnight\", is the maintainer loop: follow the loop section of `${CLAUDE_PLUGIN_ROOT}/skills/using-brother/SKILL.md`, start it only through `runtime/loop/start_run.sh`, say every refusal as `START REFUSED [step]: fix`, and stop it with `runtime/loop/stop_loop.sh --reason` when the person says \"stop the loop\"."),
     ("status",
      "Use when someone asks where things stand, what happened, what a run did, what it cost, or what is "
      "waiting on them. Reads the run's receipt and answers in plain language with PASS, FAIL and NO-DATA kept "
@@ -107,7 +108,8 @@ VERBS = (
      "second registry; the receipt is the record. A missing receipt is NO-DATA, said as such, never a pass. "
      "Never show a run id or a run directory; name the outcome. The page that shows where a project "
      "stands is written by `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_view.py\"` "
-     "(`${CLAUDE_PLUGIN_ROOT}` under Claude Code) from the project's own records; offer it, never retype it."),
+     "(`${CLAUDE_PLUGIN_ROOT}` under Claude Code) from the project's own records; offer it, never retype it."
+     " Answer \"loop status\" or \"is the loop healthy\" from `runtime/loop/loop_watch.py --log <the newest driver log>` and `runtime/loop/loop_intake.py status --running`, saying each line as printed."),
     ("next",
      "Use when someone asks what to do next, which decision is waiting on them, or which packet to pick up. "
      "Returns exactly one recommended action with a one sentence reason, never a menu. Invoke as /brother "
@@ -116,7 +118,8 @@ VERBS = (
      "and why it is first; a decision waiting on the person is shown highest stakes first with a recommended "
      "option. Never a list of options with no ranking. Inside Cursor, the next action may be the next harness "
      "packet: `${CLAUDE_PLUGIN_ROOT}/skills/using-brother/references/cursor-execute.md` carries those "
-     "instructions."),
+     "instructions."
+     " When the person asks why nothing is landing, give the class printed by `runtime/loop/loop_watch.py` to `runtime/loop/watch_act.py <class> <reason>` and name the one action it returns."),
     ("review",
      "Use when someone asks to review, verify, check or prove a change before it ships or before it is called "
      "done: a diff, a pull request, a migration, a number, a design, a contract, a production path. Judges the "
@@ -128,7 +131,8 @@ VERBS = (
      "approval, ran, proof), each answering PASS, FAIL or NO-DATA on its own evidence. A gate with nothing to "
      "read is NO-DATA and never a pass. Report what passes, what does not, and the one next action. A design "
      "review judges the shape of a system before it is built: what it is for, how the process runs, the "
-     "architecture and the data model, each against the law for that phase and nothing else."),
+     "architecture and the data model, each against the law for that phase and nothing else."
+     " Answer \"What did the loop land\" from `runtime/loop/loop_report.py --run <the driver log>`, giving every figure with the file it names."),
     ("deliver",
      "Use when work is finished and must close with evidence in hand: a delivery summary, a handover to "
      "another person, taking a decision back, or turning a lesson into a rule. Reads the receipt and refuses "
@@ -141,7 +145,8 @@ VERBS = (
      "handover pages another person takes a project over from are written by `python3 "
      "\"${BROTHER_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_handover.py\"` (`${CLAUDE_PLUGIN_ROOT}` "
      "under Claude Code) from the records, never by hand. No receipt, or a refused entry, is a NOT DONE "
-     "report."),
+     "report."
+     " Give the loop's morning report from `runtime/loop/loop_report.py --since-hours N` in the report shape (key takeaway, actions, blockers, next steps, facilitators) before any handover pack."),
     ("help",
      "Use when someone asks what Brother does, how to use it, whether the install is healthy, or whether a "
      "newer release exists. Explains in plain language and checks the install; never prints a menu of skills. "

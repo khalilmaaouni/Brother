@@ -282,7 +282,12 @@ echo "$CLOSED" | cut -c1-160
 # (self_check_staged.py, pre_push_hook.sh): just landed code, unsandboxed. land_batch.py --push stages the plan
 # alone, runs both checks from a frozen copy of hub's head, commits and pushes with hooks off; a refused check
 # leaves the plan change as it was, and the next pass says so (dirty with no landing in flight).
-if ! git diff --quiet -- docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json 2>/dev/null; then
+# THE SELECTED PLAN (2026-10-10): the one selector every pass tool reads, BROTHER_WBS or the default. A value the
+# selector refuses stops the pass here, before any tool runs against the wrong plan; it never diffs the default instead.
+if ! PLAN_FILE=$(python3 -B ~/.claude/bin/plan_path.py 2>&1); then
+  echo "LOOP BLOCKED: the plan selector refused: $(printf '%s\n' "$PLAN_FILE" | tail -1 | cut -c1-200)"; exit 44
+fi
+if ! git diff --quiet -- "$PLAN_FILE" 2>/dev/null; then
   CLOSE_PUSH=$(python3 ~/.claude/bin/land_batch.py --push 2>&1); CPRC=$?
   echo "closure $(printf '%s\n' "$CLOSE_PUSH" | tail -1 | cut -c1-160)"
   [ "${CPRC:-1}" -ne 0 ] && echo "closure did not land (lander exit ${CPRC}): the plan change stays as the closer left it and the next pass reports it"

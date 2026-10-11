@@ -38,7 +38,9 @@ finding, never as a pass; (3) every child runs in its own process group and the 
 import json, os, re, signal, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected()
 BATTERY = "scripts/check_all.sh"
 BIN = os.path.expanduser("~/.claude/bin")
 TIMEOUT = 180

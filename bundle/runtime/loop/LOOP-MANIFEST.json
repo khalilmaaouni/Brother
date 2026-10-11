@@ -30,7 +30,7 @@
   },
   {
    "name": "brother_login.py",
-   "sha256": "e3b1e97903f6dca9af172bc7a563592af8bd1b7d1f60de6c0119da825416bfb1"
+   "sha256": "590919b2d0cf425c750b2696f8b86ac68f9716ea6ff862f4ffcdf7ba2a2df686"
   },
   {
    "name": "brother_night_tick.py",
@@ -38,7 +38,7 @@
   },
   {
    "name": "build_brief.py",
-   "sha256": "826cf3a45fdf079435eb7d759262945b92ead99508ecf4ba87c0b2c640090887"
+   "sha256": "8d96ac9bee8152f8657ed0bfdb18039ad690925870d5813e91c8dbd98354533e"
   },
   {
    "name": "build_plan.py",
@@ -50,7 +50,7 @@
   },
   {
    "name": "check_wave.py",
-   "sha256": "0e8198f357976812f1d280140b8aeefb3d89741111c8b6a2f2daf45983a5c334"
+   "sha256": "0a53a80bf1d956069eda4c464f41b3d560a03934db615df953de048735dd1f35"
   },
   {
    "name": "claude_ledger.py",
@@ -70,11 +70,11 @@
   },
   {
    "name": "diag_apply.py",
-   "sha256": "3f06ebceddc122ddbb83fe5463ffbd0b50e90a9c9f3f6d7b2e4446e569c0d0ff"
+   "sha256": "6387bbf1763a75be05c62453cc591fb34a6ca29d2c796a0a7b6eb022d4c38b29"
   },
   {
    "name": "diag_brief.py",
-   "sha256": "9fa60440a9f704e44e6424c3c2801f468507ea3d576c8ee855651d81c767e7ef"
+   "sha256": "d0c723ab6bde68ca10c36b08c541b467c93b682dde6a11ce781bce7b2f9c4c9e"
   },
   {
    "name": "diag_notes.py",
@@ -102,7 +102,7 @@
   },
   {
    "name": "gen_subunit_gantt.py",
-   "sha256": "363e9e5b43ced70524aa6b5187c58b0b49ee243764b4cfb6875646cf0ce0366f"
+   "sha256": "4ff4fa9929e167ca3dde9fbf31d089a3f380eb190741daad229c87326c85ae69"
   },
   {
    "name": "grade_all.sh",
@@ -114,7 +114,7 @@
   },
   {
    "name": "grade_build.py",
-   "sha256": "4f279144b193bb5232e27446eaeed8c565234a65d9252d11528c46fcf9342319"
+   "sha256": "0c10e02b4cd1422dc83508833e0588af4325e171405f997b1f72ebdf1503aa23"
   },
   {
    "name": "grade_lane.sh",
@@ -138,7 +138,7 @@
   },
   {
    "name": "judge_calibrate.py",
-   "sha256": "dcbd1d844194b837abbe2640c88ce1284bb38b851ee3f7d9ec4f9ef24bcdd99d"
+   "sha256": "8ce1655fde4528faf68c5d9a6f75b2609cda75143cf9ef0eb602ca78425b5273"
   },
   {
    "name": "land_apply.py",
@@ -146,15 +146,19 @@
   },
   {
    "name": "land_batch.py",
-   "sha256": "8b084356029e3eb1bfbf9dfce4114dcb8b79cb1194fb4f627b5a5902ea4dcf50"
+   "sha256": "bdabf35c856e032ef45deca587262193bf45c6df90eb23640b4ccfa3e0027949"
+  },
+  {
+   "name": "landing_standard.py",
+   "sha256": "07566bc730d0056930a0ff4ee0e80a47c4a7fab2a9075711f72afcfeba5986bc"
   },
   {
    "name": "loop_canary.py",
-   "sha256": "4ecef28b2d9d25c4a3ecdcff200b2cfbf30650a8e353a50935a34af163223ca1"
+   "sha256": "fa363eff254ff338b6f0e61dc98189b481ce0dc501be8bdcb2c75fbde1d1ee6f"
   },
   {
    "name": "loop_done.py",
-   "sha256": "5c72b017cb080a21bc3e3d4af506f9ca295e53c9647164888ccae17f2b0acc7b"
+   "sha256": "35c1e69cf3372b144f1c75fb283a240d24914fc03f77199c4708e139fad2905c"
   },
   {
    "name": "loop_guard.sh",
@@ -170,11 +174,11 @@
   },
   {
    "name": "loop_intake.py",
-   "sha256": "f7afe1a29fd1ff3e997b6d8ed890c32e4994bf5a943c0e90d1a4b9c06fe1d0cc"
+   "sha256": "101ba6c7c03402e1de395f0f37fa6add40309e31c4c5202b6f57d8e71ac790e9"
   },
   {
    "name": "loop_pass.sh",
-   "sha256": "5e10e602bc548868482432b5b9e58643178630fdd529ceef90d2d2cab293ffce"
+   "sha256": "ec3535280afb6263c9162b1866fb2b8c3d7ec41251423716ca70b518d45d0c14"
   },
   {
    "name": "loop_procs.py",
@@ -186,7 +190,7 @@
   },
   {
    "name": "loop_report.py",
-   "sha256": "322bed3017a77d496527a533169f16e77db619fd8919754586bb49aac7018aa5"
+   "sha256": "384386cf753ab8ee336b430b9da2dd084e2885a800a827a3ad2f6e46af9bb279"
   },
   {
    "name": "loop_roles.py",
@@ -246,7 +250,7 @@
   },
   {
    "name": "pass_digest.py",
-   "sha256": "ea8216bb50caffc850fe6078168571b7d3c7f2d3e2e8624970176a50022c8691"
+   "sha256": "243ba7dcad0d2905ed3f66cf032532c9abd86d3e8e8ca2ab971d70cd535221bd"
   },
   {
    "name": "pass_pulse.py",
@@ -255,6 +259,10 @@
   {
    "name": "plan_lint.py",
    "sha256": "a104aa6a35a1864b6f310fb5ad6c10b3d5e1b3b07b835b52ae7f8873ba41920a"
+  },
+  {
+   "name": "plan_path.py",
+   "sha256": "b2434ea5d90b07874c3faa48243de36b3f62e1c5aa8c1a23412de884203eca7c"
   },
   {
    "name": "plan_store.py",
@@ -270,7 +278,7 @@
   },
   {
    "name": "probe_wave.py",
-   "sha256": "8c827d997244f36c37dbb1a42dc203952691cb9ef180f6912dbb1ae77cd38999"
+   "sha256": "4809231bad69b6ab060137269ca84a608c81bbbcc65facf6257eb9319ab51d71"
   },
   {
    "name": "proof_accept.py",
@@ -302,7 +310,7 @@
   },
   {
    "name": "repair_wave.py",
-   "sha256": "c4ac08039dff4618ef165480b9efe1a4db358245b1085272f6e492e73da29004"
+   "sha256": "196de7c8f48de9f6e3a7bd6aea2a76f4fef9098ea02d3d2c82ccabbbdd82b58c"
   },
   {
    "name": "review_brief.py",
@@ -318,11 +326,11 @@
   },
   {
    "name": "runner_pool.py",
-   "sha256": "e630d4f7805921f0fc31c1dc7e9ff4db3c2e7c36fa4d1cb71d1c3cda6b24a196"
+   "sha256": "e3b18e670e8973b5b64fcb7d92dfe33f80b76c86b1c52c2042c303edceba86db"
   },
   {
    "name": "salvage.py",
-   "sha256": "6c8c6345db93b36430d14b4a809ade9096e392ea940e2dec3ed0d672e9c0df6f"
+   "sha256": "b7ec0c6501ee4402811241d778f9feeb47f8c84ae4f5c35ef8fe01e5d35a61c6"
   },
   {
    "name": "scratch_prune.py",
@@ -342,7 +350,7 @@
   },
   {
    "name": "spec_accept.py",
-   "sha256": "6cb12edfd13548f7a9890981b00ac90bb76a366ca6b8842e4a1d517ceb25f043"
+   "sha256": "1a6162fdf0b0568f6a7d2f54e65a2be1a7c8ab98fc145de54aa9c2a5084a1e9b"
   },
   {
    "name": "spec_check.py",
@@ -350,23 +358,27 @@
   },
   {
    "name": "spec_council.py",
-   "sha256": "ce157b93018c13819a4af8847971778b874d155c1227a6b0f1787688a8680045"
+   "sha256": "62f142a7feabcbe47ed89faeff13f424293d0161f866d7779aeb7263d601e4c7"
   },
   {
    "name": "spec_intake.py",
-   "sha256": "a7d4d7a6ed42c5826763404b3579e96223fab5959fcce91c6d308c4984db6e27"
+   "sha256": "94a510b740ea0970c836bce39ae410d014a9f9ce8fea7e780bb15117c3c1e2e4"
   },
   {
    "name": "spec_score.py",
-   "sha256": "dc896e70c389e8fa3f33159f42846d0f6ba2eae24b3156989467fe35ba82653a"
+   "sha256": "930ad425300578a967862250e1a5617fabe3084b890f029d810150cc78e4a724"
   },
   {
    "name": "spec_wave.py",
-   "sha256": "c1898073bdcd02cf6e0e89cb4072aeec70f303e4a61fb81ea495125524295971"
+   "sha256": "5baacf2457f502fad2be8b41bd3428a640e359519ca34a2e8e94ca0b5c80272a"
   },
   {
    "name": "stage_log.py",
    "sha256": "190f3321f676428f9b4499cdc5ce0ec56e4b533c3b6b82429354fbe12258e2a2"
+  },
+  {
+   "name": "start_run.sh",
+   "sha256": "ecf17573be1b29ed2cd29d6aa560f6148d0ede6ad8771bc4a4ecdd335c41b015"
   },
   {
    "name": "stop_loop.sh",
@@ -394,7 +406,7 @@
   },
   {
    "name": "test_brother_login.py",
-   "sha256": "64a723343060393924d0a59bace2901284ca3721e6dcd0018b33c2192b0bd1e8"
+   "sha256": "9ee24e35fe95805c3e51d5d7e120707ad166d621a2c163ecd4fecebe418c7432"
   },
   {
    "name": "test_claude_adapter.py",
@@ -482,7 +494,15 @@
   },
   {
    "name": "test_land_batch_landings.py",
-   "sha256": "a5c21f5bb91c63f9079b14156b6a44b8bd8f45baf641f45b0430e50e03eeaaff"
+   "sha256": "2ef96e821a69b86e1c7df207eae4518debd4922d77bee14bc7b57cbc302092f5"
+  },
+  {
+   "name": "test_landing_standard.py",
+   "sha256": "0de178132a4b2ba11577b8a44fcf4c7e9ca43dd1d4cc2a02b10fc7daa5749f36"
+  },
+  {
+   "name": "test_loop_plan_selection.py",
+   "sha256": "dc1ab30008b87f76f49dad8c4523fc272bc7d2a75442fc2894e61f627f412941"
   },
   {
    "name": "test_loop_receipt.py",
@@ -589,6 +609,10 @@
    "sha256": "ad9f3301126578a237dc4f4aa7e6ce36238eec4fbeeaa107ca74f78d685665ac"
   },
   {
+   "name": "test_runner_pool_shared_files.py",
+   "sha256": "543be0a23c2badb2951f9ab767483dda26063e3bd9821115de1f404cd4196796"
+  },
+  {
    "name": "test_sandbox_first.py",
    "sha256": "f02e8467f5019eec1cea22992fc1e280e2b03ef4e575008c1371955f1a3e57a8"
   },
@@ -613,6 +637,14 @@
    "sha256": "10a88924d0083a3987b588501e6731d114aac2688030ce431f27c34256e44d3a"
   },
   {
+   "name": "test_spec_score_standard.py",
+   "sha256": "275badbf20ff188b2066e19315328adf92da6c41258c98b7c88f61fd723f44b3"
+  },
+  {
+   "name": "test_start_run.py",
+   "sha256": "04d5ae65b3080e0cff151870d2552a9e29b952ac791d379b81e5e7809fb5cc4c"
+  },
+  {
    "name": "test_stop_drain.py",
    "sha256": "d204f37e7fc278bc6b47637f20f31c1f246e868c682ab0bd1b73ef8f3da84644"
   },
@@ -634,11 +666,11 @@
   },
   {
    "name": "unit_ledger.py",
-   "sha256": "ec83408c0d84126b77871e26b866dfe1aea0cf5694f738b38e8045fea8366b1f"
+   "sha256": "9f9ff188ceb0c1f22c4aebc25dd2527abfb282fae57f242631c4ec75164478fe"
   },
   {
    "name": "unit_runner.py",
-   "sha256": "52b4bc49e2054f3bcba9493910e84190a0fe0d7500a41e04c284b7cc83a7f1aa"
+   "sha256": "c1531e6d208dcee6680c8fc2b25a3b3cb70ec6c4cbcc0e4631e79ac9b2776b9e"
   },
   {
    "name": "usage_check.py",

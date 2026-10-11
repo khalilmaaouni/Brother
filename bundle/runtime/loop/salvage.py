@@ -22,8 +22,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # THIS file's own directory: the copies installed beside it
 from runner_pool import admissible
 import plan_store  # noqa: E402  (the one landed test every loop reader shares: plan_store.sub_landed)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+PLAN = _PP.selected()
 
 
 def runs_dir():

@@ -26,10 +26,10 @@ Run in a terminal:
 
 ```bash
 claude plugin marketplace add khalilmaaouni/Brother
-claude plugin install brothermode@brother
+claude plugin install brother@brother
 ```
 
-The root marketplace names `brothermode` and its product source ref. After
+The root marketplace names `brother` and its product source ref. After
 installation, start a fresh Claude Code session and use `/brothermode:help`,
 then `/brothermode:start` with a small outcome. The guided start carries the
 setup conversation. Installing the plugin alone is not consent to record
@@ -58,7 +58,7 @@ The pinned clone ref comes from
 release ref, independent of the product's `VERSION`:
 
 ```bash
-git clone --branch v1.1.1 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.2 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ls SKILL.md
 cat VERSION

@@ -7,6 +7,7 @@ docstring): a term real enough to matter, committed alongside the tool that
 looks for it, publishes exactly what the tool exists to stop.
 """
 import contextlib
+import io
 import hashlib
 import inspect
 import json
@@ -180,6 +181,9 @@ set -e
 sub="$1 $2"
 shift 2
 remote=$(git remote get-url origin)
+if [ -n "$FAKE_GH_LOG" ]; then
+  echo "$sub $*" >> "$FAKE_GH_LOG"
+fi
 case "$sub" in
   "pr create")
     if [ -n "$FAKE_GH_FAIL_CREATE" ]; then
@@ -210,6 +214,18 @@ case "$sub" in
       exit 1
     fi
     git push --quiet "$remote" "HEAD:refs/heads/main"
+    if [ -n "$FAKE_GH_MAIN_ADVANCES" ]; then
+      # FX3.a: another merge lands on main right after ours, before the tag.
+      # An explicit template: a bare `mktemp -d` on macOS ignores TMPDIR and
+      # lands in the host's per-user temp folder, which a sandboxed run denies.
+      other=$(mktemp -d "${TMPDIR:-/tmp}/fake-gh-other.XXXXXX")
+      git clone --quiet --branch main "$remote" "$other/c"
+      echo later > "$other/c/later.md"
+      git -C "$other/c" add later.md
+      git -C "$other/c" -c user.name=o -c user.email=o@example.invalid commit --quiet -m "an unrelated later merge"
+      git -C "$other/c" push --quiet origin HEAD:refs/heads/main
+      rm -rf "$other"
+    fi
     if [ -n "$FAKE_GH_MERGE_RACE" ]; then
       # What GitHub answered on the 1.0.21 cut: the merge goes through and
       # the call still exits 1.
@@ -225,6 +241,21 @@ case "$sub" in
       echo "fake gh: could not resolve to a PullRequest" >&2
       exit 1
     fi
+    case "$*" in
+      *mergeCommit*)
+        # FX3.a: the commit the merge produced (this stand-in merges by a
+        # fast forward, so it is the checkout's own commit), or the later
+        # tip of main, or nothing yet.
+        if [ -n "$FAKE_GH_MERGE_COMMIT_NULL" ]; then
+          echo null
+        elif [ -n "$FAKE_GH_MERGE_COMMIT_TIP" ]; then
+          git ls-remote "$remote" refs/heads/main | cut -f1
+        else
+          git rev-parse HEAD
+        fi
+        exit 0
+        ;;
+    esac
     git fetch --quiet "$remote" main
     if git merge-base --is-ancestor HEAD FETCH_HEAD; then
       echo "MERGED"
@@ -2882,6 +2913,267 @@ class ATagRefusesAnExportTreeItsOwnProductsCannotVerify(unittest.TestCase):
                              lines)
             self.assertFalse(any(l.startswith("verified:") for l in lines),
                              lines)
+
+
+class TheTagPointsAtThePullRequestsMergeCommit(unittest.TestCase):
+    """FX3.a: the tag names the commit the release pull request's merge produced, never whatever main's tip is
+    when the tag is made. On the base the tag took FETCH_HEAD after the merge, so a second merge landing between
+    them tagged a commit nobody reviewed (a latent race; the three recorded releases happen to agree)."""
+
+    ALLOWLIST = ATagRefusesAnExportTreeItsOwnProductsCannotVerify.ALLOWLIST
+    _seed_product = ATagRefusesAnExportTreeItsOwnProductsCannotVerify._seed_product
+    _remote_state = ATagRefusesAnExportTreeItsOwnProductsCannotVerify._remote_state
+
+    def _push(self, remote_dir, root, run=None, **env):
+        with _fake_gh(**env):
+            return EP.push_appended(self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9", run=run,
+                                    wait_sleep=lambda s: None)
+
+    def _git(self, remote_dir, *args):
+        return subprocess.run(["git", "-C", remote_dir] + list(args), capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    def test_the_tag_is_the_merge_commit_when_main_moved_after_it(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, lines = self._push(remote_dir, root, FAKE_GH_MAIN_ADVANCES="1")
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            tagged = self._git(remote_dir, "rev-parse", "v9.9.9^{commit}")
+            self.assertNotEqual(tagged, self._git(remote_dir, "rev-parse", "main"))
+            self.assertEqual(tagged, self._git(remote_dir, "rev-parse", "main^1"))
+            line = [l for l in lines if l.startswith("TAGGED: v9.9.9")]
+            self.assertEqual(len(line), 1, lines)
+            self.assertIn("(local commit %s)" % tagged, line[0])
+
+    def test_a_merge_commit_whose_tree_is_not_the_export_refuses(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, lines = self._push(remote_dir, root, FAKE_GH_MAIN_ADVANCES="1", FAKE_GH_MERGE_COMMIT_TIP="1")
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            why = [l for l in lines if l.startswith("REFUSED: the merge commit")]
+            self.assertEqual(len(why), 1, lines)
+            self.assertIn("not the export tree", why[0])
+            self.assertFalse(any(l.startswith("TAGGED:") for l in lines), lines)
+            self.assertEqual(self._remote_state(remote_dir)[1], [])
+
+    def test_a_merge_commit_outside_main_or_missing_here_refuses(self):
+        for verb, said in ((["git", "merge-base", "--is-ancestor"], "not in the fetched history"),
+                           (["git", "cat-file", "-e"], "is not a commit in the export checkout")):
+            with self.subTest(refused=" ".join(verb)):
+                def run(cmd, cwd=None, env=None, timeout=120, _verb=verb):
+                    if list(cmd[:3]) == _verb:
+                        return subprocess.CompletedProcess(cmd, 1, "", "")
+                    return EP._run(cmd, cwd, env=env, timeout=timeout)
+                with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+                    _seed_bare_remote(remote_dir)
+                    self._seed_product(root)
+                    code, lines = self._push(remote_dir, root, run=run)
+                    self.assertEqual(code, EP.EXIT_REFUSED, lines)
+                    self.assertTrue(any(l.startswith("REFUSED: the merge commit") and said in l
+                                        for l in lines), lines)
+                    self.assertEqual(self._remote_state(remote_dir), ("2", []))
+
+    def test_no_merge_commit_reported_refuses_and_never_falls_back_to_the_tip(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, lines = self._push(remote_dir, root, FAKE_GH_MERGE_COMMIT_NULL="1")
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertTrue(any("did not report a merge commit" in l for l in lines), lines)
+            self.assertEqual(self._remote_state(remote_dir), ("2", []))
+
+    def test_a_rerun_after_merged_never_tagged_finds_the_pull_request_by_its_branch(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, lines = self._push(remote_dir, root, FAKE_GH_MERGE_RACE="1", FAKE_GH_VIEW_UNREADABLE="1")
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertEqual(self._remote_state(remote_dir), ("2", []))
+            log = os.path.join(root, "gh.log")
+            code, lines = self._push(remote_dir, root, FAKE_GH_LOG=log)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            with open(log, encoding="utf-8") as fh:
+                self.assertIn("pr view release/9.9.9 --json mergeCommit -q .mergeCommit.oid", fh.read())
+            self.assertEqual(self._git(remote_dir, "rev-parse", "v9.9.9^{commit}"),
+                             self._git(remote_dir, "rev-parse", "main"))
+
+    def test_a_late_merge_commit_is_waited_for_bounded(self):
+        oid = "a" * 40
+
+        def stub(answers):
+            calls = []
+
+            def run(cmd, cwd=None, env=None, timeout=120):
+                calls.append(list(cmd))
+                code, out = answers[min(len(calls), len(answers)) - 1]
+                return subprocess.CompletedProcess(cmd, code, out, "")
+            return run, calls
+        slept = []
+        run, calls = stub([(0, "null\n"), (0, "null\n"), (0, oid + "\n")])
+        self.assertEqual(EP.pull_request_merge_commit("release/9.9.9", "/d", run, slept.append), oid)
+        self.assertEqual(len(slept), 2)
+        self.assertEqual(calls[0], [EP.GH_BIN, "pr", "view", "release/9.9.9", "--json", "mergeCommit", "-q",
+                                    ".mergeCommit.oid"])
+        slept = []
+        run, calls = stub([(0, "null\n")])
+        self.assertIsNone(EP.pull_request_merge_commit("release/9.9.9", "/d", run, slept.append))
+        self.assertEqual(len(calls), EP.MERGE_STATE_POLLS)
+        for bad in ((1, oid + "\n"), (0, ""), (0, oid[:39] + "\n"), (0, "{}\n")):
+            with self.subTest(answer=bad):
+                run, _calls = stub([bad])
+                self.assertIsNone(EP.pull_request_merge_commit("r", "/d", run, lambda s: None))
+
+
+class TheExporterSaysWhenItBeginsToWrite(unittest.TestCase):
+    """FX4.a: a --push run prints REMOTE-WRITE: armed <token> first, REMOTE-WRITE: begin <token> right before its
+    first remote write (flushed, once), and, when it refuses before any write, REMOTE-WRITE: none ... <token> as its
+    very last line. The cut reads a failure as local only on that affirmative last line (plan v5, the stricter
+    reading): a truncated, empty, killed or old capture stays a host refusal."""
+
+    ALLOWLIST = ATagRefusesAnExportTreeItsOwnProductsCannotVerify.ALLOWLIST
+    _seed_product = ATagRefusesAnExportTreeItsOwnProductsCannotVerify._seed_product
+    _remote_state = ATagRefusesAnExportTreeItsOwnProductsCannotVerify._remote_state
+    TOKEN = re.compile(r"^REMOTE-WRITE: (armed|begin|none, refused before any write) ([0-9a-f]{16})$")
+
+    def marks(self, text):
+        return [m.groups() for m in (self.TOKEN.match(l) for l in text.splitlines()) if m]
+
+    def _cli_push(self, root, remote_dir, extra=(), allowlist=None):
+        allowlist = allowlist or _write_lines(os.path.join(root, "ALLOWLIST.txt"), ["scripts", "clean.md"])
+        terms = _write_lines(os.path.join(root, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+        env = dict(os.environ)
+        env["BROTHER_PRIVATE_TERMS"] = terms
+        return _run_cli(["--allowlist", allowlist, "--root", root, "--remote", remote_dir, "--branch", "main"]
+                        + list(extra), env)
+
+    def test_a_cli_push_prints_armed_then_begin_then_pushed(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {"clean.md": "nothing private here\n"})
+            with _fake_gh():
+                proc = self._cli_push(root, remote_dir, ["--push", "--skip-required-fast"])
+            self.assertEqual(proc.returncode, EP.EXIT_OK, proc.stdout + proc.stderr)
+            marks = self.marks(proc.stdout)
+            self.assertEqual([k for k, _t in marks], ["armed", "begin"], proc.stdout)
+            self.assertEqual(marks[0][1], marks[1][1])
+            lines = proc.stdout.splitlines()
+            self.assertTrue(lines[0].startswith(EP.REMOTE_WRITE_ARMED + " "), lines[:2])
+            begin = lines.index("%s %s" % (EP.REMOTE_WRITE_BEGIN, marks[0][1]))
+            pushed = next(i for i, l in enumerate(lines) if l.startswith("PUSHED"))
+            self.assertLess(begin, pushed)
+
+    def _capture_push(self, remote_dir, root, env=None, state=None):
+        seen = []
+        out = io.StringIO()
+
+        def run(cmd, cwd=None, env=None, timeout=120):
+            if list(cmd[:2]) == ["git", "push"]:
+                seen.append((list(cmd), EP.REMOTE_WRITE_BEGIN in out.getvalue()))
+            return EP._run(cmd, cwd, env=env, timeout=timeout)
+        with _fake_gh(**(env or {})), contextlib.redirect_stdout(out):
+            code, lines = EP.push_appended(self.ALLOWLIST, remote_dir, "main", root=root, tag="v9.9.9", run=run,
+                                           wait_sleep=lambda s: None,
+                                           write_state=state if state is not None else {"token": "f" * 16})
+        return code, lines, out.getvalue(), seen
+
+    def test_begin_is_printed_before_the_first_push_and_only_once(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, lines, out, seen = self._capture_push(remote_dir, root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertTrue(seen and all(flag for _cmd, flag in seen), seen)
+            self.assertEqual(out.splitlines().count("%s %s" % (EP.REMOTE_WRITE_BEGIN, "f" * 16)), 1, out)
+
+    def test_a_run_refused_before_any_write_prints_no_begin(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, _lines, _out, _seen = self._capture_push(remote_dir, root)
+            self.assertEqual(code, EP.EXIT_OK)
+            state = {"token": "e" * 16}
+            code, lines, out, seen = self._capture_push(remote_dir, root, state=state)
+            self.assertEqual(code, EP.EXIT_REFUSED, lines)
+            self.assertNotIn(EP.REMOTE_WRITE_BEGIN, out)
+            self.assertEqual(seen, [])
+            self.assertFalse(state.get("announced"))
+
+    def test_a_rerun_that_only_tags_prints_begin_before_the_tag_push(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            self._seed_product(root)
+            code, _lines, _out, _seen = self._capture_push(
+                remote_dir, root, env={"FAKE_GH_MERGE_RACE": "1", "FAKE_GH_VIEW_UNREADABLE": "1"})
+            self.assertEqual(code, EP.EXIT_REFUSED)
+            code, lines, out, seen = self._capture_push(remote_dir, root)
+            self.assertEqual(code, EP.EXIT_OK, lines)
+            self.assertEqual(out.count(EP.REMOTE_WRITE_BEGIN), 1, out)
+            self.assertEqual(len(seen), 1, seen)
+            self.assertNotIn("HEAD:refs/heads/release/9.9.9", " ".join(seen[0][0]))
+            self.assertTrue(seen[0][1], "the tag push ran before the begin line")
+
+    def test_begin_is_flushed(self):
+        calls = []
+        with mock.patch("builtins.print", side_effect=lambda *a, **k: calls.append((a, k))):
+            self.assertTrue(EP.announce_remote_write({"token": "a" * 16}))
+        self.assertEqual(calls, [(("%s %s" % (EP.REMOTE_WRITE_BEGIN, "a" * 16),), {"flush": True})])
+        state = {"token": "a" * 16, "announced": True}
+        with mock.patch("builtins.print", side_effect=lambda *a, **k: calls.append((a, k))):
+            self.assertFalse(EP.announce_remote_write(state))
+        self.assertEqual(len(calls), 1)
+
+    def test_a_dry_run_prints_no_marker(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {"clean.md": "nothing private here\n"})
+            proc = self._cli_push(root, remote_dir, ["--dry-run"])
+            self.assertEqual(proc.returncode, EP.EXIT_OK, proc.stdout + proc.stderr)
+            self.assertNotIn("REMOTE-WRITE", proc.stdout)
+
+    def test_a_refusal_at_the_start_prints_armed_then_none_as_its_last_line(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {"clean.md": "nothing private here\n"})
+            proc = self._cli_push(root, remote_dir, ["--push"], allowlist=os.path.join(root, "missing.txt"))
+            self.assertNotEqual(proc.returncode, EP.EXIT_OK)
+            marks = self.marks(proc.stdout)
+            self.assertEqual([k for k, _t in marks], ["armed", "none, refused before any write"], proc.stdout)
+            self.assertEqual(marks[0][1], marks[1][1])
+            filled = [l for l in proc.stdout.splitlines() if l.strip()]
+            self.assertEqual(filled[0], "%s %s" % (EP.REMOTE_WRITE_ARMED, marks[0][1]))
+            self.assertEqual(filled[-1], "%s %s" % (EP.REMOTE_WRITE_NONE, marks[0][1]))
+
+    def test_a_successful_push_prints_no_none_line(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {"clean.md": "nothing private here\n"})
+            with _fake_gh():
+                proc = self._cli_push(root, remote_dir, ["--push", "--skip-required-fast"])
+            self.assertEqual(proc.returncode, EP.EXIT_OK, proc.stdout + proc.stderr)
+            self.assertNotIn(EP.REMOTE_WRITE_NONE, proc.stdout)
+
+    def test_a_push_with_nothing_to_write_succeeds_with_no_none_line(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {"clean.md": "nothing private here\n"})
+            with _fake_gh():
+                first = self._cli_push(root, remote_dir, ["--push", "--skip-required-fast"])
+                again = self._cli_push(root, remote_dir, ["--push", "--skip-required-fast"])
+            self.assertEqual(first.returncode, EP.EXIT_OK, first.stdout + first.stderr)
+            self.assertEqual(again.returncode, EP.EXIT_OK, again.stdout + again.stderr)
+            self.assertIn("nothing to push", again.stdout)
+            self.assertEqual([k for k, _t in self.marks(again.stdout)], ["armed"], again.stdout)
+
+    def test_a_refusal_after_a_write_began_prints_no_none_line(self):
+        with tempfile.TemporaryDirectory() as remote_dir, tempfile.TemporaryDirectory() as root:
+            _seed_bare_remote(remote_dir)
+            _make_fake_root(root, {"clean.md": "nothing private here\n"})
+            with _fake_gh(FAKE_GH_FAIL_CREATE="1"):
+                proc = self._cli_push(root, remote_dir, ["--push", "--skip-required-fast"])
+            self.assertEqual(proc.returncode, EP.EXIT_REFUSED, proc.stdout + proc.stderr)
+            self.assertEqual([k for k, _t in self.marks(proc.stdout)], ["armed", "begin"], proc.stdout)
 
 
 class TheExportTreesReadinessGateVerdictMustBeParsedStrictly(

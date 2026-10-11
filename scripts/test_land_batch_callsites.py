@@ -74,10 +74,18 @@ def const_of(tree, name):
     """Read a module level string constant out of the AST rather than duplicating it here, so a rename of
     BRANCH or PLAN in the module cannot leave this suite silently testing a fixture nobody reaches."""
     for n in tree.body:
-        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant):
-            for t in n.targets:
-                if isinstance(t, ast.Name) and t.id == name:
-                    return n.value.value
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+            if isinstance(n.value, ast.Constant):
+                return n.value.value
+            # PLAN = _PP.selected() since 2026-10-10: the module reads the one plan selector (scripts/loop/plan_path.py,
+            # BROTHER_WBS or the default), so this suite asks the same selector rather than spelling the path here
+            v = n.value
+            if isinstance(v, ast.Call) and isinstance(v.func, ast.Attribute) and v.func.attr == "selected" and getattr(v.func.value, "id", "") == "_PP":
+                # the copy beside the land_batch under test: scripts/loop unless LAND_BATCH names another (spelled so
+                # the loop tool parity scan can bind this import, 2026-10-11)
+                sys.path.insert(0, os.path.dirname(TARGET) if os.environ.get("LAND_BATCH") else os.path.join(HERE, "loop"))
+                import plan_path
+                return plan_path.selected()
     return None
 
 

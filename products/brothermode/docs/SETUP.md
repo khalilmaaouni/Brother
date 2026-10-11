@@ -22,11 +22,12 @@ For the standalone product, run:
 
 ```bash
 claude plugin marketplace add khalilmaaouni/Brother
-claude plugin install brothermode@brother
+claude plugin install brother@brother
 ```
 
-The hub marketplace registers the product from `products/brothermode` at its
-configured ref. The standalone product's local marketplace is a different
+The hub marketplace lists exactly one plugin, `brother`, sourced from the
+`bundle` directory at a release ref; the `brothermode` plugin name was retired
+in 1.1.0. The standalone product's local marketplace is a different
 compatibility surface. `scripts/release-smoke-install.sh` defaults to testing
 that local product marketplace in a temporary configuration; it is not proof
 that today's hub install has run. Do not use its legacy `--github` source as
@@ -36,7 +37,7 @@ For a pinned clone, use the sequence derived from
 `tools/bm_project_facts.py::facts()`:
 
 ```bash
-git clone --branch v1.1.1 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.2 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```

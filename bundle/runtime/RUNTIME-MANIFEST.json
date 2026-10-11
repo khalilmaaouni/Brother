@@ -23,7 +23,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "ab3e2ce57c4afc34cfa16a235cfa8ff0f2124f8fbec050ec88e671d7efeb3706"
+   "sha256": "fb8d1a6431e707a694c87ffa6cce1b9a379aad76f63a3d76ba2fc168b27071c7"
   },
   {
    "path": "brother_state.py",
@@ -43,7 +43,7 @@
   },
   {
    "path": "continuity.py",
-   "sha256": "b2129a836cf6afb72b069c9662ee6868a3066bd76a4d0b40fd43ab6dc5449631"
+   "sha256": "fdaf9f53f9b74437b7656d070d29368819c210480613b24b594e5bb8caa019a8"
   },
   {
    "path": "contract_check.py",
@@ -95,7 +95,7 @@
   },
   {
    "path": "host_capability.py",
-   "sha256": "bfb2b288ad0781dbf58255165e1a92a09a1133e43eac356b152e0052c790b2e2"
+   "sha256": "f06b1ba8b59d8b038adf3f733eb5c0fff7342f0533458ef67713443e1d2c567c"
   },
   {
    "path": "integrate.py",
@@ -295,6 +295,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "preflight/20260926-182529-1692-g6b332d8bd-dirty",
- "source_revision": "6b332d8bd931ab4c21c37419e3a2872536cab47b"
+ "source_describe": "preflight/20260926-182529-1794-g7a558b6a9-dirty",
+ "source_revision": "7a558b6a9d5414e21544609e4f5331ff5b360814"
 }

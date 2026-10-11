@@ -5,7 +5,7 @@ description: "Use when someone asks what to do next, which decision is waiting o
 
 # brother next
 
-The one recommended action. Read the state the receipt and the repository show, then name one action and why it is first; a decision waiting on the person is shown highest stakes first with a recommended option. Never a list of options with no ranking. Inside Cursor, the next action may be the next harness packet: `${CLAUDE_PLUGIN_ROOT}/skills/using-brother/references/cursor-execute.md` carries those instructions.
+The one recommended action. Read the state the receipt and the repository show, then name one action and why it is first; a decision waiting on the person is shown highest stakes first with a recommended option. Never a list of options with no ranking. Inside Cursor, the next action may be the next harness packet: `${CLAUDE_PLUGIN_ROOT}/skills/using-brother/references/cursor-execute.md` carries those instructions. When the person asks why nothing is landing, give the class printed by `runtime/loop/loop_watch.py` to `runtime/loop/watch_act.py <class> <reason>` and name the one action it returns.
 
 This is one of the six verbs behind the one door. Under Claude Code and Cursor the door is `/brother <what you are trying to do>`, and the verb word is optional: the door's routing order in `${CLAUDE_PLUGIN_ROOT}/skills/using-brother/SKILL.md` decides (`${BROTHER_PLUGIN_ROOT}` under Codex, `${PLUGIN_ROOT}` under Cursor). Codex and Antigravity have no slash command surface: there this skill is reached by its name, or through the `using-brother` skill. Never ask the person to choose a product, an autonomy code, a plan format, a run id or a test framework.
 

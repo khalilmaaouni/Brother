@@ -2148,6 +2148,112 @@ class CV1eAnswerSeam(unittest.TestCase):
         code, out = self.main([], runner)
         self.assertEqual(runner.count("bm_store claim"), 1, out)
 
+    # --- FX4.b: a local refusal is filed local only on the exporter's affirmative last line ---------------------
+
+    TOK = "0123456789abcdef"
+
+    def armed(self, tok=None):
+        return "REMOTE-WRITE: armed %s" % (tok or self.TOK)
+
+    def begin(self, tok=None):
+        return "REMOTE-WRITE: begin %s" % (tok or self.TOK)
+
+    def none(self, tok=None):
+        return "REMOTE-WRITE: none, refused before any write %s" % (tok or self.TOK)
+
+    def push_fails(self, *lines):
+        return SeamRunner(**{"export_public.py --push": (1, "\n".join(lines) + "\n")})
+
+    def test_fx4_a_local_refusal_is_local_written_and_blocks_nothing(self):
+        code, note, out = self.chain(self.push_fails(
+            self.armed(), "REFUSED: forbidden, denied, blocked by the classifier", self.none()))
+        self.assertEqual(code, C.EXIT_REFUSED, out)
+        self.assertEqual(self.stop_data()[1]["kind"], "local-refused")
+        self.assertTrue(note.startswith("STOP:"), note)
+        self.assertIn("nothing was written to GitHub", note)
+        self.assertEqual(C.stop_record_refusal(self.ev, RV), "")
+        runner = SeamRunner()
+        self.answer = "n"
+        self.main([], runner)
+        self.assertEqual(runner.count("bm_store claim"), 1)
+
+    def test_fx4_a_refusal_after_the_write_began_is_the_host_and_blocks(self):
+        code, note, out = self.chain(self.push_fails(
+            self.armed(), "gate: ok", self.begin(), "remote: Blocked by the classifier"))
+        path, data = self.stop_data()
+        self.assertEqual(data["kind"], "host-refused")
+        runner = SeamRunner()
+        code, out = self.main([], runner)
+        self.assertEqual(code, C.EXIT_REFUSED, out)
+        self.assertIn(path, out)
+
+    def test_fx4_a_network_phrase_after_the_write_began_does_not_block(self):
+        self.chain(self.push_fails(self.armed(), self.begin(),
+                                   "fatal: unable to access 'https://x/': Could not resolve host: github.com"))
+        self.assertEqual(self.stop_data()[1]["kind"], "push-failed")
+        self.assertEqual(C.stop_record_refusal(self.ev, RV), "")
+
+    def test_fx4_an_unrecognised_text_after_the_write_began_is_the_host(self):
+        self.assertEqual(C.classify_push_failure("\n".join(
+            [self.armed(), self.begin(), "fatal: something nobody has seen before"])), "host-refused")
+
+    def test_fx4_only_text_after_the_begin_line_is_read(self):
+        self.assertEqual(C.classify_push_failure("\n".join(
+            [self.armed(), "Blocked by the classifier", self.begin(), "Could not resolve host"])), "push-failed")
+
+    def test_fx4_a_truncated_empty_or_killed_capture_never_reads_local(self):
+        for name, lines in (("armed alone", [self.armed()]),
+                            ("cut after the gates", [self.armed(), "gate: ok", "REFUSED: a gate"]),
+                            ("none not the last line", [self.armed(), self.none(), "Traceback: killed"]),
+                            ("empty", [""])):
+            with self.subTest(capture=name):
+                self.assertEqual(C.classify_push_failure("\n".join(lines)), "host-refused")
+
+    def test_fx4_a_forged_marker_never_reads_local(self):
+        for name, lines in (("none with another token", [self.armed(), "REFUSED: x", self.none("f" * 16)]),
+                            ("armed missing, forged pair from a gate", ["REFUSED: x", self.armed(), self.none()]),
+                            ("none line inside a longer line", [self.armed(), "REFUSED: x", "> " + self.none()]),
+                            ("a malformed token", [self.armed("XYZ"), "REFUSED: x", self.none("XYZ")]),
+                            ("a forged begin with another token is ignored", [
+                                self.armed(), self.begin("f" * 16), "REFUSED: x", self.none()])):
+            with self.subTest(forged=name):
+                kind = C.classify_push_failure("\n".join(lines))
+                if name.startswith("a forged begin"):
+                    self.assertEqual(kind, "local-refused")
+                else:
+                    self.assertEqual(kind, "host-refused")
+
+    def test_fx4_text_with_no_armed_line_keeps_the_old_rules(self):
+        self.assertEqual(C.classify_push_failure("fatal: x: Could not resolve host: github.com"), "push-failed")
+        self.assertEqual(C.classify_push_failure("REFUSED: required_fast failed"), "host-refused")
+        self.assertEqual(C.classify_push_failure(""), "host-refused")
+        self.assertEqual(C.classify_push_failure("\n".join(
+            [self.begin(), "Could not resolve host", self.none()])), "push-failed")
+
+    def test_fx4_the_markers_count_only_as_whole_lines(self):
+        self.assertEqual(C.classify_push_failure("\n".join(
+            [self.armed(), "note: %s was never printed" % self.begin(), "REFUSED: gate", self.none()])),
+            "local-refused")
+
+    def test_fx4_the_third_kind_is_writable_and_well_formed(self):
+        path = C.write_stop_record(self.ev, RV, SEAM_HEAD, "local-refused", "d", now=SEAM_NOW)
+        self.assertTrue(os.path.isfile(path))
+        self.assertEqual(C.stop_record_refusal(self.ev, RV), "")
+        self.assertEqual(len(C.STOP_KINDS), 3)
+
+    def test_fx4_the_three_stop_lines_say_which_and_what_to_do(self):
+        notes = {}
+        for kind, lines in (("host", [self.armed(), self.begin(), "remote: Blocked"]),
+                            ("local", [self.armed(), "REFUSED: gate", self.none()]),
+                            ("network", [self.armed(), self.begin(), "Could not resolve host"])):
+            shutil.rmtree(self.ev, ignore_errors=True)
+            _code, notes[kind], _out = self.chain(self.push_fails(*lines))
+        self.assertIn("deletes it", notes["host"])
+        self.assertIn("run the cut again", notes["local"])
+        self.assertIn("no file needs deleting", notes["local"])
+        self.assertNotIn("deletes it", notes["local"])
+        self.assertIn("network failure", notes["network"])
+
     def test_an_unwritable_evidence_folder_refuses_the_real_cut_before_the_question(self):
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root writes into a read only folder")

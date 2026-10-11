@@ -24,8 +24,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import writer_lock  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
 import plan_store  # noqa: E402  (the one landed test: plan_store.sub_landed, finding 2 of 2026-09-27)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+PLAN = _PP.selected()
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
 COUNCIL = os.path.expanduser("~/.claude/evidence/spec-council.json")
 SCORES = os.path.expanduser("~/.claude/evidence/spec-scores.json")

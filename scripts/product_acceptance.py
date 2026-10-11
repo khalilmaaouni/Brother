@@ -152,6 +152,10 @@ TWO_INDEPENDENT_DECOMPOSER = """
     ]))
 """
 
+# TL1 (1.1.2): A2 declares a dependency on A1, so its check reads A1's
+# file too, as one plain command (a resumed record refuses a `&&` chain);
+# a check that ignored A1 read NO-DATA under the dependency revert, and a
+# resumed toy run then exited 2 (PARTIAL), not 0.
 TWO_DEPENDENT_DECOMPOSER = """
     import json, sys
     sys.stdin.read()
@@ -159,7 +163,8 @@ TWO_DEPENDENT_DECOMPOSER = """
         {"id": "A1", "objective": "create file one",
          "done_check": "test -f one.txt", "writes": ["one.txt"], "deps": []},
         {"id": "A2", "objective": "create file two",
-         "done_check": "test -f two.txt", "writes": ["two.txt"],
+         "done_check": "test -f one.txt -a -f two.txt",
+         "writes": ["two.txt"],
          "deps": ["A1"]},
     ]))
 """

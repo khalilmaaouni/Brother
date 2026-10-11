@@ -248,6 +248,32 @@ BATTERY_GLOB = os.path.join("products", "*", "tools", "test_all.py")
 #: test can point an injected runner at a stand-in.
 GH_BIN = "gh"
 
+#: FX4.a (2026-10-11): where a --push run stood when it stopped, said by the
+#: exporter itself. `armed <token>` is the first line of a --push run;
+#: `begin <token>` is printed (flushed, once) right before the first remote
+#: write; `none, refused before any write <token>` is the last line of a run
+#: that refused with no write begun. cut.py reads a failure as local ONLY on
+#: that affirmative last line carrying the armed line's token (plan v5, the
+#: stricter reading): a truncated, empty, killed or old capture stays a host
+#: refusal. The token, fresh per run, keeps a gate's captured output from
+#: forging either line.
+REMOTE_WRITE_ARMED = "REMOTE-WRITE: armed"
+REMOTE_WRITE_BEGIN = "REMOTE-WRITE: begin"
+REMOTE_WRITE_NONE = "REMOTE-WRITE: none, refused before any write"
+
+
+def announce_remote_write(state):
+    """Print the begin line, flushed, the first time it is called with this
+    `state` dict (carrying the run's token when main armed it); True then,
+    False on every later call."""
+    if state.get("announced"):
+        return False
+    token = state.get("token")
+    print("%s %s" % (REMOTE_WRITE_BEGIN, token) if token
+          else REMOTE_WRITE_BEGIN, flush=True)
+    state["announced"] = True
+    return True
+
 #: The branch a release is pushed to before its pull request. The tag is
 #: cut from the MERGED tip of the protected branch, never from this one.
 RELEASE_BRANCH_PREFIX = "release/"
@@ -1812,9 +1838,61 @@ def pull_request_state(pr_ref, cwd, run=None, sleep=None):
     return state
 
 
+#: FX3.a (2026-10-11): the tag names the commit the release pull request's
+#: merge produced. Until then it took FETCH_HEAD after the merge, the tip of
+#: main at that instant, so a second merge landing in between tagged a
+#: commit nobody reviewed (a latent race: v1.0.21, v1.1.0 and v1.1.1 agree
+#: with their pull requests' merge commits, read 2026-10-11).
+MERGE_COMMIT_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def pull_request_merge_commit(pr_ref, cwd, run=None, sleep=None):
+    """The merge commit the host reports for the pull request, or None. Polled
+    the way pull_request_state polls (a merge commit can lag the merge); a
+    non zero exit, an empty answer, `null` or anything not 40 hex is not yet."""
+    run = run or _run
+    sleep = sleep or time.sleep
+    for attempt in range(MERGE_STATE_POLLS):
+        proc = run([GH_BIN, "pr", "view", pr_ref, "--json", "mergeCommit",
+                    "-q", ".mergeCommit.oid"], cwd)
+        oid = (proc.stdout or "").strip() if proc.returncode == 0 else ""
+        if MERGE_COMMIT_RE.fullmatch(oid):
+            return oid
+        if attempt + 1 < MERGE_STATE_POLLS:
+            sleep(MERGE_STATE_POLL_SECONDS)
+    return None
+
+
+def merge_commit_refusal(cwd, run, oid, expected_tree, branch):
+    """'' when `oid` is a 40 hex commit present in `cwd`, whose tree is the
+    reviewed export tree and which sits in the fetched history of `branch`
+    (FETCH_HEAD); else one REFUSED line. There is no fallback to the tip."""
+    run = run or _run
+    if not isinstance(oid, str) or not MERGE_COMMIT_RE.fullmatch(oid):
+        return ("REFUSED: the release pull request did not report a merge "
+                "commit (gh pr view --json mergeCommit answered %r); the merge "
+                "already happened, no tag was pushed" % (oid,))
+    if run(["git", "cat-file", "-e", "%s^{commit}" % oid], cwd).returncode != 0:
+        return ("REFUSED: the merge commit %s is not a commit in the export "
+                "checkout after the fetch of %s; no tag was pushed"
+                % (oid[:12], branch))
+    tree = run(["git", "rev-parse", "%s^{tree}" % oid], cwd)
+    got = (tree.stdout or "").strip() if tree.returncode == 0 else ""
+    if not got or got != expected_tree:
+        return ("REFUSED: the merge commit %s has tree %s, not the export tree "
+                "%s that was gated; no tag was pushed"
+                % (oid[:12], got[:12] or "(unreadable)",
+                   (expected_tree or "(unreadable)")[:12]))
+    if run(["git", "merge-base", "--is-ancestor", oid, "FETCH_HEAD"],
+           cwd).returncode != 0:
+        return ("REFUSED: the merge commit %s is not in the fetched history "
+                "of %s; no tag was pushed" % (oid[:12], branch))
+    return ""
+
+
 def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                    bootstrap=False, run=None, require_signed=False,
-                   wait_sleep=None, wait_clock=None):
+                   wait_sleep=None, wait_clock=None, write_state=None):
     """The real push path, kept separate from gating (see module docstring:
     ORPHAN ON PURPOSE). Fetches `remote`'s current tip, rebuilds the same
     allowlisted content as a new commit ON TOP of it (an honest append),
@@ -1860,6 +1938,8 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     also replacing every git/gh subprocess call needs the two seams apart."""
     run = run or _run
     lines = []
+    # FX4.a: one announcement per run, before whichever write comes first
+    write_state = {} if write_state is None else write_state
     with tempfile.TemporaryDirectory(prefix="brother-export-push-") as d:
         run(["git", "init", "-q"], d)
         run(["git", "config", "user.name", AUTHOR_NAME], d)
@@ -2001,6 +2081,13 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
             author = "%s <%s>" % (AUTHOR_NAME, AUTHOR_EMAIL)
             run(["git", "commit", "-q", "--author", author, "-m",
                   COMMIT_MESSAGE], d)
+        # FX3.a: the tree every gate above cleared, on both paths (the resume
+        # path's clean status proves HEAD already is it); the tag's merge
+        # commit must carry exactly this tree.
+        head_tree = run(["git", "rev-parse", "HEAD^{tree}"], d)
+        expected_tree = ((head_tree.stdout or "").strip()
+                         if head_tree.returncode == 0 else "")
+        pr_ref = None
 
         env = dict(os.environ)
         env[edition_guard.EXPORT_ENV] = edition_guard.EXPORT_MARK
@@ -2014,6 +2101,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
             # has no protected branch to open a pull request against; every
             # other export writes its own branch and asks for a merge.
             target = branch if bootstrap else release_branch_name(tag, export_rev)
+            announce_remote_write(write_state)
             push = run(["git", "push", remote, "HEAD:refs/heads/%s" % target],
                         d, env=env)
             if (push.stdout or "").strip():
@@ -2137,7 +2225,17 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                                   % (branch,
                                      (fetch_merged.stderr or "").strip()))
                     return EXIT_REFUSED, lines
-                target_rev = "FETCH_HEAD"
+                # FX3.a: the pull request's own merge commit, found on a
+                # rerun by its branch name; never the fetched tip.
+                pr_lookup = pr_ref or release_branch_name(tag, "")
+                merge_oid = pull_request_merge_commit(pr_lookup, d, run,
+                                                      wait_sleep)
+                why = merge_commit_refusal(d, run, merge_oid, expected_tree,
+                                           branch)
+                if why:
+                    lines.append(why)
+                    return EXIT_REFUSED, lines
+                target_rev = merge_oid
             signed, key_id = signing_configured(d, run)
             if signed:
                 lines.append("tag signing: git tag -s using key %s "
@@ -2188,6 +2286,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                     "%s, only the tag itself was never created or pushed"
                     % (tag, (peeled.stderr or "").strip(), landed))
                 return EXIT_REFUSED, lines
+            announce_remote_write(write_state)
             tag_push = run(["git", "push", "--porcelain", remote,
                             "refs/tags/%s" % tag], d, env=env)
             if (tag_push.stderr or "").strip():
@@ -2738,6 +2837,16 @@ def tag_time_checks(export_dir, version):
 
 
 def main(argv=None):
+    """The CLI. On a --push run that refuses before any remote write began,
+    the very last line is the affirmative REMOTE_WRITE_NONE line (FX4.a)."""
+    state = {}
+    code = _main(argv, state)
+    if state.get("token") and not state.get("announced") and code != EXIT_OK:
+        print("%s %s" % (REMOTE_WRITE_NONE, state["token"]), flush=True)
+    return code
+
+
+def _main(argv, state):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--allowlist", default=None)
     ap.add_argument("--root", default=ROOT,
@@ -2817,6 +2926,9 @@ def main(argv=None):
                           "roadmap: the key is the founder's, this only "
                           "reads what he has already set up.")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    if args.push:
+        state["token"] = os.urandom(8).hex()
+        print("%s %s" % (REMOTE_WRITE_ARMED, state["token"]), flush=True)
 
     allowlist = load_allowlist(args.allowlist)
     if allowlist is None:
@@ -2953,7 +3065,8 @@ def main(argv=None):
     code, lines = push_appended(allowlist, args.remote, args.branch,
                                 args.root, tag=args.tag,
                                 bootstrap=args.bootstrap,
-                                require_signed=args.require_signed)
+                                require_signed=args.require_signed,
+                                write_state=state)
     for line in lines:
         print(line)
     return code
