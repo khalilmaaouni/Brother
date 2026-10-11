@@ -42,7 +42,8 @@ class BriefTree(object):
         os.makedirs(self.home)
         os.makedirs(os.path.join(self.root, "_runs"))
         self.write("_home/.brothersbe-private-names", "")
-        self.write("_plan.json", WBS_JSON)
+        # under docs/plan/ and relative to the tree: the one shape plan_path.selected admits for BROTHER_WBS (2026-10-10)
+        self.write("docs/plan/_plan.json", WBS_JSON)
 
     def write(self, rel, text):
         path = os.path.join(self.root, rel)
@@ -59,7 +60,7 @@ class BriefTree(object):
     def env(self, **extra):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("BROTHER_") and k not in ("HOME", "PYTHONPATH")}
-        env.update(HOME=self.home, BROTHER_WBS=os.path.join(self.root, "_plan.json"),
+        env.update(HOME=self.home, BROTHER_WBS="docs/plan/_plan.json",
                    BROTHER_UNIT_RUNS=os.path.join(self.root, "_runs"), PYTHONDONTWRITEBYTECODE="1")
         env.update(extra)
         return env

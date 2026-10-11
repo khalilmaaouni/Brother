@@ -16,6 +16,7 @@ import unittest
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import handover_ceremony as HC
 from handover_ceremony import (
     repo_state, sbe_task_summary, day_plan_state, pr_state, limit_state,
     collect_state, state_has_error, build_vault_note, emit_vault_notes,
@@ -602,6 +603,347 @@ class Night0912HandoverCeremony(unittest.TestCase):
                 content = f.read()
             self.assertIn("first", content)
             self.assertNotIn("second", content)
+
+
+EX_SYMPTOM = ("the nightly export stopped after the packing step because the "
+              "manifest listed a file the allowlist never shipped")
+RESTATED = ("export stopped after the packing step since the manifest listed "
+            "a file the allowlist never shipped")
+FOUR_ONLY = ("export stopped after packing, then a long unrelated sentence "
+             "about login prompts blocking another build on the first run "
+             "of the day")
+THREE_SAME = "login prompt blocked"
+EX_SLUG = "an-export-stops-when-the-manifest-lists-an-unshipped-file"
+EX_RENAMED = "the-export-stops-because-the-manifest-lists-an-unshipped-file"
+
+
+class DuplicateMatch(unittest.TestCase):
+    def test_tokens_are_lowercase_words_of_three_or_more_without_stopwords(self):
+        self.assertEqual(
+            HC._tokens("The debate runner's first helper call exited 1 in 0 s"),
+            frozenset({"call", "debate", "exited", "first", "helper",
+                       "runner"}))
+        self.assertEqual(HC._tokens("it looked fine and then it was not"),
+                         frozenset({"fine", "looked"}))
+        self.assertEqual(HC._tokens("EXPORT Export"), frozenset({"export"}))
+
+    def test_tokens_of_a_non_text_value_or_empty_text_are_empty(self):
+        for value in (None, 5, b"x", "", "   "):
+            self.assertEqual(HC._tokens(value), frozenset(), value)
+
+    def test_similar_needs_the_shared_word_count(self):
+        words = HC._tokens(THREE_SAME)
+        self.assertEqual(len(words), 3)
+        self.assertFalse(HC._similar(words, words))
+
+    def test_similar_needs_the_ratio(self):
+        a, b = HC._tokens(FOUR_ONLY), HC._tokens(EX_SYMPTOM)
+        self.assertEqual(len(a & b), 4)
+        self.assertFalse(HC._similar(a, b))
+
+    def test_similar_holds_for_a_close_restatement(self):
+        self.assertTrue(HC._similar(HC._tokens(RESTATED),
+                                    HC._tokens(EX_SYMPTOM)))
+
+    def test_a_restated_symptom_under_another_name_is_found(self):
+        self.assertEqual(
+            HC.find_duplicate("brand-new-name", RESTATED,
+                              {EX_SLUG: [EX_SYMPTOM]}),
+            (EX_SLUG, "symptom"))
+
+    def test_a_renamed_note_is_found_by_name_alone(self):
+        self.assertEqual(
+            HC.find_duplicate(EX_RENAMED, "nothing in common with it at all",
+                              {EX_SLUG: []}),
+            (EX_SLUG, "name"))
+
+    def test_the_notes_own_slug_is_never_its_duplicate(self):
+        self.assertIsNone(
+            HC.find_duplicate(EX_SLUG, EX_SYMPTOM, {EX_SLUG: [EX_SYMPTOM]}))
+
+    def test_the_smallest_slug_wins(self):
+        existing = {}
+        existing["zeta-note"] = [EX_SYMPTOM]
+        existing["alpha-note"] = [EX_SYMPTOM]
+        for _ in range(2):
+            self.assertEqual(
+                HC.find_duplicate("brand-new-name", RESTATED, existing),
+                ("alpha-note", "symptom"))
+
+    def test_nothing_to_compare_matches_nothing(self):
+        self.assertIsNone(HC.find_duplicate("brand-new-name", RESTATED, {}))
+        for symptom in ("", None, 5):
+            self.assertIsNone(HC.find_duplicate(
+                "brand-new-name", symptom, {EX_SLUG: [EX_SYMPTOM]}), symptom)
+        for existing in (None, 0, True, "x", b"x", [], ["x"], (), {1, 2},
+                         {EX_SLUG: "x"}, {EX_SLUG: None}, {1: [EX_SYMPTOM]},
+                         {EX_SLUG: [None, 5, b"x"]}):
+            self.assertIsNone(HC.find_duplicate(
+                "brand-new-name", RESTATED, existing), existing)
+
+
+
+FM = b'---\ntype: failure\nsymptom: "alpha bravo charlie delta"\n---\n# n\n'
+
+
+class ExistingFailures(unittest.TestCase):
+    """What a vault directory already holds: each note's front matter
+    symptom and each Failures-Index line's text, keyed by slug."""
+
+    def vault_dir(self, files, index=None):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        for name, data in files.items():
+            with open(os.path.join(d, name), "wb") as f:
+                f.write(data)
+        if index is not None:
+            with open(os.path.join(d, INDEX_NAME), "wb") as f:
+                f.write(index)
+        return d
+
+    def test_a_note_symptom_is_read_from_its_front_matter(self):
+        d = self.vault_dir({"n.md": FM})
+        self.assertEqual(HC._existing_failures(d),
+                         {"n": ["alpha bravo charlie delta"]})
+
+    def test_an_unterminated_front_matter_is_still_read(self):
+        d = self.vault_dir({"n.md": b'---\ntype: failure\n'
+                                    b'symptom: "alpha bravo charlie delta"\n'
+                                    b'more: text\n'})
+        self.assertEqual(HC._existing_failures(d),
+                         {"n": ["alpha bravo charlie delta"]})
+
+    def test_a_symptom_line_in_the_body_is_not_read(self):
+        d = self.vault_dir({"n.md": FM.replace(b"type: failure\n", b"")
+                            + b'symptom: "other words here now"\n'})
+        self.assertEqual(HC._existing_failures(d),
+                         {"n": ["alpha bravo charlie delta"]})
+        d = self.vault_dir({"n.md": b"---\ntype: failure\n---\n# n\n"
+                                    b'symptom: "other words here now"\n'})
+        self.assertEqual(HC._existing_failures(d), {"n": []})
+
+    def test_text_without_front_matter_gives_no_symptom(self):
+        d = self.vault_dir({"n.md": b'# title\nsymptom: "alpha bravo"\n'})
+        self.assertEqual(HC._existing_failures(d), {"n": []})
+
+    def test_the_forty_line_cap_holds(self):
+        body = b"---\n" + b"pad: x\n" * 39 + b'symptom: "too late"\n---\n'
+        d = self.vault_dir({"n.md": body})
+        self.assertEqual(HC._existing_failures(d), {"n": []})
+        body = b"---\n" + b"pad: x\n" * 38 + b'symptom: "just in"\n---\n'
+        d = self.vault_dir({"n.md": body})
+        self.assertEqual(HC._existing_failures(d), {"n": ["just in"]})
+
+    def test_a_note_without_a_symptom_still_exists_in_the_dict(self):
+        d = self.vault_dir({"n.md": b"---\ntype: failure\n---\n"})
+        self.assertEqual(HC._existing_failures(d), {"n": []})
+        self.assertEqual(HC._existing_failures(self.vault_dir({})), {})
+
+    def test_a_symptom_quote_pair_is_removed_only_when_both_ends_have_one(self):
+        for raw, want in ((b'"a b"', "a b"), (b'"a b', '"a b'),
+                          (b"a b", "a b"), (b'a b"', 'a b"')):
+            d = self.vault_dir({"n.md": b"---\nsymptom: " + raw + b"\n---\n"})
+            self.assertEqual(HC._existing_failures(d), {"n": [want]}, raw)
+
+    def test_index_lines_in_the_new_shape_give_the_symptom_text(self):
+        d = self.vault_dir({}, index=(
+            b"# Failures\n- [[s]] 2026-10-04. AREA: loop. SYMPTOM: every unit "
+            b"stalled. FIX: hold.\n"))
+        self.assertEqual(HC._existing_failures(d),
+                         {"s": ["every unit stalled."]})
+
+    def test_index_lines_in_the_old_shape_give_the_text_after_the_slug(self):
+        d = self.vault_dir({}, index=(
+            b"- [[o]] 2026-09-09. Every script passes a flag.\n"
+            b"- [[o]] 2026-09-10. A second line for it.\n"
+            b"- [[bare]]\n"
+            b"not a list line [[x]] here\n"))
+        self.assertEqual(HC._existing_failures(d), {
+            "o": ["2026-09-09. Every script passes a flag.",
+                  "2026-09-10. A second line for it."],
+            "bare": []})
+
+    def test_the_index_file_and_other_files_are_not_notes(self):
+        d = self.vault_dir({"notes.txt": FM, "a.md.bak": FM}, index=FM)
+        self.assertEqual(HC._existing_failures(d), {})
+
+    def test_a_binary_note_and_a_binary_index_do_not_raise(self):
+        d = self.vault_dir({"n.md": b"\xff\xfe\x00---"},
+                           index=b"\xff\xfe\x00---")
+        self.assertEqual(HC._existing_failures(d), {"n": []})
+
+    def test_an_unreadable_directory_raises_oserror(self):
+        d = self.vault_dir({})
+        with self.assertRaises(OSError):
+            HC._existing_failures(os.path.join(d, "missing"))
+        os.mkdir(os.path.join(d, "x.md"))
+        with self.assertRaises(OSError):
+            HC._existing_failures(d)
+
+    def test_hostile_values_are_refused_never_read_or_crashed(self):
+        for bad in (None, 0, True, -1, float("nan"), b"x", [], ["x"], {},
+                    {"a": 1}, (), {1, 2}, object()):
+            with self.assertRaises(ValueError):
+                HC._existing_failures(bad)
+            with self.assertRaises(ValueError):
+                HC._note_symptom(bad)
+        for bad in ("", "x"):
+            with self.assertRaises(OSError):
+                HC._existing_failures(bad + "-no-such-dir-n19b")
+            with self.assertRaises(OSError):
+                HC._note_symptom(bad + "-no-such-note-n19b")
+
+
+EX_NOTE = ("---\ntype: failure\nstatus: open\nsymptom: \"%s\"\n---\n"
+           "\n# existing\n" % EX_SYMPTOM).encode("utf-8")
+EX_INDEX = ("# Failures\n\n## Handover ceremony 2026-10-01\n"
+            "- [[existing-note]] 2026-10-01. AREA: export. SYMPTOM: %s. "
+            "FIX: ship the file.\n" % EX_SYMPTOM).encode("utf-8")
+UNRELATED = "the login prompt blocked a build on its first run of the day"
+
+
+class DuplicateLessonRefusal(unittest.TestCase):
+    """emit_vault_notes refuses a failure lesson that repeats a note already
+    in the vault, names that note, writes the rest, and fails closed."""
+
+    vault_dir = ExistingFailures.vault_dir
+
+    def setUp(self):
+        self.vault = self.vault_dir({"existing-note.md": EX_NOTE},
+                                    index=EX_INDEX)
+        self.index_path = os.path.join(self.vault, INDEX_NAME)
+        self.index_text = self.read(self.index_path)
+
+    @staticmethod
+    def read(path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def emit(self, lessons, vault=None):
+        return emit_vault_notes(vault or self.vault, lessons,
+                                today="2026-10-11")
+
+    def test_a_restated_failure_under_another_name_is_refused_and_names_the_note(self):
+        written, refused, appended = self.emit(
+            [lesson(name="export halts after packing", symptom=RESTATED)])
+        self.assertEqual(written, [])
+        self.assertEqual(len(refused), 1)
+        self.assertIn("existing-note.md", refused[0])
+        self.assertIn("symptom", refused[0])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.vault, "export-halts-after-packing.md")))
+        self.assertEqual(self.read(self.index_path), self.index_text)
+        self.assertEqual(appended, 0)
+
+    def test_the_rest_of_the_batch_still_writes(self):
+        written, refused, appended = self.emit(
+            [lesson(name="export halts after packing", symptom=RESTATED),
+             lesson(name="login prompt hangs", symptom=UNRELATED)])
+        self.assertEqual(written,
+                         [os.path.join(self.vault, "login-prompt-hangs.md")])
+        self.assertEqual(len(refused), 1)
+        self.assertEqual(appended, 1)
+        index = self.read(self.index_path)
+        self.assertIn("[[login-prompt-hangs]]", index)
+        self.assertNotIn("[[export-halts-after-packing]]", index)
+        self.assertFalse(os.path.exists(
+            os.path.join(self.vault, "export-halts-after-packing.md")))
+
+    def test_a_renamed_note_is_refused_by_name(self):
+        vault = self.vault_dir({EX_SLUG + ".md": EX_NOTE}, index=b"")
+        written, refused, _ = self.emit(
+            [lesson(name=EX_RENAMED, symptom=UNRELATED)], vault=vault)
+        self.assertEqual(written, [])
+        self.assertEqual(len(refused), 1)
+        self.assertIn("name", refused[0])
+        self.assertIn(EX_SLUG + ".md", refused[0])
+        self.assertFalse(os.path.exists(
+            os.path.join(vault, EX_RENAMED + ".md")))
+
+    def test_a_finding_with_a_repeated_symptom_is_written(self):
+        written, refused, _ = self.emit(
+            [lesson(name="export halts after packing", type="finding",
+                    symptom=RESTATED)])
+        self.assertEqual(refused, [])
+        self.assertEqual(written, [os.path.join(
+            self.vault, "export-halts-after-packing.md")])
+
+    def test_a_rerun_of_the_same_lesson_is_not_a_duplicate(self):
+        one = [lesson(name="login prompt hangs", symptom=UNRELATED)]
+        written, refused, appended = self.emit(one)
+        self.assertEqual((len(written), refused, appended), (1, [], 1))
+        written, refused, appended = self.emit(one)
+        self.assertEqual(written,
+                         [os.path.join(self.vault, "login-prompt-hangs.md")])
+        self.assertEqual(refused, [])
+        self.assertEqual(appended, 0)
+
+    def test_two_lessons_with_one_symptom_in_one_batch_write_once(self):
+        vault = self.vault_dir({}, index=b"")
+        written, refused, appended = self.emit(
+            [lesson(name="export halts after packing", symptom=RESTATED),
+             lesson(name="allowlist gap on release", symptom=RESTATED)],
+            vault=vault)
+        self.assertEqual(written, [os.path.join(
+            vault, "export-halts-after-packing.md")])
+        self.assertEqual(len(refused), 1)
+        self.assertIn("export-halts-after-packing.md", refused[0])
+        self.assertEqual(appended, 1)
+        self.assertFalse(os.path.exists(
+            os.path.join(vault, "allowlist-gap-on-release.md")))
+
+    def test_notes_that_cannot_be_read_refuse_every_failure_and_still_write_findings(self):
+        os.mkdir(os.path.join(self.vault, "broken.md"))
+        written, refused, appended = self.emit(
+            [lesson(name="login prompt hangs", symptom=UNRELATED),
+             lesson(name="a plain finding", type="finding")])
+        self.assertEqual(written,
+                         [os.path.join(self.vault, "a-plain-finding.md")])
+        self.assertEqual(len(refused), 1)
+        self.assertIn("could not be read", refused[0])
+        self.assertIn(self.vault, refused[0])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.vault, "login-prompt-hangs.md")))
+        self.assertEqual(self.read(self.index_path), self.index_text)
+        self.assertEqual(appended, 0)
+
+    def test_the_cli_exits_1_names_the_note_and_writes_the_rest(self):
+        lf = os.path.join(self.vault_dir({}), "lessons.json")
+        with open(lf, "w", encoding="utf-8") as f:
+            json.dump([lesson(name="export halts after packing",
+                              symptom=RESTATED),
+                       lesson(name="login prompt hangs", symptom=UNRELATED)],
+                      f)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = main(["--emit-vault", self.vault, "--lesson-file", lf])
+        self.assertEqual(code, 1)
+        self.assertIn("REFUSED", buf.getvalue())
+        self.assertIn("existing-note.md", buf.getvalue())
+        self.assertTrue(os.path.exists(
+            os.path.join(self.vault, "login-prompt-hangs.md")))
+
+    def test_hostile_symptoms_and_other_refusals_keep_their_own_path(self):
+        # no symptom key, None or "": no symptom words, only the name matches
+        bare = lesson(name="login prompt hangs")
+        del bare["symptom"]
+        written, refused, _ = self.emit(
+            [bare, lesson(name="tool one stalls", symptom=None),
+             lesson(name="tool two stalls", symptom="")])
+        self.assertEqual((len(written), refused), (3, []))
+        vault = self.vault_dir({EX_SLUG + ".md": EX_NOTE}, index=b"")
+        renamed = lesson(name=EX_RENAMED)
+        del renamed["symptom"]
+        written, refused, _ = self.emit([renamed], vault=vault)
+        self.assertEqual(written, [])
+        self.assertIn("matched on name", refused[0])
+        # a lesson refused for a bad status keeps its own reason
+        written, refused, _ = self.emit(
+            [lesson(name="export halts", symptom=RESTATED, status="bogus")])
+        self.assertEqual(written, [])
+        self.assertEqual(len(refused), 1)
+        self.assertIn("bogus", refused[0])
+        self.assertNotIn("duplicates", refused[0])
 
 
 if __name__ == "__main__":

@@ -204,6 +204,53 @@ class AScopedRunOffersOnlyItsScopeToLand(unittest.TestCase):
         self.assertIn("READY   0 to land", out)
 
 
+class EveryOfferableBuildReachesTheLander(unittest.TestCase):
+    """2026-10-11, the 1.1.2 run: loop_pass.sh reads the READY paths out of this digest, which printed 8 and then
+    "... 85 more". 93 READY builds of sub units in no plan unit filled the 8 lines, so the three in scope builds were
+    never handed to land_batch and the run ended UNPRODUCTIVE with 3 grader PASS builds. A build of a sub unit in no
+    plan unit is never offered (land_batch holds it anyway); every offered path is printed, none hidden."""
+    def run_main(self, plan_subs, stale_subs):
+        sandbox = tempfile.TemporaryDirectory(prefix="pass-digest-reach-")
+        self.addCleanup(sandbox.cleanup)
+        root = sandbox.name
+        plan_path = os.path.join(root, "plan.json")
+        with open(plan_path, "w", encoding="utf-8") as handle:
+            json.dump({"units": [{"id": "N5", "state": "SPECIFIED", "sub_units": plan_subs}]}, handle)
+        runs = os.path.join(root, "unit-runs")
+        for sub in stale_subs + plan_subs:
+            d = os.path.join(runs, sub + "-120000"); os.makedirs(d)
+            with open(os.path.join(d, "STATUS"), "w", encoding="utf-8") as handle:
+                handle.write("READY /b/%s-r0-build.json (round 0)" % sub)
+        old = PD.PLAN, PD.RUNS, sys.argv, os.environ.get("BROTHER_SCOPE")
+        def restore():
+            PD.PLAN, PD.RUNS, sys.argv = old[:3]
+            if old[3] is None: os.environ.pop("BROTHER_SCOPE", None)
+            else: os.environ["BROTHER_SCOPE"] = old[3]
+        self.addCleanup(restore)
+        PD.PLAN, PD.RUNS, sys.argv = plan_path, runs, ["pass_digest.py", "--no-fetch"]
+        os.environ.pop("BROTHER_SCOPE", None)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = PD.main()
+        return code, buffer.getvalue()
+
+    def test_stale_builds_of_no_plan_unit_never_crowd_out_the_plans_build(self):
+        code, out = self.run_main(["N5.a"], ["OLD%d.a" % i for i in range(10)])
+        self.assertEqual(code, 0, out)
+        self.assertIn("READY   1 to land:", out)
+        self.assertIn("/b/N5.a-r0-build.json", out)
+        self.assertNotIn("/b/OLD0.a-r0-build.json", out)
+        self.assertIn("READY in no plan unit, not offered to land: 10", out)
+
+    def test_every_offered_path_is_printed_never_hidden_behind_a_count(self):
+        subs = ["N5.%s" % c for c in "abcdefghijk"]
+        code, out = self.run_main(subs, [])
+        self.assertIn("READY   11 to land:", out)
+        for sub in subs:
+            self.assertIn("/b/%s-r0-build.json" % sub, out)
+        self.assertNotRegex(out, r"\.\.\. \d+ more")
+
+
 class TheLandedMatchIsExact(unittest.TestCase):
     """Finding 2, 2026-09-27: A.1 matched inside A.10 and "A.1 not landed" read as landed, so an unlanded build
     vanished from READY. One fixture per guard."""

@@ -23,7 +23,9 @@ if out_json and os.path.exists(out_json):
     os.remove(out_json)   # a run that dies leaves NO file, never the previous run's scores under this run's name
 # NO SCORE CACHE (plan E, 2026-10-01): its key read status text and one directory's metadata, so two different edits
 # could share a key and a nested spec change could keep a stale score. Scoring runs every time.
-plan = json.load(open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the copy beside this file, and only that one
+import plan_path as _PP  # noqa: E402  the one plan selector (BROTHER_WBS or the default; an invalid value refuses)
+plan = json.load(open(_PP.selected(), encoding="utf-8"))
 # ONE rule for what a done_check may be, owned by the grader: the scorer, the brief gate and the grader read the same
 # regex, so a section cannot score 9 on a command the grader will then refuse, or the reverse (2026-09-24: three copies
 # had drifted three ways). The regex alone was not enough (2026-09-29): the scorer matched it against ANY python3 line,
@@ -33,6 +35,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the copy besi
 from grade_build import record_claim
 from brief_check import SPEC_PATH, labelled_paths
 import spec_check   # the landing gate's done check reader (done_check) and its command rule (grade_build.OK_CMD)
+import landing_standard   # LS1.b: the landing standard's machine rules (own test, mirrored file, checklist)
+
+
+def mirrored_paths():
+    """The bundle/runtime/ paths tracked in this checkout (git ls-files), or None when the list cannot be read."""
+    try:
+        r = subprocess.run(["git", "ls-files", "bundle/runtime"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return set(r.stdout.split()) if r.returncode == 0 else None
+
+
+_MIRRORED = mirrored_paths()
 tracked = set(subprocess.run(["git", "ls-files"], capture_output=True, text=True, timeout=30).stdout.split())
 _defs = None
 
@@ -107,6 +122,22 @@ for u in plan["units"]:
         _gate = spec_check.gate_refusal(spec, sub)   # the landing gate's own verdict, never a second reading (2026-09-29)
         if _gate:
             miss.append("DONE CHECK: " + _gate)
+        _own = landing_standard.own_test_refusal(spec_check.done_check(spec, sub), paths)
+        if _own:
+            miss.append(_own)
+        _loop_built = str(u.get("worker", "")).startswith("the loop")
+        if _loop_built and _MIRRORED is None:
+            miss.append("MIRRORED: NO-DATA, the mirror list could not be read")
+        else:
+            # only the files the sub unit CHANGES (its Files: lines); a Reads: line names files the build never writes
+            # (N19.a reads scripts/tmp_sandbox.py, 2026-10-11); no Files: line at all keeps every path (fail closed)
+            _changed = [q for ln in sec.splitlines() if ln.lstrip().startswith("Files:") for q in SPEC_PATH.findall(ln)]
+            _mir = landing_standard.mirrored_refusal(_changed or paths, _MIRRORED or set(), _loop_built)
+            if _mir:
+                miss.append(_mir)
+        _keys = landing_standard.checklist_missing(sec)
+        if _keys:
+            miss.append("CHECKLIST: missing " + ", ".join(_keys))
         if not re.search(r"\b(R\d+|REQ[- ][A-Z0-9-]+|R-[A-Z]+-\d+|W\d|H\d)\b", spec):
             miss.append("REQUIREMENTS: no requirement ids mapped to a control point")
         fn_names = "|".join(re.escape(d[0]) for d in defs) or "$^"
@@ -122,8 +153,8 @@ for u in plan["units"]:
         unknowns = re.findall(r"\bUNKNOWN\b|\bTBD\b|to be decided", sec)
         if unknowns:
             miss.append("NO UNKNOWN: %d left in the section" % len(unknowns))
-        scores[sub] = (10 - len(miss), miss)
-        record_claim("spec_score", sub, "this spec scores 9 or more, so the lane can land", (10 - len(miss)) / 10.0)
+        scores[sub] = (max(0, 10 - len(miss)), miss)   # LS1.b: more than ten misses floor at 0, never negative
+        record_claim("spec_score", sub, "this spec scores 9 or more, so the lane can land", scores[sub][0] / 10.0)
 _lines = ["%-8s %2d/10 %s" % (sub, n, "" if n == 10 else "| " + " | ".join(miss)) for sub, (n, miss) in scores.items()]
 ok = sum(1 for n, _ in scores.values() if n >= 9)
 _lines.append("\n%d sub units scored | %d at 9 or 10 (may start) | %d under 9 (HELD)" % (len(scores), ok, len(scores) - ok))

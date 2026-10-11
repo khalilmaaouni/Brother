@@ -23,8 +23,9 @@ import sys
 
 BIN = os.path.expanduser("~/.claude/bin")
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop")); import plan_store  # noqa: E402  (the one landed test)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected()
 ADVERSARIES = (("a", "deepseek"), ("b", "muse"))   # DeepSeek first by the owner's order, Muse as the second lane
 if os.environ.get("BROTHER_ADVERSARY_MODEL", "").strip() not in ("", "deepseek"):   # one named model for both lanes; "deepseek" is today's pair (probe_wave.adversary_models, 2026-09-30)
     ADVERSARIES = (("a", os.environ["BROTHER_ADVERSARY_MODEL"].strip()), ("b", os.environ["BROTHER_ADVERSARY_MODEL"].strip()))

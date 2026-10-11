@@ -97,7 +97,12 @@ def load_fn(path, name):
     # os.path.dirname(os.path.abspath(__file__)) rather than a fixed string, so lifting it in
     # isolation needs the real name it reads. `path` IS the file being parsed, so the value here
     # is the same one BIN would compute from a real load of unit_runner.py itself.
-    ns = {"os": os, "re": re, "sys": sys, "run": "/nonexistent-run-dir", "__file__": path}
+    # AND THE PLAN SELECTOR (2026-10-10): runner_pool's GENERATED tuple names the selected plan through
+    # `import plan_path as _PP`, so the lifted copy of that ALL CAPS assign needs the same name bound.
+    if LOOP not in sys.path:
+        sys.path.insert(0, LOOP)
+    import plan_path as _PP
+    ns = {"os": os, "re": re, "sys": sys, "run": "/nonexistent-run-dir", "__file__": path, "_PP": _PP}
     # AND THE TYPING NAMES THE SIGNATURES USE (2026-10-02). ACC3.b gave runner_pool typed signatures
     # (Optional[str]); a def evaluates its annotations, so the lifted copy died with NameError: Optional,
     # and every landing that ran this suite as a neighbour was refused as inherited red, which stopped the

@@ -308,7 +308,9 @@ class ADependentUnitIsHandedOverAfterItsDependenciesLand(SessionWorkerBase):
         third = sh([sys.executable, BROTHER_RUN, "--continue",
                     "--cwd", self.repo, "--runs-root", self.tmp], env=self.env)
         out = third.stdout + third.stderr
-        self.assertEqual(third.returncode, 0, out)
+        # TL1 (1.1.2 notes): A3 declares A1 and A2 but its check reads only three.txt,
+        # so A3 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(third.returncode, 2, out)
         # The report lists what the RUN integrated, not what this call did,
         # so all three are named once the last one lands.
         self.assertIn("integrated (3):", out, out)

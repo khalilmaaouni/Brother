@@ -8,11 +8,12 @@ import glob, json, os, re, subprocess, sys, html
 # a generator that could not be run at all. A page whose input nobody produces is a one off with extra steps.
 # The state is derived here from the three sources that already hold it: the plan, the run evidence, and the
 # spec scores. Pass --data FILE to render a prepared file instead, which is how the fixtures test it.
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
 SCORES = os.path.expanduser("~/.claude/evidence/spec-scores.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_store  # noqa: E402  (the one landed test: plan_store.sub_landed, finding 2 of 2026-09-27)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected()
 
 
 def _newest_status(runs_dir=RUNS):
@@ -250,7 +251,7 @@ def next_step_of():
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
         import salvage, grade_build, check_wave
-        plan = json.load(open('docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json', encoding='utf-8'))
+        plan = json.load(open(PLAN, encoding='utf-8'))
         subs = salvage.all_subs(plan) - salvage.landed_subs(plan)
         view = {}
         for c in salvage.plan_view(salvage.candidates(salvage.runs_dir(), subs), grade_build.preflight, check_wave.checker_mode(), salvage.runs_dir()):

@@ -33,8 +33,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
 import provenance  # noqa: E402  (sibling module, scripts/loop/provenance.py)
 import plan_store  # noqa: E402  (the one plan writer, and the one landed test: plan_store.sub_landed)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+PLAN = _PP.selected()
 
 
 

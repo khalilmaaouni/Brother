@@ -10,7 +10,8 @@ never counts. A judge with no known outcome is NO-DATA, never a pass. Determinis
 import glob, json, os, re, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_store  # noqa: E402  (the one landed test: plan_store.sub_landed, finding 2 of 2026-09-27)
-RUNS = os.path.expanduser("~/.claude/evidence/unit-runs"); PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+RUNS = os.path.expanduser("~/.claude/evidence/unit-runs"); PLAN = _PP.selected()
 OUT = os.path.expanduser("~/.claude/evidence/judge-calibration.json"); COUNCIL = os.path.expanduser("~/.claude/evidence/spec-council.json")
 BAR_PRECISION, BAR_RULINGS = 0.8, 20
 

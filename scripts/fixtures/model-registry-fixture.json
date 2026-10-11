@@ -185,7 +185,7 @@
       "note": "the owner's choice for documentation and orchestration work"
     },
     "luna": {
-      "id": "gpt-5.6-luna",
+      "id": "gpt-6-luna",
       "transport": "codex",
       "privacy": "public",
       "quality": {

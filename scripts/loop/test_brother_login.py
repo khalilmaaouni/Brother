@@ -263,6 +263,64 @@ class Forget(Base):
         self.assertEqual(self.run_main(argv=["forget"]), 0)
 
 
+class Status(Base):
+    """N1.d: `brother-login status` reads whether a well formed login exists, through the same reader a seat uses, and
+    prints a fixed sentence. It never prints, writes or builds anything, and every failure names the login lane's own
+    remedy (D-N1-3), never the interactive Claude sign in."""
+
+    PRESENT = "Brother login is present and well formed in your login Keychain."
+
+    def test_a_saved_login_reads_present_and_prints_nothing_else(self):
+        self.seed(CANARY)
+        self.assertEqual(self.run_main(argv=["status"]), 0)
+        self.assertEqual(self.out, self.PRESENT + "\n")
+        self.assertEqual(self.err, "")
+
+    def test_a_missing_item_names_the_one_line_fix(self):
+        self.assertEqual(self.run_main(argv=["status"]), 1)
+        self.assertEqual(self.err.strip(), BL.MISSING)
+        self.assertEqual(self.out, "")
+
+    def test_an_unreadable_item_fails_closed(self):
+        self.seed(CANARY)
+        self.fakes("good", "unreadable")
+        self.assertEqual(self.run_main(argv=["status"]), 1)
+        self.assertNotIn(self.PRESENT, self.out)
+
+    def test_a_value_that_is_not_a_token_is_refused_without_echoing_it(self):
+        self.seed("hunter2")
+        self.assertEqual(self.run_main(argv=["status"]), 1)
+        self.assertIn("not a Claude token", self.err)
+        self.assertNotIn("hunter2", self.out + self.err)
+
+    def test_status_only_reads(self):
+        self.seed(CANARY)
+        BL.build_reader = lambda *a, **k: (_ for _ in ()).throw(AssertionError("status built the reader"))
+        self.assertEqual(self.run_main(argv=["status"]), 0)
+        with open(self.argv_log) as fh:
+            verbs = [json.loads(line)[0] for line in fh]
+        self.assertEqual(verbs, ["get"])
+        self.assertEqual(self.stored(), CANARY)
+
+    def test_an_extra_argument_is_refused(self):
+        self.seed(CANARY)
+        self.assertEqual(self.run_main(argv=["status", "x"]), 1)
+        self.assertNotIn(self.PRESENT, self.out)
+        self.assertIn("brother-login status", self.err)
+
+    def test_every_failure_names_the_login_lane_remedy(self):
+        for seed, mode in ((None, "ok"), (CANARY, "unreadable"), ("hunter2", "ok")):
+            if seed is not None:
+                self.seed(seed)
+            self.fakes("good", mode)
+            self.assertEqual(self.run_main(argv=["status"]), 1)
+            self.assertIn("brother-login", self.err, (seed, mode))
+            for wrong in ("claude auth", "claude login", "run claude", "run `claude`"):
+                self.assertNotIn(wrong, self.err.lower(), (seed, mode))
+            if os.path.exists(self.state):
+                os.remove(self.state)
+
+
 class WithLogin(Base):
     """What the loop's worker calls: the fresh Keychain value on a one shot pipe, and a copy of the scrubbed child
     environment that names the pipe and carries no token (review 2026-10-03, F1)."""

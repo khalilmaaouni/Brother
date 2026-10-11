@@ -65,7 +65,8 @@ def code_root(frozen=None):
     if os.path.realpath(root) == os.path.realpath(os.getcwd()):
         raise model_router.Refused("inside the lander the code root is never the landing tree: %s is the tree being landed into" % root)
     return root
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"; CHECK_ALL = "scripts/check_all.sh"
+sys.path.insert(0, BIN); import plan_path as _PP   # noqa: E402  THIS directory's copy of the one plan selector (BROTHER_WBS or the default; an invalid value refuses)
+PLAN = _PP.selected(); CHECK_ALL = "scripts/check_all.sh"
 LOOP_UNIT = "BL"   # the unit whose owns names every brother.loop component (scripts/test_bl_owns_complete.py)
 ANCHOR = "# LAST, on purpose"
 #: A test path the lander may write into check_all.sh, a shell script run unsandboxed by people (ninth review 2026-10-02,
@@ -1742,7 +1743,7 @@ def record_attempt(uid, ident, rc, why, path=None):
         return False
 
 
-def closing_pass(closed, sh_, log, remote, branch, plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", frozen=None, rev_=None):
+def closing_pass(closed, sh_, log, remote, branch, plan_path=None, frozen=None, rev_=None):
     """THE CLOSING PASS (owner 2026-09-23 06:0x): a unit whose last sub unit just landed is closed NOW by its own done check
     through scripts/close_unit.py, and the closure is committed and pushed by this same writer. A red done check prints
     CLOSE-RED with the check's last line and the unit stays open; a refused scan restores the plan file; a refused push gate
@@ -1752,8 +1753,11 @@ def closing_pass(closed, sh_, log, remote, branch, plan_path="docs/plan/BROTHER-
     step that kept being deferred (one closure in a night against sixty landings). Returns the lines to print.
     frozen: the base commit's copy the pre-commit check and the push gate run from (D13); the closure's commit and push run
     the hooks' checks the way the landing's do, and git runs no hook. No frozen copy closes nothing and says so.
-    rev_: short sha reader for the unwind (default git rev-parse --short in the current directory)."""
+    rev_: short sha reader for the unwind (default git rev-parse --short in the current directory).
+    plan_path: the plan the closures are written to; None reads the selected plan NOW (plan_path.selected), never a
+    path frozen when this module was defined."""
     out = []
+    plan_path = plan_path or _PP.selected()
     rev_ = rev_ or (lambda r: subprocess.run(["git", "rev-parse", "--short", r], capture_output=True, text=True).stdout.strip())
     # EVERY ELIGIBLE UNIT, not only this landing's (defect seen 07:0x: D5 and U8 had every sub unit landed before the pass was
     # deployed and stayed open). close_unit.py with no name closes every unit whose sub units are all landed and not DONE.

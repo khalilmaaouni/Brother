@@ -15,8 +15,8 @@ to run the battery.
 |---|---:|
 | Parts | 513 |
 | Parts with a purpose written in the file | 510 |
-| Parts with a suite wired into the battery | 445 |
-| Checks in the battery | 1022 |
+| Parts with a suite wired into the battery | 446 |
+| Checks in the battery | 1043 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -34,7 +34,7 @@ undocumented corners looks complete and is not.
 | `acceptance_11` | Acceptance test for capability area 11: operational credibility. | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_2` | Acceptance test for capability area 2: interrupt and redirect without | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_3` | Acceptance test for capability area 3: partial diff acceptance (G1-M3.6 | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
-| `acceptance_4` | Acceptance test for capability area 4: monorepos and generated code | `acceptance`, `acceptance-self`, `product-acceptance-self`, `system-doc-current`, `system-doc-self` |
+| `acceptance_4` | Acceptance test for capability area 4: monorepos and generated code | `acceptance`, `acceptance-4-disk-reading`, `acceptance-self`, `product-acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_5` | Acceptance test for capability area 5: terminal cancellation and hung | `acceptance`, `acceptance-self`, `product-acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_6` | Acceptance test for capability area 6: dirty trees and rebases | `acceptance`, `acceptance-self`, `product-acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_7` | Acceptance test for capability area 7: choosing the right tests and | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
@@ -141,9 +141,9 @@ undocumented corners looks complete and is not.
 | `cursor_parity` | DOM-50.06. Names every outstanding Cursor portability gap | `cursor_parity-self` |
 | `cursor_plugin_install` | Install the Brother Cursor plugin to ~/.cursor/plugins/local/brother. | `air_gapped_install-self` |
 | `cursor_smoke` | the clean-install Cursor smoke test, run in an isolated home. | `cursor-smoke`, `cursor-smoke-self` |
-| `cut` | The release cut as ONE command: readiness, precedence, the chain, one | `cut-self` |
+| `cut` | The release cut as ONE command: readiness, precedence, the chain, one | `cut-rehearsal-self`, `cut-self` |
 | `cut_preflight` | .py: everything that can refuse a release cut, asked FIRST. | `cut-preflight-self`, `cut-self` |
-| `cut_rehearsal` | the cut rehearsal command whose verdict the real cut reads (CV1.b). | **NO-DATA**, nothing in the battery runs it |
+| `cut_rehearsal` | the cut rehearsal command whose verdict the real cut reads (CV1.b). | `cut-rehearsal-self` |
 | `cutover_pack` | The 1.0.13 cutover pack: one prompt and one zip a fresh session on another | `cutover-pack-self` |
 | `daybook` | The Daybook: the minimal board over the outcome contract (v2). | `daybook`, `daybook-self` |
 | `decide` | never hand a human a wall, hand them a screen. | `contract-roundtrip`, `decide-self` |
@@ -204,7 +204,7 @@ undocumented corners looks complete and is not.
 | `evidence_retention` | What in the evidence folder could be pruned, oldest and largest first. DELETES NOTHING unless told to. | `evidence-retention-self` |
 | `execution_boundary` | DOM-40.01: the one provider interface the orchestration core depends on. | `execution_boundary-self` |
 | `execution_mode` | is parallelism worth it for THIS graph right now? | `execution-mode` |
-| `export_public` | the single route from the private hub to the public | `cut-self`, `edition-guard-self`, `export-public-self`, `release-closeout-self` |
+| `export_public` | the single route from the private hub to the public | `cut-preflight-self`, `cut-self`, `edition-guard-self`, `export-public-self`, `release-closeout-self` |
 | `fable_authority` | W3 of the readiness board: who decides when the founder is away, and how. | `fable-authority`, `fable-authority-self` |
 | `fabrication_scan` | LAW 0: an artifact may not assert what is not there. This is the check behind it. | `fabrication-scan` |
 | `failure_ledger` | Record every failure with its reason, and feed the recurring ones back into the next brief. | `failure-ledger-self`, `failure-ledger-selftest` |
@@ -524,7 +524,7 @@ undocumented corners looks complete and is not.
 | `verify_advisor` | a local page for checking work before a commit. | `verify-advisor-self` |
 | `verify_runtime` | .py: do the bytes in an installed copy match its manifest, | `air_gapped_install-self`, `bundle-runtime-self`, `release-closeout-self` |
 | `verify_task_estate` | Run every task's OWN verifyCommand and produce real verdicts. | **NO-DATA**, nothing in the battery runs it |
-| `version_source` | One version and manifest source for this repository's umbrella package. | `version-source-self` |
+| `version_source` | One version and manifest source for this repository's umbrella package. | `cut-preflight-self`, `version-source-self` |
 | `vertical_to_core` | WBS-60.05 Vault convergence, Vertical-to-Core learning. | `vertical-to-core-self` |
 | `virgin_unit_proof` | the gate the v1.0.6 defect proved was missing. | `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `wbs` | The decomposition standard: no node may be dispatched that nobody broke down. | `wbs-granularity`, `wbs-self` |
@@ -978,6 +978,27 @@ undocumented corners looks complete and is not.
 - `scratch-prune-external`: `python3 -B scripts/loop/test_scratch_prune.py`
 - `or-ask-effort`: `python3 scripts/loop/test_or_ask_effort.py`
 - `or-ask-billing`: `python3 -B scripts/loop/test_or_ask_billing.py`
+- `loop-plan-selection`: `python3 -B scripts/loop/test_loop_plan_selection.py`
+- `loop-start-run`: `python3 -B scripts/loop/test_start_run.py`
+- `landing-standard`: `python3 -B scripts/loop/test_landing_standard.py`
+- `spec-score-standard`: `python3 -B scripts/loop/test_spec_score_standard.py`
+- `runner-pool-shared-files`: `python3 -B scripts/loop/test_runner_pool_shared_files.py`
+- `codex-doc-release-refs`: `python3 scripts/test_codex_doc_release_refs.py`
+- `cursor-doc-release-refs`: `python3 scripts/test_cursor_doc_release_refs.py`
+- `loop-door-skill-self`: `python3 -B scripts/test_loop_door_skill.py`
+- `loop-door-verbs-self`: `python3 -B scripts/test_loop_door_verbs.py`
+- `cut-rehearsal-self`: `python3 -B scripts/test_cut_rehearsal.py`
+- `cut-rehearsal-awake-self`: `python3 -B scripts/test_cut_rehearsal_awake.py`
+- `cut-step-clock-self`: `python3 -B scripts/test_cut_step_clock.py`
+- `workflow-canary-self`: `python3 -B scripts/test_required_fast_workflow.py`
+- `no-promise`: `python3 -B scripts/test_no_promise_to_cut_version.py`
+- `brother-run-truth-line`: `python3 scripts/test_brother_run_truth_line.py -v`
+- `brother-run-truth-exit`: `python3 scripts/test_brother_run_truth_exit.py -v`
+- `brother-run-truth-render`: `python3 scripts/test_brother_run_truth_render.py -v`
+- `brother-run-resume-doc`: `python3 scripts/test_brother_run_resume_doc.py -v`
+- `brother-run-resume-pointer`: `python3 scripts/test_brother_run_resume_pointer.py -v`
+- `continuity-work-doc`: `python3 scripts/test_continuity_work_doc.py -v`
+- `acceptance-4-disk-reading`: `python3 -B scripts/test_acceptance_4.py`
 - `model-call-no-plugin`: `python3 scripts/test_model_call_no_plugin.py`
 - `model-call-ledger-rows`: `python3 -B scripts/test_model_call_ledger_rows.py`
 - `model-call-selftest-world`: `python3 -B scripts/test_model_call_selftest_world.py`

@@ -37,7 +37,7 @@ SUBCOMMANDS
   view      tools/bm_view.py render (the generated project-view page;
             NON-AUTHORITATIVE, a render, never a source of truth,
             freeze answer 3)
-  doctor    scripts/doctor.py (the eleven install-health checks)
+  doctor    scripts/doctor.py (install-health checks)
   recover   tools/bm_autosave.py's real recovery read path; per
             V3-FREEZE-2026-08-07.md's Refutation adjudication ruling B1,
             recovery here means COMPACT-BOUNDARY autosave snapshots
@@ -246,7 +246,7 @@ def cmd_continue(argv):
 
 
 def cmd_doctor(argv):
-    """scripts/doctor.py, unmodified: eleven install-health checks, each
+    """scripts/doctor.py, unmodified: install-health checks, each
     PASS, FAIL or SKIP, read-only. doctor.py resolves its OWN root from
     its own file location (the installed BrotherMode copy), not from
     cwd or BROTHERMODE_ROOT, so this subcommand reports on the
@@ -490,7 +490,7 @@ _COMMAND_ONE_LINERS = (
     ("deliver", "generate the delivery packet"),
     ("view", "write the page that shows where the project stands"),
     ("continue", "write the handoff packet and start the next session"),
-    ("doctor", "eleven install-health checks, PASS, FAIL or SKIP"),
+    ("doctor", "install-health checks, PASS, FAIL or SKIP"),
     ("recover", "the git-snapshot recovery path (compact-boundary only)"),
     ("version", "the installed VERSION file's content"),
     ("update", "the installed version against the newest release"),

@@ -24,8 +24,9 @@ import subprocess
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_store  # noqa: E402  (the one landed test: plan_store.sub_landed, finding 2 of 2026-09-27)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+PLAN = _PP.selected()
 BIN = os.path.expanduser("~/.claude/bin")
 MODELS = ("deepseek", "muse")      # deepseek first by owner order; muse is the second, independent draft
 FILE_BUDGET = 14000                # per shown file, before the verbatim slicer trims it

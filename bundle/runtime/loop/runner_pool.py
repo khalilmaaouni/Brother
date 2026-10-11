@@ -338,7 +338,8 @@ def waits_to_land(state):
 # FAIL DIRECTION: a sub unit whose touch set cannot be read (no path in its section, no build on disk) BLOCKS: it is
 # refused, and a live runner with an unreadable set refuses every start, since unknown and touching everything read
 # the same. Fewer starts, never more; the remedy is the spec repair lane naming the files.
-GENERATED = ("bundle/", "SYSTEM.md", "scripts/check_all.sh", "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json")
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses; test_unit_runner_probe_gate lifts this ALL CAPS assign, so its loader carries _PP)
+GENERATED = ("bundle/", "SYSTEM.md", "scripts/check_all.sh", _PP.selected())
 from brief_check import SPEC_PATH as PATH_RE  # noqa: E402  (the one reader of a file a spec names; a label before or after the path)
 def touch_set(sub, spec_path, runs_dir=RUNS, mtime=None):
     """{path} this sub unit patches, or None when nothing readable names one."""
@@ -437,6 +438,23 @@ def reviewed_route(ts, root="."):
         if full is None:
             return "REVIEWED-ROUTE: %s; a native build would be refused after it ran, so it is built on the reviewed route" % why
     return ""
+
+
+def busy_paths(pairs, spec_of, touch=None):
+    """(path -> sub unit patching it, [subs whose touch set is unknown]) over (unit, sub) pairs in flight.
+
+    LS1.c (2026-10-11): in flight means live runners AND builds READY to land. The pool built `busy` from live runners
+    only, so a sibling could start on a file a READY build changes, be built against a tree that moves when that build
+    lands, and stop applying (rule S3)."""
+    touch = touch or touch_set
+    busy, unknown = {}, []
+    for _u, _s in pairs:
+        _ts = touch(_s, spec_of.get(_u))
+        if _ts is None:
+            unknown.append(_s)
+        else:
+            busy.update({p: _s for p in _ts})
+    return busy, unknown
 
 
 def touch_conflict(ts, busy, unknown):
@@ -882,7 +900,7 @@ def _wip_record_refusal(raw, at_now: float, age_limit: float) -> str:
 def main():
     os.makedirs(RUNS, exist_ok=True)
     dry = "--dry" in sys.argv
-    plan = json.load(open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8"))
+    plan = json.load(open(_PP.selected(), encoding="utf-8"))
 
     for _d in sorted(glob.glob(os.path.join(RUNS, "*-*/"))):
         try:
@@ -937,11 +955,7 @@ def main():
         COUNCIL_STATE = {}
     started = 0
     spec_of = {u["id"]: u.get("spec") for u in plan["units"]}   # lowercase on purpose: computed from the plan at import, not a constant a test loader may lift (test_unit_runner_probe_gate lifts ALL CAPS assigns)
-    busy = {}; unknown_alive = []          # path -> sub unit patching it, over live runners then this pass's starts
-    for _u, _s in sorted(alive):
-        _ts = touch_set(_s, spec_of.get(_u))
-        if _ts is None: unknown_alive.append(_s)
-        else: busy.update({p: _s for p in _ts})
+    busy, unknown_alive = busy_paths(sorted(alive), spec_of)   # path -> sub unit patching it: live runners, READY builds (below), then this pass's starts
     # owner budget 2026-09-20: the night's OpenRouter money is a real ceiling, so lane width is sized by what it funds.
     # The landing stage is serial anyway, so a cap here costs no delivery: it stops buying builds the night cannot land.
     try:
@@ -968,6 +982,9 @@ def main():
     _ready = {u["id"] for u in units if any(waits_to_land(last.get(s, "")) and not plan_store.sub_landed(s, u.get("evidence") or "")
                                             for s in u["sub_units"])}
     in_progress = alive_units | _ready
+    _b, _unk = busy_paths([(x["id"], _s) for x in units if x["id"] in _ready - alive_units for _s in x["sub_units"]
+                           if waits_to_land(last.get(_s, "")) and not plan_store.sub_landed(_s, x.get("evidence") or "")], spec_of)
+    busy.update(_b); unknown_alive.extend(_unk)   # LS1.c: a READY build's files stay busy until it lands
     room = max(0, min(BURN_CAP - len(alive_units), WIP - len(in_progress)))
     print("BUDGET cap %d runner(s) | WIP cap %d unit(s) | %d alive, %d READY to land | room for %d"
           % (BURN_CAP, WIP, len(alive_units), len(_ready - alive_units), room))

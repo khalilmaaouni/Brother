@@ -14,9 +14,11 @@ wait, so it is the model's clock, never the queue's (seconds, the fan out's wall
 says which: span, none (no reservation: a codex or claude build, or a slot wait that ran out), open (no close yet) or
 corrupt (a time that is missing, not a number, or not after its reserve); only span carries model_seconds."""
 import argparse, fnmatch, json, math, os, re, sys, tempfile, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # THIS directory's copy
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
 LEDGER = os.path.expanduser("~/.claude/brother-or-dispatch-state/openrouter-ledger.jsonl")
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+PLAN = _PP.selected()
 ROLLUPS = [("by model", "actual_model"), ("by unit class", "unit_class"), ("by round", "round"), ("by refusal reason", "refusal")]
 
 

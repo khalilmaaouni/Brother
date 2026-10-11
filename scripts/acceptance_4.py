@@ -196,7 +196,21 @@ def _run(explain, calibrate):
         parts, problem = loop_bridge.load_parts()
         if parts is None:
             return 2, "NO-DATA: %s" % problem
-        worker = loop_bridge.LaneWorker(parts["spawn"], ["sh", worker_script])
+        # THIS RUN'S OWN RESERVATION, held and handed down exactly as a real run does: brother_run acquires one per
+        # drain and loop_bridge.main resolves it for LaneWorker (LOAD-02, release 1.0.20). Without it LaneWorker's disk
+        # admission held the worker on any machine under the 15 GiB cleanup band, the scope gate never ran, and this
+        # test measured free disk instead of the scope gate. The store is this run's own, inside tmp; under the
+        # refuse floor the admission still refuses, which reads NO-DATA below.
+        try:
+            import machine_reservation
+        except ImportError as exc:
+            return 2, "NO-DATA: could not import the machine reservation: %s" % exc
+        store, holder = os.path.join(tmp, "MACHINE-RESERVATION.json"), "acceptance-4-%d" % os.getpid()
+        _held, problem = machine_reservation.acquire(store, holder, 600)
+        reservation = loop_bridge.resolve_own_reservation(store, holder)
+        if reservation is None:
+            return 2, "NO-DATA: this run could not hold its own machine reservation: %s" % problem
+        worker = loop_bridge.LaneWorker(parts["spawn"], ["sh", worker_script], reservation=reservation)
 
         node = {"id": "U1", "name": "add a helper to hand-written source only",
                 "done_check": "test -f packages/app/src/hand.py && "
@@ -209,6 +223,12 @@ def _run(explain, calibrate):
 
         if explain:
             print(TEMPLATE)
+
+        # A worker held before it ran left the scope gate nothing to read: that is this machine's answer (a disk
+        # floor, a refused admission), never the scope gate's, so it is NO-DATA, not a FAIL of the gate.
+        if record.get("worker_status") == "held":
+            return 2, ("NO-DATA: the worker was held before it ran, so the scope gate had nothing to read: %s"
+                       % record.get("reason", "no reason recorded"))
 
         scope = record.get("scope") or {}
         verdict = scope.get("verdict")

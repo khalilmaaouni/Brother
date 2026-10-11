@@ -50,13 +50,18 @@ run_evidence" scripts bundle/runtime finds no hit outside this file's own
 tests), so every real capture is a direct, deliberate CLI invocation.
 
 PRODUCER: this module is the sole producer of its own evidence files. The
-write happens inside capture(), above, at the `with open(path, "w",
-encoding="utf-8") as fh: fh.write(body)` call (lines 94-95 of this file),
-which always writes the FULL captured stdout and stderr, never a trimmed
-view; view() and findings() only read the dict capture() already returned.
+write happens inside capture(), which opens the file BEFORE the command runs,
+writes the header with line two reading `[exit unfinished]`, then streams
+every output line (stdout and stderr merged, in arrival order) to the file and
+flushes it before the next line is read, so a run that is killed still leaves
+everything it printed. When the command ends, capture() writes the end marker
+and overwrites line two in place with the real exit code. It always writes the
+FULL output, never a trimmed view; view() and findings() only read the dict
+capture() already returned.
 """
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -86,34 +91,192 @@ def _colour(enabled):
     return "", "", "", "", ""
 
 
+#: Line two of a capture is padded to this width, before and after the run, so
+#: the real exit code can overwrite `[exit unfinished]` in place.
+STATUS_WIDTH = 64
+
+#: The line that closes a finished capture. A file without it did not finish.
+END_MARK = "--- end ---"
+
+OUTPUT_MARK = "--- output (stdout and stderr in arrival order) ---"
+
+
+class CaptureRefused(Exception):
+    """The capture file could not be opened, so the command was NOT run:
+    running without a record is the one thing this module exists to prevent."""
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_str_list(value):
+    return (isinstance(value, list) and bool(value)
+            and all(isinstance(item, str) for item in value))
+
+
+def _status_text(code, seconds):
+    if code is None:
+        return "[exit unfinished]"
+    return "[exit %d after %.1fs]" % (code, seconds)
+
+
+def _reading(clock):
+    value = clock()
+    if isinstance(value, bool) or not isinstance(value, (int, float)) \
+            or not math.isfinite(value):
+        raise ValueError("the clock returned %r, not a finite number" % (value,))
+    return value
+
+
+def status_line(code, seconds):
+    """Line two of a capture, always STATUS_WIDTH characters wide.
+
+    None is a run still in progress; an int is the command's exit code."""
+    if code is not None and not _is_int(code):
+        raise ValueError("code must be None or an int, got %s" % type(code).__name__)
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise ValueError("seconds must be a number, got %s" % type(seconds).__name__)
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("seconds must be finite and not negative, got %r" % seconds)
+    text = _status_text(code, seconds)
+    if len(text) > STATUS_WIDTH:
+        raise ValueError("status %r is wider than %d" % (text, STATUS_WIDTH))
+    return text.ljust(STATUS_WIDTH)
+
+
+def open_capture(path):
+    """The capture file, opened for binary read and write. A seam for tests."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non empty string")
+    try:
+        return open(path, "w+b")
+    except OSError as exc:
+        raise CaptureRefused("%s: %s" % (path, exc)) from exc
+
+
+def stream_runner(argv, cwd, env, emit):
+    """Run argv with stderr merged into stdout and hand each line to emit as it
+    arrives. Returns the child's exit code."""
+    if not _is_str_list(argv):
+        raise ValueError("argv must be a non empty list of strings")
+    if cwd is not None and not isinstance(cwd, str):
+        raise ValueError("cwd must be None or a string")
+    if env is not None and not (isinstance(env, dict) and all(
+            isinstance(k, str) and isinstance(v, str) for k, v in env.items())):
+        raise ValueError("env must be None or a dict of strings")
+    if not callable(emit):
+        raise ValueError("emit must be callable")
+    # N12.b: a copy, never the process environment itself; a Python child
+    # flushes each print as it happens unless the caller chose otherwise.
+    child_env = dict(os.environ if env is None else env)
+    if "PYTHONUNBUFFERED" not in child_env:
+        child_env["PYTHONUNBUFFERED"] = "1"
+    proc = subprocess.Popen(argv, cwd=cwd, env=child_env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, universal_newlines=True,
+                            encoding="utf-8", errors="replace")
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            emit(line)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        proc.stdout.close()
+    return proc.wait()
+
+
+def _no_dashes(text):
+    """text with every dash character turned into a space."""
+    return "".join(" " if c in "-\u2010\u2011\u2012\u2013\u2014\u2015\u2212" else c
+                   for c in text)
+
+
 def capture(argv, store=None, cwd=None, env=None, runner=None, clock=None):
     """Run it, keep ALL of it, return where it went and what it said.
 
-    Returns a dict: exit_code, path, lines, bytes, stdout, stderr, seconds.
-    `stdout` here is the WHOLE thing; slicing is the caller's business and the
-    file outlives the caller either way."""
+    Returns a dict: exit_code, path, lines, bytes, stdout, stderr, seconds,
+    write_error (the first failed write after the header, or None).
+    `stdout` here is the WHOLE stream, stdout and stderr merged in arrival
+    order, and `stderr` is empty; slicing is the caller's business and the
+    file outlives the caller either way. The file is written while the command
+    runs: a run that is stopped leaves every line it printed and a line two
+    that still reads `[exit unfinished]`."""
+    if not _is_str_list(argv):
+        raise ValueError("argv must be a non empty list of strings")
+    for label, value in (("store", store), ("cwd", cwd)):
+        if value is not None and not isinstance(value, str):
+            raise ValueError("%s must be None or a string" % label)
+    if env is not None and not isinstance(env, dict):
+        raise ValueError("env must be None or a dict")
+    for label, value in (("runner", runner), ("clock", clock)):
+        if value is not None and not callable(value):
+            raise ValueError("%s must be None or callable" % label)
     store = store or DEFAULT_STORE
-    os.makedirs(store, exist_ok=True)
     clock = clock or time.time
-    started = clock()
-    runner = runner or (lambda a, **kw: subprocess.run(a, **kw))
-    try:
-        proc = runner(argv, cwd=cwd, env=env, capture_output=True, text=True)
-        out, err, code = proc.stdout or "", proc.stderr or "", proc.returncode
-    except Exception as exc:  # noqa: BLE001
-        # sbe: allow-silent the failure IS the captured evidence, written below
-        out, err, code = "", "run_evidence: could not start %r: %s" % (argv, exc), 127
-    seconds = clock() - started
+    started = _reading(clock)
+    runner = runner or stream_runner
 
     stamp = "%d-%d" % (int(started), os.getpid())
     name = "".join(c if c.isalnum() else "-" for c in " ".join(argv))[:60].strip("-")
     path = os.path.join(store, "%s-%s.txt" % (stamp, name or "command"))
-    body = ("$ %s\n[exit %s after %.1fs]\n\n--- stdout ---\n%s\n--- stderr ---\n%s"
-            % (" ".join(argv), code, seconds, out, err))
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(body)
-    return {"exit_code": code, "path": path, "stdout": out, "stderr": err,
-            "seconds": seconds, "lines": body.count("\n") + 1, "bytes": len(body)}
+    first = ("$ %s\n" % " ".join(argv)).encode("utf-8", "replace")
+    header = first + ("%s\n\n%s\n" % (status_line(None, 0.0), OUTPUT_MARK)).encode("utf-8")
+    fh = None
+    try:
+        os.makedirs(store, exist_ok=True)
+        fh = open_capture(path)
+        fh.write(header)
+        fh.flush()  # the header is on disk before the command starts
+    except OSError as exc:
+        if fh is not None:
+            fh.close()
+        raise CaptureRefused("%s (%s)" % (path, exc)) from exc
+
+    out = []
+    count = {"newlines": header.count(b"\n"), "bytes": len(header)}
+    failed = []
+
+    def guarded(step, *args):
+        # N12.b: a write that fails (a full disk, a closed handle) never stops
+        # the run; the first message is kept and the output stays in memory.
+        try:
+            step(*args)
+        except (OSError, ValueError) as exc:
+            failed.append(_no_dashes("%s" % (exc,)))
+
+    def emit(line):
+        data = line.encode("utf-8", "replace")
+        out.append(line)
+        guarded(fh.write, data)
+        guarded(fh.flush)  # on disk before the next line is read
+        count["newlines"] += data.count(b"\n")
+        count["bytes"] += len(data)
+
+    try:
+        code = runner(argv, cwd=cwd, env=env, emit=emit)
+        if not _is_int(code):
+            raise ValueError("the runner returned %r, not an exit code" % (code,))
+    except Exception as exc:  # noqa: BLE001
+        # sbe: allow-silent the failure IS the captured evidence, written below
+        emit("run_evidence: could not start %r: %s\n" % (argv, exc))
+        code = 127
+    seconds = max(_reading(clock) - started, 0.0)
+
+    if out and not out[-1].endswith("\n"):
+        emit("\n")
+    stdout = "".join(out)
+    trailer = ("%s\n%s\n" % (END_MARK, _status_text(code, seconds))).encode("utf-8")
+    guarded(fh.write, trailer)
+    count["newlines"] += trailer.count(b"\n")
+    count["bytes"] += len(trailer)
+    guarded(fh.seek, len(first))
+    guarded(fh.write, status_line(code, seconds).encode("utf-8"))
+    guarded(fh.close)
+    return {"exit_code": code, "path": path, "stdout": stdout, "stderr": "",
+            "seconds": seconds, "lines": count["newlines"] + 1, "bytes": count["bytes"],
+            "write_error": failed[0] if failed else None}
 
 
 def findings(result, colour=False):
@@ -126,6 +289,11 @@ def findings(result, colour=False):
     code, so, se = result["exit_code"], result["stdout"], result["stderr"]
     both = so + se
 
+    if result.get("write_error") is not None:
+        out.append(("ALERT", "%sthe capture file stopped growing (%s): the record on "
+                             "disk is INCOMPLETE; the whole output is in this result "
+                             "only%s" % (red, _no_dashes("%s" % (result["write_error"],)),
+                                         off)))
     if not both.strip():
         out.append(("ALERT", "%sthe command printed NOTHING at all%s. That reads "
                              "exactly like a clean pass and is never the same thing: "
@@ -286,6 +454,10 @@ def main(argv=None):
     ap.add_argument("--class", dest="klass",
                     help="the TECHNIQUE class being tried, declared not inferred")
     ap.add_argument("command", nargs=argparse.REMAINDER)
+    if argv is not None and not (isinstance(argv, list)
+                                 and all(isinstance(a, str) for a in argv)):
+        print("run_evidence: argv must be a list of strings", file=sys.stderr)
+        raise SystemExit(2)
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     cmd = [c for c in args.command if c != "--"]
@@ -304,7 +476,12 @@ def main(argv=None):
             print("%s: %s" % (verdict, why), file=sys.stderr)
             return 1
 
-    result = capture(cmd, store=args.store)
+    try:
+        result = capture(cmd, store=args.store)
+    except CaptureRefused as exc:
+        print("REFUSED: cannot open a capture file (%s); the command was NOT run"
+              % exc, file=sys.stderr)
+        return 1
 
     if args.problem and args.klass and ledger is not None:
         ledger.record(args.problem, args.klass,

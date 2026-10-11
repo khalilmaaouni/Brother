@@ -183,9 +183,19 @@ def gate_conflicts(spec_text, refused):
     return out
 
 
-def units_with_command_runners(plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
+def selected_plan():
+    """The plan this precheck reads: scripts/loop/plan_path.selected (BROTHER_WBS or the default), asked at CALL time so a
+    default argument never freezes a path when this module is defined. An invalid BROTHER_WBS raises ValueError."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
+    import plan_path as _PP
+    return _PP.selected()
+
+
+def units_with_command_runners(plan_path=None):
     """Unit ids whose plan record names command_runners (grade_build.allowed_runners reads the same field), plus DONE units.
-    Unreadable plan: the empty set, so every subprocess conflict is still reported."""
+    Unreadable plan: the empty set, so every subprocess conflict is still reported. plan_path None: the selected plan."""
+    if plan_path is None:
+        plan_path = selected_plan()
     try:
         with open(plan_path, encoding="utf-8") as fh:
             units = json.load(fh).get("units") or []
@@ -195,11 +205,13 @@ def units_with_command_runners(plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.jso
         return set()
 
 
-def malformed_runners(plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
+def malformed_runners(plan_path=None):
     """[(unit id, entry)] for every command_runners entry that is not a .py or .sh path. grade_build.allowed_runners
     admits subprocess for listed PATHS only, so a module name ("subprocess", "os": all six H units on 2026-09-24)
     allows nothing while the brief tells the worker it may run commands. Unreadable plan: [] (the scan below still
-    reports every conflict, since no unit is then exempt)."""
+    reports every conflict, since no unit is then exempt). plan_path None: the selected plan."""
+    if plan_path is None:
+        plan_path = selected_plan()
     try:
         with open(plan_path, encoding="utf-8") as fh:
             units = json.load(fh).get("units") or []
@@ -209,7 +221,9 @@ def malformed_runners(plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
             if not (isinstance(e, str) and e.strip() == e and e.endswith((".py", ".sh")) and " " not in e)]
 
 
-def main_gate_scan(specs_dir="docs/plan/specs", plan_path="docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"):
+def main_gate_scan(specs_dir="docs/plan/specs", plan_path=None):
+    if plan_path is None:
+        plan_path = selected_plan()
     refused = refused_modules()
     if refused is None:
         print("NO-DATA: the build safety screen could not be read, so no spec was checked against it")

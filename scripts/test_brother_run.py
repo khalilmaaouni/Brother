@@ -2768,7 +2768,8 @@ class DependencyMutationEndToEnd(unittest.TestCase):
             code = _br.main(["ignored", "--resume", self.run_dir, "--cwd",
                              self.repo])
         text = out.getvalue() + err.getvalue()
-        self.assertEqual(code, 0, text)
+        # TL1 (1.1.2 notes): one PASS beside a NO-DATA is PARTIAL and exits 2.
+        self.assertEqual(code, 2, text)
         self.assertIn("D delivered:", text)
         self.assertIn("U is NO-DATA: the check still passes with D's change "
                       "to D.txt reverted, so it does not exercise that "
@@ -5134,7 +5135,8 @@ class EachUnitCarriesItsOwnFileList(StubRunFixture):
                  "deps": []},
             ]))
         """ % ("%s %s" % (shlex.quote(sys.executable), shlex.quote(check))), NON_OVERWRITING_MODEL)
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): one PASS beside a NO-DATA is PARTIAL and exits 2.
+        self.assertEqual(proc.returncode, 2, out)
         self.assertIn("A1 delivered:", out, out)
         self.assertIn("N1 is NO-DATA: no file changed, so nothing here "
                       "proves the work was done", out, out)
@@ -6581,7 +6583,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
 
     def test_the_last_stdout_line_names_a_receipt_file_that_exists(self):
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         last = [line for line in proc.stdout.splitlines() if line.strip()][-1]
         self.assertTrue(last.startswith("brother_run: receipt: "), out)
         path = last.split("brother_run: receipt: ", 1)[1].strip()
@@ -6592,7 +6596,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
 
     def test_the_receipt_names_every_file_the_run_edited(self):
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         path = os.path.join(self._run_dir(), _br.RECEIPT_DIRNAME,
                             _br.RECEIPT_FILENAME)
         with open(path, encoding="utf-8") as fh:
@@ -6613,7 +6619,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
         receipt_path is filled in with THIS receipt's own path rather
         than left at the module's default NO-DATA."""
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         path = os.path.join(self._run_dir(), _br.RECEIPT_DIRNAME,
                             _br.RECEIPT_FILENAME)
         with open(path, encoding="utf-8") as fh:
@@ -6627,7 +6635,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
         run whose receipt directory cannot be created (a plain FILE already
         sits at that name) must say so and refuse the zero."""
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         run_dir = self._run_dir()
         shutil.rmtree(os.path.join(run_dir, _br.RECEIPT_DIRNAME))
         with open(os.path.join(run_dir, _br.RECEIPT_DIRNAME), "w",

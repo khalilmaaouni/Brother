@@ -136,7 +136,8 @@ except _MR.Refused as _exc:
     print("REFUSED: the code root is refused (%s); no probe job is written and nothing is sent" % str(_exc)[:160]); sys.exit(3)
 for d in ("prompts", "out", "findings", "logs"):
     os.makedirs(os.path.join(pw, d), exist_ok=True)
-plan = json.load(open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8"))
+import plan_path as _PP  # noqa: E402  the one plan selector: BROTHER_WBS or the default, an invalid value refuses
+plan = json.load(open(_PP.selected(), encoding="utf-8"))
 spec_of = {sub: u["spec"] for u in plan["units"] for sub in (u.get("sub_units") or []) if u.get("spec")}
 names = [l.strip().lower() for l in open(os.path.expanduser("~/.brothersbe-private-names"), encoding="utf-8") if l.strip() and not l.startswith("#")]
 lanes = {}

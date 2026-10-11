@@ -457,6 +457,9 @@ run_check "brothersbe-verify-install"  sh -c 'cd products/brothersbe && sh scrip
 # the first thing an outside reader runs, so it earns a place in the cheap
 # slice rather than only in the full battery.
 run_check "readme-honesty"      python3 scripts/test_readme_honesty.py
+run_check "codex-doc-release-refs" python3 scripts/test_codex_doc_release_refs.py
+run_check "cursor-doc-release-refs" python3 scripts/test_cursor_doc_release_refs.py
+run_check "no-promise" python3 -B scripts/test_no_promise_to_cut_version.py
 # E47: the charter named an architecture of record the tree did not hold,
 # and tests/test_surface.py could not notice because it matched the
 # record's NAME as a string in COORDINATION.md. This opens every path the

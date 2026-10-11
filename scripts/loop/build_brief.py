@@ -252,8 +252,13 @@ corr = ("" if not corrections else
 # THE UNIT, FROM THE WBS (owner 2026-09-24: briefs are per unit and from the epic). The row the plan carries for this
 # unit is stated before the specification, so a worker reads WHY the unit exists and what closes it before HOW. An
 # unreadable plan or a missing row is said so; brief_check refuses the brief, which is the honest answer.
-def unit_block(unit_id, plan_path=os.environ.get("BROTHER_WBS", "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json")):
+def unit_block(unit_id, plan_path=None):
+    """plan_path None reads the selected plan NOW (plan_path.selected: BROTHER_WBS or the default), never a value frozen
+    when this module was defined; an invalid BROTHER_WBS is a refusal, said in the NO-DATA line, never the default."""
     try:
+        if plan_path is None:
+            import plan_path as _PP   # the copy beside this file (sys.path above); the local name is this parameter's
+            plan_path = _PP.selected()
         with open(plan_path, encoding="utf-8") as fh:
             plan = json.load(fh)
         row = next(u for u in plan.get("units", []) if u.get("id") == unit_id)
