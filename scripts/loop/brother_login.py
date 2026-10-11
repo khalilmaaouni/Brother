@@ -257,6 +257,14 @@ def forget():
     print("Local login removed. Stop running loops and revoke it in Claude settings.")
 
 
+def status():
+    """Whether a well formed login is saved, read through the same reader a seat uses. The value is dropped unread by
+    anyone: never printed, measured or logged. Proves the item exists and is shaped like a Claude token, not that it is
+    valid or unrevoked. A Failure carries the login lane's own remedy (brother-login), never the interactive sign in."""
+    read_saved()
+    print("Brother login is present and well formed in your login Keychain.")
+
+
 def _interrupted(signum, frame):
     raise KeyboardInterrupt
 
@@ -269,8 +277,10 @@ def main(argv, tty=None, deadline_s=SIGN_IN_S):
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         if argv == ["forget"]:
             forget()
+        elif argv == ["status"]:
+            status()
         else:
-            require(argv == [], "Use brother-login or brother-login forget.")
+            require(argv == [], "Use brother-login, brother-login status or brother-login forget.")
             build_reader()
             save(capture(tty, deadline_s))
             print("Brother login saved and verified in your login Keychain.")

@@ -71,6 +71,7 @@ PAIRS = {
     "scripts/test_codex_product_skills.py": "scripts/test_cursor_plugin.py",
     "scripts/codex_parity.py": "scripts/cursor_parity.py",
     "scripts/test_codex_parity.py": "scripts/test_cursor_parity.py",
+    "scripts/test_codex_doc_release_refs.py": "scripts/test_cursor_doc_release_refs.py",
 }
 
 EXEMPT = {
@@ -97,6 +98,7 @@ BATTERY_PAIRS = {
     "codex-package-self": "cursor-plugin-self",
     "codex-hooks-self": "cursor-hook-run-self",
     "codex-product-skills-self": "cursor-plugin-self",
+    "codex-doc-release-refs": "cursor-doc-release-refs",
 }
 
 BATTERY_EXEMPT = {

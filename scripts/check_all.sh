@@ -1638,6 +1638,27 @@ run_check "scratch-prune-self" python3 -B scripts/loop/scratch_prune.py --selfte
 run_check "scratch-prune-external" python3 -B scripts/loop/test_scratch_prune.py
 run_check "or-ask-effort" python3 scripts/loop/test_or_ask_effort.py
 run_check "or-ask-billing" python3 -B scripts/loop/test_or_ask_billing.py
+run_check "loop-plan-selection" python3 -B scripts/loop/test_loop_plan_selection.py
+run_check "loop-start-run" python3 -B scripts/loop/test_start_run.py
+run_check "landing-standard" python3 -B scripts/loop/test_landing_standard.py
+run_check "spec-score-standard" python3 -B scripts/loop/test_spec_score_standard.py
+run_check "runner-pool-shared-files" python3 -B scripts/loop/test_runner_pool_shared_files.py
+run_check "codex-doc-release-refs" python3 scripts/test_codex_doc_release_refs.py
+run_check "cursor-doc-release-refs" python3 scripts/test_cursor_doc_release_refs.py
+run_check "loop-door-skill-self" python3 -B scripts/test_loop_door_skill.py
+run_check "loop-door-verbs-self" python3 -B scripts/test_loop_door_verbs.py
+run_check "cut-rehearsal-self" python3 -B scripts/test_cut_rehearsal.py
+run_check "cut-rehearsal-awake-self" python3 -B scripts/test_cut_rehearsal_awake.py
+run_check "cut-step-clock-self" python3 -B scripts/test_cut_step_clock.py
+run_check "workflow-canary-self" python3 -B scripts/test_required_fast_workflow.py
+run_check "no-promise" python3 -B scripts/test_no_promise_to_cut_version.py
+run_check "brother-run-truth-line" python3 scripts/test_brother_run_truth_line.py -v
+run_check "brother-run-truth-exit" python3 scripts/test_brother_run_truth_exit.py -v
+run_check "brother-run-truth-render" python3 scripts/test_brother_run_truth_render.py -v
+run_check "brother-run-resume-doc" python3 scripts/test_brother_run_resume_doc.py -v
+run_check "brother-run-resume-pointer" python3 scripts/test_brother_run_resume_pointer.py -v
+run_check "continuity-work-doc" python3 scripts/test_continuity_work_doc.py -v
+run_check "acceptance-4-disk-reading" python3 -B scripts/test_acceptance_4.py
 run_check "model-call-no-plugin" python3 scripts/test_model_call_no_plugin.py
 run_check "model-call-ledger-rows" python3 -B scripts/test_model_call_ledger_rows.py
 run_check "model-call-selftest-world" python3 -B scripts/test_model_call_selftest_world.py

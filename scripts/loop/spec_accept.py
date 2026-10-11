@@ -32,7 +32,8 @@ drafts_dir = os.path.abspath(os.path.expanduser(sys.argv[1])); only = sys.argv[2
 if FLOOR < 9:
     print("FLOOR   %d of 10, below the standing bar of 9: a second pass under the owner's 2026-09-21 order, "
           "for sections a repair wave could not lift to 9" % FLOOR)
-plan = json.load(open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8"))
+import plan_path as _PP  # noqa: E402  the one plan selector: BROTHER_WBS or the default, an invalid value refuses
+plan = json.load(open(_PP.selected(), encoding="utf-8"))
 tmp_json = os.path.expanduser("~/.claude/evidence/spec-accept-scores.json")
 
 

@@ -345,7 +345,61 @@ def _ready_line(output, version):
     return re.search(r"^READY for %s(?![\w.])" % re.escape(version), output, re.MULTILINE) is not None
 
 
-def run_rehearsal(root, version, candidate="", directory="", timeout_s=DEFAULT_TIMEOUT_S, runner=None, clock=None):
+#: FC1.b: the absolute path, as scripts/night_tick.py spells it; -i -m -s are the assertions the session's wrapper
+#: used (idle, disk, system sleep), and -w ties them to the rehearsal's own pid so they end with it, even on SIGKILL.
+CAFFEINATE = "/usr/bin/caffeinate"
+
+
+def awake_command(pid):
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        raise ValueError("the pid to hold awake must be a positive int, got %r" % (pid,))
+    return [CAFFEINATE, "-i", "-m", "-s", "-w", str(pid)]
+
+
+def hold_awake(pid, popen=subprocess.Popen, exists=os.path.exists, settle_s=0.2):
+    """(process, '') while caffeinate holds the machine awake for `pid`; (None, why) when it is missing, cannot
+    start, or exits within settle_s. Never a hold that is not there."""
+    cmd = awake_command(pid)
+    if not exists(CAFFEINATE):
+        return None, "%s does not exist on this host" % CAFFEINATE
+    try:
+        proc = popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        code = proc.wait(timeout=settle_s)
+    except subprocess.TimeoutExpired:
+        return proc, ""
+    except (OSError, AttributeError) as exc:
+        return None, "%s could not start: %s" % (CAFFEINATE, exc)
+    return None, "%s exited at once (exit %s)" % (CAFFEINATE, code)
+
+
+def release_awake(handle):
+    """End the hold; never raises and never changes a verdict (-w ends it with the process anyway)."""
+    if handle is None:
+        return
+    try:
+        handle.terminate()
+        try:
+            handle.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            handle.kill()
+    except OSError:
+        pass
+
+
+def _no_hold(pid):
+    return None, ""
+
+
+def _awake_for(runner, awake):
+    """The injected hold when given; else the real one for a real run (no runner) and none for a scripted runner,
+    the same rule run_rehearsal already uses for the child, so no test spawns caffeinate by accident."""
+    if awake is not None:
+        return awake
+    return hold_awake if runner is None else _no_hold
+
+
+def run_rehearsal(root, version, candidate="", directory="", timeout_s=DEFAULT_TIMEOUT_S, runner=None, clock=None,
+                  awake=None):
     """(verdict, exit_code, record_path). Never raises on a child failure: a worktree that cannot be made, a child that
     times out or a log that cannot be written is NO-DATA with a record that says why, or a RehearsalRefused when even
     the record cannot be written or another rehearsal is running. A malformed argument raises ValueError."""
@@ -365,6 +419,20 @@ def run_rehearsal(root, version, candidate="", directory="", timeout_s=DEFAULT_T
     directory = directory or evidence_dir()
     scratch = scratch_root()
     lock = _take_lock(scratch)
+    # FC1.b (2026-10-11): the rehearsal holds the machine awake by itself, from its lock to its record. The 1.1.1
+    # rehearsal stayed awake only under the session's caffeinate wrapper; a 1.1.0 one lost about 80 minutes to sleep.
+    handle, why = _awake_for(runner, awake)(os.getpid())
+    if why:
+        _release_lock(lock)
+        raise RehearsalRefused("the machine cannot be held awake for the rehearsal: %s" % why)
+    try:
+        return _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock)
+    finally:
+        release_awake(handle)
+
+
+def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock):
+    """run_rehearsal from the lock to the record, while the machine is held awake."""
     started = clock()
     worktree = ""
     made = False

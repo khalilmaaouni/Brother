@@ -95,8 +95,10 @@ class CheapestFirst(unittest.TestCase):
 
     def test_a_cheap_refusal_stops_the_minutes_long_gate(self):
         body = function_body("run_all")
-        self.assertIn(
-            "if virgin and not any(r[0] == REFUSED for r in results):", body)
+        # FC1.a (2026-10-11): a cheap NO-DATA row spares it too, through _cleared
+        self.assertIn("if virgin and _cleared(results):", body)
+        self.assertIn("return all(r[0] == OK for r in results)",
+                      function_body("_cleared"))
 
 
 class HorizonClocks(unittest.TestCase):

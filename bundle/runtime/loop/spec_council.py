@@ -18,7 +18,8 @@ RULES = ("House laws: say UNKNOWN rather than guess; judge only what the specifi
          "A BLOCKER is a design flaw that lets the unit do harm, fail open, or pass its own done check while broken. Be strict and be fair: do not invent findings, and do not call a preference a blocker.\n\n"
          "Output exactly ONE JSON object: {\"verdict\": \"BUILD AS IS\" | \"FIX FIRST\" | \"DO NOT BUILD\", \"findings\": [up to 8, each {\"sub_unit\": \"<id or all>\", \"severity\": \"blocker|major|minor\", \"proof\": \"a PLAIN grep or git grep, repo relative paths, no pipes and no shell characters, that PRINTS evidence this finding is real; omit only when no grep can show it\", \"expect\": \"the exact substring that command must print\", \"what\": one sentence, \"why_it_matters\": one sentence, \"fix\": one sentence naming the requirement or section to change}], "
          "\"scores\": {\"safety\": 0-10, \"clarity\": 0-10, \"buildability\": 0-10, \"testability\": 0-10}, \"missing_requirement\": one sentence or null}\n\nTHE SPECIFICATION:\n%s\n\nTHE REAL FILES IT NAMES (excerpts):\n%s\n")
-plan = json.load(open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8"))
+import plan_path as _PP  # the one plan selector: BROTHER_WBS or the default, an invalid value refuses
+plan = json.load(open(_PP.selected(), encoding="utf-8"))
 units = {u["id"]: u for u in plan["units"] if u.get("spec")}
 mode, wanted = sys.argv[1], sys.argv[2:]
 if mode == "attack":

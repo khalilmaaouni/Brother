@@ -32,14 +32,33 @@ PUBLIC_REMOTE=https://github.com/khalilmaaouni/Brother
 # chain ran 5,004s to 6,397s and no log could say which step the time went
 # to, because the headers carried no clock; only the outer steps cut.py
 # streams did. A plain line, separate from the header, so nothing that reads
-# a header changes. Format: [step HH:MM:SS] <id> +<s since previous>s, total <s>s
+# a header changes.
+# --- step clock: begin
+# FC1.c (2026-10-11): each step prints a start line and an end line carrying ITS
+# OWN id and seconds. The old single line printed the previous step's seconds
+# under the next step's id (the 2,395 s of 2d read "2t +2395s"), and a failing
+# step printed nothing. The EXIT trap closes the last step, the failing one
+# included, and exits with the script's own status. No reader parses these
+# lines (grep of scripts/ for "[step ", 2026-10-11).
+# Format: [step HH:MM:SS] start <id>, total <s>s
+#    and: [step HH:MM:SS] end <id> after <s>s, exit <code>, total <s>s
 CUT_T0=$(date +%s)
 CUT_TPREV=$CUT_T0
-step_clock() {
+CUT_STEP=""
+step_end() {
+  [ -n "$CUT_STEP" ] || return 0
   cut_now=$(date +%s)
-  echo "[step $(date +%H:%M:%S)] $1 +$((cut_now - CUT_TPREV))s, total $((cut_now - CUT_T0))s"
-  CUT_TPREV=$cut_now
+  echo "[step $(date +%H:%M:%S)] end $CUT_STEP after $((cut_now - CUT_TPREV))s, exit $1, total $((cut_now - CUT_T0))s"
+  CUT_STEP=""
 }
+step_clock() {
+  step_end 0
+  CUT_TPREV=$(date +%s)
+  CUT_STEP=$1
+  echo "[step $(date +%H:%M:%S)] start $1, total $((CUT_TPREV - CUT_T0))s"
+}
+trap 'cut_rc=$?; step_end "$cut_rc"; exit "$cut_rc"' EXIT
+# --- step clock: end
 
 echo "== 1. bump the source of truth and every carrier to $VERSION and point refs at the tag =="
 step_clock "1"

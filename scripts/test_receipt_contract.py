@@ -420,8 +420,11 @@ class AGeneratedReceiptMatchesTheContract(unittest.TestCase):
         proc = TBR.sh([sys.executable, TBR.BROTHER_RUN,
                        "make add() refuse non-numeric input and cover it",
                        "--cwd", repo, "--runs-root", tmp], env=env)
-        if proc.returncode != 0:
-            raise AssertionError("brother_run exited %d:\n%s"
+        # TL1-i (1.1.2): this toy is partial on purpose (G2's dependency revert
+        # disproves it, so the receipt carries an unproven entry), and a run with
+        # a PASS beside a NO-DATA exits 2, unverified. Any other code is a defect.
+        if proc.returncode != 2:
+            raise AssertionError("brother_run exited %d, expected 2:\n%s"
                                  % (proc.returncode,
                                     proc.stdout + proc.stderr))
         runs = os.path.join(tmp, "docs", "plan", "runs")

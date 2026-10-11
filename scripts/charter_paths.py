@@ -12,7 +12,11 @@ WHAT IT CHECKS. Every backticked token in docs/CHARTER.md that looks like a
 repository path must resolve against the repository root. Three tokens in the
 charter are deliberately NOT paths in this repository and are listed in GENERIC
 below with the reason: each is a relative name inside some other tree, or a path
-the charter itself describes as one that must not exist yet.
+the charter itself describes as one that must not exist yet. Every named path
+that exists must also reach the public export: the allowlist must carry it and
+the denylist must not withhold it, read through scripts/export_public.py's own
+loaders so the verdict is the one a real export would reach. A path the export
+would drop is a FAIL, and export rules that cannot be read are NO-DATA.
 
 DRIVEN BOTH WAYS. An exemption is only safe while it is still earned, so a
 GENERIC entry the charter no longer mentions is itself a FAIL: the list cannot
@@ -84,7 +88,76 @@ def read_charter(path):
         return None
 
 
+def export_rules(root):
+    """Return (allowlist, denylist, why) as the exporter reads them under root.
+
+    The allowlist is None, with `why` naming the reason, when the file is
+    absent, holds no entries, or the exporter cannot be imported: a rule that
+    cannot be read is NO-DATA, never "export everything"."""
+    if not isinstance(root, str):
+        raise ValueError("root must be a str, got %s" % type(root).__name__)
+    # Imported here, not at the top, so a broken exporter cannot break the
+    # existence check or path_shaped for any other caller.
+    try:
+        import export_public
+        allow_rel = os.path.relpath(export_public.DEFAULT_ALLOWLIST,
+                                    export_public.ROOT)
+        deny_rel = os.path.relpath(export_public.DEFAULT_DENYLIST,
+                                   export_public.ROOT)
+        allowlist = export_public.load_allowlist(os.path.join(root, allow_rel))
+        denylist = export_public.load_denylist(os.path.join(root, deny_rel))
+    except Exception as exc:  # the loader's own errors are NO-DATA, named
+        return None, [], ("export_public could not be imported (%s)"
+                          % type(exc).__name__)
+    if allowlist is None:
+        return None, denylist, "no allowlist file under %s" % root
+    if not allowlist:
+        return None, denylist, "the allowlist holds no entries"
+    return allowlist, denylist, ""
+
+
+def exported(token, allowlist, denylist, hard_exclude):
+    """True only when the public export would carry `token`.
+
+    Mirrors build_export_tree: an allowlist entry carries the paths under it
+    (and a directory token is carried when an entry lies under it), never a
+    hard excluded entry, and a denylist entry withholds itself and everything
+    under it. Matching is exact and case sensitive, as git pathspecs are."""
+    if not isinstance(token, str) or not isinstance(allowlist, list) \
+            or not isinstance(denylist, list) \
+            or not isinstance(hard_exclude, (list, tuple, set, frozenset)):
+        return False
+    hard = set(h for h in hard_exclude if isinstance(h, str))
+    token = os.path.normpath(token).strip("/")
+    if token in ("", ".", "..") or token.startswith("../"):
+        return False
+    carried = False
+    for entry in allowlist:
+        if not isinstance(entry, str):
+            continue
+        entry = entry.strip("/")
+        if not entry or entry in hard or entry.startswith("editions/"):
+            continue
+        if token == entry:
+            carried = True
+        elif token.startswith(entry + "/"):
+            carried = True
+        elif entry.startswith(token + "/"):
+            carried = True
+    if not carried:
+        return False
+    for entry in denylist:
+        if not isinstance(entry, str):
+            continue
+        entry = entry.strip("/")
+        if entry and (token == entry or token.startswith(entry + "/")):
+            return False
+    return True
+
+
 def check(charter_path, root):
+    if not isinstance(charter_path, str) or not isinstance(root, str):
+        raise ValueError("charter_path and root must be str")
     text = read_charter(charter_path)
     if text is None:
         return 2
@@ -96,6 +169,7 @@ def check(charter_path, root):
         return 2
 
     missing = []
+    present = []
     checked = 0
     for token in tokens:
         if token in GENERIC:
@@ -103,23 +177,45 @@ def check(charter_path, root):
         checked += 1
         if not os.path.exists(os.path.join(root, token)):
             missing.append(token)
+        else:
+            present.append(token)
 
     stale = [t for t in GENERIC if t not in tokens]
+
+    allowlist, denylist, why = export_rules(root)
+    unexported = []
+    if allowlist is not None:
+        import export_public
+        for token in present:
+            if not exported(token, allowlist, denylist,
+                            export_public.HARD_EXCLUDE):
+                unexported.append(token)
 
     for token in missing:
         print("FAIL: %s names `%s`, which is not in the tree"
               % (charter_path, token))
+    for token in unexported:
+        print("FAIL: %s names `%s`, which the public export will not carry "
+              "(docs/plan/EXPORT-ALLOWLIST.txt does not cover it, or "
+              "docs/plan/EXPORT-DENYLIST.txt withholds it)"
+              % (charter_path, token))
     for token in stale:
         print("FAIL: `%s` is exempt in GENERIC but %s no longer names it; "
               "drop the exemption" % (token, charter_path))
+    if allowlist is None:
+        print("NO-DATA: cannot read the export rules under %s: %s"
+              % (root, why))
 
-    if missing or stale:
-        print("FAIL  %d missing, %d stale exemption(s), out of %d checked"
-              % (len(missing), len(stale), checked))
+    if missing or unexported or stale:
+        print("FAIL  %d missing, %d not exported, %d stale exemption(s), "
+              "out of %d checked"
+              % (len(missing), len(unexported), len(stale), checked))
         return 1
+    if allowlist is None:
+        return 2
 
-    print("PASS  %d repository path(s) named by %s all exist; "
-          "%d generic token(s) exempt"
+    print("PASS  %d repository path(s) named by %s all exist and reach the "
+          "public export; %d generic token(s) exempt"
           % (checked, charter_path, len(GENERIC)))
     return 0
 

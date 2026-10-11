@@ -138,6 +138,14 @@ except Exception:  # noqa: BLE001
 EXIT_OK = 0
 EXIT_REFUSED = 1
 EXIT_NODATA = 2
+#: FX3.b (2026-10-11): the tag is public and the requested Release is not.
+#: Distinct on purpose: exit 1 means nothing was pushed, this means the
+#: opposite, and a rerun of the cut is refused because the tag exists.
+EXIT_INCOMPLETE = 3
+
+#: FC1.a (2026-10-11): the one reason readiness appends for a preflight that did
+#: not clear and the one check_mode reads to stop before the rehearsal's chain.
+PREFLIGHT_REFUSED = "cut preflight did not clear"
 
 # CV1.a (2026-10-03): version_skip_refusal reads the tag state through
 # next_cut.tag_state, never by running the script. A tree without it cannot
@@ -997,7 +1005,7 @@ def readiness(root, version, bm, paths, force, runner=None,
         ok, lines = preflight(root, version, runner)
         _print(lines)
         if not ok:
-            reasons.append("cut preflight did not clear")
+            reasons.append(PREFLIGHT_REFUSED)
     if (reasons and stop_early) or not include_fast:
         return reasons
     ok, lines = required_fast(root, version, runner)
@@ -1169,13 +1177,74 @@ def gh_release_command(version, remote=None, notes_file=None):
             "--verify-tag"]
 
 
+def finish_release_command(version, notes_file, notes_sha256):
+    """The one printed way to finish a Release a cut left missing: cut.py
+    --finish-release repeats the notes scans and the full sha256 check of
+    the reviewed bytes, then creates the Release (FX3 recovery ruling). A
+    hash that is not known prints NO-DATA, which that route refuses."""
+    return ["python3", "scripts/cut.py", "--finish-release",
+            notes_sha256 or "NO-DATA", "--version", version,
+            "--release-notes-file", notes_file]
+
+
+def release_incomplete_line(version, passed, notes_file, notes_sha256, why):
+    """FX3.b: one line for a cut whose tag is public and whose requested
+    Release is not: what passed, why the Release is missing, that a rerun is
+    refused, the guarded route that finishes it, the notes hash prefix and
+    the read that confirms it."""
+    why = " ".join((why or "no output").split())[:200]
+    return ("INCOMPLETE: tag v%s IS ALREADY PUBLIC (%s) but the GitHub Release "
+            "was NOT created: %s; nothing else is left to push and a rerun of "
+            "this cut is refused because the tag exists; finish it with "
+            "exactly: %s (it re-scans the notes and re-checks their full "
+            "sha256 before it creates the Release); the notes file must still "
+            "hash to sha256 %s, check with shasum -a 256 %s; confirm with: gh "
+            "release view v%s --repo %s"
+            % (version, ", ".join(passed) or "no step recorded", why,
+               " ".join(finish_release_command(version, notes_file,
+                                               notes_sha256)),
+               notes_sha256[:12] if notes_sha256 else "NO-DATA", notes_file,
+               version, gh_repo_slug(EP.DEFAULT_REMOTE)))
+
+
+def finish_release(root, version, notes_file, scanned_sha256, expected,
+                   runner=None):
+    """--finish-release: create the Release a cut left missing, and nothing
+    else. main() has just read and scanned the notes once (the scans a cut
+    runs before its fence); this refuses unless the version is explicit and
+    the full sha256 of those scanned bytes equals `expected`, then
+    create_gh_release re-hashes right before it publishes."""
+    if not version or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        print("REFUSED: --finish-release needs --version X.Y.Z, the tag that "
+              "is already public; nothing was published")
+        return EXIT_REFUSED
+    # main() hands the 64 lowercase hex of the bytes it just scanned, or None
+    # without --release-notes-file, so equality alone refuses a missing body
+    # and a short, upper case or NO-DATA value.
+    if scanned_sha256 != expected:
+        print("REFUSED: %s hashes to %s, not the reviewed %r; nothing was "
+              "published" % (notes_file, (scanned_sha256 or "NO-DATA")[:12],
+                             expected))
+        return EXIT_REFUSED
+    ok, lines = create_gh_release(root, version, runner, notes_file=notes_file,
+                                  expected_sha256=expected)
+    _print(lines)
+    if not ok:
+        print(release_incomplete_line(version, [], notes_file, expected,
+                                      lines[-1] if lines else ""))
+        return EXIT_INCOMPLETE
+    print("DONE: GitHub Release v%s created from %s (sha256 %s)"
+          % (version, notes_file, expected[:12]))
+    return EXIT_OK
+
+
 def create_gh_release(root, version, runner=None, heartbeat=None,
                       remote=None, notes_file=None, expected_sha256=None):
     """(ok, lines): runs gh_release_command for real. Called ONLY after a
-    successful push (run_chain's own gate); a failure is reported and
-    NEVER retried here or anywhere else -- the one truly irreversible step,
-    the pushed tag, already landed, so this step's own failure never
-    changes the cut's exit code (see run_chain).
+    successful push (run_chain's own gate) or by --finish-release; a
+    failure is reported and NEVER retried here or anywhere else. The pushed
+    tag already landed, so since FX3.b (2026-10-11) a failure here ends the
+    cut INCOMPLETE (exit 3, see run_chain), never REFUSED and never DONE.
 
     Review (adversarial, 2026-09-19): main() scanned --release-notes-file
     for private terms, dashes and attribution ONCE, before the fence was
@@ -1189,7 +1258,8 @@ def create_gh_release(root, version, runner=None, heartbeat=None,
     an unknown (None) expected hash all refuse to publish -- fail closed,
     never publish on a hash this call cannot confirm -- and fall into the
     same already-handled path as any other gh failure: the tag is already
-    public, so this is reported and never turned into a REFUSED cut."""
+    public, so the cut ends INCOMPLETE with the guarded route that finishes
+    it, never a REFUSED cut."""
     if notes_file:
         actual_sha256 = _hash_file(notes_file)
         if expected_sha256 is None or actual_sha256 != expected_sha256:
@@ -1199,14 +1269,18 @@ def create_gh_release(root, version, runner=None, heartbeat=None,
                 why = "has no recorded scan hash to check against"
             else:
                 why = "changed since it was scanned"
-            manual = " ".join(gh_release_command(version, remote, notes_file))
+            # FX3 recovery ruling (plan v5): the way out is the guarded
+            # route, which repeats the scans and the full hash check; a bare
+            # gh command that skips them is never printed.
+            guarded = " ".join(finish_release_command(version, notes_file,
+                                                      expected_sha256))
             return False, [
                 "REFUSED: gh release create NOT run: --release-notes-file "
                 "%s %s. Publishing bytes that were never scanned is "
-                "refused; re-scan and re-run: python3 scripts/cut.py "
-                "--release-notes-file %s (plus the cut's usual flags), or "
-                "once you trust the file unchanged, publish it by hand: %s"
-                % (notes_file, why, notes_file, manual)
+                "refused; once the file holds the bytes you reviewed, "
+                "finish through the guarded route, which re-scans them and "
+                "re-checks their full sha256 first: %s"
+                % (notes_file, why, guarded)
             ]
     return step("gh release create", gh_release_command(version, remote,
                                                         notes_file),
@@ -1244,6 +1318,16 @@ def check_mode(root, version, bm, paths, force, runner=None,
     print("cut --check: %s" % version)
     failures = readiness(root, version, bm, paths, force, runner,
                          stop_early=False, include_fast=False)
+    # FC1.a (2026-10-11): a 1.1.1 rehearsal printed its preflight refusal,
+    # then ran the chain for 50 more minutes to reach the same NOT-READY.
+    # The chain cannot change a preflight verdict; every other reason still
+    # runs it, so one report names everything a clear preflight leaves.
+    if PREFLIGHT_REFUSED in failures:
+        print("rehearsal: not run, cut_preflight.py did not clear (a row "
+              "REFUSED or read NO-DATA), and the chain cannot change that "
+              "verdict")
+        print("NOT READY for %s: %s" % (version, "; ".join(failures)))
+        return EXIT_REFUSED
     rehearsal = tempfile.mkdtemp(prefix="cut-rehearsal-%s-" % version)
     add = _run(["git", "worktree", "add", "--detach", rehearsal, "HEAD"],
                root, runner)
@@ -1525,7 +1609,9 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         # host refusing, and that record blocks every later cut of this
         # version until the owner deletes it.
         detail = "\n".join(lines)
-        kind = classify_push_failure(detail)
+        # the exporter's own text, without export_public_push's header line,
+        # so its first line is the exporter's first line (FX4.b)
+        kind = classify_push_failure("\n".join(lines[1:]))
         try:
             where = "stop record %s" % write_stop_record(
                 CR.evidence_dir(), version, cut_head, kind, detail)
@@ -1543,6 +1629,10 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         if kind == STOP_HOST_REFUSED:
             after = ("every later cut of v%s is refused until the owner "
                      "reads the record and deletes it" % version)
+        elif kind == STOP_LOCAL_REFUSED:
+            after = ("the exporter refused before any write: nothing was "
+                     "written to GitHub; fix what the output above names and "
+                     "run the cut again; no file needs deleting")
         else:
             after = ("a positively identified network failure: the owner "
                      "may run the cut again from his terminal")
@@ -1625,10 +1715,11 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
     # necessarily what actually gets published (the 1.0.20 Release body
     # was a separate 42-line Codex draft, not the 102-line generated
     # note) -- defaulting to it here would publish a body nobody chose.
-    # Best-effort and never retried either way: the tag is already public,
-    # so a gh failure is reported and left for the founder, never turned
-    # into a REFUSED cut over an already-landed tag (item 9: it is folded
-    # into the DONE: evidence line below so it is never easy to miss).
+    # Never retried either way: the tag is already public, so a gh failure
+    # is never turned into a REFUSED cut over an already-landed tag. Since
+    # FX3.b (2026-10-11) it is not DONE either: the owner reads the exit
+    # code and the word DONE, so a requested Release that is missing ends
+    # the cut INCOMPLETE (exit 3) with the guarded route that finishes it.
     gh_note = None
     if notes_file:
         gh_ok, gh_lines = create_gh_release(root, version, runner,
@@ -1639,17 +1730,24 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         if gh_ok:
             passed.append("gh release create v%s" % version)
         else:
-            gh_note = ("GH RELEASE NOT CREATED for v%s (exit above); the "
-                      "tag is already public, create it by hand: %s"
-                      % (version, " ".join(gh_release_command(
-                          version, notes_file=notes_file))))
-            print(gh_note)
+            # FX3.b (2026-10-11): a requested Release that is not there is
+            # an unfinished cut, never DONE: exit 3, no DONE line, and the
+            # fence parked with this line (evidence None) instead of
+            # completed.
+            line = release_incomplete_line(version, passed, notes_file,
+                                           notes_sha256,
+                                           gh_lines[-1] if gh_lines else "")
+            print(line)
+            return EXIT_INCOMPLETE, None, line
     else:
         gh_note = ("GitHub Release NOT published for v%s: no "
                   "--release-notes-file was given. The tag is public with "
-                  "no Release yet; publish one by hand once its body is "
-                  "ready: %s" % (version,
-                                 " ".join(gh_release_command(version))))
+                  "no Release yet; once its body is reviewed, publish it "
+                  "through the guarded route, which scans it and checks its "
+                  "full sha256 first: %s"
+                  % (version, " ".join(finish_release_command(
+                      version, "<reviewed body>",
+                      "<sha256 of that body>"))))
         print(gh_note)
     evidence = "cut %s pushed: %s" % (version, ", ".join(passed))
     if force is not None:
@@ -1756,7 +1854,11 @@ NETWORK_FAILURE_RE = re.compile(
 STOP_SCHEMA = "cv1.stop.1"
 STOP_HOST_REFUSED = "host-refused"
 STOP_PUSH_FAILED = "push-failed"
-STOP_KINDS = (STOP_HOST_REFUSED, STOP_PUSH_FAILED)
+#: FX4.b (2026-10-11): the exporter itself said, on its last line, that it
+#: refused before any remote write. Written for the history, never blocking.
+STOP_LOCAL_REFUSED = "local-refused"
+STOP_KINDS = (STOP_HOST_REFUSED, STOP_PUSH_FAILED, STOP_LOCAL_REFUSED)
+_ARMED_RE = re.compile(re.escape(EP.REMOTE_WRITE_ARMED) + r" ([0-9a-f]{16})")
 STOP_DETAIL_CHARS = 400
 
 
@@ -1807,11 +1909,44 @@ def question_text(version, head, rehearsal, release_clause):
                             release_clause))
 
 
+def remote_write_tail(text):
+    """(token, tail, none) from the exporter's own REMOTE-WRITE lines (FX4.a),
+    each counted only as a whole line. `token` is set only when the FIRST
+    non-empty line is the armed line (the exporter prints it first, so a
+    gate's captured output cannot stand in for it); `tail` is the text after
+    the first begin line carrying that token, else None; `none` is True only
+    when the LAST non-empty line is the none line carrying that token. Any
+    other shape is ('', None, False)."""
+    if not isinstance(text, str):
+        return "", None, False
+    lines = text.splitlines()
+    filled = [l for l in lines if l.strip()]
+    armed = _ARMED_RE.fullmatch(filled[0]) if filled else None
+    if not armed:
+        return "", None, False
+    token = armed.group(1)
+    begin = "%s %s" % (EP.REMOTE_WRITE_BEGIN, token)
+    tail = "\n".join(lines[lines.index(begin) + 1:]) if begin in lines else None
+    return token, tail, filled[-1] == "%s %s" % (EP.REMOTE_WRITE_NONE, token)
+
+
 def classify_push_failure(text):
-    """'push-failed' only when REFUSAL_RE does not match and
-    NETWORK_FAILURE_RE does; every other text, empty or unreadable included,
-    is 'host-refused'. Either way the run stops."""
-    if not isinstance(text, str) or REFUSAL_RE.search(text):
+    """The exporter's own output decides first (FX4.b, plan v5 stricter
+    reading): armed with no begin line is 'local-refused' ONLY when its last
+    line affirms that it refused before any write; armed with no begin and
+    no such line (truncated, killed, partial) is 'host-refused'; after a
+    begin line only the text that followed it is read. Text with no armed
+    line keeps the rules below on the whole text: 'push-failed' only when
+    REFUSAL_RE does not match and NETWORK_FAILURE_RE does; every other text,
+    empty or unreadable included, is 'host-refused'. The run always stops."""
+    if not isinstance(text, str):
+        return STOP_HOST_REFUSED
+    token, tail, none = remote_write_tail(text)
+    if token and tail is None:
+        return STOP_LOCAL_REFUSED if none else STOP_HOST_REFUSED
+    if token:
+        text = tail
+    if REFUSAL_RE.search(text):
         return STOP_HOST_REFUSED
     if NETWORK_FAILURE_RE.search(text):
         return STOP_PUSH_FAILED
@@ -2982,6 +3117,13 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
                           "--notes-file`, run only after a successful push. "
                           "REQUIRED for a real cut unless --no-release-page "
                           "says why not")
+    ap.add_argument("--finish-release", metavar="SHA256", default=None,
+                     help="FX3: create ONLY the GitHub Release a cut left "
+                          "missing (tag public, cut exit 3): needs --version "
+                          "and --release-notes-file; the notes are scanned "
+                          "again and must hash to this full sha256 before "
+                          "gh release create runs. Nothing else of the cut "
+                          "runs")
     ap.add_argument("--no-release-page", metavar="REASON", default=None,
                      help="cut and tag WITHOUT publishing a GitHub Release "
                           "page, on purpose, for the stated reason")
@@ -3081,6 +3223,9 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
         if not ok:
             return EXIT_REFUSED
         notes_sha256 = hashlib.sha256(notes_raw).hexdigest()
+    if args.finish_release is not None:
+        return finish_release(root, args.version, notes_file, notes_sha256,
+                              args.finish_release, runner)
     if not notes_file and not args.check and not (args.no_release_page
                                                   or "").strip():
         # Measured 2026-09-20 on the 1.0.21 cut: started with no release

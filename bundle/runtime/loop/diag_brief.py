@@ -7,8 +7,9 @@ source files, never by cutting one in half. The answer must be ONE fact plus a c
 import glob, json, os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # THIS directory's copy
 import plan_store  # noqa: E402  (the one landed test every loop reader shares: plan_store.sub_landed)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 BIN = os.path.expanduser("~/.claude/bin"); RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"; BUDGET = 190000
+PLAN = _PP.selected(); BUDGET = 190000
 ASK = ('You are a DIAGNOSTICIAN. Several worker builds of sub unit %s failed, or the brief could not be sent. Find the ONE fact '
        'the workers were never shown that explains it. Answer as JSON only: {"fact": one sentence, "prove": ONE plain grep or '
        'git grep command, run from the repo root, repo relative paths only, no pipes and no shell characters, "expect": the '

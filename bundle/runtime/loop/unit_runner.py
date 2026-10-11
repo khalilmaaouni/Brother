@@ -103,7 +103,8 @@ def claim_run_dir(root, sub_id, now, tries):
     return None
 
 
-plan = json.load(open("docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json", encoding="utf-8"))
+import plan_path as _PP  # the one plan selector: BROTHER_WBS or the default, an invalid value refuses
+plan = json.load(open(_PP.selected(), encoding="utf-8"))
 # THE ROUND CAP READS HISTORY SINCE THE LAST NEW FACT (2026-09-27), the same boundary the value gate uses: the spec's last
 # change, or now for a restart carrying a proven fact. Lifetime history capped repaired sub units at 3 rounds for failures
 # of a spec or a brief that no longer exists.

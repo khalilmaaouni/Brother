@@ -428,8 +428,8 @@ class CheckModeClaimsNothingAndWritesNothing(unittest.TestCase):
                                   (1, "cut-preflight: REFUSED\n")}))
         code, _ = _main(["--check"], r)
         self.assertEqual(code, C.EXIT_REFUSED)
-        self.assertLess(r.calls.index("cut_preflight.py"),
-                        r.calls.index("cut_v1.0.0.sh"))
+        # FC1.a: a refused preflight ends --check before the chain
+        self.assertNotIn("cut_v1.0.0.sh", r.calls)
         cmd = r.cmds[r.calls.index("cut_preflight.py")]
         self.assertEqual(cmd[cmd.index("--version") + 1], VERSION)
         self.assertNotIn("--no-virgin-gate", cmd)
@@ -1936,27 +1936,76 @@ class GhReleaseRunsOnlyAfterASuccessfulPush(unittest.TestCase):
                       out.getvalue())
         self.assertIn("body.md", out.getvalue())
 
-    def test_a_failed_gh_release_is_reported_but_never_refuses_an_otherwise_green_cut(self):
+    def _incomplete(self, r, argv=None):
         import contextlib
         import io
-        r = Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")}))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code, _ = _main(["--yes", "--release-notes-file", CLEAN_NOTES_FILE], r)
-        self.assertEqual(code, C.EXIT_OK, r.calls)
+            code, _ = _main((argv or ["--yes", "--release-notes-file", CLEAN_NOTES_FILE]), r)
+        return code, out.getvalue()
+
+    def test_a_failed_gh_release_ends_the_cut_incomplete_with_the_command_that_finishes_it(self):
+        """FX3.b: the owner reads the exit code and the word DONE; a requested Release that is not there is an
+        unfinished cut (exit 3), never DONE with the failure folded into a sentence."""
+        r = Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")}))
+        code, out = self._incomplete(r)
+        self.assertEqual(code, C.EXIT_INCOMPLETE, r.calls)
         self.assertIn(
             "reproduce_export.py", r.calls,
             "a gh release failure must not stop the chain from verifying "
             "the already-public tag")
-        self.assertIn("GH RELEASE NOT CREATED", out.getvalue())
-        # Item 9: the failure is folded into the DONE: evidence line, not
-        # only into an easy-to-miss line further up the output.
-        done_line = [l for l in out.getvalue().splitlines()
-                    if l.startswith("DONE:")][0]
-        self.assertIn("GH RELEASE NOT CREATED", done_line, done_line)
-        self.assertNotIn("bm_store park", r.calls,
-                         "a gh release failure alone must never park the "
-                         "fence of an otherwise successful cut")
+        lines = out.splitlines()
+        self.assertEqual(len([l for l in lines if l.startswith("INCOMPLETE:")]), 1, out)
+        self.assertEqual([l for l in lines if l.startswith("DONE:")], [], out)
+        self.assertIn("bm_store park", r.calls)
+        self.assertNotIn("bm_store complete", r.calls)
+
+    def test_a_changed_notes_file_also_ends_the_cut_incomplete(self):
+        tmp = tempfile.mkdtemp(prefix="cut-test-incomplete-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        notes = os.path.join(tmp, "body.md")
+        with open(notes, "w", encoding="utf-8") as fh:
+            fh.write("# Release notes\n\nScanned.\n")
+        r = RewritingRunner(GREEN, notes, new_text="# Release notes\n\nRewritten.\n")
+        code, out = self._incomplete(r, ["--yes", "--release-notes-file", notes])
+        self.assertEqual(code, C.EXIT_INCOMPLETE, r.calls)
+        self.assertNotIn("gh release create", r.calls)
+        self.assertTrue(any(l.startswith("INCOMPLETE:") for l in out.splitlines()), out)
+
+    def test_the_parked_fence_note_is_the_printed_line(self):
+        r = Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")}))
+        _code, out = self._incomplete(r)
+        line = [l for l in out.splitlines() if l.startswith("INCOMPLETE:")][0]
+        park = [c for c in r.cmds if _key(c) == "bm_store park"][0]
+        self.assertEqual(park[park.index("--note") + 1], line)
+
+    def test_the_line_names_the_public_tag_the_guarded_command_the_hash_and_the_read(self):
+        sha = "ab" * 32
+        line = C.release_incomplete_line(VERSION, ["cut_v1.0.0.sh", "export_public"], "/n/body.md", sha,
+                                         "HTTP 422")
+        self.assertTrue(line.startswith("INCOMPLETE: tag v%s IS ALREADY PUBLIC" % VERSION), line)
+        self.assertIn("cut_v1.0.0.sh, export_public", line)
+        self.assertIn(" ".join(C.finish_release_command(VERSION, "/n/body.md", sha)), line)
+        self.assertIn("--finish-release %s" % sha, line)
+        self.assertIn("sha256 %s" % sha[:12], line)
+        self.assertIn("gh release view v%s --repo %s" % (VERSION, C.gh_repo_slug(C.EP.DEFAULT_REMOTE)), line)
+        # the guarded route only: no bare gh release create that skips the scans and the hash
+        self.assertNotIn("gh release create", line)
+        self.assertIn("NO-DATA", C.release_incomplete_line(VERSION, [], "/n/body.md", None, "x"))
+        folded = C.release_incomplete_line(VERSION, [], "/n/body.md", sha, "first\nsecond")
+        self.assertNotIn("\n", folded)
+        long = C.release_incomplete_line(VERSION, [], "/n/body.md", sha, "w" * 5000)
+        self.assertIn("w" * 200, long)
+        self.assertNotIn("w" * 201, long)
+
+    def test_the_incomplete_exit_code_is_its_own(self):
+        self.assertNotIn(C.EXIT_INCOMPLETE, (C.EXIT_OK, C.EXIT_REFUSED, C.EXIT_NODATA))
+
+    def test_no_raw_publish_command_is_printed_on_any_release_failure(self):
+        r = Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")}))
+        _code, out = self._incomplete(r)
+        self.assertNotIn("gh release create v%s" % VERSION, out)
+        self.assertIn("--finish-release", out)
 
     def test_a_failed_gh_release_is_never_retried(self):
         r = Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")}))
@@ -2017,9 +2066,10 @@ class TheNotesFileIsRehashedRightBeforeItIsPublished(unittest.TestCase):
     the scanned file's sha256 and create_gh_release re-hashes right before
     it would publish, refusing (fail closed) on any mismatch, a missing
     file, or an unknown hash, always through the SAME already-tested
-    'gh release create failed' path: the cut still finishes EXIT_OK (the
-    tag is already public and irreversible), the gh step is simply never
-    reached, and the reason is folded into the DONE: evidence line."""
+    'gh release create failed' path: since FX3.b (2026-10-11) the cut ends
+    INCOMPLETE (exit 3, the tag is already public and irreversible, the
+    fence parked), the gh step is never reached, and the INCOMPLETE line
+    names the guarded route that finishes it."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="cut-test-hash-")
@@ -2050,26 +2100,28 @@ class TheNotesFileIsRehashedRightBeforeItIsPublished(unittest.TestCase):
                                      "the founder was still at the "
                                      "prompt.\n")
         code, out = self._run(r)
-        self.assertEqual(code, C.EXIT_OK,
-                         "the tag is already public and irreversible; a "
-                         "changed notes file must not turn the cut itself "
-                         "into a failure: %s" % r.calls)
+        self.assertEqual(code, C.EXIT_INCOMPLETE,
+                         "the tag is already public and the Release is "
+                         "missing: the cut is incomplete, never DONE: %s"
+                         % r.calls)
         self.assertNotIn("gh release create", r.calls,
                          "the real gh binary must never run on unscanned "
                          "bytes")
         self.assertIn("changed since it was scanned", out)
         self.assertIn("REFUSED: gh release create NOT run", out)
-        # The manual command is still handed to the founder, same as any
-        # other gh-release-not-created path.
-        self.assertIn("gh release create v%s" % VERSION, out)
-        done_line = [l for l in out.splitlines()
-                    if l.startswith("DONE:")][0]
-        self.assertIn("GH RELEASE NOT CREATED", done_line, done_line)
+        # FX3 recovery ruling: the way out is the guarded route, which
+        # repeats the scans and the full hash check; never a bare command.
+        self.assertIn("--finish-release", out)
+        self.assertNotIn("gh release create v%s" % VERSION, out)
+        self.assertTrue(any(l.startswith("INCOMPLETE:")
+                            for l in out.splitlines()), out)
+        self.assertFalse(any(l.startswith("DONE:")
+                             for l in out.splitlines()), out)
 
     def test_a_file_deleted_after_the_push_refuses_to_publish(self):
         r = RewritingRunner(GREEN, self.notes, new_text=None)
         code, out = self._run(r)
-        self.assertEqual(code, C.EXIT_OK, r.calls)
+        self.assertEqual(code, C.EXIT_INCOMPLETE, r.calls)
         self.assertNotIn("gh release create", r.calls)
         self.assertIn("could not be re-read", out)
         self.assertIn("REFUSED: gh release create NOT run", out)
@@ -2121,9 +2173,80 @@ class TheNotesFileIsRehashedRightBeforeItIsPublished(unittest.TestCase):
                 os.environ.pop("HOME", None)
             else:
                 os.environ["HOME"] = old_home
-        self.assertEqual(code, C.EXIT_OK, r.calls)
+        self.assertEqual(code, C.EXIT_INCOMPLETE, r.calls)
         self.assertNotIn("gh release create", r.calls)
         self.assertIn("changed since it was scanned", out.getvalue())
+
+
+class TheGuardedRouteFinishesAMissingRelease(unittest.TestCase):
+    """FX3 recovery ruling (plan v5): the only printed way to finish a Release a cut left missing is
+    cut.py --finish-release, which repeats the notes scans and checks the full sha256 of the reviewed bytes before
+    it creates the Release, and runs no other step of the cut."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cut-test-finish-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.notes = os.path.join(self.tmp, "body.md")
+        with open(self.notes, "w", encoding="utf-8") as fh:
+            fh.write("# Release notes\n\nReviewed.\n")
+        with open(self.notes, "rb") as fh:
+            self.sha = hashlib.sha256(fh.read()).hexdigest()
+
+    def finish(self, sha, r=None, notes=None, terms_file=None, version=VERSION):
+        r = r or Runner(GREEN)
+        argv = ["--finish-release", sha, "--release-notes-file", notes or self.notes]
+        if version:
+            argv += ["--version", version]
+        code, _ = _main(argv, r, terms_file=terms_file)
+        return code, r
+
+    def test_the_reviewed_bytes_publish_and_nothing_else_of_the_cut_runs(self):
+        code, r = self.finish(self.sha)
+        self.assertEqual(code, C.EXIT_OK, r.calls)
+        self.assertEqual(r.calls.count("gh release create"), 1, r.calls)
+        gh = [c for c in r.cmds if _key(c) == "gh release create"][0]
+        self.assertEqual(gh, C.gh_release_command(VERSION, notes_file=self.notes))
+        for never in ("bm_store claim", "cut_v1.0.0.sh", "export_public.py", "next_cut.py"):
+            self.assertNotIn(never, r.calls)
+
+    def test_a_different_full_hash_refuses_before_gh(self):
+        code, r = self.finish("0" * 64)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertNotIn("gh release create", r.calls)
+
+    def test_a_hash_that_is_not_sixty_four_hex_refuses_before_gh(self):
+        for bad in ("NO-DATA", self.sha[:12], self.sha.upper()):
+            with self.subTest(sha=bad):
+                code, r = self.finish(bad)
+                self.assertEqual(code, C.EXIT_REFUSED)
+                self.assertNotIn("gh release create", r.calls)
+
+    def test_the_scans_are_repeated(self):
+        terms = os.path.join(self.tmp, "terms.txt")
+        with open(terms, "w", encoding="utf-8") as fh:
+            fh.write("plantedterm\n")
+        with open(self.notes, "w", encoding="utf-8") as fh:
+            fh.write("# Release notes\n\nplantedterm\n")
+        with open(self.notes, "rb") as fh:
+            sha = hashlib.sha256(fh.read()).hexdigest()
+        code, r = self.finish(sha, terms_file=terms)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertNotIn("gh release create", r.calls)
+
+    def test_no_notes_file_refuses(self):
+        r = Runner(GREEN)
+        code, _ = _main(["--finish-release", self.sha, "--version", VERSION], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertNotIn("gh release create", r.calls)
+
+    def test_no_explicit_version_refuses(self):
+        code, r = self.finish(self.sha, version=None)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertNotIn("gh release create", r.calls)
+
+    def test_a_failed_release_stays_incomplete(self):
+        code, r = self.finish(self.sha, r=Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")})))
+        self.assertEqual(code, C.EXIT_INCOMPLETE)
 
 
 class MainReadsTheReleaseNotesFileExactlyOnce(unittest.TestCase):

@@ -53,6 +53,11 @@ Four independent actions, any combination in one invocation:
                            append only (an existing line is never edited,
                            a slug already listed is not repeated). No index
                            in DIR is FLAGGED (exit 1), never created.
+                           A failure lesson whose name or symptom closely
+                           matches a note already in DIR (find_duplicate) is
+                           REFUSED, naming that note; every other lesson
+                           still writes. Notes in DIR that cannot be read
+                           refuse every failure lesson, never write one.
   --emit-handover PATH     write the human START-HERE markdown: priority
                            first (uncommitted work, open sbe tasks, the
                            day-plan ready set, open pull requests), then
@@ -100,6 +105,12 @@ ALLOWED_TYPE = {"failure", "finding", "decision", "session-log", "overview",
 PROCESS_WAIVER = "none (process lesson)"
 INDEX_NAME = "Failures-Index.md"
 GH_FIELDS = "number,title,headRefName,url"
+DUP_MIN_SHARED = 4  # words two texts must share before they can match
+DUP_MIN_RATIO = 0.6  # shared words over all distinct words of both
+_STOPWORDS = frozenset((
+    "the", "and", "for", "with", "from", "that", "this", "was", "were",
+    "not", "but", "are", "its", "into", "then", "when", "than", "has",
+    "have", "had", "can", "will", "you", "your", "out"))
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +312,121 @@ def failure_index_line(lesson, slug, created):
         slug, created, area, symptom, fix)
 
 
+def _tokens(text):
+    """Lowercase ASCII words of 3 or more characters, stopwords dropped.
+
+    A value that is not a str has no words."""
+    if not isinstance(text, str):
+        return frozenset()
+    words = set()
+    run = []
+    for ch in text.lower() + " ":
+        if "a" <= ch <= "z" or "0" <= ch <= "9":
+            run.append(ch)
+            continue
+        word = "".join(run)
+        run = []
+        if len(word) >= 3 and word not in _STOPWORDS:
+            words.add(word)
+    return frozenset(words)
+
+
+def _similar(a, b):
+    """True when a and b share enough words, by count first, then by ratio."""
+    shared = len(a & b)
+    if shared < DUP_MIN_SHARED:
+        return False
+    return shared / len(a | b) >= DUP_MIN_RATIO
+
+
+def find_duplicate(name_slug, symptom, existing):
+    """The (slug, kind) of the existing note this lesson repeats, or None.
+
+    kind is "name" or "symptom"; the smallest matching slug wins. A note is
+    never its own duplicate. Anything not comparable matches nothing."""
+    if not isinstance(existing, dict):
+        return None
+    name_words = _tokens(name_slug)
+    symptom_words = _tokens(symptom)
+    slugs = [slug for slug in existing if isinstance(slug, str)]
+    for slug in sorted(slugs):
+        if slug == name_slug:
+            continue
+        if _similar(name_words, _tokens(slug)):
+            return (slug, "name")
+        texts = existing[slug]
+        if not isinstance(texts, (list, tuple)):
+            continue
+        for text in texts:
+            if _similar(symptom_words, _tokens(text)):
+                return (slug, "symptom")
+    return None
+
+
+NOTE_HEAD_LINES = 40  # a note's symptom is read from its first 40 lines only
+_INDEX_LINE = re.compile(r"^- \[\[([^\]\n]+)\]\]\s*(.*)$")
+
+
+def _note_symptom(path):
+    """The symptom: value of the note's opening front matter block, quotes
+    removed, or "" when there is none. Only the first 40 lines are read; an
+    unterminated block is read to that cap. OSError is not caught. A path
+    that is not a str is refused with ValueError (never a file descriptor)."""
+    if not isinstance(path, str):
+        raise ValueError("note path %r is not a str" % (path,))
+    with open(path, encoding="utf-8", errors="replace") as f:
+        head = []
+        for line in f:
+            head.append(line)
+            if len(head) >= NOTE_HEAD_LINES:
+                break
+    if not head or head[0].strip() != "---":
+        return ""
+    for line in head[1:]:
+        if line.strip() == "---":
+            break
+        if line.startswith("symptom:"):
+            value = line[len("symptom:"):].strip()
+            if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+                value = value[1:-1]
+            return value
+    return ""
+
+
+def _existing_failures(dir_path):
+    """slug -> texts describing that note: each DIR/*.md note (not the index)
+    with its front matter symptom, then each Failures-Index line's SYMPTOM
+    text (or its prose, for an older line). A note or index only slug with no
+    text still appears. OSError from the listing or any read propagates: the
+    caller decides. A dir_path that is not a str is refused with ValueError."""
+    if not isinstance(dir_path, str):
+        raise ValueError("vault directory %r is not a str" % (dir_path,))
+    existing = {}
+    for name in sorted(os.listdir(dir_path)):
+        if not name.endswith(".md") or name == INDEX_NAME:
+            continue
+        symptom = _note_symptom(os.path.join(dir_path, name))
+        existing[name[:-3]] = [symptom] if symptom else []
+    index_path = os.path.join(dir_path, INDEX_NAME)
+    if os.path.isfile(index_path):
+        with open(index_path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+        for line in lines:
+            m = _INDEX_LINE.match(line)
+            if not m:
+                continue
+            slug, rest = m.group(1), m.group(2)
+            texts = existing.setdefault(slug, [])
+            if "SYMPTOM:" in rest:
+                text = rest.split("SYMPTOM:", 1)[1].split(" FIX:", 1)[0]
+            else:
+                text = rest
+            text = text.strip()
+            if text:
+                texts.append(text)
+    return existing
+
+
 def append_failures_index(index_path, entries, today):
     """Append-only: adds each (slug, line) whose [[slug]] is not already in
     the index, under a "## Handover ceremony DATE" section (reused when it is
@@ -404,6 +530,12 @@ def emit_vault_notes(dir_path, lessons, project="brother", today=None):
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     written, refused, index_entries = [], [], []
     seen = set()
+    # unreadable notes block every failure lesson; never an empty "no match"
+    scan_error = None
+    try:
+        existing = _existing_failures(dir_path)
+    except OSError as exc:
+        existing, scan_error = None, str(exc)
     for lesson in lessons:
         try:
             filename, content = build_vault_note(
@@ -416,12 +548,27 @@ def emit_vault_notes(dir_path, lessons, project="brother", today=None):
             refused.append("lesson %r produces duplicate note %s; already "
                            "written this run" % (lesson.get("name"), filename))
             continue
+        is_failure = (lesson.get("type") or "failure").strip() == "failure"
+        if is_failure:
+            if existing is None:
+                refused.append("lesson %r not written: the notes in %s could "
+                               "not be read (%s)" % (lesson.get("name"),
+                                                     dir_path, scan_error))
+                continue
+            match = find_duplicate(filename[:-3], lesson.get("symptom") or "",
+                                   existing)
+            if match is not None:
+                refused.append("lesson %r duplicates note %s.md (matched on "
+                               "%s); not written" % (lesson.get("name"),
+                                                     match[0], match[1]))
+                continue
         seen.add(filename)
         path = os.path.join(dir_path, filename)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         written.append(path)
-        if (lesson.get("type") or "failure").strip() == "failure":
+        if is_failure:
+            existing[filename[:-3]] = [lesson.get("symptom") or ""]
             index_entries.append((filename[:-3], failure_index_line(
                 lesson, filename[:-3], lesson.get("created") or today)))
     appended = append_failures_index(

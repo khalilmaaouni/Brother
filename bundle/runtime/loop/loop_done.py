@@ -28,8 +28,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # THIS directory's copy
 import plan_store  # noqa: E402  (the one landed test every loop reader shares: plan_store.sub_landed)
 import loop_procs  # noqa: E402  (the one process ownership rule every loop reader and stop shares)
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+PLAN = _PP.selected()
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
 
 

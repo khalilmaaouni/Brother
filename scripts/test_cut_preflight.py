@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -247,7 +248,7 @@ class CheapestFirst(unittest.TestCase):
     MARKET = json.dumps({"plugins": [{"name": "alpha", "version": "3.4.5",
                                       "source": {"path": "products/alpha"}}]})
 
-    def _all(self, answers, root=None, version="1.0.21"):
+    def _all(self, answers, root=None, version="1.0.21", docs=None, **kw):
         built = []
 
         class TagRunner(Runner):
@@ -282,8 +283,22 @@ class CheapestFirst(unittest.TestCase):
         # CV1.d: the release-plan row reads NO-DATA when its script is absent; the scripted runner answers its exit.
         os.makedirs(os.path.join(root, "scripts"))
         open(os.path.join(root, "scripts", "gen_release_plan.py"), "w").close()
+        # N24.a: one current page for the no-promise row, unless the case plants its own
+        for rel, text in (docs or {"README.md": "# fixture\n"}).items():
+            os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+            with open(os.path.join(root, rel), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        # N4.b: the version-after-bump row's two scripts, answered by the scripted runner
+        open(os.path.join(root, "scripts", "version_source.py"), "w").close()
+        open(os.path.join(root, "scripts", "test_version_truth.py"), "w").close()
+        # FX2.a: a home holding .claude, so no case reads this machine's real home
+        home = tempfile.mkdtemp(prefix="test-cut-preflight-home-")
+        self.addCleanup(shutil.rmtree, home, True)
+        os.makedirs(os.path.join(home, ".claude"))
+        kw.setdefault("home", home)
+        self.last_runner = r
         res = P.run_all(root, version, remote="https://x", runner=r, now=NOW,
-                        build=build)
+                        build=build, **kw)
         return res, built
 
     def test_the_previous_cut_is_read_from_the_newest_release_note(self):
@@ -295,7 +310,8 @@ class CheapestFirst(unittest.TestCase):
         self.assertEqual(P.exit_code(res), P.EXIT_OK, res)
         # One export tree for the plugin bump gate, one for the virgin gate.
         self.assertEqual(len(built), 2)
-        self.assertEqual([n for _, n, _ in res][-2:], ["plugin-bumps", "virgin-gate"])
+        self.assertEqual([n for _, n, _ in res][-3:],
+                         ["plugin-bumps", "export-real-home", "virgin-gate"])
 
     def test_a_changed_plugin_with_no_bump_refuses_and_spares_the_virgin_gate(self):
         res, built = self._all({"git diff": (0, "products/alpha/tool.py\n")})
@@ -318,6 +334,172 @@ class CheapestFirst(unittest.TestCase):
         self.assertEqual(P.exit_code([(P.OK, "a", ""), (P.NODATA, "b", "")]), P.EXIT_NODATA)
         self.assertEqual(P.exit_code([(P.NODATA, "b", ""), (P.REFUSED, "c", "")]),
                          P.EXIT_REFUSED)
+
+
+def _home(test, claude=True):
+    """A throwaway home; with .claude inside unless told otherwise."""
+    home = tempfile.mkdtemp(prefix="test-cut-preflight-home-")
+    test.addCleanup(shutil.rmtree, home, True)
+    if claude:
+        os.makedirs(os.path.join(home, ".claude"))
+    return home
+
+
+class TheExportRunsUnderTheRealHome(unittest.TestCase):
+    """FX2.a: the exporter's dry run, its required_fast proof included, asked in the preflight under the real HOME
+    (the 1.1.1 cut met a drifted ~/.claude/bin loop only after the y, because every earlier run had an empty HOME)."""
+
+    def test_the_dry_run_runs_with_the_real_home_and_no_git_key(self):
+        home = _home(self)
+        r = Runner()
+        with mock.patch.dict(os.environ, {"GIT_DIR": "/x/.git", "GIT_INDEX_FILE": "/x/index"}):
+            P.check_export_real_home("/the/root", "https://x", r, home=home)
+        key, cmd, kw = r.calls[0]
+        self.assertEqual(key, "export_public.py")
+        self.assertEqual(cmd[1], os.path.join("/the/root", "scripts", "export_public.py"))
+        self.assertIn("--dry-run", cmd)
+        self.assertIn("--prove-required-fast", cmd)
+        self.assertNotIn("--push", cmd)
+        self.assertEqual(cmd[cmd.index("--remote") + 1], "https://x")
+        self.assertEqual(kw["cwd"], "/the/root")
+        self.assertEqual(kw["env"]["HOME"], home)
+        self.assertEqual([k for k in kw["env"] if k.startswith("GIT_")], [])
+        self.assertEqual(kw["timeout"], P.EXPORT_ROW_TIMEOUT_S)
+
+    def test_zero_is_ok_one_is_refused_and_every_other_exit_is_no_data(self):
+        home = _home(self)
+        verdict = P.check_export_real_home("/r", "https://x", Runner({"export_public.py": (0, "CLEAR\n")}), home=home)
+        self.assertEqual(verdict[:2], (P.OK, "export-real-home"))
+        out = "REFUSED: at least one gate did not clear\nFAILED: loop-tool-parity\n"
+        verdict = P.check_export_real_home("/r", "https://x", Runner({"export_public.py": (1, out)}), home=home)
+        self.assertEqual(verdict[0], P.REFUSED)
+        self.assertIn("REFUSED: at least one gate did not clear", verdict[2])
+        self.assertIn("FAILED: loop-tool-parity", verdict[2])
+        for code in (2, 3, 124, 127):
+            with self.subTest(exit=code):
+                verdict = P.check_export_real_home("/r", "https://x", Runner({"export_public.py": (code, "")}),
+                                                   home=home)
+                self.assertEqual(verdict[0], P.NODATA)
+
+    def test_a_home_that_cannot_be_this_machine_is_no_data_and_runs_nothing(self):
+        afile = os.path.join(_home(self), "a-file")
+        open(afile, "w").close()
+        for home in ("relative/home", "", os.path.join(_home(self), "missing"), afile, _home(self, claude=False)):
+            with self.subTest(home=home):
+                r = Runner()
+                verdict = P.check_export_real_home("/r", "https://x", r, home=home)
+                self.assertEqual(verdict[0], P.NODATA)
+                self.assertEqual(r.calls, [])
+
+    def _all(self, answers, **kw):
+        tp = CheapestFirst("test_all_green_is_exit_zero_and_the_virgin_gate_ran")
+        self.addCleanup(tp.doCleanups)
+        res, built = tp._all(answers, **kw)
+        return res, built, tp.last_runner
+
+    def test_the_row_runs_only_when_every_cheaper_row_is_ok(self):
+        for why, answers in (("a refused cheap row", {"battery_exception_audit.py": (1, "EXPIRED x\n")}),
+                             ("a no-data cheap row", {"battery_exception_audit.py": (2, "NO-DATA\n")}),
+                             ("a refused plugin-bumps row", {"git diff": (0, "products/alpha/tool.py\n")})):
+            with self.subTest(why=why):
+                res, _built, r = self._all(answers)
+                row = [(v, d) for v, n, d in res if n == "export-real-home"]
+                self.assertEqual(len(row), 1, res)
+                self.assertEqual(row[0][0], P.NODATA)
+                self.assertIn("not run", row[0][1])
+                self.assertNotIn("export_public.py", [c[0] for c in r.calls])
+
+    def test_a_refused_export_row_spares_the_virgin_gate(self):
+        res, built, _r = self._all({"export_public.py": (1, "REFUSED: x\n")})
+        rows = dict((n, (v, d)) for v, n, d in res)
+        self.assertEqual(rows["export-real-home"][0], P.REFUSED)
+        self.assertIn("not run", rows["virgin-gate"][1])
+        self.assertEqual(len(built), 1, "the virgin gate built a tree after the export row refused")
+
+    def test_the_order_is_plugin_bumps_export_virgin(self):
+        res, _built, _r = self._all({})
+        self.assertEqual([n for _, n, _ in res][-3:], ["plugin-bumps", "export-real-home", "virgin-gate"])
+
+    def test_no_export_row_without_the_virgin_gate(self):
+        res, _built, r = self._all({}, virgin=False)
+        self.assertNotIn("export-real-home", [n for _, n, _ in res])
+        self.assertNotIn("export_public.py", [c[0] for c in r.calls])
+
+
+MACHINE_NAMES = ("loop-tool-parity", "loop-wiring", "model-registry", "projects-dir", "installed-guard")
+
+
+class TheMachineRowsAreAskedOnThisMachine(unittest.TestCase):
+    """FX2.b: the required_fast rows that read this machine's own state (installed loop, model registry, projects
+    listing) are asked on this machine, in the cheap tier, before the y. A row that says NOT APPLICABLE measured
+    nothing and reads NO-DATA (the empty HOME lesson)."""
+
+    def test_each_row_runs_its_exact_command_from_the_root_with_the_real_home(self):
+        home = _home(self)
+        r = Runner()
+        P.check_machine_rows("/the/root", r, home=home)
+        self.assertEqual(len(r.calls), len(P.MACHINE_ROWS))
+        for (name, argv), (_key, cmd, kw) in zip(P.MACHINE_ROWS, r.calls):
+            with self.subTest(row=name):
+                self.assertEqual(cmd, [sys.executable, os.path.join("/the/root", argv[0])] + list(argv[1:]))
+                self.assertEqual(kw["cwd"], "/the/root")
+                self.assertEqual(kw["env"]["HOME"], home)
+                self.assertEqual(kw["timeout"], P.MACHINE_ROW_TIMEOUT_S)
+        self.assertEqual([n for n, _a in P.MACHINE_ROWS], list(MACHINE_NAMES))
+        self.assertEqual(dict(P.MACHINE_ROWS)["loop-wiring"], ("scripts/test_loop_wiring.py", "--max", "4"))
+        self.assertEqual(dict(P.MACHINE_ROWS)["projects-dir"],
+                         ("scripts/test_integrate.py", "TranscriptHygieneRetiresOnlyTheVanishedWorktree"))
+
+    def test_zero_is_ok_two_124_127_no_data_and_other_exits_refused(self):
+        home = _home(self)
+        want = {0: P.OK, 1: P.REFUSED, 2: P.NODATA, 124: P.NODATA, 127: P.NODATA}
+        for name, argv in P.MACHINE_ROWS:
+            for code, verdict in want.items():
+                with self.subTest(row=name, exit=code):
+                    r = Runner({os.path.basename(argv[0]): (code, "a line\n")})
+                    got = P.check_machine_row("/r", name, argv, r, home=home)
+                    self.assertEqual(got[:2], (verdict, name))
+
+    def test_not_applicable_is_no_data_never_ok(self):
+        home = _home(self)
+        line = "NOT APPLICABLE: no loop is installed under this HOME"
+        for name, argv in P.MACHINE_ROWS:
+            with self.subTest(row=name):
+                r = Runner({os.path.basename(argv[0]): (0, line + " (/h/.claude/bin)\nOK\n")})
+                got = P.check_machine_row("/r", name, argv, r, home=home)
+                self.assertEqual(got[0], P.NODATA)
+                self.assertIn(line, got[2])
+
+    def test_a_home_that_cannot_be_this_machine_is_five_no_data_and_no_process(self):
+        afile = os.path.join(_home(self), "a-file")
+        open(afile, "w").close()
+        for home in ("relative/home", "", os.path.join(_home(self), "missing"), afile, _home(self, claude=False)):
+            with self.subTest(home=home):
+                r = Runner()
+                got = P.check_machine_rows("/r", r, home=home)
+                self.assertEqual([v for v, _n, _d in got], [P.NODATA] * len(P.MACHINE_ROWS))
+                self.assertEqual(r.calls, [])
+
+    def _all(self, answers, **kw):
+        tp = CheapestFirst("test_all_green_is_exit_zero_and_the_virgin_gate_ran")
+        self.addCleanup(tp.doCleanups)
+        return tp._all(answers, **kw)
+
+    def test_a_refused_machine_row_spares_every_expensive_row(self):
+        res, built = self._all({"test_loop_tool_parity.py": (1, "FAIL drift  tool.py\n24 drifted\n")})
+        rows = dict((n, (v, d)) for v, n, d in res)
+        self.assertEqual(rows["loop-tool-parity"][0], P.REFUSED)
+        for name in ("plugin-bumps", "export-real-home", "virgin-gate"):
+            with self.subTest(spared=name):
+                self.assertIn("not run", rows[name][1])
+        self.assertEqual(built, [])
+
+    def test_the_names_are_in_order_each_once(self):
+        res, _built = self._all({})
+        self.assertEqual([n for _v, n, _d in res],
+                         ["exceptions", "pack-clock", "readiness-rows", "release-plan", "no-promise", "version-after-bump",
+                          "changelog-text", "public-remote"] + list(MACHINE_NAMES) + ["plugin-bumps", "export-real-home",
+                                                                    "virgin-gate"])
 
 
 def declares(version):
@@ -591,6 +773,311 @@ class RunnerEnvIsTheSingleConditionsEntryPoint(unittest.TestCase):
         with open(os.path.join(home, ".cut_preflight_used"), "w") as fh:
             fh.write("x")
         self.assertRaises(ValueError, P.runner_env, home)
+
+
+# --- N4.a: the bumped scratch copy -----------------------------------------------------------------------------
+
+V0 = json.load(open(os.path.join(P.ROOT, ".claude-plugin", "marketplace.json"), encoding="utf-8"))["metadata"]["version"]
+
+
+def make_root(test, readme="# Brother\n\nNo version here.\n"):
+    """A throwaway root holding the real catalog and manifests, synthetic text files and the real bump and rule
+    scripts, removed by cleanup."""
+    root = tempfile.mkdtemp(prefix="test-n4-root-")
+    test.addCleanup(shutil.rmtree, root, True)
+    for rel in P._bump_copy_list(P.ROOT):
+        src = os.path.join(P.ROOT, rel)
+        if os.path.isfile(src):
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            shutil.copyfile(src, os.path.join(root, rel))
+    texts = {"README.md": readme, "docs/VERSIONING.md": "Current version: %s.\n" % V0,
+             "docs/plan/PROJECT.public.md": "# Project\n"}
+    for rel, text in texts.items():
+        os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+        if text is None:
+            continue
+        mode = "wb" if isinstance(text, bytes) else "w"
+        with open(os.path.join(root, rel), mode) as fh:
+            fh.write(text)
+    os.makedirs(os.path.join(root, "scripts"), exist_ok=True)
+    for name in ("version_source.py", "bundle_runtime.py", "test_version_truth.py"):
+        shutil.copyfile(os.path.join(P.HERE, name), os.path.join(root, "scripts", name))
+    return root
+
+
+def fake_root(test):
+    """A root holding only the two empty scripts, for cases a scripted Runner answers."""
+    root = tempfile.mkdtemp(prefix="test-n4-fake-")
+    test.addCleanup(shutil.rmtree, root, True)
+    os.makedirs(os.path.join(root, "scripts"))
+    for rel in (P.VERSION_SOURCE_REL, P.VERSION_TRUTH_REL):
+        open(os.path.join(root, rel), "w").close()
+    return root
+
+
+def record_scratch(test):
+    """Every directory P.tempfile.mkdtemp returns while the case runs."""
+    made = []
+    real = tempfile.mkdtemp
+
+    def mkdtemp(*a, **k):
+        made.append(real(*a, **k))
+        test.addCleanup(shutil.rmtree, made[-1], True)
+        return made[-1]
+    patcher = mock.patch.object(P.tempfile, "mkdtemp", mkdtemp)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return made
+
+
+def _tree(root):
+    out = {}
+    for base, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.join(base, name)
+            with open(path, "rb") as fh:
+                out[os.path.relpath(path, root)] = fh.read()
+    return out
+
+
+class BumpedScratch(unittest.TestCase):
+    """N4.a: the files the version rule reads, copied to a scratch directory and bumped there by the root's own
+    bump script; the root is never written and every failure removes the scratch."""
+
+    def scratch(self, root, version="99.0.0", runner=None):
+        scratch, failed = P.bumped_scratch(root, version, runner)
+        if scratch:
+            self.addCleanup(shutil.rmtree, scratch, True)
+        return scratch, failed
+
+    def test_the_scratch_holds_the_bumped_manifests(self):
+        root = make_root(self)
+        scratch, failed = self.scratch(root)
+        self.assertIsNone(failed)
+        market = json.load(open(os.path.join(scratch, ".claude-plugin", "marketplace.json"), encoding="utf-8"))
+        self.assertEqual(market["metadata"]["version"], "99.0.0")
+        self.assertEqual([p["version"] for p in market["plugins"] if p.get("name") == "brother"], ["99.0.0"])
+        before = json.load(open(os.path.join(root, ".claude-plugin", "marketplace.json"), encoding="utf-8"))
+        self.assertEqual(before["metadata"]["version"], V0)
+
+    def test_the_root_is_never_written(self):
+        root = make_root(self)
+        before = _tree(root)
+        self.scratch(root)
+        self.assertEqual(_tree(root), before)
+
+    def test_the_copy_list_holds_everything_the_rule_reads_and_the_bump_writes(self):
+        import test_version_truth as TVT
+        import version_source as VS
+        listed = P._bump_copy_list(P.ROOT)
+        # Each file relative to ITS OWN module's root: TVT.ROOT is resolved (symlinks followed) while P.ROOT is not, so
+        # under a symlinked checkout (/var -> /private/var, where the hermetic gate builds the export) a relpath
+        # across the two walked out of the tree.
+        wanted = [p.relative_to(TVT.ROOT).as_posix() for p in TVT.TEXT_FILES]
+        wanted += [".claude-plugin/marketplace.json", P.VERSION_TRUTH_REL.replace(os.sep, "/")]
+        wanted += list(VS.CARRIER_FILES_REL)
+        for rel in wanted:
+            with self.subTest(path=rel):
+                self.assertIn(rel, listed)
+
+    def test_the_version_rule_script_is_copied_beside_the_scratch_tree(self):
+        scratch, _failed = self.scratch(make_root(self))
+        self.assertTrue(os.path.isfile(os.path.join(scratch, "scripts", "test_version_truth.py")))
+
+    def test_the_stage_claim_directory_is_mirrored(self):
+        root = make_root(self)
+        scratch, _failed = self.scratch(root)
+        self.assertFalse(os.path.isdir(os.path.join(scratch, "products", "brothermode")))
+        os.makedirs(os.path.join(root, "products", "brothermode"))
+        scratch, _failed = self.scratch(root)
+        self.assertTrue(os.path.isdir(os.path.join(scratch, "products", "brothermode")))
+
+    def test_a_version_that_is_not_x_y_z_is_refused_before_anything_runs(self):
+        root = fake_root(self)
+        made = record_scratch(self)
+        for bad in ("1.0", "v1.2.3", "1.2.3 && x", "1.2.3.4", "1.2.3\n", " 1.2.3"):
+            with self.subTest(version=bad):
+                r = Runner()
+                self.assertEqual(P.bumped_scratch(root, bad, r)[0], None)
+                self.assertEqual(P.bumped_scratch(root, bad, r)[1][:2], (P.REFUSED, "version-after-bump"))
+                self.assertEqual(r.calls, [])
+        self.assertEqual(made, [])
+
+    def test_a_root_or_version_that_is_not_text_is_refused_at_the_door(self):
+        root = fake_root(self)
+        for bad_root in (None, "", 0, ["x"]):
+            with self.subTest(root=bad_root):
+                with self.assertRaises(ValueError):
+                    P.bumped_scratch(bad_root, "1.2.3", Runner())
+        for bad in (None, 5, ""):
+            with self.subTest(version=bad):
+                with self.assertRaises(ValueError):
+                    P.bumped_scratch(root, bad, Runner())
+
+    def test_a_missing_script_is_no_data_and_names_it(self):
+        for rel in (P.VERSION_SOURCE_REL, P.VERSION_TRUTH_REL):
+            with self.subTest(missing=rel):
+                root = fake_root(self)
+                os.remove(os.path.join(root, rel))
+                r = Runner()
+                scratch, failed = P.bumped_scratch(root, "1.2.3", r)
+                self.assertIsNone(scratch)
+                self.assertEqual(failed[0], P.NODATA)
+                self.assertIn(rel, failed[2])
+                self.assertEqual(r.calls, [])
+
+    def test_a_marketplace_that_cannot_be_read_is_no_data(self):
+        for name, text in (("not json", "{"), ("a list", "[]"), ("plugins a string", '{"plugins": "x"}'),
+                           ("dotdot", json.dumps({"plugins": [{"source": {"path": "../x"}}]})),
+                           ("absolute", json.dumps({"plugins": [{"source": {"path": "/etc"}}]}))):
+            with self.subTest(market=name):
+                root = fake_root(self)
+                os.makedirs(os.path.join(root, ".claude-plugin"))
+                with open(os.path.join(root, ".claude-plugin", "marketplace.json"), "w") as fh:
+                    fh.write(text)
+                r = Runner()
+                scratch, failed = P.bumped_scratch(root, "1.2.3", r)
+                self.assertIsNone(scratch)
+                self.assertEqual(failed[0], P.NODATA, failed)
+                self.assertEqual(r.calls, [])
+
+    def test_the_bump_exit_code_is_mapped(self):
+        for code, verdict in ((1, P.REFUSED), (2, P.NODATA), (124, P.NODATA), (127, P.NODATA)):
+            with self.subTest(exit=code):
+                root = fake_root(self)
+                made = record_scratch(self)
+                scratch, failed = P.bumped_scratch(root, "1.2.3", Runner({"version_source.py": (code, "x\n")}))
+                self.assertIsNone(scratch)
+                self.assertEqual(failed[0], verdict)
+                self.assertEqual(len(made), 1)
+                self.assertFalse(os.path.exists(made[0]))
+
+    def test_the_bump_runs_the_roots_script_on_the_copy(self):
+        root = fake_root(self)
+        r = Runner()
+        scratch, failed = self.scratch(root, runner=r)
+        self.assertIsNone(failed)
+        _key, cmd, kw = r.calls[0]
+        self.assertEqual(cmd, [sys.executable, os.path.join(root, "scripts", "version_source.py"), "--write",
+                               "--version", "99.0.0", "--root", scratch])
+        self.assertEqual(kw["cwd"], root)
+        self.assertNotEqual(scratch, root)
+
+    def test_a_copy_error_is_no_data_and_leaves_no_scratch(self):
+        root = fake_root(self)
+        made = record_scratch(self)
+        with mock.patch.object(P.shutil, "copyfile", side_effect=OSError("disk full")):
+            scratch, failed = P.bumped_scratch(root, "1.2.3", Runner())
+        self.assertIsNone(scratch)
+        self.assertEqual(failed[0], P.NODATA)
+        self.assertIn("disk full", failed[2])
+        self.assertFalse(os.path.exists(made[0]))
+
+    def test_two_calls_use_two_scratch_directories_and_agree(self):
+        root = fake_root(self)
+        made = record_scratch(self)
+        a = P.bumped_scratch(root, "1.2.3", Runner())
+        b = P.bumped_scratch(root, "1.2.3", Runner())
+        self.assertEqual(len(set(made)), 2)
+        self.assertEqual((a[0] is None, a[1]), (b[0] is None, b[1]))
+
+
+INCIDENT = "Brother\n\n## What changed in %s\n" % V0
+
+
+class VersionAfterBump(unittest.TestCase):
+    """N4.b: the version rule runs on the bumped copy, in the cheap tier, so a string that agrees with the manifest
+    before the bump and not after it refuses in seconds instead of after the chain."""
+
+    def check(self, root, version="99.0.0", runner=None):
+        return P.check_version_after_bump(root, version, runner)
+
+    def test_a_readme_that_passes_before_the_bump_and_fails_after_is_refused(self):
+        root = make_root(self, readme=INCIDENT)
+        before = subprocess.run([sys.executable, os.path.join(root, P.VERSION_TRUTH_REL)], cwd=root,
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+        verdict, name, detail = self.check(root)
+        self.assertEqual((verdict, name), (P.REFUSED, "version-after-bump"), detail)
+        self.assertIn("README.md", detail)
+        self.assertIn("99.0.0", detail)
+
+    def test_a_readme_with_no_version_is_ok_after_the_bump(self):
+        verdict, _name, detail = self.check(make_root(self))
+        self.assertEqual(verdict, P.OK, detail)
+        self.assertIn("99.0.0", detail)
+
+    def test_a_readme_naming_the_target_version_is_ok_after_the_bump(self):
+        verdict, _name, detail = self.check(make_root(self, readme="Brother 99.0.0\n"))
+        self.assertEqual(verdict, P.OK, detail)
+
+    def test_a_missing_readme_is_refused(self):
+        root = make_root(self)
+        os.remove(os.path.join(root, "README.md"))
+        verdict, _name, detail = self.check(root)
+        self.assertEqual(verdict, P.REFUSED, detail)
+        self.assertIn("README.md", detail)
+
+    def test_a_crashing_rule_is_no_data(self):
+        verdict, _name, detail = self.check(make_root(self, readme=b"\xff\xfe"))
+        self.assertEqual(verdict, P.NODATA, detail)
+
+    def test_the_rule_exit_codes_are_mapped(self):
+        for answer, verdict in (((0, "PASSED\n"), P.OK),
+                                ((1, "FAILED: README.md disagrees\n"), P.REFUSED),
+                                ((1, "Traceback (most recent call last):\nValueError\n"), P.NODATA),
+                                ((2, ""), P.NODATA), ((124, ""), P.NODATA), ((127, ""), P.NODATA)):
+            with self.subTest(answer=answer):
+                got = self.check(fake_root(self), runner=Runner({"test_version_truth.py": answer}))
+                self.assertEqual(got[:2], (verdict, "version-after-bump"))
+
+    def test_the_rule_runs_after_the_bump_and_inside_the_copy(self):
+        for answer in ((0, "PASSED\n"), (1, "FAILED: x\n")):
+            with self.subTest(answer=answer):
+                root = fake_root(self)
+                made = record_scratch(self)
+                r = Runner({"test_version_truth.py": answer})
+                self.check(root, runner=r)
+                self.assertEqual([c[0] for c in r.calls], ["version_source.py", "test_version_truth.py"])
+                _key, cmd, kw = r.calls[1]
+                self.assertEqual(cmd[1], os.path.join(made[0], P.VERSION_TRUTH_REL))
+                self.assertEqual(kw["cwd"], made[0])
+                self.assertFalse(os.path.exists(made[0]))
+
+    def test_the_detail_names_the_file_and_line(self):
+        out = ("FAILED: shipped version strings in README.md disagree\n  README.md line 3: brother shown as 1.1.0, "
+               "manifest says 99.0.0\n  " + "x" * 400 + "\n  fourth line\n")
+        got = self.check(fake_root(self), runner=Runner({"test_version_truth.py": (1, out)}))
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
+        self.assertIn(" | ".join(lines[:2]), got[2])
+        self.assertNotIn("fourth line", got[2])
+        self.assertLessEqual(len(got[2]), 300)
+
+    def test_a_root_or_version_that_is_not_text_raises(self):
+        with self.assertRaises(ValueError):
+            P.check_version_after_bump("", "1.2.3", Runner())
+        with self.assertRaises(ValueError):
+            P.check_version_after_bump(fake_root(self), None, Runner())
+
+    def test_run_all_carries_the_row_between_the_release_plan_and_the_changelog(self):
+        tp = CheapestFirst("test_all_green_is_exit_zero_and_the_virgin_gate_ran")
+        self.addCleanup(tp.doCleanups)
+        res, _built = tp._all({})
+        names = [n for _v, n, _d in res]
+        self.assertEqual(names.count("version-after-bump"), 1, names)
+        self.assertLess(names.index("release-plan"), names.index("version-after-bump"))
+        self.assertLess(names.index("version-after-bump"), names.index("changelog-text"))
+
+    def test_a_failing_rule_refuses_the_preflight_and_spares_the_gates(self):
+        tp = CheapestFirst("test_all_green_is_exit_zero_and_the_virgin_gate_ran")
+        self.addCleanup(tp.doCleanups)
+        res, built = tp._all({"test_version_truth.py": (1, "FAILED: README.md line 3\n")})
+        rows = dict((n, (v, d)) for v, n, d in res)
+        self.assertEqual(P.exit_code(res), P.EXIT_REFUSED, res)
+        self.assertEqual(rows["version-after-bump"][0], P.REFUSED)
+        self.assertEqual(built, [])
+        self.assertEqual(rows["virgin-gate"][0], P.NODATA)
+        self.assertIn("not run", rows["virgin-gate"][1])
 
 
 if __name__ == "__main__":

@@ -10,7 +10,8 @@ BIN = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, BIN)
 import grade_build as G
 drafts = os.path.abspath(os.path.expanduser(sys.argv[1]))
 skip = set(sys.argv[sys.argv.index("--skip") + 1:]) if "--skip" in sys.argv else set()
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected()
 tmp = os.path.expanduser("~/.claude/evidence/spec-intake-scores.json")
 
 

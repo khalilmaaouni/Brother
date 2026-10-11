@@ -108,6 +108,7 @@ import random
 import re
 import shlex
 import shutil
+import stat
 import statistics
 import subprocess
 import sys
@@ -897,18 +898,161 @@ ENGINE_JSON_FILES = frozenset((
     os.path.basename(loop_bridge.usage_sidecar_path(CLAIMS_FILENAME))))
 
 
-def _find_work_doc(run_dir):
-    """The run's Work document: the one *.json file in `run_dir` that is not
-    one of the engine's own bookkeeping files (ENGINE_JSON_FILES). None if
-    the directory holds zero or more than one such file."""
+#: RW1 (1.1.2): the marker key naming the run's Work document by its plain
+#: file name, and the words every unlistable-folder refusal carries.
+WORK_DOCUMENT_KEY = "work_document"
+WORK_DOC_UNLISTABLE = "could not be listed"
+_NO_GUESS = "fix or remove it; resume does not guess"
+
+
+def _plain_work_doc_name(name):
+    """True only for a plain .json file name inside the run folder: a
+    non-empty str equal to its own basename, no separator or NUL, not "."
+    or "..", and not one of the engine's own bookkeeping files. Pure: no
+    filesystem call, so a bad name is refused before anything is touched."""
+    return (isinstance(name, str) and name not in ("", ".", "..")
+            and name == os.path.basename(name)
+            and not any(c in name for c in "/\\\x00")
+            and name.endswith(".json") and name not in ENGINE_JSON_FILES)
+
+
+def _is_work_document(doc):
+    """A structural test (1.1.1 has no on-disk record validator): a dict whose
+    rows (or units) is a non-empty list of dicts, each with a non-blank id."""
+    rows = (doc.get("rows") or doc.get("units")) if isinstance(doc, dict) \
+        else None
+    return (isinstance(rows, list) and bool(rows) and all(
+        isinstance(r, dict) and isinstance(r.get("id"), str)
+        and r["id"].strip() for r in rows))
+
+
+def _read_regular_json(path):
+    """(value, "") or (None, why). Refuses a link (checked first, then the
+    open itself never follows one), anything that is not a regular file on
+    the open descriptor (a folder, a FIFO: opened non-blocking so it cannot
+    hang), and text that is not JSON. One open, so a link swapped in after
+    the check is not followed by this read."""
+    if os.path.islink(path):
+        return None, "is a link, not a regular file"
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, "does not exist"
+    except OSError as exc:
+        return None, "could not be opened (%s)" % exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None, "is not a regular file"
+        with os.fdopen(fd, "r", encoding="utf-8") as fh:
+            fd = None
+            return json.load(fh), ""
+    except (ValueError, RecursionError):
+        return None, "is not valid JSON"
+    except OSError as exc:
+        return None, "could not be read (%s)" % exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _read_marker(run_dir):
+    """(marker, "") or (None, why): the run folder's target.json, read the
+    one way every reader reads it. Absent: (None, ""). Present but
+    unreadable, corrupt or not a JSON object: (None, why), which refuses;
+    nothing guesses past a damaged marker."""
+    path = os.path.join(run_dir, TARGET_FILENAME)
+    if not os.path.lexists(path):
+        return None, ""
+    value, why = _read_regular_json(path)
+    if why:
+        return None, "%s %s; %s" % (TARGET_FILENAME, why, _NO_GUESS)
+    if not isinstance(value, dict):
+        return None, "%s is not a JSON object; %s" % (TARGET_FILENAME,
+                                                      _NO_GUESS)
+    return value, ""
+
+
+def _find_work_doc_why(run_dir):
+    """(path, "") or (None, why): THE lookup of a run's Work document.
+
+    Pointer mode, when target.json is an object carrying WORK_DOCUMENT_KEY
+    (whatever its value): the value must pass _plain_work_doc_name, name a
+    regular file that is not a link, and parse as a Work document; anything
+    else refuses and never falls back to another file. A marker that exists
+    but cannot be read as an object refuses. Legacy mode, when there is no
+    marker or the object has no pointer: exactly one .json that is not an
+    engine file; none or several refuse, and several never pick one."""
     if not os.path.isdir(run_dir):
-        return None
-    files = [f for f in os.listdir(run_dir)
-             if f.endswith(".json") and f not in ENGINE_JSON_FILES]
-    return os.path.join(run_dir, files[0]) if len(files) == 1 else None
+        return None, "%s is not a directory" % run_dir
+    marker, problem = _read_marker(run_dir)
+    if problem:
+        return None, problem
+    if isinstance(marker, dict) and WORK_DOCUMENT_KEY in marker:
+        name = marker[WORK_DOCUMENT_KEY]
+        if not _plain_work_doc_name(name):
+            return None, ("%s names %r as the Work document, which is not a "
+                          "plain .json file name in the run folder; the "
+                          "lookup did not fall back to another file"
+                          % (TARGET_FILENAME, name))
+        path = os.path.join(run_dir, name)
+        doc, why = _read_regular_json(path)
+        if not why and not _is_work_document(doc):
+            why = "is not a Work document (no rows that carry an id)"
+        if why:
+            return None, ("%s, named by %s, %s; the lookup did not fall back "
+                          "to another file" % (name, TARGET_FILENAME, why))
+        return path, ""
+    try:
+        names = os.listdir(run_dir)
+    except OSError as exc:
+        return None, "%s %s (%s)" % (run_dir, WORK_DOC_UNLISTABLE, exc)
+    files = sorted(f for f in names
+                   if f.endswith(".json") and f not in ENGINE_JSON_FILES)
+    if len(files) == 1:
+        return os.path.join(run_dir, files[0]), ""
+    if not files:
+        return None, ("no Work document: %s holds no .json file besides the "
+                      "engine's own" % run_dir)
+    return None, ("ambiguous: %d candidate files (%s) and %s names none of "
+                  "them" % (len(files), ", ".join(files[:5]),
+                            TARGET_FILENAME))
 
 
-def _write_run_target(run_dir, cwd, contract_path=None, contract=None):
+def _find_work_doc(run_dir):
+    """The run's Work document path, or None: _find_work_doc_why without the
+    reason, for the callers that only branch on found or not."""
+    return _find_work_doc_why(run_dir)[0]
+
+
+#: RW1-WRITER (decision 2026-10-11): the default of _write_run_target's
+#: work_doc_path, meaning an explicit legacy call that names no Work document.
+#: Any value supplied instead must be a valid pointer, or the write refuses.
+_LEGACY_MARKER = object()
+
+
+def _work_doc_pointer(run_dir, work_doc_path):
+    """(basename, "") when `work_doc_path` names a Work document directly in
+    `run_dir` under a plain .json name, as a regular file, so the reader
+    (_find_work_doc_why) will accept exactly what the writer records; else
+    (None, why)."""
+    if not isinstance(work_doc_path, str) or not work_doc_path:
+        return None, "is not a path"
+    if (os.path.dirname(os.path.abspath(work_doc_path))
+            != os.path.abspath(run_dir)):
+        return None, "is not directly inside the run folder %s" % run_dir
+    name = os.path.basename(work_doc_path)
+    if not _plain_work_doc_name(name):
+        return None, "is not a plain .json file name"
+    doc, why = _read_regular_json(work_doc_path)
+    if not why and not _is_work_document(doc):
+        why = "is not a Work document (no rows that carry an id)"
+    return (None, why) if why else (name, "")
+
+
+def _write_run_target(run_dir, cwd, contract_path=None, contract=None, *,
+                      work_doc_path=_LEGACY_MARKER):
     """Record which repository this run is FOR, written once at run start
     (never on resume, which reuses whatever a run already recorded) so a
     later --continue can match a crashed run back to the repo a bare
@@ -919,25 +1063,38 @@ def _write_run_target(run_dir, cwd, contract_path=None, contract=None):
     and the question actually asked, so delivery (unit U7) reads them from
     the run rather than being told them again. Three fields, never a copy of
     the record: the record itself stays the single source and its path is
-    right here."""
+    right here.
+
+    RW1 (1.1.2): `work_doc_path`, keyword only, records which Work document
+    is this run's, as its basename under WORK_DOCUMENT_KEY, so a stray .json
+    landing in the folder later cannot hide it from --resume. A supplied
+    value that is not a valid pointer raises ValueError and writes nothing
+    (decision RW1-WRITER); only a call that passes no pointer at all writes
+    the legacy shape. The marker goes through work_record.write_record
+    (temp file, fsync, os.replace under the claim store lock), so a failed
+    write leaves the previous marker whole; OSError and TimeoutError
+    propagate, and the run stops before any work."""
     doc = {"cwd": os.path.abspath(cwd)}
     if contract_path and isinstance(contract, dict):
         doc["contract"] = {"path": os.path.abspath(contract_path),
                            "language": contract.get("language"),
                            "question": contract.get("question")}
-    with open(os.path.join(run_dir, TARGET_FILENAME), "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=1)
+    if work_doc_path is not _LEGACY_MARKER:
+        name, why = _work_doc_pointer(run_dir, work_doc_path)
+        if why:
+            raise ValueError("brother_run: target.json was not written: the "
+                             "Work document %r %s" % (work_doc_path, why))
+        doc[WORK_DOCUMENT_KEY] = name
+    work_record.write_record(os.path.join(run_dir, TARGET_FILENAME), doc)
 
 
 def _read_run_target(run_dir):
-    path = os.path.join(run_dir, TARGET_FILENAME)
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh).get("cwd")
-    except (OSError, ValueError):
-        return None
+    """The repository a run is FOR, or None: read through _read_marker, so a
+    marker that is an array, a number or garbage is skipped by discovery
+    instead of crashing it, and a cwd that is not text is no match."""
+    marker, _problem = _read_marker(run_dir)
+    cwd = marker.get("cwd") if isinstance(marker, dict) else None
+    return cwd if isinstance(cwd, str) and cwd else None
 
 
 #: Where a finished run's own measured wall clock ends up: build_cost_block
@@ -2603,6 +2760,333 @@ def _verdict_for(receipt):
         receipt.get("state"), "NO-DATA")
 
 
+#: TL1 (1.1.2): the one result a whole run reads as, and the exit code each
+#: state maps to. Closed vocabularies: a line or a consumer built on them can
+#: only ever carry one of these words.
+RESULT_STATES = ("DONE", "PARTIAL", "NOT DONE", "UNVERIFIED")
+EXIT_FOR_STATE = {"DONE": 0, "NOT DONE": 1, "PARTIAL": 2, "UNVERIFIED": 2}
+RELEASE_VALUES = ("HUMAN_DECISION_REQUIRED", "DECISION_RECORDED",
+                  "NOT_REQUESTED")
+NEXT_VALUES = ("review-receipt", "answer-release-screen",
+               "repair-unverified-unit", "fix-failed-unit",
+               "rerun-for-receipt")
+
+
+def delivery_conclusion(final_receipts, refused, parked, receipt_available,
+                        risk_triggers, release_answer):
+    """TL1.a: the whole run's verdict, read only from facts the engine already
+    holds. Pure: no check runs, no model is called, nothing is mutated, and
+    the six parameters are the only way in, so no worker prose can reach the
+    state. The first rule that matches decides:
+
+    1. receipt_available is not True: NOT DONE (nothing provable from disk).
+    2. anything refused: NOT DONE, the old refusal sentence.
+    3. anything parked: NOT DONE, it waits on a person's release decision.
+    4. any unit FAIL with no refusal entry (the verifier's own): NOT DONE.
+    5. no units at all: UNVERIFIED.
+    6. no unit PASS: UNVERIFIED.
+    7. a PASS beside a NO-DATA: PARTIAL (only partly proven).
+    8. every unit PASS: DONE.
+
+    A receipt that is not a dict counts NO-DATA, never PASS. `release` is a
+    separate closed value and fails toward a human: only a dict answer whose
+    choice is one of loom.CHOICES is a recorded decision. Only the truthiness
+    of risk_triggers is read; none of its text is copied."""
+    receipts = final_receipts if isinstance(final_receipts, list) else []
+    verdicts = [_verdict_for(r) if isinstance(r, dict) else "NO-DATA"
+                for r in receipts]
+    counts = {"PASS": verdicts.count("PASS"), "FAIL": verdicts.count("FAIL"),
+              "NO-DATA": verdicts.count("NO-DATA")}
+    refused = list(refused or ())
+    parked = list(parked or ())
+    if receipt_available is not True:
+        state, reason = "NOT DONE", (
+            "this run left no readable receipt, so nothing it did is "
+            "provable from disk")
+    elif refused:
+        state, reason = "NOT DONE", (
+            "%d unit(s) refused: %s"
+            % (len(refused), "; ".join("%s: %s" % (uid, str(why)[:120])
+                                       for uid, why in refused)))
+    elif parked:
+        state, reason = "NOT DONE", (
+            "%d piece(s) wait on a person's release decision: %s"
+            % (len(parked), ", ".join(str(p) for p in parked)))
+    elif counts["FAIL"]:
+        state, reason = "NOT DONE", (
+            "a unit's receipt read FAIL with no matching entry in this "
+            "run's own refused list; the verifier itself refused")
+    elif not verdicts:
+        state, reason = "UNVERIFIED", (
+            "no units were in this run's Work document at all")
+    elif not counts["PASS"]:
+        state, reason = "UNVERIFIED", (
+            "nothing in this run was verified (0 PASS, %d NO-DATA); a run "
+            "that refused nothing but proved nothing is not the same thing "
+            "as success" % counts["NO-DATA"])
+    elif counts["NO-DATA"]:
+        state, reason = "PARTIAL", (
+            "%d of %d unit(s) verified and %d read NO-DATA: the outcome is "
+            "only partly proven"
+            % (counts["PASS"], len(verdicts), counts["NO-DATA"]))
+    else:
+        state, reason = "DONE", (
+            "%d unit(s) verified and none was refused" % counts["PASS"])
+    if (isinstance(release_answer, dict)
+            and release_answer.get("choice") in loom.CHOICES):
+        release = "DECISION_RECORDED"
+    elif risk_triggers:
+        release = "HUMAN_DECISION_REQUIRED"
+    else:
+        release = "NOT_REQUESTED"
+    if receipt_available is not True:
+        nxt = "rerun-for-receipt"
+    elif state == "NOT DONE":
+        nxt = "answer-release-screen" if parked else "fix-failed-unit"
+    elif state in ("PARTIAL", "UNVERIFIED"):
+        nxt = "repair-unverified-unit"
+    elif release == "HUMAN_DECISION_REQUIRED":
+        nxt = "answer-release-screen"
+    else:
+        nxt = "review-receipt"
+    return {"state": state, "units": len(verdicts), "counts": counts,
+            "release": release, "next": nxt, "reason": reason}
+
+
+#: TL1.c: the one engine-authored result line. A consumer reads the LAST
+#: stdout line starting with this prefix, which is the second to last
+#: non-empty line (the receipt line stays last); an earlier match can only
+#: be text the report echoed, and no line at all means no result.
+RESULT_PREFIX = "BROTHER RESULT: "
+_SAFE_RESULT_LINE = (RESULT_PREFIX + "UNVERIFIED | units=0 PASS=0 FAIL=0 "
+                     "NO-DATA=0 | release=HUMAN_DECISION_REQUIRED | "
+                     "next=rerun-for-receipt")
+
+
+def format_result_line(conclusion):
+    """The result line from a delivery_conclusion dict and nothing else:
+    three closed words and four non-negative ints. Anything else (not a
+    dict, a missing or unknown field, a bool or negative count) returns the
+    safe UNVERIFIED line, so no path, objective, command or reason text can
+    ever enter it."""
+    try:
+        state, release, nxt = (conclusion["state"], conclusion["release"],
+                               conclusion["next"])
+        counts = conclusion["counts"]
+        nums = (conclusion["units"], counts["PASS"], counts["FAIL"],
+                counts["NO-DATA"])
+    except (TypeError, KeyError, IndexError):
+        return _SAFE_RESULT_LINE
+    if (state not in RESULT_STATES or release not in RELEASE_VALUES
+            or nxt not in NEXT_VALUES
+            or not all(type(n) is int and n >= 0 for n in nums)):
+        return _SAFE_RESULT_LINE
+    return ("%s%s | units=%d PASS=%d FAIL=%d NO-DATA=%d | release=%s | "
+            "next=%s" % ((RESULT_PREFIX, state) + nums + (release, nxt)))
+
+
+#: TL1-RECEIPT (decision 2026-10-11): the fields receipt_record() and
+#: _write_receipt always put on a receipt. A JSON object missing any of them
+#: is not a receipt, however non-empty.
+RECEIPT_REQUIRED_FIELDS = tuple(
+    key for key, _q in receipt_door.RECEIPT_QUESTIONS) + (
+        "report", "host_capability")
+
+
+def _load_receipt(path):
+    """(body, "") when `path` holds a receipt of the run that wrote it, else
+    (None, the problem in words). A receipt carries every
+    RECEIPT_REQUIRED_FIELDS key, its per-file checks (scope.changed, a
+    list), per unit entries (evidence and unproven, lists of dicts with an
+    id and a state), and names its own path in host_capability.receipt_path,
+    which binds it to the run folder it was written into."""
+    if not isinstance(path, str) or not path:
+        return None, "no receipt path to read back"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            body = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "%s could not be read back: %s" % (path, exc)
+    if not isinstance(body, dict):
+        return None, "%s read back as %s, not a receipt" % (
+            path, type(body).__name__)
+    missing = [k for k in RECEIPT_REQUIRED_FIELDS if k not in body]
+    if missing:
+        return None, "%s lacks the receipt field(s) %s" % (
+            path, ", ".join(missing))
+    scope = body.get("scope")
+    if not isinstance(scope, dict) or not isinstance(scope.get("changed"),
+                                                     list):
+        return None, "%s carries no per-file checks (scope.changed)" % path
+    entries = body.get("evidence"), body.get("unproven")
+    if not all(isinstance(e, list) and all(
+            isinstance(x, dict) and "id" in x and "state" in x for x in e)
+               for e in entries):
+        return None, "%s carries no per unit verdicts" % path
+    host = body.get("host_capability")
+    if not isinstance(host, dict) or host.get("receipt_path") != path:
+        return None, ("%s is not bound to this run: it names %r as its own "
+                      "path" % (path, (host or {}).get("receipt_path")
+                                if isinstance(host, dict) else None))
+    return body, ""
+
+
+def _receipt_units(body):
+    """The receipt's own per unit (id, state) pairs, order free."""
+    return sorted(repr((e.get("id"), e.get("state")))
+                  for e in body["evidence"] + body["unproven"])
+
+
+def _receipt_readable(path, final_receipts):
+    """"" when `path` reads back as this run's receipt AND its per unit
+    verdicts are exactly `final_receipts` (the ones the result line counts),
+    else the problem in words. _write_receipt only knows json.dump returned;
+    this proves a stranger can open the file and read the same result."""
+    body, problem = _load_receipt(path)
+    if problem:
+        return problem
+    expected = [r for r in (final_receipts if isinstance(final_receipts, list)
+                            else []) if isinstance(r, dict)]
+    if (not isinstance(final_receipts, list)
+            or len(expected) != len(final_receipts)
+            or _receipt_units(body) != sorted(
+                repr((r.get("id"), r.get("state"))) for r in expected)):
+        return ("%s disagrees with this run's own per unit verdicts"
+                % path)
+    return ""
+
+
+def settle_delivery(final_receipts, refused, parked, receipt_path,
+                    receipt_problem, risk_triggers, release_answer):
+    """(conclusion, receipt_path, receipt_problem). Reads a receipt that
+    _write_receipt reported written back from disk; a failed read turns the
+    path to None and names the problem. The receipt counts as available only
+    with a path and no problem."""
+    if receipt_path and not receipt_problem:
+        problem = _receipt_readable(receipt_path, final_receipts)
+        if problem:
+            receipt_path, receipt_problem = None, problem
+    conclusion = delivery_conclusion(
+        final_receipts, refused, parked,
+        bool(receipt_path) and not receipt_problem, risk_triggers,
+        release_answer)
+    return conclusion, receipt_path, receipt_problem
+
+
+_RESULT_LINE_RE = re.compile(
+    r"^BROTHER RESULT: (DONE|PARTIAL|NOT DONE|UNVERIFIED) \| units=(\d+) "
+    r"PASS=(\d+) FAIL=(\d+) NO-DATA=(\d+) \| release=(\S+) \| next=(\S+)$")
+_RECEIPT_LINE = "brother_run: receipt: "
+
+
+def read_run_result(stdout, exit_code):
+    """(state, why): what a consumer of one engine run may conclude. TL1-ii
+    (decision 2026-10-11, the stricter reading): the LAST stdout line that
+    begins with RESULT_PREFIX, which must be the second to last non-empty
+    line, must agree with the process exit code AND with the receipt the
+    last line names (the same unit counts, read from the receipt's own per
+    unit verdicts). Anything missing, malformed or disagreeing reads NOT
+    DONE with why non-empty; only full agreement returns the line's state
+    with why "". The engine escapes echoed lines that begin with the prefix,
+    so an earlier match is never genuine; a forged terminal pair still has
+    to agree with an exit code and a receipt it does not control."""
+    lines = [ln for ln in str(stdout or "").splitlines() if ln.strip()]
+    found = [ln for ln in lines if ln.startswith(RESULT_PREFIX)]
+    if not found:
+        return "NOT DONE", "the run printed no result line"
+    match = _RESULT_LINE_RE.match(found[-1])
+    if (not match or match.group(6) not in RELEASE_VALUES
+            or match.group(7) not in NEXT_VALUES):
+        return "NOT DONE", "the result line is malformed"
+    if len(lines) < 2 or lines[-2] != found[-1]:
+        return "NOT DONE", ("the result line is not the second to last "
+                            "non-empty line")
+    state = match.group(1)
+    if type(exit_code) is not int or EXIT_FOR_STATE[state] != exit_code:
+        return "NOT DONE", ("the line reads %s but the exit code is %r"
+                            % (state, exit_code))
+    if not lines[-1].startswith(_RECEIPT_LINE):
+        return "NOT DONE", "no receipt was left: %s" % lines[-1][:200]
+    body, problem = _load_receipt(lines[-1][len(_RECEIPT_LINE):])
+    if problem:
+        return "NOT DONE", problem
+    states = [e.get("state") for e in body["evidence"] + body["unproven"]]
+    receipt_counts = (len(states), states.count("verified"),
+                      states.count("refused"),
+                      len(states) - states.count("verified")
+                      - states.count("refused"))
+    line_counts = tuple(int(match.group(i)) for i in range(2, 6))
+    if receipt_counts != line_counts:
+        return "NOT DONE", ("the line counts %s disagree with the receipt's "
+                            "%s" % (line_counts, receipt_counts))
+    return state, ""
+
+
+#: TL1-ii: the mark an echoed line that begins with RESULT_PREFIX is given on
+#: stdout, so the only column 0 result line is the engine's own.
+ECHO_MARK = "(echoed) "
+
+
+class _ReservedPrefixGuard(object):
+    """Every write to stdout while main() runs passes through here: a line
+    that begins with RESULT_PREFIX is escaped with ECHO_MARK, whoever wrote
+    it (a unit's objective or check echoed into a screen or the report, a
+    module the engine calls). The engine's own result line goes out through
+    genuine(), the one path that skips the escape. A line start that could
+    still grow into the prefix is held until it is decided. Ceiling: a child
+    process writing straight to the inherited descriptor bypasses Python's
+    stdout; the engine captures its workers' and checks' output instead."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self._held = ""
+        self._line_start = True
+
+    def write(self, text):
+        data = self._held + str(text)
+        self._held = ""
+        out, pos = [], 0
+        while pos < len(data):
+            nl = data.find("\n", pos)
+            end = len(data) if nl < 0 else nl + 1
+            seg = data[pos:end]
+            if self._line_start:
+                if nl < 0 and RESULT_PREFIX.startswith(seg):
+                    self._held = seg
+                    break
+                if seg.startswith(RESULT_PREFIX):
+                    out.append(ECHO_MARK)
+            out.append(seg)
+            self._line_start = nl >= 0
+            pos = end
+        if out:
+            self.stream.write("".join(out))
+        return len(str(text))
+
+    def genuine(self, line):
+        if self._held or not self._line_start:
+            self.stream.write(self._held + "\n")
+            self._held, self._line_start = "", True
+        self.stream.write(line + "\n")
+
+    def release(self):
+        if self._held:
+            self.stream.write(self._held)
+            self._held = ""
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+def _print_result_line(line):
+    """The engine's own result line, the one write that skips the escape."""
+    out = sys.stdout
+    if isinstance(out, _ReservedPrefixGuard):
+        out.genuine(line)
+    else:
+        print(line)
+
+
 #: P12 (persona plan row P12, 2026-09-04): the journal event types the
 #: recurrence loop reads and writes, named once so a reader can grep the
 #: whole chain by string. VAULT_RECALL is not written by anything in this
@@ -3064,34 +3548,19 @@ def _draft_failure_cases(record, final_receipts, run_dir, receipt_path):
 
 def _exit_code_for(receipts, refused):
     """(code, reason). exit-code-convention-v1 (rule 3, the zero-context
-    critic, 2026-09-03): `return 1 if refused else 0` let a run whose every
-    receipt was NO-DATA exit 0, and a CI consumer reads that as success. The
-    estate's real convention, read from the same verdicts a person already
-    sees printed under "what this run proved": 0 ONLY when this run proved
-    something (at least one PASS) and refused nothing; 1 when any unit, or
-    the verifier itself, refused (a FAIL receipt with no matching entry in
-    `refused` is the verifier's own refusal, caught the same way); 2 when
-    nothing was refused but nothing was proven either (every receipt
-    NO-DATA, or no units at all), which is neither a failure nor a delivery, and
-    treating it as either would be a guess this function refuses to make."""
-    verdicts = [_verdict_for(r) for r in receipts]
-    if refused:
-        return 1, ("%d unit(s) refused: %s"
-                   % (len(refused),
-                      "; ".join("%s: %s" % (uid, reason[:120])
-                               for uid, reason in refused)))
-    if "FAIL" in verdicts:
-        return 1, ("a unit's receipt read FAIL with no matching entry in "
-                   "this run's own refused list; the verifier itself "
-                   "refused")
-    if not verdicts:
-        return 2, "no units were in this run's Work document at all"
-    if "PASS" not in verdicts:
-        return 2, ("nothing in this run was verified (0 PASS, %d NO-DATA); "
-                   "a run that refused nothing but proved nothing is not "
-                   "the same thing as success" % verdicts.count("NO-DATA"))
-    return 0, ("%d unit(s) verified and none was refused"
-              % verdicts.count("PASS"))
+    critic, 2026-09-03) made a run that proved nothing exit 2 instead of 0.
+    TL1 (1.1.2) makes this a thin reader of delivery_conclusion, so the code
+    is EXIT_FOR_STATE of the one state the run reads as: 0 for DONE (every
+    unit PASS, nothing refused), 1 for NOT DONE (any refusal, or a FAIL
+    receipt the verifier itself refused), 2 for PARTIAL or UNVERIFIED
+    (nothing refused, but not every unit proven, or no units at all). The
+    one intended tightening: a PASS beside a NO-DATA used to exit 0 and now
+    exits 2, because a partly proven outcome is not a delivery. Every other
+    input keeps its old code and its old reason words. The receipt, parked
+    and release facts are read by main() through the same helper; here the
+    receipt is taken as present and nothing as parked."""
+    conclusion = delivery_conclusion(receipts, refused, (), True, (), None)
+    return EXIT_FOR_STATE[conclusion["state"]], conclusion["reason"]
 
 
 def _git_object_type(cwd, rev):
@@ -5501,7 +5970,7 @@ def _human_moment(log, moment, spec, resolver=None):
     return choice
 
 
-def main(argv=None):
+def _main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("outcome", nargs="?", default="",
                     help="what should be true when this is done; optional "
@@ -5806,11 +6275,10 @@ def main(argv=None):
         # the unfinished remainder runs. The door is NOT re-asked: the plan
         # a crash interrupted is the plan the resume finishes.
         run_dir = os.path.abspath(args.resume)
-        doc_path = _find_work_doc(run_dir)
+        doc_path, why = _find_work_doc_why(run_dir)
         if not doc_path:
-            print("brother_run: --resume needs a run directory holding "
-                  "exactly one Work document; %s does not" % run_dir,
-                  file=sys.stderr)
+            print("brother_run: --resume could not find the Work document "
+                  "in %s: %s" % (run_dir, why), file=sys.stderr)
             return 1
         with open(doc_path, "r", encoding="utf-8") as fh:
             record = json.load(fh)
@@ -5980,7 +6448,8 @@ def main(argv=None):
                 # repository it was actually decomposed for.
                 _write_run_target(run_dir, cwd,
                                   contract_path=args.contract,
-                                  contract=contract)
+                                  contract=contract,
+                                  work_doc_path=record["path"])
                 # THE CREATOR, stamped on disk once and never overwritten
                 # (see _stamp_harness), so every later resume can still
                 # name the engine whose plan and prechecks this record
@@ -7080,8 +7549,14 @@ def main(argv=None):
     # takes the exit code away from zero and says why on the same line.
     receipt_path, receipt_problem = _write_receipt(run_dir, final_receipts,
                                                    report, log_path)
+    # TL1.c: the receipt is read back, and the exit code is the mapped state
+    # of the same conclusion the result line prints, so the two cannot
+    # disagree. A receipt that is missing or unreadable is NOT DONE (1).
+    conclusion, receipt_path, receipt_problem = settle_delivery(
+        final_receipts, refused, waiting, receipt_path, receipt_problem,
+        triggers, release_answer)
+    exit_code = EXIT_FOR_STATE[conclusion["state"]]
     if receipt_problem:
-        exit_code = exit_code or 1
         exit_reason = ("this run left no receipt, so nothing it did is "
                        "provable from disk: %s (the delivery itself ended: "
                        "%s)" % (receipt_problem, exit_reason))
@@ -7134,11 +7609,31 @@ def main(argv=None):
                 "%s (%s); the run's own exit code is unaffected"
                 % (run_dir, exc))
         print("PROOF CARD: NO-DATA (%s)" % exc)
+    # TL1.c: the one result line, after the card and before the receipt
+    # line, appended to run.log and printed past the echo escape.
+    result = format_result_line(conclusion)
+    log.note(result)
+    _print_result_line(result)
     if receipt_path:
         print("brother_run: receipt: %s" % receipt_path)
     else:
         print("brother_run: no receipt: %s" % receipt_problem)
     return exit_code
+
+
+
+def main(argv=None):
+    """The command line: _main with stdout behind _ReservedPrefixGuard
+    (TL1-ii), restored however _main ends, so no echoed line can begin with
+    RESULT_PREFIX at column 0."""
+    guard = _ReservedPrefixGuard(sys.stdout)
+    sys.stdout = guard
+    try:
+        return _main(argv)
+    finally:
+        guard.release()
+        if sys.stdout is guard:
+            sys.stdout = guard.stream
 
 
 if __name__ == "__main__":

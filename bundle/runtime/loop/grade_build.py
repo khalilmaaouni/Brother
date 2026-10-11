@@ -77,7 +77,9 @@ def _is_wire(name):
 #: interpreters given code on the command line, and shell=True are refused inside a literal argv too. Nothing else
 #: in the screen moves: an unlisted path is refused exactly as before, and NET_MODULES other than subprocess stay
 #: refused for listed paths as well. The plan is the only source of the list: an unreadable plan allows NOTHING.
-PLAN_PATH = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import plan_path as _PP  # noqa: E402  the one plan selector (BROTHER_WBS or the default; an invalid value refuses)
+PLAN_PATH = _PP.selected()
 NET_BINARIES = {"curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "netcat", "telnet", "ftp", "rsync", "socat",
                 "openssl", "pip", "pip3", "npm", "npx", "brew", "gh", "codex", "claude"}
 NET_GIT_VERBS = {"fetch", "push", "pull", "clone", "ls-remote", "remote", "submodule"}
@@ -729,8 +731,10 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # landing commit, the closer, the pass's sizing eval, the sentry and the diagnostician
                    "scripts/self_check_staged.py", "scripts/close_unit.py", "scripts/adaptive_sizing.py",
                    "scripts/worktree_sentry.py", "scripts/diag_round.py",
-                   # the plan and its specs: the landing writes evidence there itself, and close_unit runs done checks
-                   "docs/plan/brother-1.1.0-launch-wbs.json",
+                   # the plan and its specs: the landing writes evidence there itself, and close_unit runs done checks.
+                   # Both the historical plan and the one this run selected (plan_path.selected, case folded), and the
+                   # selector itself: a build that rewrote it would point every reader and writer at a plan of its choosing
+                   _PP.DEFAULT.lower(), PLAN_PATH.lower(), "scripts/loop/plan_path.py",
                    # EVERY MODULE THE FROZEN CHECKS IMPORT (review 14 finding 1, 2026-10-02): the lander runs the pre-commit
                    # check and the push gate from a frozen copy of the base commit, and the base commit is whatever landed
                    # last, so a build that edits a module those checks import changes the NEXT landing's checks. From an AST

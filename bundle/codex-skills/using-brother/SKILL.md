@@ -43,6 +43,13 @@ format, a run id or a test framework.
 
 ## Any task that names Brother: run the engine, then read the receipt
 
+This section is written for you, the assistant, never for the person. The
+person gives one plain sentence; you prepare and validate everything below
+yourself. Never ask the person for plan.json, contract.json, a run id, an
+autonomy code or MODEL_WORKER_CMD; never ask them to write JSON, and never
+ask them to choose a worker. Ask at most one genuine product or permission
+blocker; otherwise carry the work through to the receipt.
+
 Codex has no slash commands, so under Codex a task that names Brother is done
 by running the engine, never by hand-editing files and printing no receipt.
 Write NO intake into the target repository first (no STATE.md, no `.sbe/`,
@@ -56,30 +63,44 @@ before the first claim. Full detail: the Codex smoke runbook in the Brother repo
    yet fails by way of "No such file or directory" and leaves no planner to
    hand back a replacement. Use `python3 -m unittest` plus one import-based
    line.
-2. **Write the units yourself, then run the engine.** No model call can be
-   assumed available inside a session. Supply a JSON list with `id`,
-   `objective`, `done_check`,
-   `writes`, `deps`. `writes` must name EVERY file the unit touches, or the
-   file changed outside it fails the scope audit and the unit reads
-   QUARANTINE, never integrated. MODEL_WORKER_CMD is a script that edits
-   only those files, and it must exit 0 when it is done, or the worker
-   returns before committing and the edit is lost:
+2. **Write the units yourself, then run the engine.** A nested `codex exec`
+   cannot start inside a Codex turn, so no model call can be assumed
+   available inside a session. Supply a JSON list with `id`, `objective`,
+   `done_check`, `writes`, `deps`. `writes` must name EVERY file the unit
+   touches, or the file changed outside it fails the scope audit and the
+   unit reads QUARANTINE, never integrated. MODEL_WORKER_CMD is a script
+   that edits only those files, and it must exit 0 when it is done, or the
+   worker returns before committing and the edit is lost. The plan, the
+   contract and the worker script are saved by you in the `contracts`
+   folder of the host's Brother state folder, never in the target
+   repository or any temp directory. Use absolute paths and pass them to
+   the engine. Under Codex the folder is
+   `"${CODEX_HOME:-$HOME/.codex}/brother/contracts/"`; under Claude Code
+   it is `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/brother/contracts/"`.
+   The plan, the contract and the runs root stay OUTSIDE the target
+   repository (inside dirties the tree, and a read-only install cannot
+   write it) and outside any temp directory (a receipt under $TMPDIR is
+   gone at the next reboot). The five rules a plan must satisfy:
+   references/router-details.md. In a coding session a plan without its
+   outcome contract is refused (exit 2): write the contract first
+   (references/intake.md) and check it with
+   `python3 "$BROTHER_PLUGIN_ROOT/runtime/contract_check.py" <the contract>`
+   until it exits 0. Use absolute paths for the plan, contract and worker
+   script, as in this example:
 
-       MODEL_WORKER_CMD="python3 write_the_change.py" \
+       MODEL_WORKER_CMD="python3 <absolute path of the worker script>" \
            python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" "<outcome>" \
-           --cwd <repo> --plan plan.json --contract contract.json \
+           --cwd <repo> --plan <absolute path of the plan> \
+           --contract <absolute path of the contract> \
            --runs-root "${CODEX_HOME:-$HOME/.codex}/brother/runs"
 
    (`--runs-root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/brother/runs"` under
-   Claude Code.) In a coding session a plan without its outcome contract is
-   refused (exit 2): write `contract.json` first (references/intake.md) and
-   check it with
-   `python3 "$BROTHER_PLUGIN_ROOT/runtime/contract_check.py" contract.json`.
-   The plan, the contract and the runs root stay OUTSIDE the
-   target repository (inside dirties the
-   tree, and a read-only install cannot write it) and outside any temp
-   directory (a receipt under $TMPDIR is gone at the next reboot). The five
-   rules a plan must satisfy: references/router-details.md.
+   Claude Code.) Never say a second model is working, and never print a
+   receipt unless the engine's own output shows it. If the engine cannot
+   run a worker, tell the person one reason and the supported next step:
+   run the engine from a terminal outside the Codex session, where it
+   spawns the host's own worker (references/router-details.md); never write
+   a receipt yourself.
 3. **Print the receipt line, then read the receipt back.** The engine's last
    line is `brother_run: receipt: <path>`; open it and report every entry:
    the file, the check, the exit code that decided it.
@@ -138,22 +159,50 @@ tools ship under `${CLAUDE_PLUGIN_ROOT}/runtime/loop/` (a Codex install reads `$
 on a clone install they are `scripts/loop/` at the checkout root). They are executed from a stamped copy the installer
 makes, never from the bundle in place, so a running loop keeps its own tools while a newer stamp is proven.
 
-Routing phrases: start a run until HH:MM, stop the loop, loop status, what did the loop land, why is nothing landing,
-resume the loop. The order of the verbs, and the one that runs before any of them:
+You do not type the loop's commands. Say what you want in plain words, and Brother runs one launcher,
+`runtime/loop/start_run.sh`. On a clone install the same files sit in `scripts/loop/` at the checkout root, and the
+launcher is run from the launch worktree. It checks, in order, that the tree is clean and equal to its upstream, that
+both program pins are executable files, that no hold or pause is in force, that no other loop is alive, and that the
+intake says READY. It then starts the driver and waits for its first line.
 
-1. The canary. `python3 runtime/loop/loop_canary.py` from the checkout root replays landed builds through every judging
-   stage (grade, probes, spec gate, land apply, status word, checker hold) and must print WOULD LAND. A run may not start
-   on a canary that refuses; an unmeasured stage is named, never counted as a pass.
-2. The intake. `python3 runtime/loop/loop_intake.py prepare --deadline HH:MM --budget-usd N --words "<the owner's words>"`
-   records one budget for one run and refuses READY until the canary is green.
-3. The driver. `bash runtime/loop/loop_until.sh HH:MM` runs passes until the deadline; every pass prints PULSE and BUDGET
-   lines; `runtime/loop/loop_watch.py --log <the driver's log>` names the class that needs a hand; `runtime/loop/stop_loop.sh`
-   stops everything of the loop and nothing else.
-4. The report. `runtime/loop/loop_report.py --since-hours N` prints what landed, what it cost in both ledgers and the yield
-   of every stage, each figure naming its file. The journal of a run lives in the run directory the driver announces.
+| You say | Brother runs |
+| --- | --- |
+| "start a run until 22:00 with 40 dollars", "run the loop overnight" | `runtime/loop/start_run.sh --deadline HH:MM --budget-usd N`, with `--plan <file under docs/plan>` when the person names a plan |
+| "loop status", "is the loop healthy" | `runtime/loop/loop_watch.py --log <the newest driver log>`, then `runtime/loop/loop_intake.py status --running` |
+| "why is nothing landing" | The class printed by `runtime/loop/loop_watch.py`, given to `runtime/loop/watch_act.py <class> <reason>`; name the one action it returns |
+| "what did the loop land" | `runtime/loop/loop_report.py --run <the driver log>` |
+| "the morning report", "deliver the loop report" | `runtime/loop/loop_report.py --since-hours N`, printed in the report shape, then the handover pack |
+| "stop the loop" | `runtime/loop/stop_loop.sh --reason "<the person's words>"`, beside the controller stop under `/brother start stop` |
 
-Every number the loop reports is read from a ledger or a log. A run that ends with nothing landed says so, with the
-refusal classes that stopped it; it never rounds silence up to progress.
+The launcher, from the launch worktree:
+
+```bash
+bash scripts/loop/start_run.sh --deadline 22:00 --budget-usd 40
+```
+
+A deadline and a budget are required. If the person names no deadline or no budget, ask that one question and start
+nothing. If the person says "Claude only", add `--worker opus55 --adversary opus55 --documenter sonnet55`: those are
+the Claude seats in the model registry, and the launcher's own defaults for the finisher (`opus55`) and the checker
+(`sonnet`) are Claude already.
+
+Say every line the launcher prints as it printed it. A refusal reads `START REFUSED [step]: fix`, where the step is
+args, tree, pins, controls, live, intake, driver, launch or signal: say that line with the fix it carries, start
+nothing, and do not try another route to the same start. When the fix names a lapsed Claude sign-in, say to sign in
+once in a terminal by running `claude`, then ask to start again. When it names Brother's saved loop login
+(brother-login), say to run `runtime/loop/brother_login.py` once in a terminal, then ask to start again. A hold or
+pause is lifted only with `--lift-hold` and the person's own words. Without them the launcher refuses, and Brother
+never writes those words for the person.
+
+**What the launcher does**
+
+Behind the launcher are the steps that used to be typed by hand. The intake (`runtime/loop/loop_intake.py prepare`)
+records one budget for one run and refuses READY until the canary (`runtime/loop/loop_canary.py`, which replays landed
+builds through every judging stage) is green. The driver (`runtime/loop/loop_until.sh HH:MM`) runs passes until the
+deadline and prints PULSE and BUDGET lines. The report (`runtime/loop/loop_report.py`) prints what landed, what it
+cost, and the yield of every stage, each figure naming its file. These are the explanation of the launcher, not
+instructions to the person.
+
+Every number the loop reports is read from a ledger or a log. A run that ends with nothing landed says so, with the refusal classes that stopped it; it never rounds silence up to progress.
 
 ## More detail: verbs, boundaries, handback, closing
 

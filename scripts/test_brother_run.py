@@ -2768,7 +2768,8 @@ class DependencyMutationEndToEnd(unittest.TestCase):
             code = _br.main(["ignored", "--resume", self.run_dir, "--cwd",
                              self.repo])
         text = out.getvalue() + err.getvalue()
-        self.assertEqual(code, 0, text)
+        # TL1 (1.1.2 notes): one PASS beside a NO-DATA is PARTIAL and exits 2.
+        self.assertEqual(code, 2, text)
         self.assertIn("D delivered:", text)
         self.assertIn("U is NO-DATA: the check still passes with D's change "
                       "to D.txt reverted, so it does not exercise that "
@@ -5134,7 +5135,8 @@ class EachUnitCarriesItsOwnFileList(StubRunFixture):
                  "deps": []},
             ]))
         """ % ("%s %s" % (shlex.quote(sys.executable), shlex.quote(check))), NON_OVERWRITING_MODEL)
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): one PASS beside a NO-DATA is PARTIAL and exits 2.
+        self.assertEqual(proc.returncode, 2, out)
         self.assertIn("A1 delivered:", out, out)
         self.assertIn("N1 is NO-DATA: no file changed, so nothing here "
                       "proves the work was done", out, out)
@@ -6581,7 +6583,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
 
     def test_the_last_stdout_line_names_a_receipt_file_that_exists(self):
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         last = [line for line in proc.stdout.splitlines() if line.strip()][-1]
         self.assertTrue(last.startswith("brother_run: receipt: "), out)
         path = last.split("brother_run: receipt: ", 1)[1].strip()
@@ -6592,7 +6596,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
 
     def test_the_receipt_names_every_file_the_run_edited(self):
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         path = os.path.join(self._run_dir(), _br.RECEIPT_DIRNAME,
                             _br.RECEIPT_FILENAME)
         with open(path, encoding="utf-8") as fh:
@@ -6613,7 +6619,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
         receipt_path is filled in with THIS receipt's own path rather
         than left at the module's default NO-DATA."""
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         path = os.path.join(self._run_dir(), _br.RECEIPT_DIRNAME,
                             _br.RECEIPT_FILENAME)
         with open(path, encoding="utf-8") as fh:
@@ -6627,7 +6635,9 @@ class TheFirstRunLeavesAReceipt(unittest.TestCase):
         run whose receipt directory cannot be created (a plain FILE already
         sits at that name) must say so and refuse the zero."""
         proc, out = self._run()
-        self.assertEqual(proc.returncode, 0, out)
+        # TL1 (1.1.2 notes): G2 declares G1 but its check reads only test_mathlib.py,
+        # so G2 is NO-DATA and the run is PARTIAL, exit 2.
+        self.assertEqual(proc.returncode, 2, out)
         run_dir = self._run_dir()
         shutil.rmtree(os.path.join(run_dir, _br.RECEIPT_DIRNAME))
         with open(os.path.join(run_dir, _br.RECEIPT_DIRNAME), "w",
@@ -6692,16 +6702,44 @@ class TheWaitIsNarrated(unittest.TestCase):
         finally:
             beat.stop()
         self.assertEqual(record["verdict"], "PASS")
-        text = out.getvalue()
+        self._assert_narrated(out.getvalue())
+
+    def test_a_beat_before_the_unit_starts_is_honest_not_a_failure(self):
+        """1.1.2 cut, GitHub run 38146264768: on a slow runner the first beat
+        fired before run_node registered u1 and said "no piece of work has
+        started yet", which is true, and the old rule (every beat names u1)
+        failed the release check. tick() puts that pre-start beat in the
+        stream deterministically; the narration that follows must still name
+        the unit at least twice."""
+        out = io.StringIO()
+        beat = run_heartbeat.Heartbeat(interval=1.0, stream=out,
+                                       bound_seconds=900).start()
+        try:
+            out.write("\n".join(beat.tick()) + "\n")
+            record = loop_bridge.run_node({"id": "u1", "name": "the slow one"},
+                                          self._parts(), _SlowWorker(3.0))
+        finally:
+            beat.stop()
+        self.assertEqual(record["verdict"], "PASS")
+        self._assert_narrated(out.getvalue())
+
+    def _assert_narrated(self, text):
+        """At least two beats name u1, each with its worker and bound; the only
+        other beat allowed is the pre-start one, and only before the first
+        beat that names the unit."""
         beats = [line for line in text.splitlines()
                  if line.startswith("brother_run: still working:")]
-        self.assertGreaterEqual(len(beats), 2, text)
-        for line in beats:
+        named = [line for line in beats if "u1" in line]
+        self.assertGreaterEqual(len(named), 2, text)
+        first = beats.index(named[0])
+        for line in beats[:first]:
+            self.assertIn("no piece of work has started yet", line, text)
+        for line in beats[first:]:
             self.assertIn("u1", line)
             self.assertIn("worker the-slow-stub", line)
             self.assertIn("of at most 900s", line)
         # The phase is the LAST one the unit reached, never a generic "busy".
-        self.assertIn("the worker is running", beats[0])
+        self.assertIn("the worker is running", named[0])
 
     def test_each_state_change_says_so_once(self):
         out = io.StringIO()

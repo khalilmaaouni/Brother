@@ -17,7 +17,8 @@ def upstream():
         return None
     up = r.stdout.strip()
     return tuple(up.split("/", 1)) if r.returncode == 0 and "/" in up else None
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected()
 
 def _dir_time(path, mtime=None):
     """When a run folder was last active. The folder name carries only HHMMSS, which WRAPS AT MIDNIGHT: sorting
@@ -252,8 +253,8 @@ def _selftest_body():
     cases.append(("upstream() reads (remote, branch) from the checkout, and None with no upstream", _with == ("origin", "main") and _without is None))
     # THE ENTRY POINT, run for real: main() in a throwaway clone with a plan file. On 2026-09-22 14:10 a string
     # formatting error in main() crashed every pass while this selftest, which covered only the helpers, read OK.
-    _plan = os.path.join(_clone, "docs", "plan"); os.makedirs(_plan)
-    with open(os.path.join(_plan, "BROTHER-1.1.0-LAUNCH-WBS.json"), "w") as f:
+    _plan = os.path.join(_clone, os.path.dirname(PLAN)); os.makedirs(_plan)
+    with open(os.path.join(_clone, PLAN), "w") as f:   # the selected plan, so the child (which inherits BROTHER_WBS) reads this fixture
         json.dump({"units": [{"id": "X1", "state": "DONE", "subunits": []}, {"id": "X2", "state": "PARTIAL", "subunits": []}]}, f)
     _g("-C", _clone, "branch", "--set-upstream-to=origin/main")
     _env = dict(os.environ, BROTHER_EVIDENCE=os.path.join(_d, "ev"))
@@ -314,10 +315,16 @@ def main():
         outside = out_of_scope_subs(plan)
         held = sorted(s for s, (st, rest) in last.items() if st == "READY" and rest.strip() and s in outside and s not in landed_subs(plan))
         if held: print("READY outside this run's scope, not offered to land: %s" % ", ".join(held))
-        ready, unprobed, need, stalled = partition(last, landed_subs(plan), {s for _, s in alive}, closed_subs(plan) | outside)
+        # 2026-10-11: a READY build of a sub unit in no plan unit is never offered (land_batch holds it anyway), and
+        # every offered path is printed: loop_pass.sh lands exactly the paths printed here, so a "... N more" line hid
+        # the run's own builds behind 93 stale ones and the pass landed nothing.
+        in_plan = {s for u in plan.get("units", []) for s in (u.get("sub_units") or []) if isinstance(s, str)}
+        orphan = sum(1 for s, (st, rest) in last.items() if st == "READY" and rest.strip() and s not in in_plan)
+        if orphan: print("READY in no plan unit, not offered to land: %d" % orphan)
+        ready, unprobed, need, stalled = partition(last, landed_subs(plan), {s for _, s in alive},
+                                                   closed_subs(plan) | outside | (set(last) - in_plan))
         print("READY   %d to land%s" % (len(ready), ":" if ready else ""))
-        for p in ready[:8]: print("        " + p)
-        if len(ready) > 8: print("        ... %d more" % (len(ready) - 8))
+        for p in ready: print("        " + p)
         skipped = skipped_ready(last, landed_subs(plan), closed_subs(plan))
         if skipped: print("READY on closed units: %d skipped: %s" % (len(skipped), ", ".join(skipped)))
         print("UNPROBED %s (never landed: probe_round re-probes it, then a fresh runner rebuilds it)" % first3(unprobed))

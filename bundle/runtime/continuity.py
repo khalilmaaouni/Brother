@@ -117,20 +117,16 @@ def _target_cwd_from_journal(events):
 
 
 def _work_doc_path(run_dir):
-    """The one *.json file in run_dir that is not one of the engine's own
-    bookkeeping files, mirroring brother_run._find_work_doc but built off
-    the public ENGINE_JSON_FILES set rather than the private function
-    itself, the same reuse boundary journal_projection.py already keeps."""
-    if not os.path.isdir(run_dir):
-        return None
-    try:
-        names = os.listdir(run_dir)
-    except OSError as exc:
-        sys.stderr.write("continuity: could not list %s (%s)\n" % (run_dir, exc))
-        return None
-    files = [f for f in names if f.endswith(".json")
-             and f not in brother_run.ENGINE_JSON_FILES]
-    return os.path.join(run_dir, files[0]) if len(files) == 1 else None
+    """The run's Work document, asked of the engine's own lookup
+    (brother_run._find_work_doc_why, RW1), so continuity and the engine can
+    never disagree about which document a run is: a marker pointer wins over
+    a stray file, and a damaged marker or an ambiguous folder is a None here
+    that the capsule reads as NO-DATA. A folder that cannot be listed still
+    says so on stderr, the one diagnostic the old copy of the rule gave."""
+    path, why = brother_run._find_work_doc_why(run_dir)
+    if path is None and brother_run.WORK_DOC_UNLISTABLE in why:
+        sys.stderr.write("continuity: %s\n" % why)
+    return path
 
 
 def _read_json(path):

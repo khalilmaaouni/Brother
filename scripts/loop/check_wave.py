@@ -20,7 +20,8 @@ import datetime, fcntl, hashlib, json, os, re, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"; SPECS = "docs/plan/specs"
+import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
+PLAN = _PP.selected(); SPECS = "docs/plan/specs"
 # The verdict word may be qualified ("VERDICT unchanged: FIX FIRST" was a real 347 s answer read as NO-DATA on
 # 2026-09-22 because this demanded a bare colon). Up to 40 characters may sit between VERDICT and the ruling.
 VERDICT_RE = re.compile(r"VERDICT\b[^A-Za-z]{0,40}?(?:[A-Za-z]+[^A-Za-z]{1,10}){0,3}?(LAND AS IS|FIX FIRST)", re.I)

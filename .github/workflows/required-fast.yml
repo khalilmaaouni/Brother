@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 jobs:
   required-fast:
     # skipped on the private hub (spends no minutes, GitHub Free 2,000/month quota), runs free on the public export
@@ -11,6 +12,26 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.251
+      - name: required-fast
+        run: sh scripts/required_fast.sh
+  required-fast-canary:
+    # the same steps, only for a manual dispatch on the private hub: the candidate export tree on GitHub's Linux
+    # before the owner's y. It prints the commit and tree it checked first, so the record binds the run to that
+    # tree; it claims nothing about any other tree. UNVERIFIED: that github.event.repository.private is filled in a
+    # workflow_dispatch payload is not proven by a run yet; if it reads empty this job is skipped (spends nothing)
+    # and the runbook reads that skip as NO-DATA, never a pass.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bind the candidate tree
+        run: git rev-parse HEAD 'HEAD^{tree}'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

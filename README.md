@@ -8,31 +8,27 @@
 claude plugin marketplace add khalilmaaouni/Brother && claude plugin install brother@brother
 ```
 
-The marketplace this repository declares is named `brother`, in lower case, whatever case the repository slug you added it from carries. Use that spelling everywhere a command names the marketplace: `claude plugin marketplace update Brother` answers `Marketplace 'Brother' not found. Available marketplaces: brother` and exits 1.
-
-Open a repository and invoke Brother. With no unfinished work, the bare door asks what you are trying to do rather than making you choose BrotherMode, BrotherSBE, or another internal product.
+Open a repository and type `/brother`, followed by the outcome you want. For example:
 
 ```text
 /brother make add() reject non-numeric input and prove the behavior with a test
 ```
 
-If unfinished Brother work exists in that repository, the door should discover it and offer/resume the plain-language outcome instead of exposing a run id as the user experience.
-
-For the quick start, use an authenticated Claude Code session, with Git and Python available. Start a fresh Claude Code session after installation.
+With no unfinished work, Brother asks what you are trying to do. If work is unfinished, it can find it by its outcome and offer to resume it. For installation, update, and removal instructions, see [Install on Claude Code](docs/how-to/install-claude-code.md).
 
 ### Cursor
 
-Cursor loads a local plugin from `~/.cursor/plugins/local/brother`. From a Brother checkout:
+From a Brother checkout, install the local plugin:
 
-```bash
+```bash reference
 python3 scripts/cursor_plugin_install.py
 ```
 
-Then reload the window and invoke `/brother`. See [Install on Cursor](docs/how-to/install-cursor.md). Treat Cursor's limits as advisory until a signed-in Cursor Agent session demonstrates that it blocks an action outside the allowed scope. Installation and offline checks alone do not establish that boundary.
+Reload the window, then invoke `/brother`. See [Install on Cursor](docs/how-to/install-cursor.md). Cursor's limits remain advisory until a signed-in session demonstrates that an action outside the allowed scope is blocked.
 
 ### Codex
 
-Codex does not expose Brother through Claude's slash-command surface. Install the Brother plugin, wire the supported managed hooks/trust path, then use the installed Brother skill or runtime engine. See [Install on Codex](docs/how-to/install-codex.md).
+Install the Brother plugin and configure its supported managed hooks. Then use the installed Brother skill or run the engine from a Brother checkout. See [Install on Codex](docs/how-to/install-codex.md).
 
 To upgrade an existing install, remove the configured marketplace first, then add it again at the new ref, joined so no step runs over a failed one:
 
@@ -44,15 +40,21 @@ codex plugin marketplace remove brother && codex plugin marketplace add https://
 
 **When AI says done, Brother gives you proof.**
 
-You want to give an AI agent a task and get on with your day. But full auto asks for more trust than you can justify, and watching every action turns you into the agent's full-time supervisor.
+Brother connects scoped execution, verification, delivery evidence, and local memory. It helps you define the outcome, check the work, and review what happened. Protection depends on the installed controls, the task, and the quality of its checks. Brother does not guarantee that every task is safe to leave unattended.
 
-**Brother is built for autonomy you can justify:** agreed boundaries before the work, checks during execution, and an auditable record when you return. It is a plugin for Claude Code and Codex that connects scoped execution, verification, delivery evidence, and local memory.
+[Who Brother is for](#who-brother-is-for) · [Why this approach](#why-brother) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Documentation](docs/README.md)
 
-The goal is to let you step away for more useful work as the system earns confidence through a track record you can inspect. Current protection depends on the installed controls, the task, and the quality of its checks; Brother is not a blanket guarantee that any job is safe to leave unattended.
+**Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
 
-[The problem](#why-brother) · [Who it is for](#who-brother-is-for) · [Why this approach](#what-makes-brother-different) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Get started](#start-in-sixty-seconds) · [Documentation](docs/README.md)
+## What changed in 1.1.2
 
-**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
+A run that reports PASS beside NO-DATA now exits 2, meaning unverified. If its receipt cannot be written or read back, it exits 1. The result line and exit code now reflect the run’s whole delivery verdict.
+
+Runs record their Work document in `target.json`, and continuity asks the engine to look up that document. When the pointer is doubtful, the run refuses with a reason. The loop now sends every READY build for a planned unit to the lander, while builds with no plan unit are counted but never offered.
+
+The release rehearsal now keeps the machine awake from lock through recording, checks preflight before doing work, and reports the time for each cut step. The cut checks the version rule after the bump, tags the release pull request’s merge commit, and stops incomplete if a requested Release is missing. A manual dispatch job runs only on the private hub.
+
+The Codex install guidance and skill wording are refreshed, and the host capability table distinguishes documented mechanisms from current certification, which remains NO-DATA without matching sealed evidence. Version pages are checked for promises about the version being cut, and the live tree is checked for stale sentences. The run evidence recorder and handover ceremony also improve how interrupted work and repeated lessons are handled.
 
 ## What changed in 1.1.1
 
@@ -66,111 +68,228 @@ Brother addresses the trust gap between delegating work and knowing whether the 
 
 One plugin named `brother` replaces the three older plugins in the catalog, and its install line has no dependency on another catalog entry. Lesson recall can work in the one plugin when the Vault folder variables are set. The release proof is one completed unattended run of eight hours, not an endurance guarantee. For migration details, see [Migrate to the Brother plugin](docs/how-to/migrate-to-one-plugin.md). The older plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog; pinned installs of `brothermode` and `brothersbe` still resolve. Claim verification, formerly `brotherds`, is not carried by the one plugin and remains experimental. The limits of 1.1.0 are listed in [Limits before adoption](#limits-before-adoption).
 
-## Problems developers report, and what to type
+## What a receipt tells you
 
-The slash-command examples below are for Claude Code. Codex users should invoke the installed Brother skill with the same request.
+A completed run writes `receipt/receipt.json` inside its run directory and prints that path as its last line. The receipt names changed files, checks and their exact commands and exit codes, who wrote each check, the engine revision, and returned cost fields. If a field cannot be answered, the receipt says `NO-DATA` and why.
 
-### Agent says done without running anything
+The verdicts mean:
 
-Developers report agents claiming tests passed when no test ran or a later check failed.
+| Verdict | Meaning |
+| --- | --- |
+| `PASS` | The evidence supports the stated claim. |
+| `FAIL` | The evidence contradicts the stated claim. |
+| `NO-DATA` | The available evidence does not establish either answer. |
 
-**How Brother handles it:** Each completed Brother run writes a receipt listing changed files, exact checks, exit codes, and cases where the evidence cannot answer. Read the receipt path printed last and rerun its listed checks.
+A successful command is not proof by itself. A check that was already green, does not exercise the claimed behavior, or stays green when the implementation is reverted can be `NO-DATA`. A receipt makes evidence reviewable; it cannot make a weak check sufficient.
 
-**Use it**
+## Problems developers report, and how Brother handles them
+
+The examples use the `/brother` entry point. In Codex, invoke the installed Brother skill with the same request. Sources are linked with each reported problem. Reddit sources were read through third-party archive snapshots; their counts and dates are snapshot data, not live Reddit measurements.
+
+### “Done” without a test run
+
+A developer described a regression suite whose failures were reported as passing in [issue #46940](https://github.com/anthropics/claude-code/issues/46940) (2026-04-12). Other reports in the research note describe checks that failed or were never run.
+
+**Example:** A change breaks an existing case, but the closing message says the suite passed. The reviewer has to run it again to learn what happened.
+
+**Type:**
+
+```text
+/brother fix the regression and show which checks ran after the change
+```
+
+**What Brother does:** The receipt records each changed file, check command, exit code, and verdict. A check that did not run or does not establish the claim remains `NO-DATA`. J102 and J063 are second-opinion checks in shadow, so their answers do not control the run.
+
+**Evidence left:** The run receipt, with `PASS`, `FAIL`, or `NO-DATA` for the evidence. Rerun the listed checks when reviewing the result.
+
+**Limit:** A receipt is not an independent audit, and a test can be poorly designed.
+
+### A small request expands into unrelated edits
+
+A [Cursor forum report](https://forum.cursor.com/t/linear-cursor-cloud-agent-sonnet-4-5-makes-overly-broad-edits-touches-18-files-when-only-1-2-expected/165633) (2026-07-13) describes a copy button change that touched about 18 files, including unrelated cleanup.
+
+**Example:** You ask for one button and its test, then get a large diff of formatting and type changes that are hard to review.
+
+**Type:**
+
+```text
+/brother add the copy button and its test; only change the files needed for that behavior
+```
+
+**What Brother does:** Work can be defined with an objective, allowed writes, dependencies, and a deciding check. J117 audits scope in shadow. Scope enforcement depends on the active host and mode.
+
+**Evidence left:** The receipt identifies changed files and their checks. Scope findings can help direct review, but the shadow answer does not itself block a write.
+
+**Limit:** These controls are not an operating system sandbox. Cursor remains advisory until its signed-in canary demonstrates a deny.
+
+### Unattended work stalls or burns through its plan
+
+A report about a run pausing at a usage limit says it “kills productivity” for overnight work: [issue #35744](https://github.com/anthropics/claude-code/issues/35744) (2026-03-18). Other reports describe limits arriving sooner than expected, including [issue #38335](https://github.com/anthropics/claude-code/issues/38335) and [issue #16157](https://github.com/anthropics/claude-code/issues/16157). An archived [agent discussion](https://reddit.com/r/AI_Agents/comments/1srcerr) describes repeated work with rising token use and no visible failure.
+
+**Example:** A long job retries the same step, loses constraints, or stops at a limit without a useful account of what finished.
+
+**Type:**
 
 ```text
 /brother <outcome>
 ```
 
-**Limit:** A receipt cannot make a weak test sufficient, and an auditable record is not an independent audit.
+For existing work, resume from a Brother checkout with:
 
-### Edits outside the asked scope
-
-Developers report agents making unrelated edits that expand the diff beyond the request.
-
-**How Brother handles it:** A work unit declares its allowed writes, objective, check, and dependencies. Out-of-scope writes should be quarantined or refused; enforcement depends on the active mode and host.
-
-**Use it**
-
-```text
-/brother make add() reject non-numeric input and prove the behavior with a test; only change mathlib.py and test_mathlib.py
+```bash reference
+python3 scripts/brother_run.py --continue --cwd "$TARGET_REPO"
 ```
 
-**Limit:** Scope controls are not an operating system sandbox, and Cursor enforcement is advisory.
+**What Brother does:** Each run can be resumed from its recorded work. The receipt shows what changed and what checks ran. The Brother.loop release tooling is for Brother's own release plan; it is not a general-purpose overnight runner for other repositories.
 
-### Green checks that prove nothing
+**Evidence left:** A receipt for completed work and the run state used to resume. Cost fields that the worker did not return are `NO-DATA`.
 
-Developers report green checks after tests were weakened, skipped, or disconnected from the requested behavior.
+**Limit:** A cash budget for Claude seats is not established. A prior eight-hour run does not guarantee unattended operation.
 
-**How Brother handles it:** A check that was already green or stays green when the implementation is reverted is reported as `NO-DATA`. A unit that changed no file is also `NO-DATA`.
+### A scheduled run cannot answer a prompt
 
-**Use it**
+A report says scheduled tasks ask for folder and tool permissions again on each run: [issue #47180](https://github.com/anthropics/claude-code/issues/47180) (2026-04-13).
 
-For your project, read the verdict on each check in the receipt; an already-green or revert-insensitive check shows as `NO-DATA`. From a Brother checkout, run Brother's own self-test with:
+**Example:** A scheduled job waits for someone to approve a prompt that nobody sees.
+
+**Type:**
 
 ```text
-python3 scripts/test_brother_run.py
+/brother <outcome>
 ```
 
-**Limit:** The same agent can write code and tests that agree on the wrong answer, so bring independent expected results.
+**What Brother does:** The current intake checks whether the task can start with the available capabilities. If it cannot establish readiness, it reports the reason rather than treating a waiting process as completed work.
 
-### Context lost between sessions
+**Evidence left:** The intake result and, if work proceeds, the run receipt.
 
-Developers report having to restate decisions and project context when a new session starts.
+**Limit:** The specific sign-in warning and scheduled-run refusal improvements described in the plan are not part of this release.
 
-**How Brother handles it:** Brother can discover unfinished work by its plain-language outcome and resume it. Its local Vault can retain useful lessons, subject to checking them against current code and evidence.
+### Constraints disappear as the conversation grows
 
-**Use it**
+A report says that “user intent and corrections” were lost after context compaction: [issue #36068](https://github.com/anthropics/claude-code/issues/36068) (2026-03-19). An archived discussion describes writing state to disk because conversation memory does not survive compaction: [r/ClaudeAI snapshot](https://reddit.com/r/ClaudeAI/comments/1r06z4r) (about June 2025; snapshot read 2026-02-10).
 
-From a Brother checkout, set `TARGET_REPO` to the absolute path of the repository Brother was changing, then resume the repository work with:
+**Example:** A later session repeats a rejected approach or forgets a constraint that mattered to the original request.
+
+**Type:**
 
 ```text
 python3 scripts/brother_run.py --continue --cwd "$TARGET_REPO"
 ```
 
-For Vault recall, set `BM_VAULT_ROOT`, then from a Brother checkout index and recall lessons:
+For Vault recall, set `BM_VAULT_ROOT`, then use:
 
-```text
+```bash reference
 python3 products/brothermode/tools/bm_vault.py index --vault "$BM_VAULT_ROOT"
 python3 products/brothermode/tools/bm_vault.py recall --query "retry timeout duplicate charge" --limit 3 --fast --explain
 ```
 
-**Limit:** Memory is not evidence or a secrets store, and recalled text can reach the model provider.
+**What Brother does:** Resume finds unfinished work by its outcome. The local Vault can retain and retrieve lessons, constraints, and failed approaches. Check recalled information against current code and evidence.
 
-### Unattended runs going wrong
+**Evidence left:** The saved run state, any recalled lesson, and the new run receipt.
 
-Developers report unattended loops retrying, losing constraints, or consuming usage while no one is watching.
+**Limit:** Memory is not evidence or a secrets store. Recalled text may be sent to the model provider.
 
-**How Brother handles it:** Before launch, including resume, Brother probes managed capabilities; an explicit A0 higher-autonomy request is refused when those capabilities are insufficient, while other modes report `not enforced`. Failed work can be resumed with its run directory and worktrees.
+### Project rules are ignored
 
-**Use it**
+A report says mandatory repository rules were ignored across repositories: [issue #2544](https://github.com/anthropics/claude-code/issues/2544) (2025-06-24).
+
+**Example:** A prose rule says “do not change generated files,” but no check fails when the generated file is edited.
+
+**Type:**
 
 ```text
-/brother <outcome>
+/brother make the requested change and run the repository check that enforces its rules
 ```
 
-**Limit:** Brother does not cap token spend for you in this release, and one completed eight-hour run is not a guarantee of unattended operation.
+**What Brother does:** It treats a rule as enforceable only when a check or host control implements it. Work can name its check and allowed writes; Brother records the command and result.
 
-### Review burden
+**Evidence left:** The receipt records the check, exit code, and verdict. Run the project's own check directly when you need to confirm a rule.
 
-Developers report that producing code faster can leave more work for reviewers to understand and verify.
+**Limit:** Documentation alone cannot enforce a rule. The interpreter and command shapes supported by the runtime are limited.
 
-**How Brother handles it:** The receipt links evidence to each changed file. Reviewers are advised to read risky, unproven, and scope-surprising changes first, then mechanical ones.
+### Review cannot keep up with generated changes
 
-**Use it**
+An archived [r/ExperiencedDevs discussion](https://reddit.com/r/ExperiencedDevs/comments/1pem6eg) describes large generated changes that ordinary review feedback could not easily repair (about January 2025; snapshot read 2025-12-06). Another archived [r/programming discussion](https://reddit.com/r/programming/comments/1pvtq6l) asks how to make review resilient to low-quality generated code (about March 2025; snapshot read 2025-12-06).
 
-Open the receipt path printed last and read the changed files and checks.
+**Example:** A reviewer sees a large diff and a green summary, but has to reconstruct which check supports each file.
 
-**Limit:** Reading order assists review, but it is not acceptance and no review-time improvement has been demonstrated.
+**Type:**
 
-## How Brother is different
+```text
+/brother show what changed, which checks support it, and what remains unproven
+```
 
-- Verdicts are `PASS`, `FAIL`, or `NO-DATA`; `NO-DATA` is never a pass.
-- A check that cannot fail does not count as proof.
-- Each completed Brother run writes a receipt.
-- Allowed writes are declared up front, and enforcement depends on your host and mode.
-- Memory never overrides current evidence.
-- You keep the decisions.
+For a long log, a second opinion can be requested with:
+
+```bash reference
+python3 scripts/jev_checks.py j064 --lines-file log.txt
+```
+
+**What Brother does:** The receipt connects changed files to checks. J064 can triage log lines in shadow; the process exit code remains authoritative.
+
+**Evidence left:** Per-file checks and the receipt, plus a shadow answer where that check is configured.
+
+**Limit:** Shadow answers do not replace human review. The public export does not include the Jev registry needed for this check.
+
+### “I do not trust the green check”
+
+The 2025 Stack Overflow Developer Survey reports that 46% of respondents distrust AI tool accuracy and 66% named almost-right solutions as a leading frustration: [survey results](https://survey.stackoverflow.co/2025/ai).
+
+**Example:** A test passes, but it ran before the change, misses the requested behavior, or stays green after the implementation is undone.
+
+**Type:**
+
+```text
+python3 scripts/test_brother_run.py
+```
+
+For your own task, ask Brother to show which check proves the requested behavior:
+
+```text
+/brother show which check proves the behavior I asked for
+```
+
+**What Brother does:** Brother distinguishes a passing command from evidence that discriminates the claim. An already-green or revert-insensitive check can be `NO-DATA`.
+
+**Evidence left:** A receipt with a verdict and reason for each check. The self-test checks this rule in Brother's own run behavior.
+
+**Limit:** The agent may write code and tests that agree on the wrong answer. Use independent expected results where the outcome matters.
+
+### An iOS simulator result needs context
+
+A report says the simulator tool failed after frameworks moved: [issue #79991](https://github.com/anthropics/claude-code/issues/79991) (2026-07-22). The simulator documentation also says screenshots are sent under conversation retention: [simulator documentation](https://code.claude.com/docs/en/desktop-ios-simulator.md).
+
+**Example:** A build passes, but the record does not say which simulator runtime was used or which screenshot represents the result.
+
+**Type:**
+
+```text
+python3 scripts/mobile_workflow.py run
+```
+
+**What Brother does:** The mobile workflow records simulator evidence, including runtime and screenshot hash, for a run.
+
+**Evidence left:** A run receipt with the simulator runtime and screenshot SHA-256. Human acceptance remains a separate decision.
+
+**Limit:** Use simulated devices, not accounts containing real data. The plain-language mobile guidance and broader device matrix are planned work.
+
+### A late release failure means repeating earlier steps
+
+A release engineering post describes rebuilding artifacts and rerunning tests after a late pipeline configuration failure: [pipeline article](https://www.atlassian.com/blog/it-teams/rerun-failed-pipeline-steps) (2018-07-31).
+
+**Example:** A release check fails near the end, and the team repeats lengthy earlier checks to discover whether anything else changed.
+
+**Type:**
+
+```text
+python3 scripts/cut.py
+```
+
+**What Brother does:** The existing cut machinery records rehearsal state and checks whether a cut is eligible. Fast refusal and reuse of a recent ready rehearsal remain planned work.
+
+**Evidence left:** The rehearsal record and the checks it reports.
+
+**Limit:** The planned fast path does not ship in this release.
 
 ## Installation
 
@@ -179,120 +298,86 @@ claude plugin marketplace add khalilmaaouni/Brother && claude plugin install bro
 python3 scripts/cursor_plugin_install.py
 ```
 
-## Why Brother?
+## Why Brother
 
 **The problem is the trust gap between “it can do the work” and “I can leave it alone.”**
 
 You assign a task, then keep checking the terminal. You approve routine steps, scan a growing diff, and wonder whether the agent is still solving the right problem. Turn off the interruptions and the uncertainty remains: did it exceed its scope, weaken a test, repeat a failed approach, or declare success without evidence?
 
-Watching can catch mistakes, but watching is not an enforced boundary. A log can show what happened without preventing it. A stream of approvals can consume your attention without establishing that the result is correct. And an overnight run is not a productivity win if you spend the morning reconstructing and repairing it.
+Watching can catch mistakes, but watching is not an enforced boundary. A log can show what happened without preventing it. A stream of approvals can consume your attention without establishing that the result is correct. An overnight run is not a productivity win if you spend the morning reconstructing and repairing it.
 
-Brother's approach is to define the delegated work, constrain its execution through the available controls, verify its claims, and leave a record that makes the result reviewable. The human's role is to set intent and make consequential decisions; the system should carry the routine checking that makes delegation possible.
+Brother's approach is to define the delegated work, constrain its execution through available controls, verify its claims, and leave a record that makes the result reviewable. You set the intent and make consequential decisions; the system carries routine checking where it can.
 
 | What you need | What Brother brings |
 | --- | --- |
 | Confidence before stepping away | An explicit outcome, allowed changes, and deciding checks |
-| Limits on autonomous work | Isolated execution and scope controls, with enforcement dependent on setup |
+| Limits on autonomous work | Scope controls and isolated execution where available |
 | Verification while work proceeds | Recorded check results and visible failures or missing evidence |
-| A reviewable result on return | A receipt connecting changed files, commands, results, and unresolved findings |
-| Confidence that can grow over time | Rerunnable records and measurement protocols, with gaps disclosed |
+| A reviewable result on return | A receipt connecting files, commands, results, and unresolved findings |
+| Continuity beyond the conversation | Resumable work and local lessons that can be checked against current evidence |
 | Authority over consequential decisions | Human review, acceptance, and release decisions |
 
-**The ambition: more useful work completed while you are away, with less uncertainty when you return.**
+The aim is more useful work completed while you are away, with less uncertainty when you return. Whether this saves attention must be measured.
 
-### “I want to delegate, but I cannot stop watching.”
+### Who Brother is for
 
-Brother moves the trust question upstream: what may the agent change, what would demonstrate success, and which decisions remain yours? During execution, the configured controls and checks provide evidence about those boundaries. On return, the delivery record gives you a basis for acceptance.
-
-That is the intended shift from continuous supervision to bounded delegation and evidence-based review. Whether it actually saves attention must be measured; adding more logs or approval prompts alone does not establish that benefit.
-
-### “It says done. Now I have to check everything myself.”
-
-A summary is useful, but it does not show which command ran against which change. Brother records the changed files, deciding commands, exit codes, and evidence in a receipt. That gives a reviewer a concrete starting point: inspect the checks, rerun them, and identify the parts that still need attention.
-
-The benefit is traceability. It does not remove your responsibility to judge whether the checks are sufficient.
-
-### “The tests passed, but they did not test the thing I asked for.”
-
-Suppose you ask an assistant to reject invalid input. A test that only checks valid input can stay green before and after the change. Brother examines whether the deciding check distinguishes the claimed behavior. An already-green check, an unchanged implementation, or a check that remains green when its claimed dependency is reverted can lead to `NO-DATA`.
-
-You can see the gap between “a command succeeded” and “this behavior was demonstrated.”
-
-### “Every new session starts with explaining the project again.”
-
-Brother can discover unfinished work and resume it by its outcome. Its local Vault can retain lessons, constraints, decisions, and failed approaches that are useful later. This gives subsequent work a place to recover context beyond the current conversation.
-
-Memory is still subject to checking. A recalled lesson cannot override current code, current evidence, or your decision.
-
-### “A small request became a sprawling change.”
-
-For substantial implementation work, Brother divides the outcome into bounded pieces. Each declares what it is trying to accomplish, what files it may change, how it will be checked, and what it depends on. Independent pieces can run separately; the results are integrated in sequence.
-
-That makes the scope and dependencies inspectable before you accept the combined result. Tiny reversible tasks can stay outside this process.
-
-### “I need to hand this over, not hand over my entire chat.”
-
-Brother brings the evidence into the delivery record: what changed, what ran, what the results support, and what remains unknown. A teammate or your future self can start from that record and follow the evidence instead of treating a confident closing message as the source of truth.
-
-## Who Brother is for
-
-Brother is for people who want to delegate meaningful work to an agent but cannot justify unrestricted full auto. Its strongest fit is work in repositories where scope and success can be made explicit and checked. The aim is to make stepping away a reasoned decision, supported by the task's controls and evidence.
+Brother is for people who want to delegate meaningful work but cannot justify unrestricted autonomy. It fits repository work where scope and success can be made explicit and checked.
 
 | User | A familiar problem | How Brother helps | What you still own |
 | --- | --- | --- | --- |
-| **Developers and solo builders** | You want a feature built while you focus elsewhere, but keep checking the agent | Define the behavior, bound the edits, and retain checks with the change | Product intent, sufficient test coverage, and the decision to ship |
-| **Backend and data engineers** | A schema or pipeline change might break consumers you did not touch | Bring migration, rollback, and downstream evidence into the review | Identifying real consumers and providing a representative test environment |
-| **Analysts and technical business analysts** | A number reaches a decision without a traceable derivation | Connect the reported figure to source data, calculations, and reconciliation evidence | Business definitions, source quality, and interpretation |
-| **QA engineers and reviewers** | “All tests pass” hides which requirements were actually checked | Inspect the commands and distinguish supported claims from missing evidence | Independent expected results and additional checks where needed |
-| **Technical leads and delivery owners** | Running more agents multiplies the work of supervising them | Use bounded outcomes, resumable work, and delivery evidence to assess delegation | Priorities, acceptance, and release authority |
-| **Mobile developers** | A native change can pass one check while its device, build, or release evidence is incomplete | Plan a journey, run bounded simulator checks, and keep native evidence separate from product acceptance | Device coverage, product quality, accessibility, and the decision to release |
+| Developers and solo builders | A feature takes attention away from other work | Define the behavior, bound edits, and retain checks with the change | Product intent, adequate test coverage, and the decision to ship |
+| Backend and data engineers | A schema or pipeline change may affect consumers outside the diff | Bring migration, rollback, and downstream evidence into review | Finding real consumers and providing a representative environment |
+| Analysts and business analysts | A figure reaches a decision without a traceable derivation | Connect the figure to source data, calculations, and reconciliation evidence | Business definitions, source quality, and interpretation |
+| QA engineers and reviewers | “All tests pass” hides which requirements were checked | Inspect commands and distinguish supported claims from missing evidence | Independent expected results and additional checks |
+| Technical leads and delivery owners | More agents can mean more supervision work | Use bounded outcomes, resumable work, and delivery evidence | Priorities, acceptance, and release authority |
+| Mobile developers | A native change may lack device or build evidence | Plan a bounded simulator check and retain its evidence | Device coverage, product quality, accessibility, and release decision |
 
-You do not need to learn the internal product names to begin. Describe the work through Brother's entry point. For role-specific examples, see the [professional guides](docs/README.md).
+You do not need to learn internal product names to begin. Describe the work through Brother's entry point. See the [professional guides](docs/README.md) for role-specific examples.
 
 ### When to use something simpler
 
-If you are exploring an idea, asking a question, or making an obvious reversible edit, the full execution process may add more work than it saves. Brother is designed to scale the checking to the task, and to stay out of trivial work. It also needs access to the relevant code, data, or test environment to substantiate a claim; missing access cannot be repaired by better wording.
+For exploration, questions, or obvious reversible edits, the full process may add more work than it saves. Brother also needs access to the relevant code, data, or test environment to substantiate a claim. Missing access cannot be fixed by better wording.
 
 ## What makes Brother different
 
-**Not another promise that agents can code. A way to decide which work deserves your trust.**
+Brother connects execution boundaries, checks, delivery evidence, and local memory. It does not claim to be the only tool with tests, memory, or isolated workers.
 
-Brother's distinctive emphasis is the connection between these mechanisms, not a claim that nobody else has tests, memory, or isolated workers:
-
-| Differentiator | What you get | The limit that matters |
+| Differentiator | What you get | Limit |
 | --- | --- | --- |
-| **Evidence tied to the change** | A durable receipt naming files, exact checks, results, and unresolved claims | A receipt cannot make a weak test sufficient |
-| **Checks that must distinguish the behavior** | Already-green and revert-insensitive checks can be marked `NO-DATA`, rather than sold as proof | This tests relevance, not complete specification coverage |
-| **Bounded execution, then serial integration** | Declared write scopes and dependencies, isolated work where available, checked results brought together in order | Host controls and effective safety mode determine enforcement |
-| **The Vault at the point of work** | Retrieve a past failure by its symptom, file, or linked lesson before repeating it | Recall is fallible context, never permission or current proof |
-| **Continuity beyond the chat** | Resume an unfinished outcome and inspect a saved delivery record | State must remain available; not every failure is automatically repairable |
-| **Authority separate from evidence** | A visible distinction between checked work, human acceptance, and release | You still own requirements, consequential decisions, and shipping |
+| Evidence tied to the change | A receipt naming files, exact checks, results, and unresolved claims | A receipt cannot make a weak test sufficient |
+| Checks that distinguish behavior | Already-green and revert-insensitive checks can be `NO-DATA` | This does not establish complete specification coverage |
+| Bounded execution and integration | Declared write scopes and dependencies, isolated work where available, checked results integrated in sequence | Enforcement depends on host controls and mode |
+| The Vault at the point of work | Retrieve a past failure by symptom, file, or linked lesson | Recall is fallible context, not permission or current proof |
+| Continuity beyond the conversation | Resume unfinished outcomes and inspect saved delivery records | State must remain available; not every failure is automatically repairable |
+| Authority separate from evidence | A distinction between checked work, human acceptance, and release | You still own requirements and consequential decisions |
 
-The intended loop is simple: **delegate within a boundary, inspect what happened, remember what mattered, and earn the next increment of autonomy.** Start with [what is enforced and what is not](docs/reference/safety-boundaries.md). For source-level detail, see the generated [system map](SYSTEM.md).
+The intended loop is: delegate within a boundary, inspect what happened, remember what mattered, and earn the next increment of autonomy. Start with [what is enforced and what is not](docs/reference/safety-boundaries.md). For source-level detail, see the generated [system map](SYSTEM.md).
 
-## A calibrated second opinion, when you turn it on
+## A calibrated second opinion
 
-Jev gives a checked decision a second opinion from an outside model service. To turn it on, add the chosen check to the `modes` object in `data/jev-seams.json`, then supply the key for that outside service. Every check ships switched off. When switched on, it records a second opinion and leaves the normal check's outcome unchanged. The public copy ships the code without the registry file because the `data` directory is not in the export allowlist, so these checks cannot run from a public install yet. Read [how to use calibrated decisions](docs/how-to/use-calibrated-decisions.md) before enabling one.
+Jev can give selected checks a second opinion. Its answers do not replace the deterministic check or the human decision. In shadow use, the answer is recorded while the existing check retains authority. See [how to use calibrated decisions](docs/how-to/use-calibrated-decisions.md).
+
+Some Jev questions are available as manual calls. The public export does not include the registry file, so registry-backed checks cannot run from a public install. Its readout and broader integration remain planned. Do not send private customer records, names, paths, or raw data to an outside service.
 
 ## How it works
 
-The delegation model has three stages: agree the boundaries, execute with the configured checks and controls, then review the evidence. Start with narrow tasks and inspect the results before trusting the same setup with larger ones.
+The delegation model has three stages: agree on the boundaries, execute with configured checks and controls, then review the evidence. Start with narrow tasks and inspect the results before trusting the same setup with larger work.
 
 ```mermaid
 flowchart LR
     A[Before you step away] --> B[While the agent works]
     B --> C[When you return]
     A --> D[Outcome, scope, checks, human decisions]
-    B --> E[Isolated work, configured controls, recorded checks]
+    B --> E[Configured controls, isolated work, recorded checks]
     C --> F[Receipt, failures, unknowns, acceptance]
 ```
 
-For substantial changes, Brother turns your request into bounded work with explicit checks, brings the results together, and records the evidence for your review.
+For substantial changes, Brother turns the request into bounded work with explicit checks, brings the results together, and records evidence for review.
 
 ```mermaid
 flowchart TD
     A[Describe the outcome] --> B[Define success and allowed changes]
-    B --> C[Work in isolated units]
+    B --> C[Work in isolated pieces]
     C --> D[Run the deciding checks]
     D --> E[Integrate checked work in sequence]
     E --> F[Inspect the receipt and unresolved findings]
@@ -305,31 +390,29 @@ flowchart TD
     class D,F evidence
 ```
 
-Independent work can proceed separately; integration happens in sequence. Failed checks and missing evidence remain visible. The receipt supports your decision; it does not authorize a deployment or accept the result for you.
+Independent work can proceed separately; integration happens in sequence. Failed checks and missing evidence remain visible. A receipt supports your decision; it does not authorize a deployment or accept the result for you.
 
 ### 1. Describe the result, including what must stay true
 
-Start with the outcome you need, rather than a list of tools to invoke. For example: “Reject non-numeric input, keep valid additions working, and show tests for both.” For work that needs a contract, intake records the original question, success checks, required answers, and relevant decision requirements.
-
-This gives the plan a target to answer. A technically correct change can still be the wrong answer to the request.
+Start with the outcome you need rather than a list of tools to invoke. For example: “Reject non-numeric input, keep valid additions working, and show tests for both.” If the requirement is ambiguous, resolve it before a test can act as the expected answer.
 
 ### 2. Make the work and its checks explicit
 
-Substantial work becomes units with an objective, allowed writes, dependencies, and a deciding command. The check is part of the definition of completion, rather than an explanation added afterward.
+Substantial work can be divided into pieces with an objective, allowed writes, dependencies, and a deciding command. The check is part of the definition of completion, not an explanation added afterward.
 
-Risk-bearing work receives additional assurance. A migration needs different evidence from a UI change; a decision-grade figure needs its derivation. Brother routes the work accordingly.
+Risk-bearing work needs evidence appropriate to the risk. A migration needs different evidence from a UI change; a decision-grade figure needs its derivation.
 
 ### 3. Execute and inspect what the checks establish
 
-The execution path isolates units and checks their results before serial integration. Brother records failures and cases where the evidence does not establish the claim. The question is not only whether a command returned zero, but whether that result supports the behavior being claimed.
+The execution path isolates work where available and checks results before serial integration. Brother records failures and cases where evidence does not establish the claim. The question is not only whether a command returned zero, but whether that result supports the behavior being claimed.
 
 ### 4. Review the delivery with evidence attached
 
-Read the receipt to see the files, commands, results, and unresolved findings. Rerun the relevant checks. Judge whether the evidence is enough for the decision in front of you. Review, acceptance, and release remain explicit human decisions.
+Read the receipt to see files, commands, results, and unresolved findings. Rerun relevant checks. Judge whether the evidence is enough for the decision in front of you. Review, acceptance, and release remain explicit human decisions.
 
 ### 5. Carry useful knowledge into the next task
 
-Resume unfinished outcomes and retain useful lessons in the Vault. The aim is to make future work easier to orient and less likely to repeat known mistakes, while keeping recalled context subordinate to current evidence.
+Resume unfinished outcomes and retain useful lessons in the Vault. Recalled context remains subordinate to current evidence.
 
 ## An example: fix input validation without breaking valid requests
 
@@ -342,17 +425,17 @@ Imagine a function accepts two values. It adds numbers correctly, but also accep
 and cover both behaviors with tests
 ```
 
-**The work to make explicit:** which implementation and test files may change, what counts as invalid input, and which commands demonstrate both rejection and preserved behavior. If the requirement is ambiguous, that needs resolving before a test can act as the expected answer.
+**The work to make explicit:** Which implementation and test files may change, what counts as invalid input, and which commands demonstrate both rejection and preserved behavior. If the requirement is ambiguous, resolve it before testing.
 
-**The evidence to inspect:** a check that demonstrates invalid input is rejected, a regression check for valid input, and a receipt connecting those results to the files that changed. If the proposed rejection test already passed before implementation, its green result alone does not prove the fix.
+**The evidence to inspect:** A check that demonstrates invalid input is rejected, a regression check for valid input, and a receipt connecting those results to changed files. If a rejection test already passed before implementation, its green result alone does not prove the fix.
 
-**Your decision:** whether the examples and edge cases are sufficient for this function's callers. Brother gives you a record to review; it does not invent missing requirements or make that judgment for you.
+**Your decision:** Whether the examples and edge cases are sufficient for callers. Brother gives you a record to review; it does not invent missing requirements or make that judgment for you.
 
-This is an illustrative workflow. The first-run transcript below includes a real distinction between a verified implementation check and a test-file claim that remained `NO-DATA`.
+This is an illustrative workflow. The first-run transcript below distinguishes a verified implementation check from a test-file claim that remained `NO-DATA`.
 
 ## Trust is earned across runs
 
-A successful demo is a starting point. A trustworthy autonomous workflow needs a track record: what tasks it attempted, what it completed, where a person intervened, what escaped the checks, and whether another reviewer can reproduce the result.
+A successful demonstration is a starting point. A trustworthy autonomous workflow needs a track record: what tasks it attempted, what it completed, where a person intervened, what escaped checks, and whether another reviewer can reproduce the result.
 
 Brother's receipts make runs inspectable. **Auditable does not mean independently audited or certified.** This page does not claim an independent safety audit, a proven unattended success rate, or a measured reduction in supervision time.
 
@@ -363,11 +446,11 @@ Two measurement protocols make the ambition concrete:
 | [Safe Unwatched Time](benchmarks/SAFE-UNWATCHED-TIME.md) | How much recorded work proceeds before a scope or evidence failure? | The instrument does not record human interventions, so its duration is an upper bound, not proof of unattended operation. It does not measure overall quality. |
 | [Acceptance Time](benchmarks/ACCEPTANCE-TIME.md) | Can a competent reviewer reach the correct accept/reject decision faster from a receipt? | The protocol requires a human trial. This page claims no demonstrated improvement. |
 
-The standard to earn is **longer useful autonomy, enforceable boundaries, recoverable failures, and a record that stands up to review**. Confidence should grow from representative runs and disclosed failures, not from a larger permission grant.
+The standard to earn is longer useful autonomy, enforceable boundaries, recoverable failures, and a record that stands up to review. Confidence should grow from representative runs and disclosed failures, not from a larger permission grant.
 
 ## The north star: autonomy that reaches verified reality
 
-**The goal is to delegate more useful work without giving up control or losing the ability to verify the outcome.** Brother connects what you intended, what was built, the evidence used to accept it, and what happened after release. More time running unattended only matters if the work remains within its boundaries and the result holds up.
+**The goal is to delegate more useful work without giving up control or losing the ability to verify the outcome.** Brother connects what you intended, what was built, the evidence used to accept it, and what happened after release. More time running unattended matters only if the work stays within its boundaries and the result holds up.
 
 ```mermaid
 flowchart LR
@@ -563,23 +646,23 @@ It is not an automatic source of truth, a secrets store, or proof that repeat er
 - Memory is not evidence.
 - Tool exit success is not delivery proof.
 - Claude Code and Codex have different host surfaces.
-- Hook scope depends on install path/configuration; read [Hook scope](docs/reference/hooks.md).
-- Tiny reversible tasks can still cost more through Brother than doing them directly, but not in every case any more: when a request already names its own existing file or files, and its own existing check written the one way Brother already knows how to run today (in the specific, narrow shape it already recognizes, not yet any test file in any framework), uses no risky wording, and the tree it runs against is already clean, Brother skips straight to doing the work and never opens a separate model session just to plan it, automatically, with nothing to turn on. Most everyday requests do not qualify, including one phrased only as plain instructions with no file or check named in it. Measured here with the model calls stood in by a script rather than a real one, so the figures below are Brother's own code and never a wait on a real model: four small requests were driven through the one command a person types, and all four finished successfully; the two that qualified opened no separate planning session at all, against one each for the two that did not, while Brother's own code took between 5.62 and 8.4 seconds either way. What a person waiting on a real model actually experiences from this is not recorded on this page.
+- Hook scope depends on install path and configuration; read [Hook scope](docs/reference/hooks.md).
+- Brother may add more effort than it saves for trivial reversible work. An existing small-change path covers only requests that meet its documented conditions. Its recorded measurement used scripted stand-ins rather than a real model, so it does not establish what a person waiting on a real model experiences.
 - Exact version capability belongs in the public release and generated `SYSTEM.md`, not copied historical prose.
-- The full instructions for older plugins' individual verb skills remain under `products/` and cannot be installed through the one plugin in this release. Carrying them is the first unit of the next release.
+- Older plugins' individual verb skills remain under `products/` and cannot be installed through the one plugin. Carrying them is planned work.
 - Users of `brotherds` should keep their existing copy and install `brother` beside it; do not uninstall `brotherds`. Old pinned copies keep their commands, and new work arrives only in `brother`.
 - For Codex upgrades, rerun status after the upgrade, repeat managed-hook setup and check, keep the hook checkout at the chosen version, start a fresh Codex session, and try a small task.
-- Brother's local Vault is not a secrets store. Do not store credentials or raw customer data; local storage does not mean recalled content stays off the network.
+- The local Vault is not a secrets store. Do not store credentials or raw customer data; recalled content may be sent to the model provider.
 - Lesson capture reads its folder from `BROTHERMODE_VAULT_ROOT`. If unset, capture is skipped and reads `NO-DATA`.
 - When acceptance cites a run, a review receipt or an explicit recorded review skip with its reason and decision maker is required, but the plugin's acceptance record does not check for it. The enforcement tool is in the repository, not in the plugin.
 - The deliver verb reads receipts recorded in an outcome contract, not the receipt of an engine run.
-- The session spend guard, decision intake gate, disk floor gate, and workflow cost wall are maintainer safety hooks and are not shipped in 1.1.0. Where shipped text cites one, it describes the maintainer's environment.
-- Antigravity's host data guard is opt in. Set `BROTHER_ANTIGRAVITY_GUARD_HOST_DATA=1` to turn it on; by default Antigravity has full access to its data folder. On Antigravity, the hook does not block a `run_command` whose command reaches outside the workspace (limitation F-007).
-- The release proof is one completed unattended run of eight hours. A second consecutive run did not start; the two run proof will be run after this release on the shipped runtime and published with the next release.
-- The planned automated pre-cut review is built only in part: its first two parts exist as tooling and the other four do not. This release had independent adversarial reviews for each change set and a machine wide inventory of everything developed since 1.0.21.
+- The session spend guard, decision intake gate, disk floor gate, and workflow cost wall are maintainer safety hooks, not shipped controls.
+- Antigravity's host data guard is opt in. Set `BROTHER_ANTIGRAVITY_GUARD_HOST_DATA=1` to turn it on; by default Antigravity has full access to its data folder. On Antigravity, the hook does not block a `run_command` whose command reaches outside the workspace.
+- The release proof is one completed unattended run of eight hours. A second consecutive run did not start; the two-run proof is not established.
+- The planned automated pre-cut review is built only in part: its first two parts exist as tooling and the other four do not. This release had independent adversarial reviews for each change set and a machine-wide inventory of everything developed since 1.0.21.
 - Three declared test exceptions stand in 1.1.0, each with a review date of 2026-10-20. The external verification score was not re-measured; its last recorded run reads 1 of 5. The long release note perturbation check runs only when `BROTHER_LONG_CHECKS=1` is set and was not run. Two tag signature tests are skipped on a machine without gpg.
 - The loop driver does not check the power source. On a laptop, low battery sleep can end a run with a disk alarm because the sleep image is read as missing free space. Keep the machine on AC power for an unattended run. The unattended build loop under `scripts/loop` is maintainer tooling, not a supported public feature.
-- A killed then resumed run with a stale `.git/packed-refs.lock` may refuse one unit, and the refusal message does not name the lock file. Remove the stale lock by hand and resume; a repair is planned for 1.1.1.
+- A killed then resumed run with a stale `.git/packed-refs.lock` may still refuse one unit after a short bounded retry; the refusal names the lock file and carries git's own advice. Remove the stale lock by hand and resume.
 - Reproduce the export from a clone with `git checkout v1.1.0` then `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.0`.
 - Lesson recall can work in the one plugin when `BROTHERMODE_VAULT_ROOT` and `BM_VAULT_ROOT` are set to the same folder until the unified resolver is available.
 
@@ -593,13 +676,13 @@ Start at [docs/README.md](docs/README.md).
 
 ## Version truth is checked
 
-Brother checks that the shipped version statements in its public documentation match the declared version source, including the plugin manifests that installation resolves.
+Brother checks that shipped version statements in public documentation match the declared version source, including the plugin manifests resolved during installation.
 
 ```text
 python3 scripts/test_version_truth.py
 ```
 
-To check a fresh clone before you trust it, run `sh scripts/required_fast.sh` from the repository root. It drives Brother's delivery engine with scripted stand-ins for the model, so it proves the mechanism works, not how a real model behaves. A run prints a summary line of the form `pass N   fail N   no-data N`, and a check with no data is listed as NO-DATA, never counted as a pass. It is not a live client check: that is `sh scripts/bundle-install-smoke.sh`, which needs the `claude` binary on your PATH and exits 2 with BLOCKED when it is missing. A human acceptance trial (you run one real task and judge its receipt) reads NO-DATA until someone runs it.
+To check a fresh clone before you trust it, run `sh scripts/required_fast.sh` from the repository root. It drives Brother's delivery engine with scripted stand-ins for the model, so it proves the mechanism works, not how a real model behaves. A run prints a summary line of the form `pass N   fail N   no-data N`, and a check with no data is listed as `NO-DATA`, never counted as a pass. It is not a live client check: that is `sh scripts/bundle-install-smoke.sh`, which needs the `claude` binary on your PATH and exits 2 with BLOCKED when it is missing. A human acceptance trial (you run one real task and judge its receipt) reads NO-DATA until someone runs it.
 
 ## Mobile development and claim verification
 
