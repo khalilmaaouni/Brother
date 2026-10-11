@@ -21,7 +21,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pr_park_state as S  # noqa: E402
-from test_pr_park_triage import make_repo, pr, write_fake_gh  # noqa: E402
+from test_pr_park_triage import NOW, make_repo, pr, write_fake_gh  # noqa: E402
 
 try:
     import tmp_sandbox
@@ -111,6 +111,8 @@ class Script(unittest.TestCase):
         self.env = write_fake_gh(self.tmp)
         self.env["PR_PARK_MAIN_REF"] = "main"
         self.env["PR_PARK_REPO"] = "o/r"
+        # the fixture dates are absolute, so the clock is too: unpinned, this suite went red on main once they aged
+        self.env["PR_PARK_NOW"] = NOW
         self.list = os.path.join(self.tmp, "park.txt")
 
     def gh_files(self, prs, views):

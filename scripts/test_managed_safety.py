@@ -457,5 +457,122 @@ class TheWorkerProbePicksArgvByClient(unittest.TestCase):
         self.assertIn("client=claude", entry["detail"], entry)
 
 
+class TheHookCheckResolvesTheRegisteredPath(unittest.TestCase):
+    """SF1.a (2026-10-11): the Claude branch of _check_hooks used to read PRESENT the moment a settings.json
+    or a plugin cache hooks.json CONTAINED the text bm_fence_hook.py, so a cache left by an uninstalled
+    version, or a settings entry pointing at a deleted checkout, lifted capability_floor to A0. Now the
+    path the matched text names is resolved and must be a regular file; the PRESENT detail says exactly
+    what was proven. Every fixture lives under one mkdtemp HOME; the real ~/.claude is never read."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="sf1a-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.env = {"HOME": self.tmp, "BROTHER_MODEL_CLIENT": "claude"}
+
+    def _cache(self, market, with_file, command='python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_fence_hook.py"'):
+        root = os.path.join(self.tmp, ".claude", "plugins", "cache", market, "brothermode", "1.0.0")
+        os.makedirs(os.path.join(root, "hooks"))
+        doc = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write",
+                                         "hooks": [{"type": "command", "command": command}]}]}}
+        with open(os.path.join(root, "hooks", "hooks.json"), "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        fence = os.path.join(root, "tools", "bm_fence_hook.py")
+        if with_file:
+            os.makedirs(os.path.dirname(fence))
+            open(fence, "w").close()
+        return fence
+
+    def _settings(self, path_text):
+        cfg = os.path.join(self.tmp, ".claude")
+        os.makedirs(cfg, exist_ok=True)
+        doc = {"hooks": {"PreToolUse": [{"matcher": "Edit",
+                                         "hooks": [{"type": "command", "command": "python3 %s" % path_text}]}]}}
+        with open(os.path.join(cfg, "settings.json"), "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+
+    def test_a_cache_registration_whose_file_is_missing_reads_missing_with_a_remedy(self):
+        fence = self._cache("m", with_file=False)
+        entry = managed_safety._check_hooks(self.env)
+        self.assertEqual(entry["state"], managed_safety.MISSING, entry)
+        self.assertIn(fence, entry["detail"], entry)
+        self.assertTrue(entry["remedy"].strip(), entry)
+        self.assertEqual(managed_safety.capability_floor({"hooks": entry}), "A3")
+
+    def test_a_cache_registration_whose_file_exists_reads_present_not_proven(self):
+        fence = self._cache("m", with_file=True)
+        entry = managed_safety._check_hooks(self.env)
+        self.assertEqual(entry["state"], managed_safety.PRESENT, entry)
+        self.assertTrue(entry["detail"].endswith(managed_safety.NOT_PROVEN), entry)
+        self.assertIn(fence, entry["detail"], entry)
+
+    def test_settings_json_absolute_path_is_present_only_when_the_file_exists(self):
+        fence = os.path.join(self.tmp, "elsewhere", "bm_fence_hook.py")
+        self._settings(fence)
+        self.assertEqual(managed_safety._check_hooks(self.env)["state"], managed_safety.MISSING)
+        os.makedirs(os.path.dirname(fence))
+        open(fence, "w").close()
+        entry = managed_safety._check_hooks(self.env)
+        self.assertEqual(entry["state"], managed_safety.PRESENT, entry)
+        self.assertIn(fence, entry["detail"], entry)
+
+    def test_settings_json_with_the_plugin_root_variable_is_unresolvable(self):
+        self._settings('"${CLAUDE_PLUGIN_ROOT}/tools/bm_fence_hook.py"')
+        entry = managed_safety._check_hooks(self.env)
+        self.assertEqual(entry["state"], managed_safety.MISSING, entry)
+        self.assertIn("unresolvable", entry["detail"], entry)
+
+    def test_a_stale_cache_beside_a_live_one_reads_present_naming_the_live_file(self):
+        self._cache("a-stale", with_file=False)
+        live = self._cache("b-live", with_file=True)
+        entry = managed_safety._check_hooks(self.env)
+        self.assertEqual(entry["state"], managed_safety.PRESENT, entry)
+        self.assertIn(live, entry["detail"], entry)
+
+    def test_no_registration_at_all_reads_missing_as_before(self):
+        os.makedirs(os.path.join(self.tmp, ".claude"))
+        entry = managed_safety._check_hooks(self.env)
+        self.assertEqual(entry["state"], managed_safety.MISSING, entry)
+        self.assertIn("none of", entry["detail"], entry)
+
+    def test_registered_fence_path_is_pure(self):
+        rf = managed_safety.registered_fence_path
+        self.assertIsNone(rf("python3 hook_guard.py", "/x/hooks/hooks.json"))
+        self.assertIsNone(rf("", "/x/hooks/hooks.json"))
+        self.assertEqual(rf("~/x/bm_fence_hook.py", "/s/settings.json"),
+                         os.path.expanduser("~/x/bm_fence_hook.py"))
+        self.assertEqual(rf('python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_fence_hook.py"', "/p/r/hooks/hooks.json"),
+                         "/p/r/tools/bm_fence_hook.py")
+        self.assertIsNone(rf('"${CLAUDE_PLUGIN_ROOT}/tools/bm_fence_hook.py"', "/s/settings.json"))
+        guarded = ('python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py" brothermode PreToolUse '
+                   '"--matcher=Edit" python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_fence_hook.py"')
+        self.assertEqual(rf(guarded, "/p/r/hooks/hooks.json"),
+                         "/p/r/runtime/hooks/brothermode/tools/bm_fence_hook.py")
+
+
+class ThePreflightNoteSaysWhatWasProven(unittest.TestCase):
+    """SF1.b (2026-10-11): brother_run.py's preflight line appended ", not enforced" only when the worst
+    capability was not PRESENT, so an all PRESENT probe (a text match, see the class above) read as full
+    enforcement. The suffix now comes from one function beside the states it reads, and the all PRESENT
+    case says exactly what the probe proved."""
+
+    def test_present_gives_the_registered_not_proven_note(self):
+        self.assertEqual(managed_safety.enforcement_note(managed_safety.PRESENT),
+                         managed_safety.ENFORCEMENT_PRESENT)
+        self.assertIn("live denial not proven by this preflight", managed_safety.ENFORCEMENT_PRESENT)
+        self.assertTrue(managed_safety.ENFORCEMENT_PRESENT.startswith(", "))
+
+    def test_every_other_state_gives_not_enforced(self):
+        self.assertEqual(managed_safety.ENFORCEMENT_ABSENT, ", not enforced")
+        for state in (managed_safety.MISSING, managed_safety.NODATA, "", None, 3, "present"):
+            with self.subTest(state=state):
+                self.assertEqual(managed_safety.enforcement_note(state), managed_safety.ENFORCEMENT_ABSENT)
+
+    def test_brother_run_prints_through_the_note_and_carries_no_literal_of_its_own(self):
+        with open(BROTHER_RUN, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("managed_safety.enforcement_note(worst_state)", src)
+        self.assertNotIn('", not enforced"', src)
+
+
 if __name__ == "__main__":
     unittest.main()

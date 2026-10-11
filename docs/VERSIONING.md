@@ -4,13 +4,13 @@ This is Brother's release contract. Version figures are copied from the version 
 
 ## One plugin
 
-Brother 1.1.0 has one plugin named `brother`. The old plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog, leaving one catalog entry in each surviving catalog. Pinned installs of old plugins keep resolving; see `docs/how-to/migrate-to-one-plugin.md`.
+Since 1.1.0, there is one plugin named `brother`. The old plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog, leaving one catalog entry in each surviving catalog. Pinned installs of old plugins keep resolving; see `docs/how-to/migrate-to-one-plugin.md`.
 
 The target is one installable plugin tree and one plugin on each host: Claude Code, Codex, Cursor and Antigravity, with Cursor advisory until its signed in canary demonstrates a deny. In 1.1.0 Antigravity is experimental and unverified: its install path ships, but no Antigravity check gates the release and no parity or certification claim is made (owner scope decision, docs/decisions/scope-1.1.0-defer-to-1.1.1-2026-10-03.json); its certification is a 1.1.1 item. The accepted host proof specification says package level checks exist, but it also says no signed in real host hook fire has yet been recorded for any of those hosts.
 
 ## Version numbers
 
-Current version: 1.1.0.
+Current version: 1.1.1.
 
 Copy any version figure in this document from the updated version source manifests in the same change that updates those manifests. The manifests are the source of truth for version numbers.
 

@@ -19,11 +19,11 @@
   },
   {
    "path": "brother_paths.py",
-   "sha256": "d1703e769d3108ec05f54c4b16df0f6d456fdaf568b7f4303a83028dd8d0a528"
+   "sha256": "205d58b5f033b14e0125374091a8d8804bc45ba2ab0d0d1af5c78cd5b117ccab"
   },
   {
    "path": "brother_run.py",
-   "sha256": "9b0c64252cd9fc4797fb0e959ef98b6a606137370f02e386dccc15fdcc335872"
+   "sha256": "ab3e2ce57c4afc34cfa16a235cfa8ff0f2124f8fbec050ec88e671d7efeb3706"
   },
   {
    "path": "brother_state.py",
@@ -159,7 +159,7 @@
   },
   {
    "path": "managed_safety.py",
-   "sha256": "8ca8c999ea5dc53b7d83944f60801ec7cf8bacfc9f9d819ab3ce3da228fc8f6f"
+   "sha256": "5dc9c650b6486ed4cb8376e4516fc4f8dbd3084b8129332e3a8977b8f2694069"
   },
   {
    "path": "mobile_design.py",
@@ -291,10 +291,10 @@
   },
   {
    "path": "worktree_lane.py",
-   "sha256": "5f3df4ff494d1860e5a499f6c7d5863666ca8fe3f448bca2f74dfd854cd1c686"
+   "sha256": "96e7041e8205404de71a857c4e532b19564f47530aa6294513a383eedf212b75"
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "preflight/20260926-182529-1589-g07fbbdec9",
- "source_revision": "07fbbdec9ce17c6f25108cfb8389b268dac4092c"
+ "source_describe": "preflight/20260926-182529-1691-g6fb9f3895-dirty",
+ "source_revision": "6fb9f3895142f84e12cf5ccad02cbb60feda8e8b"
 }

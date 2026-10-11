@@ -10,7 +10,23 @@ and BrotherSBE) shipping from the same repository and the same release.
 - Install and the one door: see README.md.
 - Each product's own reference documentation lives under its own subtree:
   products/brothermode/docs and products/brothersbe/docs.
-- This repository's own check, the one a clone of this tree can actually run:
+- This repository's public pre-merge gate, the one a clone of this tree runs:
+  `sh scripts/required_fast.sh`, from the repository root. The `required-fast`
+  workflow runs the same script on pull requests to `main`. It drives the
+  delivery engine with scripted stand-ins for the model, so it proves the
+  mechanism, not a real model's behavior, speed or quality. Exit 0: no check
+  failed and every NO-DATA row is allowed by `scripts/gate_obligations.json`.
+  Exit 1: a check failed or a NO-DATA row is unexplained. Exit 2: the script
+  refused to start. A failed check's full output is saved under `$TMPDIR` (or
+  `/tmp`) and its summary line names the file. A few rows read NO-DATA on this
+  tree (the plugin runtime tests, which the export ships without, and
+  `plugin-manifest` when no Claude Code CLI is found); they are listed and
+  never counted as passes. Three results stay separate: this gate, the live
+  client and host checks (the next item, and the signed in host proof HP1 in
+  `docs/VERSIONING.md`, which reads NO-DATA until it is recorded), and the
+  human acceptance trial, which reads NO-DATA until a person runs it.
+- The live client check, which needs the `claude` binary on PATH and exits 2
+  (BLOCKED, not a pass) without one:
   `sh scripts/bundle-install-smoke.sh` (add `--github` to prove the published
   copy instead of the local clone). It installs the bundle plugin into a
   throwaway configuration directory, confirms every promised entry point

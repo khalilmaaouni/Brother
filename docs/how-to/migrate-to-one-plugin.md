@@ -31,6 +31,10 @@ Install `brother`, then uninstall the old plugin.
 
 Antigravity is experimental and unverified in 1.1.0. Follow the [Antigravity install guide](install-antigravity.md). It describes copying the plugin directory and removing it from the scratch workspace, but does not document a command to install `brother` or remove an old plugin.
 
+## Names from 1.1.0
+
+Every 1.1.0 skill name still works for this release only. On Claude Code and Cursor, the old command form is a moved command and its pointer line reads `<old name> is now /brother <verb>`; the six verbs are `/brother start`, `/brother status`, `/brother next`, `/brother review`, `/brother deliver` and `/brother help`. On Codex, there are no slash commands; the pointer line reads `<old name> is now the brother-<verb> skill (in Claude Code: /brother <verb>)`, and the six skills are brother-start, brother-status, brother-next, brother-review, brother-deliver and brother-help. The old stop names brotherme-stop and brothermode-stop point to `/brother start stop`, which ends the run. The full table is `skills/using-brother/references/retired-names.md` in the installed plugin.
+
 ## Check the migration
 
 On Claude Code or Cursor, open a repository and invoke `/brother`. On Codex, start a fresh session and use the installed Brother skill. Follow the host's install guide to verify the result.

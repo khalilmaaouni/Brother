@@ -667,5 +667,57 @@ class ThePluginRuntimeRowWhereItsTestsDoNotShip(unittest.TestCase):
         self.assertIn("transition: BLOCKED (%s)" % PLUGIN_ROW, out)
 
 
+class PluginManifestUnderTheMergeGatePath(unittest.TestCase):
+    """C10, 2026-10-10: scripts/gate_merge_seq.sh pins PATH to the system directories, so the plugin-manifest row's
+    `command -v claude` read NO-DATA under the merge gate and every verified merge read a contradiction. These cases run
+    the REAL row (read from required_fast.sh, never typed here) with exactly that PATH and an empty HOME, so the CLI can
+    only come from where each case puts it."""
+
+    GATE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(dir=_FIXTURES.name)
+        bindir = tempfile.mkdtemp(dir=_FIXTURES.name)
+        self.cli = os.path.join(bindir, "claude")
+        with open(self.cli, "w") as handle:
+            handle.write('#!/bin/sh\n[ "$*" = "plugin validate ." ] || exit 9\necho "fixture: validated"\n')
+        os.chmod(self.cli, 0o755)
+
+    def run_row(self, extra=None):
+        with open(os.path.join(HERE, "brother_paths.py")) as handle:
+            resolver = handle.read()
+        root = build_tree(real_rows("plugin-manifest"), tracked={"scripts/brother_paths.py": resolver})
+        env = {"PATH": self.GATE_PATH, "HOME": self.home, "BROTHER_HEAVY_SLOT": "off",
+               "TMPDIR": tempfile.mkdtemp(dir=_FIXTURES.name)}
+        env.update(extra or {})
+        proc = subprocess.run(["sh", os.path.join(root, "scripts", "required_fast.sh")],
+                              capture_output=True, text=True, timeout=120, env=env)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def test_the_cli_resolved_only_through_the_owners_pin_reads_pass(self):
+        code, out = self.run_row({"BROTHER_CLAUDE_BIN": self.cli})
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 1   fail 0   no-data 0", out)
+
+    def test_no_cli_anywhere_reads_no_data_never_pass(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("brother_paths_c10", os.path.join(HERE, "brother_paths.py"))
+        paths = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(paths)
+        found = paths.claude_candidates({"PATH": self.GATE_PATH, "HOME": self.home})
+        if found:
+            self.skipTest("NO-DATA: a Claude Code CLI is installed outside the fixture at %s" % found[0])
+        code, out = self.run_row()
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("pass 0   fail 0   no-data 1", out)
+        self.assertIn("plugin-manifest\tNO-DATA", out)
+
+    def test_a_relative_pin_reads_no_data_and_is_named(self):
+        code, out = self.run_row({"BROTHER_CLAUDE_BIN": "claude"})
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("pass 0   fail 0   no-data 1", out)
+        self.assertIn("BROTHER_CLAUDE_BIN", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

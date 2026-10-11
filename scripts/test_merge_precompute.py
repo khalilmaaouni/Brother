@@ -33,6 +33,7 @@ if HERE not in sys.path:
 
 import merge_gate  # noqa: E402
 import merge_precompute  # noqa: E402
+import heavy_slot  # noqa: E402
 
 TOOL_FILES = ("merge_gate.py", "tmp_sandbox.py", "merge_precompute.py", "gate_merge_seq.sh", "merge_verified.sh",
               "merge_pins.py", "heavy_slot.py", "brother_paths.py", "resource_gate.py")
@@ -286,30 +287,33 @@ class TestRunPrecompute(Fixture):
         self.assertEqual(on_disk["entries"], status["entries"])
         self.assertTrue(on_disk["updated"])
 
-    def test_the_slot_is_taken_before_each_gate_and_released_after(self):
-        events = []
-
-        class Handle:
-            def seek(self, _n):
-                events.append("seek")
-
-            def truncate(self):
-                events.append("truncate")
-
-            def close(self):
-                events.append("release")
-
-        def take(env):
-            events.append("take")
-            return [(0, Handle())]
+    def test_the_worker_holds_no_slot_while_its_gate_runs(self):
+        # C11, 2026-10-10: the gate child queues on heavy_slot itself at weight REQUIRED_FAST_JOBS, all or nothing, in
+        # the pool HOME names. A slot the worker held was one the child could never gather, so every gate waited out
+        # the whole bound and then ran unqueued. While each gate runs, every slot of the pool must be free.
+        pool = tempfile.mkdtemp(prefix="slots-", dir=self.fix)
+        load = os.path.join(self.fix, "load1")
+        with open(load, "w") as fh:
+            fh.write("0\n")
+        env = _clean_env({"BROTHER_SLOT_DIR": pool, "LOCAL_SLOTS": "4", "BROTHER_LOAD_READING_FILE": load,
+                          "BROTHER_HEAVY_SLOT_WAIT": "5"})
+        del env["BROTHER_HEAVY_SLOT"]
+        free = []
 
         def hook(count):
-            events.append("gate")
+            held = heavy_slot.try_acquire(pool, 4, 4, label=False)
+            free.append(len(held))
+            for _index, handle in held:
+                handle.close()
 
-        merge_precompute.run_precompute(self.clone, self.pins(), self.env, self.runner(hook), take_slot=take)
-        self.assertEqual(events, ["take", "gate", "seek", "truncate", "release"] * 2)
-        self.assertEqual(merge_precompute._take_slot({"BROTHER_HEAVY_SLOT": "off"}), [])
-        self.assertEqual(merge_precompute._take_slot({"BROTHER_HEAVY_SLOT_HELD": "1"}), [])
+        merge_precompute.run_precompute(self.clone, self.pins(), env, self.runner(hook))
+        self.assertEqual(free, [4, 4])
+
+    def test_the_worker_never_queues_for_a_slot_itself(self):
+        # C11, 2026-10-10: one queue, the gate child's own; no path in the worker imports heavy_slot to queue first
+        with open(os.path.join(HERE, "merge_precompute.py"), encoding="utf-8") as fh:
+            source = fh.read()
+        self.assertIsNone(re.search(r"^\s*(import heavy_slot|from heavy_slot import)", source, re.M))
 
     def test_rows_are_written_only_through_run_gate(self):
         # R-MG-2: the worker never calls record_row and types no rc

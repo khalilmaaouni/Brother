@@ -75,6 +75,7 @@ only loses the fast path orphan_report() uses to name its unit_id later.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -92,6 +93,22 @@ NODATA = "NO-DATA"
 _GIT_LOCK = threading.Lock()
 
 BRANCH_PREFIX = "lane/"
+
+#: A git that cannot take a lock says so ("Unable to create '<path>.lock'",
+#: "cannot lock ref", reftable's "cannot lock references"). The usual LIVE
+#: holder of `packed-refs.lock` (every ref deletion takes it, so does a
+#: pack-refs) lets go within milliseconds, while a killed git's lock is never
+#: released. _clear_stale_lane outlives the usual holder: the deletion is
+#: retried this many times with this pause between attempts, on top of git's
+#: own wait (core.packedRefsTimeout, 1 s by default), about six seconds in
+#: all. Exhausting the window proves nothing about the holder (a prepared
+#: `git update-ref --stdin` holds the lock for as long as it likes), so the
+#: lock file itself is never removed by this module: it is repository wide
+#: and records no owner, and removing one a live git holds is a corruption
+#: path (see _clear_stale_branch_lock for the one lock that IS removed).
+LOCK_RETRY_ATTEMPTS = 4
+LOCK_RETRY_PAUSE_S = 0.5
+_LOCK_FAILURE = re.compile(r"Unable to create '[^']*\.lock'|cannot lock")
 
 #: THE BREADCRUMB. acquire() sees only a repo and a unit_id, never an owner or
 #: a claim store, so it cannot write a full claim record. What it CAN write,
@@ -116,8 +133,17 @@ def _git(args, cwd, runner=None):
     try:
         return runner(["git"] + list(args))
     except Exception as exc:  # noqa: BLE001
+        # A TimeoutExpired carries what git had said so far; keep it, so a
+        # refusal built from this shape still names the file git was stuck on.
+        said = str(exc)
+        for attr in ("stderr", "output"):
+            extra = getattr(exc, attr, None)
+            if extra:
+                said += " " + (extra.decode("utf-8", "replace")
+                               if isinstance(extra, bytes) else str(extra))
+
         class _Fail:  # a shape the caller can read without a special case
-            returncode, stdout, stderr = 1, "", str(exc)
+            returncode, stdout, stderr = 1, "", said
         return _Fail()
 
 
@@ -438,8 +464,7 @@ def acquire(repo, unit_id, root=None, runner=None, owned_paths=None):
             path = os.path.join(base, safe or "unit")
             proc = _git(["worktree", "add", "-q", "--detach", path, "HEAD"], repo, runner)
             if proc.returncode != 0:
-                return None, None, ("git worktree add failed: %s"
-                                    % (proc.stderr or proc.stdout or "").strip()[:200])
+                return None, None, "git worktree add failed: %s" % _said(proc)
             made = _git(["checkout", "-q", "-b", branch], path, runner)
             if made.returncode != 0:
                 branch = None  # a lane without its own branch is still isolated
@@ -683,6 +708,25 @@ def _stale_lane(repo, branch, runner=None):
     return {"path": path, "sha": sha}
 
 
+def _said(proc):
+    """git's whole message, folded onto one line, never cut. The refusal
+    notes below used to keep 160 characters of it, and on 2026-10-07 the
+    public release check's one failure ended at ".git/p": the lock file git
+    could not take, and git's own remedy for it, were both past the cut.
+    Both streams are kept: a runner can speak on either."""
+    return " ".join(((proc.stderr or "") + " " + (proc.stdout or "")).split()) or "no output"
+
+
+def _names_a_lock(proc):
+    """Did git fail to take a lock? The files backend quotes the file
+    ("Unable to create '<path>.lock': File exists"), the ref layer says
+    "cannot lock ref", the reftable backend says "cannot lock references";
+    none of those depends on the locale's strerror text. A ".lock" anywhere
+    else (a hook's own words, a worktree path that happens to end in .lock
+    in "used by worktree at '...'") is not a lock failure."""
+    return bool(_LOCK_FAILURE.search((proc.stderr or "") + (proc.stdout or "")))
+
+
 def _clear_stale_branch_lock(repo, branch, runner=None):
     """Remove a stale `refs/heads/<branch>.lock` left by a crashed run, or
     None when there is nothing to remove.
@@ -738,7 +782,7 @@ def _clear_stale_branch_lock(repo, branch, runner=None):
             "checkout) was removed before creating a fresh lane" % branch)
 
 
-def _clear_stale_lane(repo, branch, runner=None):
+def _clear_stale_lane(repo, branch, runner=None, sleep=time.sleep):
     """Refuse to reuse a leftover `lane/<unit>` branch from an earlier run:
     remove it first, or say why it could not be removed. Called from
     acquire(), below, before it creates anything, and only ever touches a
@@ -749,7 +793,25 @@ def _clear_stale_lane(repo, branch, runner=None):
     hands back instead of creating a new lane over it. ok is True with
     note=None when there was nothing stale to clear. ok is True with a note
     when a stale lane WAS found and removed, so the reuse refusal is on the
-    record rather than silent."""
+    record rather than silent.
+
+    THE LOCK, 2026-10-07: `git branch -D` takes `packed-refs.lock` in the
+    common git dir. If that file exists the deletion fails, and this used to
+    refuse the unit on the first attempt with git's message cut at 160
+    characters, so the public release check's one failure that night named
+    no lock at all. Now: a failure git attributes to a lock is retried
+    LOCK_RETRY_ATTEMPTS times, LOCK_RETRY_PAUSE_S apart, so the usual live
+    holder (another git mid ref transaction, which lets go in milliseconds)
+    is outlived; a lock still held after the window may be a dead git's or
+    a live one's (nothing here can tell), and the unit is refused with git's
+    WHOLE message, which names the file and git's own remedy, plus the
+    attempts and the measured time. This module never removes
+    packed-refs.lock: it is repository wide and carries no owner, so there
+    is no check from inside this function that proves nobody live holds it,
+    and removing one a live git holds leaves refs at stale packed values in
+    a repository other sessions work in. Any failure git does not attribute
+    to a lock refuses at once, as before. `sleep` is injectable for the
+    tests, nothing else."""
     if not branch.startswith(BRANCH_PREFIX):
         return True, None  # never this function's business
     # A SIGKILLed run whose git was mid `checkout -b` for this exact branch
@@ -773,18 +835,29 @@ def _clear_stale_lane(repo, branch, runner=None):
             return False, ("%s: stale lane %s from an earlier run exists at "
                            "%s and its worktree could not be removed (%s), so "
                            "the unit was refused rather than risk reusing its "
-                           "old work" % (NODATA, branch, sha_short,
-                           (proc.stderr or proc.stdout or "").strip()[:160]))
+                           "old work" % (NODATA, branch, sha_short, _said(proc)))
         _git(["worktree", "prune"], repo, runner)
-    branch_del = _git(["branch", "-D", branch], repo, runner)
-    if branch_del.returncode != 0:
+    attempts = 0
+    started = time.monotonic()
+    while True:
+        attempts += 1
+        branch_del = _git(["branch", "-D", branch], repo, runner)
+        if branch_del.returncode == 0:
+            break
+        if attempts < LOCK_RETRY_ATTEMPTS and _names_a_lock(branch_del):
+            sleep(LOCK_RETRY_PAUSE_S)
+            continue
         return False, ("%s: stale lane %s from an earlier run exists at %s "
-                       "and could not be deleted (%s), so the unit was "
-                       "refused rather than risk reusing its old work"
-                       % (NODATA, branch, sha_short,
-                          (branch_del.stderr or branch_del.stdout or "").strip()[:160]))
+                       "and could not be deleted (%d attempt(s) over %.1f s; "
+                       "git said: %s), so the unit was refused rather than "
+                       "risk reusing its old work"
+                       % (NODATA, branch, sha_short, attempts,
+                          time.monotonic() - started, _said(branch_del)))
     return True, ("stale lane %s from an earlier run exists at %s, not "
-                  "reused: it was removed" % (branch, sha_short))
+                  "reused: it was removed%s"
+                  % (branch, sha_short,
+                     "" if attempts == 1 else " on attempt %d, after a lock "
+                     "failure on the earlier attempt(s)" % attempts))
 
 
 def _read_claims(path):

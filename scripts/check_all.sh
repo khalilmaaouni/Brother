@@ -345,6 +345,9 @@ run_check "readiness-board-self" python3 scripts/test_gen_readiness_board.py -v
 # The 1.1.0 launch board and the sub unit Gantt: a plan whose waves mix numbers and gate names renders, and the board's
 # prose is dated data (today's notes stamped, another day's STALE, none NO-DATA). 2026-09-27.
 run_check "launch-board-self" python3 scripts/test_gen_launch_board.py
+# the 1.1.1 release plan: its Gantt generator's own guards, and the plan's schedule (dependencies ordered, no lane overlap)
+run_check "release-gantt-self" python3 scripts/gen_release_gantt.py --selftest
+run_check "release-wbs-schedule" python3 scripts/gen_release_gantt.py --check docs/plan/BROTHER-1.1.1-WBS.json
 run_check "subunit-gantt-self" python3 scripts/test_gen_subunit_gantt.py
 # A run's own money (2026-09-27): per run ledger and budget, one reader with the dispatcher, provider balance, every
 # zero naming its cause.
@@ -824,12 +827,18 @@ run_check "acceptance-time" python3 scripts/test_acceptance_time.py -v
 # the closure is computed from the real files (not a hand-typed list), the
 # packaged copy is byte-identical, and the installed launcher actually runs.
 run_check "bundle-runtime-self" python3 scripts/test_bundle_runtime.py -v
+# bundle-doctor-route (DR1, 2026-10-11): the installed brothermode_cli.py doctor
+# route, proven on a mirror this tree's generator regenerates into a scratch copy.
+run_check "bundle-doctor-route" python3 -B scripts/test_bundle_doctor_route.py
 run_check "runs-root-one-rule" python3 -B scripts/test_runs_root_one_rule.py
 run_check "bundle-installed-lookups" python3 scripts/test_bundle_installed_lookups.py -v
 # hook-guard-self: the one plugin's double-fire guard (docs/architecture/
 # ADR-ONE-PLUGIN-HOOKS.md) fires each bundled hook once, alone or beside an
 # old product plugin, and runs on anything it cannot read.
 run_check "hook-guard-self" python3 -B scripts/test_hook_guard.py -v
+run_check "quiet-start-bm" python3 -B scripts/test_quiet_start_bm.py
+run_check "quiet-start-vault" python3 -B scripts/test_quiet_start_vault.py
+run_check "footprint-budget" python3 -B scripts/test_footprint_budget.py
 # one-plugin-self: OP1 (docs/plan/specs/OP1.md), one class per sub unit:
 # no host manifest under bundle/ declares a dependency, every known host
 # manifest is present and readable, and the bundle carries every hook

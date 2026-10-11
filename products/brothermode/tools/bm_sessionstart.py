@@ -58,8 +58,89 @@ DIR = os.path.dirname(HERE)
 #: (one writable command migrates it); without this alternative the fix would
 #: have traded a scary visible message for an accurate invisible one.
 _STORE_WORRY = re.compile(
-    r"problem\(s\) found|STORE CORRUPT|refused \(schema-|WARNING|"
+    r"problem\(s\) found|STORE CORRUPT|refused \(schema-|"
+    r"refused \(git-tracked-store\)|WARNING|"
     r"unexpected error|db-busy|stale-identity|Traceback")
+#: bm_store.py also refuses 'git-exposed-store' in any git repository that has
+#: no store yet (nothing to leak, and `init` adds the ignore line), and
+#: 'git-state-unknown' when it cannot read the index or an ignore file, so
+#: those refusals are printed only when a store file is actually on disk.
+_STORE_EXPOSED = re.compile(r"refused \(git-(?:exposed-store|state-unknown)\)")
+
+
+def _store_on_disk():
+    """True when a BrotherMode store file exists where bm_store.py would look:
+    under BROTHERMODE_ROOT when it names a directory (bm_store.resolve_root
+    ignores it otherwise), else in any directory from cwd up. An error
+    answers True, so a privacy warning is shown rather than hidden."""
+    try:
+        rel = os.path.join(".brothermode", "store.sqlite3")
+        env_root = os.environ.get("BROTHERMODE_ROOT")
+        if env_root and os.path.isdir(os.path.realpath(env_root)):
+            return os.path.isfile(os.path.join(os.path.realpath(env_root), rel))
+        here = os.getcwd()
+        while True:
+            if os.path.isfile(os.path.join(here, rel)):
+                return True
+            parent = os.path.dirname(here)
+            if parent == here:
+                return False
+            here = parent
+    except (OSError, ValueError):
+        return True
+
+
+#: QS1 (the owner's 1.1.1 scope ruling, 2026-10-10): the routine start output is opt in. A session start used to
+#: inject every housekeeping line (nags, progress page, stall sweep, handover status, idle and forecast lines, every
+#: reconcile row), measured at 5,820 bytes in a fake established project and 17.4 KB on this estate. Either switch set
+#: to exactly "1" turns it back on; anything else, unset included, keeps the start quiet. BROTHERMODE_MAINTAINER=1 was
+#: already the digest's switch and keeps working.
+VERBOSE_SWITCHES = ("BROTHER_VERBOSE_START", "BROTHERMODE_MAINTAINER")
+#: What a quiet start drops from bm_reconcile.py's rows, and ONLY this: VALID rows, and the NO-DATA categories (its own
+#: row "category" words) that purely report. Every other row shows, an unknown class or category included, so a new
+#: kind of finding is never hidden by default. no-upstream is routine on any branch never pushed;
+#: no-remote-tracking-branch repeats at every start for a remote with no main or master, which a fetch cannot change.
+QUIET_CLASSES = ("VALID",)
+REPORTING_NO_DATA_CATEGORIES = ("no-upstream", "no-remote-tracking-branch")
+
+
+def verbose_start(env):
+    """True only when one of VERBOSE_SWITCHES is exactly "1" in env (a mapping such as os.environ)."""
+    return any(env.get(name) == "1" for name in VERBOSE_SWITCHES)
+
+
+def actionable_reconcile(code, text):
+    """What a quiet start prints for bm_reconcile.py --json's (exit code, output). Exit 0 or 127: nothing. Exit 1 with
+    the tool's JSON: every row except the quiet ones (QUIET_CLASSES, REPORTING_NO_DATA_CATEGORIES), under one header
+    line ("" when none is left). Any other exit with no output is one NO-DATA line. Anything else (a refusal, a crash,
+    output that is not that JSON) is a failure the user must see, so it passes through unchanged."""
+    if code in (0, 127):
+        return ""
+    if not (text or "").strip():
+        return "NO-DATA: bm_reconcile exited %s with no output\n" % code
+    passthrough = text.rstrip("\n") + "\n"
+    if code != 1:
+        return passthrough
+
+    def shown(r):
+        if r["class"] in QUIET_CLASSES:
+            return False
+        if r["class"] == "NO-DATA" and r.get("category") in REPORTING_NO_DATA_CATEGORIES:
+            return False
+        # store-unreadable is also reported in a git repository that has no store yet (the same git-exposed-store
+        # refusal store health handles), so, like there, it needs a store on disk to be worth a line.
+        return r.get("category") != "store-unreadable" or _store_on_disk()
+    try:
+        kept = [r for r in json.loads(text)["rows"] if shown(r)]
+        lines = ["%s | %s | %s | %s | route %s" % (
+            r["class"], ("%s %s" % (r["kind"], r["subject"])) if r.get("subject") else r["kind"], r["reason"],
+            r.get("next_action") or "(no action proposed)", r.get("route") or "") for r in kept]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return passthrough
+    if not lines:
+        return ""
+    return ("bm_reconcile: %d row(s) need action; BROTHER_VERBOSE_START=1 shows every row\n" % len(lines)
+            + "\n".join(lines) + "\n")
 
 
 def _say(text):
@@ -159,12 +240,14 @@ def _no_vault_bound():
         return False
 
 
-def _run(args, stdin_text=None, capture=False, keep_stderr=False):
+def _run(args, stdin_text=None, capture=False, keep_stderr=False,
+         stderr_sink=None):
     """One sibling tool, with the shell version's exact degrade semantics:
     OSError (interpreter or file missing) reads as a silent non-run, the
     same way 2>/dev/null swallowed it, and the caller decides what an exit
     code means. Returns (returncode, stdout) with stdout None unless
-    captured."""
+    captured. A list given as stderr_sink receives stderr captured on its
+    own, kept out of stdout (it wins over keep_stderr)."""
     kwargs = {"universal_newlines": True}
     if stdin_text is not None:
         kwargs["input"] = stdin_text
@@ -172,7 +255,9 @@ def _run(args, stdin_text=None, capture=False, keep_stderr=False):
         kwargs["stdin"] = subprocess.DEVNULL
     if capture:
         kwargs["stdout"] = subprocess.PIPE
-    if keep_stderr:
+    if stderr_sink is not None:
+        kwargs["stderr"] = subprocess.PIPE
+    elif keep_stderr:
         kwargs["stderr"] = subprocess.STDOUT if capture else None
     else:
         kwargs["stderr"] = subprocess.DEVNULL
@@ -180,6 +265,8 @@ def _run(args, stdin_text=None, capture=False, keep_stderr=False):
         result = subprocess.run([sys.executable] + list(args), **kwargs)
     except OSError:
         return 127, ""
+    if stderr_sink is not None:
+        stderr_sink.append(result.stderr or "")
     return result.returncode, (result.stdout if capture else None)
 
 
@@ -210,41 +297,49 @@ def main():
         return 0
 
     first_run = _is_first_run()
+    verbose = verbose_start(os.environ)
     if first_run:
         # The one line a newcomer actually needs, and the whole gap between
         # "installed" and "used". README.md names this command as the first
         # thing to type; until now the product's own first words never did.
-        _say("BrotherMode: new project. Run /brother:brothermode-start to begin.\n")
+        # This hook also runs at Codex's SessionStart, which has no slash
+        # commands, so the slash command is named for Claude Code only.
+        _say("BrotherMode: new project. To begin, say what you want done "
+             "(in Claude Code: /brother).\n")
         # Row V2: a fresh install binds no vault at all, and a nag that fires
         # every session stops being read, so this line is gated to the same
         # first-run moment as the line above, silent ever after.
         if _no_vault_bound():
-            _say("No memory vault is bound yet; /brother:brothermode-start will ask "
-                 "where it should live and bind it.\n")
+            _say("No memory vault is bound yet; once you begin, Brother will "
+                 "ask where it should live and bind it.\n")
 
     # R-4 (persona dogfood 2026-09-07): DIGEST.md printed to every session,
     # including a beginner's very first one, who has no use for an
     # engineering digest and no way to know why it appeared. It is real
     # and useful to whoever maintains this product, so it is gated to
-    # that reader rather than deleted: BROTHERMODE_MAINTAINER=1 opts in.
+    # that reader rather than deleted: BROTHERMODE_MAINTAINER=1 opts in
+    # (QS1: so does BROTHER_VERBOSE_START=1, through verbose_start).
     # Anyone else already got the one line above (first_run's welcome, or
     # nothing when there is nothing new), and gets nothing more here.
-    if os.environ.get("BROTHERMODE_MAINTAINER") == "1":
+    if verbose:
         try:
             with io.open(_tool("DIGEST.md"), encoding="utf-8") as fh:
                 _say(fh.read())
         except (IOError, OSError):
             pass
 
-    if not first_run:
+    # QS1: every routine line below, through the forecast line, runs only on the switch.
+    if verbose and not first_run:
         _run([_tool("tools", "bm_telemetry.py"), "startup-nags"])
     # PROGRESS PAGE OWED (founder directive 2026-08-10): one line ONLY when a
     # plan exists and the page is missing or older than that plan; silent
     # otherwise, because a nag that fires every session stops being read.
-    _run([_tool("tools", "bm_progress_check.py"), "status"])
+    if verbose:
+        _run([_tool("tools", "bm_progress_check.py"), "status"])
     # Stall sweep (Loop SD): pure read, prints stale fences and dead owners
     # with their exact clearing command. Fail-open like everything here.
-    _run([_tool("tools", "bm_stall.py"), "sweep"])
+    if verbose:
+        _run([_tool("tools", "bm_stall.py"), "sweep"])
 
     # BATON CEREMONY OPENING HALF (R1.3). CLAUDE.md's baton ceremony section
     # calls `bm_handover.py detect` the START half every session runs before
@@ -252,41 +347,42 @@ def main():
     # knows about into a stated NO-DATA line, so a non-zero exit or empty
     # output here means something UNEXPECTED happened (the file moved), and
     # that case degrades to one short line, never a traceback.
-    code, detect_out = _run([_tool("tools", "bm_handover.py"), "detect"],
-                            capture=True)
-    detect_out = (detect_out or "").rstrip("\n")
-    suppressed_first_run = False
-    if code == 0 and detect_out and first_run:
-        filtered = "\n".join(
-            ln for ln in detect_out.splitlines()
-            if not ln.startswith("NO-DATA: no handover pack exists yet")
-            and not ln.startswith("NO-DATA: no handover zip exists yet"))
-        # A first-run all-suppressed output is not a failure; track it.
-        suppressed_first_run = bool(filtered == "" and detect_out)
-        detect_out = filtered
-    if code == 0 and detect_out:
-        _say(detect_out + "\n")
-    elif not suppressed_first_run:
-        _say(
-            "baton ceremony check (bm_handover.py detect) could not run "
-            "this session; run it by hand, see CLAUDE.md baton ceremony "
-            "section\n")
+    if verbose:
+        code, detect_out = _run([_tool("tools", "bm_handover.py"), "detect"],
+                                capture=True)
+        detect_out = (detect_out or "").rstrip("\n")
+        suppressed_first_run = False
+        if code == 0 and detect_out and first_run:
+            filtered = "\n".join(
+                ln for ln in detect_out.splitlines()
+                if not ln.startswith("NO-DATA: no handover pack exists yet")
+                and not ln.startswith("NO-DATA: no handover zip exists yet"))
+            # A first-run all-suppressed output is not a failure; track it.
+            suppressed_first_run = bool(filtered == "" and detect_out)
+            detect_out = filtered
+        if code == 0 and detect_out:
+            _say(detect_out + "\n")
+        elif not suppressed_first_run:
+            _say(
+                "baton ceremony check (bm_handover.py detect) could not run "
+                "this session; run it by hand, see CLAUDE.md baton ceremony "
+                "section\n")
 
-    # CLOSE-PACK OWED (2026-08-12): a session opens being told the previous
-    # one left no handover, which is the person who can still do something
-    # about it. Silent when nothing is owed. Runs HERE rather than on Stop
-    # because this script has already passed the consent door, so the check
-    # inherits that gate instead of needing its own.
-    code, owed_out = _run([_tool("tools", "bm_handover.py"), "owed"],
-                          capture=True)
-    if code != 127 and owed_out:
-        for line in owed_out.splitlines(True):
-            if line.startswith("CURRENT"):
-                continue
-            if first_run and line.startswith(
-                    "OWED: no close pack exists in this checkout at all"):
-                continue
-            _say(line)
+        # CLOSE-PACK OWED (2026-08-12): a session opens being told the previous
+        # one left no handover, which is the person who can still do something
+        # about it. Silent when nothing is owed. Runs HERE rather than on Stop
+        # because this script has already passed the consent door, so the check
+        # inherits that gate instead of needing its own.
+        code, owed_out = _run([_tool("tools", "bm_handover.py"), "owed"],
+                              capture=True)
+        if code != 127 and owed_out:
+            for line in owed_out.splitlines(True):
+                if line.startswith("CURRENT"):
+                    continue
+                if first_run and line.startswith(
+                        "OWED: no close pack exists in this checkout at all"):
+                    continue
+                _say(line)
 
     _run([_tool("tools", "bm_telemetry.py"), "check-update"])
 
@@ -294,7 +390,7 @@ def main():
     # Two one-line verdicts, both fail open, because a session that cannot
     # compute its idle verdict must still start; the absence of the line is
     # itself visible.
-    if not first_run:
+    if verbose and not first_run:
         _run([_tool("tools", "bm_idle.py"), "check"])
         code, cal_out = _run([_tool("tools", "bm_forecast.py"), "calibrate",
                               "--clock", "agent", "--basis", "judged"],
@@ -314,8 +410,11 @@ def main():
     _code, health = _run([_tool("tools", "bm_store.py"), "verify"],
                          capture=True, keep_stderr=True)
     health = (health or "").rstrip("\n")
-    if health and _STORE_WORRY.search(health):
+    said = set()
+    if health and (_STORE_WORRY.search(health) or (
+            _STORE_EXPOSED.search(health) and _store_on_disk())):
         _say(health + "\n")
+        said.update(health.splitlines())
 
     # Startup reconciliation (Z2.3, docs/RECOVERY-TRUTH.md): compares what
     # the store persists against observed reality (git, the filesystem,
@@ -341,6 +440,25 @@ def main():
                     if isinstance(session_id, str) and session_id.strip()
                     else [])
     try:
+        # QS1: a quiet start reads the rows as JSON, so it can keep exactly
+        # the ones that need action by their class and category, and passes
+        # any failure output through unchanged (actionable_reconcile).
+        if not verbose:
+            # stderr is captured apart from the JSON on stdout, so a warning
+            # (BROTHERMODE_SKIP_GIT_CONTAINMENT=1 prints one per store open)
+            # never breaks the parse; it is passed through after the rows,
+            # each distinct line once and none the store health block above
+            # already printed.
+            err = []
+            code, reconciled = _run([_tool("tools", "bm_reconcile.py")]
+                                    + session_args + ["--json"],
+                                    capture=True, stderr_sink=err)
+            _say(actionable_reconcile(code, reconciled))
+            for line in "".join(err).splitlines():
+                if line.strip() and line not in said:
+                    said.add(line)
+                    _say(line + "\n")
+            return 0
         code, reconciled = _run([_tool("tools", "bm_reconcile.py")]
                                 + session_args,
                                 capture=True, keep_stderr=True)

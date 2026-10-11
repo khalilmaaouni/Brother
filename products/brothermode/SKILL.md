@@ -123,8 +123,10 @@ request has failed at its only job.
 
 ENFORCED: `tools/bm_progress_check.py` decides mechanically, per project,
 whether a plan exists and whether the page is missing or older than that plan.
-`tools/bm_sessionstart.py` runs it at every session start, so the verdict
-arrives in context rather than depending on anyone remembering. Exit 1 means a
+`tools/bm_sessionstart.py` runs it at session start when
+`BROTHER_VERBOSE_START=1` is set (the start is quiet by default since 1.1.1),
+so the verdict arrives in context rather than depending on anyone remembering.
+Exit 1 means a
 page is owed, 0 means nothing is, 2 means it could not tell, because a check
 that cannot tell must never read as a pass. NOT ENFORCED, stated plainly: no
 hook can call the client's file-delivery tool on your behalf, so the delivery

@@ -1156,7 +1156,7 @@ def cmd_list(argv):
         return 0
     if not projects:
         _out("no project in this folder yet; start one with: "
-             "/brother:brothermode-start (or, on a clone install: "
+             "/brother start <what you want> (or, on a clone install: "
              'python3 "${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py start")')
         return 0
     for p in projects:

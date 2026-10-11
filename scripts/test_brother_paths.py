@@ -350,14 +350,99 @@ class ClaudeDesktopBinary(unittest.TestCase):
         self.assertEqual([p for p in brother_paths.claude_candidates(self.env()) if "2.1.290" in p], [])
 
 
+class ClaudeForCheck(unittest.TestCase):
+    """C10, 2026-10-10: the merge gate pins PATH to the system directories, so the plugin-manifest row's
+    `command -v claude` read NO-DATA there. claude_for_check resolves the CLI without the caller's PATH: the owner's
+    pin, then the proven program, then the installed copies. Each case isolates one condition."""
+
+    def setUp(self):
+        import tempfile
+        self.home = tempfile.mkdtemp(prefix="claude-for-check-")
+        self.other = tempfile.mkdtemp(prefix="claude-for-check-bin-")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.home, ignore_errors=True)
+        shutil.rmtree(self.other, ignore_errors=True)
+
+    def program(self, directory, mode=0o755):
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, "claude")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n")
+        os.chmod(path, mode)
+        return path
+
+    def env(self, **extra):
+        env = {"HOME": self.home, "PATH": ""}
+        env.update(extra)
+        return env
+
+    def premise(self):
+        """The absolute package directories (/opt/homebrew/bin, /usr/local/bin) are this machine's: a CLI there is
+        found whatever the fixture HOME says, so the nothing-installed premise cannot be built here."""
+        found = brother_paths.claude_candidates(self.env())
+        if found:
+            self.skipTest("NO-DATA: a Claude Code CLI is installed outside the fixture at %s" % found[0])
+
+    def test_the_owners_pin_is_used_when_it_is_an_absolute_executable(self):
+        pin = self.program(self.other)
+        self.assertEqual(brother_paths.claude_for_check(self.env(BROTHER_CLAUDE_BIN=pin)), (pin, None))
+
+    def test_a_relative_pin_is_refused_and_names_the_variable(self):
+        path, reason = brother_paths.claude_for_check(self.env(BROTHER_CLAUDE_BIN="claude"))
+        self.assertIsNone(path)
+        self.assertIn("BROTHER_CLAUDE_BIN", reason)
+
+    def test_a_pin_that_is_not_executable_is_refused(self):
+        pin = self.program(self.other, mode=0o644)
+        path, reason = brother_paths.claude_for_check(self.env(BROTHER_CLAUDE_BIN=pin))
+        self.assertIsNone(path)
+        self.assertIn("not an absolute path to an executable file", reason)
+
+    def test_a_refused_pin_never_switches_to_an_installed_copy(self):
+        self.program(os.path.join(self.home, ".local", "bin"))
+        path, reason = brother_paths.claude_for_check(self.env(BROTHER_CLAUDE_BIN="relative/claude"))
+        self.assertIsNone(path)
+        self.assertIn("BROTHER_CLAUDE_BIN", reason)
+
+    def test_with_no_pin_an_installed_copy_under_home_is_found_without_path(self):
+        installed = os.path.realpath(self.program(os.path.join(self.home, ".local", "bin")))
+        path, reason = brother_paths.claude_for_check(self.env())
+        self.assertIsNone(reason)
+        self.assertEqual(os.path.realpath(path), installed)
+
+    def test_nothing_installed_is_a_reason_never_a_path(self):
+        self.premise()
+        path, reason = brother_paths.claude_for_check(self.env())
+        self.assertIsNone(path)
+        self.assertIn("no Claude Code CLI", reason)
+
+    def test_the_command_line_prints_the_path_or_a_no_data_line(self):
+        import subprocess
+        script = os.path.join(HERE, "brother_paths.py")
+        pin = self.program(self.other)
+        ok = subprocess.run([sys.executable, "-B", script, "--claude-for-check"], capture_output=True, text=True,
+                            env=self.env(BROTHER_CLAUDE_BIN=pin), timeout=30)
+        self.assertEqual((ok.returncode, ok.stdout.strip()), (0, pin))
+        bad = subprocess.run([sys.executable, "-B", script, "--claude-for-check"], capture_output=True, text=True,
+                             env=self.env(BROTHER_CLAUDE_BIN="claude"), timeout=30)
+        self.assertEqual(bad.returncode, 2)
+        self.assertTrue(bad.stdout.startswith("NO-DATA: "), bad.stdout)
+
+
 class CopiesDoNotDrift(unittest.TestCase):
     SOURCE = os.path.join(HERE, "brother_paths.py")
 
     #: Names the brothersbe copy is documented to add beyond the source
     #: (commit 4de7547b1): a line-breaking regex plus the two functions it
     #: feeds. Read off the copy itself, not assumed: it is three names, not
-    #: the two the commit message calls out by function.
-    DOCUMENTED_EXTRA_NAMES = frozenset({"_LINE_BREAKS", "one_line", "say"})
+    #: the two the commit message calls out by function. Since 2026-10-11 the
+    #: source carries _LINE_BREAKS and one_line too, byte for byte the same
+    #: (the assertion below compares every shared name), because its
+    #: --claude-for-check lines print through one_line under BrotherMode's
+    #: print choke point; say() remains the copy's only extra name.
+    DOCUMENTED_EXTRA_NAMES = frozenset({"say"})
 
     #: Shared names the brothersbe copy is documented to have MODIFIED rather
     #: than merely left alone. main() is the only one: it routes its two

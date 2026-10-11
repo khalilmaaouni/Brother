@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 512 |
-| Parts with a purpose written in the file | 509 |
-| Parts with a suite wired into the battery | 444 |
-| Checks in the battery | 1016 |
+| Parts | 513 |
+| Parts with a purpose written in the file | 510 |
+| Parts with a suite wired into the battery | 445 |
+| Checks in the battery | 1022 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -112,7 +112,7 @@ undocumented corners looks complete and is not.
 | `codex_product_skills` | Build opt-in Codex product packages outside a verified public export. | `codex-product-skills-self` |
 | `codex_skills` | generate bundle/codex-skills/ from bundle/skills/, with the | `codex-skills-current` |
 | `codex_smoke` | the clean-install Codex smoke test, run in an isolated home. | `codex-smoke`, `codex-smoke-self` |
-| `codex_surface` | Generate Codex-visible aliases for Brother's product skills and commands. | `codex-surface-current`, `codex-surface-self` |
+| `codex_surface` | Generate the shipped skill surface: six verb skills and the door's references. | `codex-surface-current`, `codex-surface-self` |
 | `coe_arbitrate` | COE-05 of the Council of Experts subsystem: turn a score matrix into one verdict. | `coe-arbitrate-self` |
 | `coe_gate` | COE-07 of the Council of Experts subsystem: the scorecard becomes a | `coe-gate-self` |
 | `coe_loop` | COE-06 of the Council of Experts subsystem: the red and green loop driver. | `coe-loop-self` |
@@ -235,6 +235,7 @@ undocumented corners looks complete and is not.
 | `gen_orch_board` | Render the 1.0.20 overnight control-plane board from this run's own two | `orch-board-closure`, `orch-board-self` |
 | `gen_readiness_board` | Render the readiness board from docs/plan/READINESS-ROADMAP-2026-08-29.json. | `readiness-board-self`, `roadmap-public-clean` |
 | `gen_receipt_schema` | One-shot generator for docs/plan/delivery-receipt-v1.schema.json from the | **NO-DATA**, nothing in the battery runs it |
+| `gen_release_gantt` | Render a release WBS (docs/plan/BROTHER-<version>-WBS.json) into its Gantt page. | `release-gantt-self`, `release-wbs-schedule` |
 | `gen_release_plan` | Render the Brother 1.1.0 release plan page from the plan files, and refuse a plan that leaves open work out. | `cut-preflight-self` |
 | `gen_wiring_audit` | Generate the one-system wiring audit from the REAL tree, so it cannot name a file that does not exist. | **NO-DATA**, nothing in the battery runs it |
 | `generic_skills_adapter` | DOM-50.08, one capability registry decides what | `generic_skills_adapter-self` |
@@ -604,6 +605,8 @@ undocumented corners looks complete and is not.
 - `intake-record-diagrams`: `python3 scripts/intake_score.py --gate --require-weighted-options`
 - `readiness-board-self`: `python3 scripts/test_gen_readiness_board.py -v`
 - `launch-board-self`: `python3 scripts/test_gen_launch_board.py`
+- `release-gantt-self`: `python3 scripts/gen_release_gantt.py --selftest`
+- `release-wbs-schedule`: `python3 scripts/gen_release_gantt.py --check docs/plan/BROTHER-1.1.1-WBS.json`
 - `subunit-gantt-self`: `python3 scripts/test_gen_subunit_gantt.py`
 - `run-money-self`: `python3 scripts/test_run_money.py`
 - `grade-build-contract-self`: `python3 scripts/test_grade_build_contract.py`
@@ -720,9 +723,13 @@ undocumented corners looks complete and is not.
 - `acceptance-compression`: `python3 scripts/test_acceptance_compression.py -v`
 - `acceptance-time`: `python3 scripts/test_acceptance_time.py -v`
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`
+- `bundle-doctor-route`: `python3 -B scripts/test_bundle_doctor_route.py`
 - `runs-root-one-rule`: `python3 -B scripts/test_runs_root_one_rule.py`
 - `bundle-installed-lookups`: `python3 scripts/test_bundle_installed_lookups.py -v`
 - `hook-guard-self`: `python3 -B scripts/test_hook_guard.py -v`
+- `quiet-start-bm`: `python3 -B scripts/test_quiet_start_bm.py`
+- `quiet-start-vault`: `python3 -B scripts/test_quiet_start_vault.py`
+- `footprint-budget`: `python3 -B scripts/test_footprint_budget.py`
 - `one-plugin-self`: `python3 -B scripts/test_one_plugin.py -v`
 - `native-evidence-self`: `python3 scripts/test_native_evidence.py -v`
 - `mobile-workflow`: `python3 scripts/test_mobile_workflow.py -v`

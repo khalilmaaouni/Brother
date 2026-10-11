@@ -1034,6 +1034,17 @@ def _loaded_line(status):
            % (m.group("total"), m.group("age"), m.group("unindexed")))
 
 
+#: QS1 (the owner's 1.1.1 scope ruling, 2026-10-10): a healthy refresh is quiet at session start. Either switch set to
+#: exactly "1" brings its status, progress and "Vault loaded" lines back; anything else, unset included, keeps them out
+#: of the session. The refresh itself always runs, and every line about a failure always prints.
+VERBOSE_SWITCHES = ("BROTHER_VERBOSE_START", "BROTHERMODE_MAINTAINER")
+
+
+def verbose_start(env):
+    """True only when one of VERBOSE_SWITCHES is exactly "1" in env (a mapping such as os.environ)."""
+    return any(env.get(name) == "1" for name in VERBOSE_SWITCHES)
+
+
 def _print_loaded_line(status):
     """cmd_refresh's own two success branches share this: print bm_vault.py's
     existing 'vault-index: ...' line UNCHANGED (vault_recall_hook.py's own
@@ -1048,6 +1059,14 @@ def _print_loaded_line(status):
     if loaded:
         say(loaded)
         sys.stderr.write(loaded + "\n")
+
+
+def _print_status_unless_quiet(status, verbose):
+    """cmd_refresh's two status sites: a quiet start (QS1) drops the status only when it is the healthy shape
+    (_loaded_line can restate it and the unindexed count was measured); a NO-DATA status always prints."""
+    m = _STATUS_LINE_RE.match(status)
+    if verbose or not m or m.group("unindexed") == "NO-DATA":
+        _print_loaded_line(status)
 
 
 def cmd_status_line(args):
@@ -1101,8 +1120,11 @@ def cmd_refresh(args):
         print("vault-index: NO-DATA: setup is not complete yet; run: "
               "python3 scripts/setup.py")
         return 0
+    verbose = verbose_start(os.environ)
     vault = args.get("vault") or _default_vault()
     if not vault:
+        if not verbose:  # QS1: a person without a vault is not told so at every start
+            return 0
         say("vault-index: NO-DATA: no vault root configured. Set BM_VAULT_ROOT or write "
               "{\"vault\": \"...\"} to %s; point-of-need recall stays empty until then."
               % CONFIG_PATH)
@@ -1126,8 +1148,8 @@ def cmd_refresh(args):
         sys.stderr.write(_line + "\n")
     if behind == 0:
         # The common case, and the reason the check comes first: nothing to do, nothing
-        # written, one line printed.
-        _print_loaded_line(_status_line(con, roots, behind))
+        # written, one line printed (QS1: only on the switch, or when it is not healthy).
+        _print_status_unless_quiet(_status_line(con, roots, behind), verbose)
         con.close()
         return 0
     con.close()
@@ -1141,11 +1163,11 @@ def cmd_refresh(args):
         return 0
     finally:
         for line in captured.getvalue().splitlines():
-            if line.strip():
+            if line.strip() and verbose:  # QS1: the refresh's progress lines are routine
                 say("vault-index: %s" % line.strip())
     try:
         con = _connect()
-        _print_loaded_line(_status_line(con, roots))
+        _print_status_unless_quiet(_status_line(con, roots), verbose)
         con.close()
     except (sqlite3.Error, OSError) as exc:
         say("vault-index: NO-DATA: the index could not be read after the refresh (%s)" % exc)

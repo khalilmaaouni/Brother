@@ -365,6 +365,29 @@ def recorded_program(transport, env=None):
     return path
 
 
+def claude_for_check(env=None):
+    """(path, None), or (None, reason): the Claude Code CLI a required check may run, resolved WITHOUT widening PATH.
+    C10, 2026-10-10: the merge gate pins PATH to the system directories (scripts/gate_merge_seq.sh), so the
+    plugin-manifest row's `command -v claude` read NO-DATA there and every verified merge read a contradiction.
+    Order: the owner's pin BROTHER_CLAUDE_BIN (an absolute path to an executable file, else refused, never a silent
+    switch to another program); the program the intake proved (recorded_program); the first installed candidate
+    (claude_candidates: the desktop app's copies, PATH, the package directories under HOME). Nothing found is a
+    reason, never a guess."""
+    pin = _get(env, CLAUDE_BIN_ENV)
+    if pin:
+        if not os.path.isabs(pin) or not _executable(pin):
+            return None, "%s=%r is not an absolute path to an executable file" % (CLAUDE_BIN_ENV, pin)
+        return pin, None
+    proven = recorded_program("claude", env)
+    if proven:
+        return proven, None
+    for path in claude_candidates(env):
+        if _executable(path):
+            return path, None
+    return None, ("no Claude Code CLI: %s is unset, no program is proven, and none is on PATH, in the package "
+                  "directories or in the desktop app" % CLAUDE_BIN_ENV)
+
+
 def decision_sentinel_path(env=None):
     """Where a rendered decision screen is stamped for the intake gate.
 

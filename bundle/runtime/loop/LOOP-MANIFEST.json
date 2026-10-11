@@ -114,7 +114,7 @@
   },
   {
    "name": "grade_build.py",
-   "sha256": "4962e4ec52e602c0f6f5575d1ea70d3b8e142cfce8cb33677e32a4bcb6912433"
+   "sha256": "4f279144b193bb5232e27446eaeed8c565234a65d9252d11528c46fcf9342319"
   },
   {
    "name": "grade_lane.sh",
@@ -202,7 +202,7 @@
   },
   {
    "name": "loop_until.sh",
-   "sha256": "0d46ad4c9c39f07d73af7d835aac4b066f58aaf5b9d8bfbb0087990946ea1891"
+   "sha256": "ee5c14073ebcb3f74496ac17cc64136b5364419f02dc4aabd46276b014f29b00"
   },
   {
    "name": "loop_watch.py",
@@ -638,7 +638,7 @@
   },
   {
    "name": "unit_runner.py",
-   "sha256": "30e75ca9dc1b3de62c352f0cdde590b68e098af8c7025527f04d94d9890475a2"
+   "sha256": "52b4bc49e2054f3bcba9493910e84190a0fe0d7500a41e04c284b7cc83a7f1aa"
   },
   {
    "name": "usage_check.py",

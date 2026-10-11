@@ -381,6 +381,278 @@ class AStaleRefLockFromAKillIsCleared(unittest.TestCase):
                     os.remove(p)
 
 
+class APackedRefsLockOnTheStaleLane(unittest.TestCase):
+    """2026-10-07, the public release check's one failure: on resume
+    _clear_stale_lane ran `git branch -D lane/<unit>` once, git could not
+    take `.git/packed-refs.lock` (a file that exists whenever another git
+    is mid ref transaction, or a killed git died holding it), the unit was
+    refused, and git's message was cut at 160 characters so the refusal
+    ended at ".git/p" and named no lock. Each test here isolates ONE
+    condition at the function level, in a throwaway repository. The engine
+    never removes packed-refs.lock: it is repository wide and carries no
+    owner, so removing it while a live git holds it is a corruption path.
+    What it does instead: say the whole truth, and retry over a bounded
+    window so a live holder (milliseconds) is outlived without touching
+    the file."""
+
+    def setUp(self):
+        # getattr, so that on a tree without the retry the tests below fail
+        # on their own assertion rather than all eight on this line.
+        self._saved = (getattr(W, "LOCK_RETRY_ATTEMPTS", None),
+                       getattr(W, "LOCK_RETRY_PAUSE_S", None))
+        W.LOCK_RETRY_PAUSE_S = 0.01  # the bound is tested by count, not by the clock
+
+    def tearDown(self):
+        W.LOCK_RETRY_ATTEMPTS, W.LOCK_RETRY_PAUSE_S = self._saved
+
+    def _stale(self, repo, packed=False, lock=False):
+        subprocess.run(["git", "branch", W.branch_for("A")], cwd=repo,
+                       check=True, capture_output=True)
+        # git itself waits core.packedRefsTimeout (1 s by default) before
+        # giving up on the lock; the subject here is the engine's retry,
+        # so git's own wait is shortened in this throwaway repository.
+        subprocess.run(["git", "config", "core.packedRefsTimeout", "50"],
+                       cwd=repo, check=True, capture_output=True)
+        if packed:
+            subprocess.run(["git", "pack-refs", "--all"], cwd=repo,
+                           check=True, capture_output=True)
+        lock_path = os.path.join(repo, ".git", "packed-refs.lock")
+        if lock:
+            with open(lock_path, "w", encoding="utf-8") as fh:
+                fh.write("")  # a dead git's leftover: empty, no owner recorded
+        return lock_path
+
+    def _counting_runner(self, repo, on_delete=None):
+        """A real git, plus a count of `branch -D` attempts and a hook run
+        before each one (the simulated other actor)."""
+        real = subprocess.run
+        calls = []
+
+        def runner(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                calls.append(list(cmd))
+                if on_delete:
+                    on_delete(len(calls))
+            return real(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        return runner, calls
+
+    def test_no_lock_is_one_attempt(self):
+        repo = a_repo()
+        self._stale(repo)
+        runner, calls = self._counting_runner(repo)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), runner)
+        self.assertTrue(ok, note)
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn("not reused", note)
+
+    def test_a_stale_lock_on_a_loose_ref_refuses_with_gits_whole_message(self):
+        repo = a_repo()
+        lock_path = self._stale(repo, lock=True)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"))
+        self.assertFalse(ok)
+        self.assertIn(W.NODATA, note)
+        self.assertIn("packed-refs.lock", note,
+                      "the refusal must name the lock file git could not take: %s" % note)
+        self.assertIn("remove the file manually", note,
+                      "git's own remedy must survive into the refusal: %s" % note)
+        self.assertNotIn("\n", note, "the note stays one line")
+        self.assertTrue(os.path.isfile(lock_path),
+                        "the engine must never remove packed-refs.lock")
+
+    def test_a_stale_lock_on_a_packed_ref_refuses_the_same_way(self):
+        repo = a_repo()
+        lock_path = self._stale(repo, packed=True, lock=True)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"))
+        self.assertFalse(ok)
+        self.assertIn("packed-refs.lock", note, note)
+        self.assertIn("remove the file manually", note, note)
+        self.assertTrue(os.path.isfile(lock_path))
+        self.assertEqual(W._stale_lane(repo, W.branch_for("A"))["sha"][:4],
+                         subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                                        capture_output=True, text=True).stdout[:4],
+                         "the packed ref must still be there, untouched")
+
+    def test_a_lock_released_during_the_window_lets_the_deletion_land(self):
+        """The live holder case: another git holds packed-refs.lock for a
+        moment and lets go. Simulated by removing the lock just before the
+        third attempt."""
+        repo = a_repo()
+        lock_path = self._stale(repo, lock=True)
+
+        def other_actor_lets_go(attempt):
+            if attempt == 3:
+                os.remove(lock_path)
+        runner, calls = self._counting_runner(repo, other_actor_lets_go)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), runner)
+        self.assertTrue(ok, note)
+        self.assertEqual(len(calls), 3, calls)
+        self.assertIn("attempt 3", note, note)
+        self.assertNotIn("was released", note, "the note must not invent a release it did not see")
+        self.assertIsNone(W._stale_lane(repo, W.branch_for("A")))
+
+    def test_a_failure_naming_no_lock_is_not_retried(self):
+        """Only a lock can be outlived. Any other failure (a branch checked
+        out elsewhere, a corrupt ref) is refused on the first attempt."""
+        repo = a_repo()
+        self._stale(repo)
+        calls = []
+
+        def never_a_lock(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                calls.append(cmd)
+
+                class _F:
+                    returncode, stdout, stderr = 1, "", "error: branch 'lane/A' is checked out elsewhere"
+                return _F()
+            return subprocess.run(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), never_a_lock)
+        self.assertFalse(ok)
+        self.assertEqual(len(calls), 1, "a non lock failure must not be retried")
+        self.assertIn("checked out elsewhere", note)
+
+    def test_a_lock_never_released_is_given_exactly_the_bounded_window(self):
+        repo = a_repo()
+        self._stale(repo, lock=True)
+        W.LOCK_RETRY_ATTEMPTS = 4
+        slept = []
+        runner, calls = self._counting_runner(repo)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), runner,
+                                       sleep=slept.append)
+        self.assertFalse(ok)
+        self.assertEqual(len(calls), 4, calls)
+        self.assertEqual(len(slept), 3, "a pause between attempts, none after the last")
+        self.assertTrue(all(abs(s - W.LOCK_RETRY_PAUSE_S) < 1e-9 for s in slept), slept)
+        self.assertIn("4 attempt(s)", note, note)
+
+    def test_a_hooks_own_words_containing_lock_are_not_a_lock(self):
+        """A reference-transaction hook refusing with "policy.lock: ..." is
+        a policy, not contention; retrying would rerun the hook's side
+        effects. Only git's own lock wording counts."""
+        repo = a_repo()
+        self._stale(repo)
+        calls = []
+
+        def hook_says_no(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                calls.append(cmd)
+
+                class _F:
+                    returncode, stdout, stderr = 1, "", "policy.lock: deletion forbidden"
+                return _F()
+            return subprocess.run(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), hook_says_no)
+        self.assertFalse(ok)
+        self.assertEqual(len(calls), 1, "a hook's refusal must not be retried")
+
+    def test_a_worktree_path_ending_in_lock_is_not_a_lock(self):
+        """git's own wording for a branch still checked out somewhere quotes
+        that worktree's path; a path ending in .lock must not read as lock
+        contention and buy four attempts."""
+        repo = a_repo()
+        self._stale(repo)
+        calls = []
+
+        def checked_out_at_a_lock_path(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                calls.append(cmd)
+
+                class _F:
+                    returncode, stdout, stderr = 1, "", ("error: cannot delete branch 'lane/A' "
+                                                         "used by worktree at '/tmp/build.lock'")
+                return _F()
+            return subprocess.run(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), checked_out_at_a_lock_path)
+        self.assertFalse(ok)
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn("/tmp/build.lock", note)
+
+    def test_both_streams_of_a_failure_reach_the_note(self):
+        repo = a_repo()
+        self._stale(repo)
+
+        def speaks_on_both(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                class _F:
+                    returncode, stdout, stderr = 1, "additional diagnostic", "deletion failed"
+                return _F()
+            return subprocess.run(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), speaks_on_both)
+        self.assertFalse(ok)
+        self.assertIn("deletion failed", note)
+        self.assertIn("additional diagnostic", note)
+
+    def test_reftables_cannot_lock_references_is_retried_too(self):
+        """The reftable backend names no file: "cannot lock references".
+        Simulated through the runner (this machine's repositories use the
+        files backend); the lock is released before the second attempt."""
+        repo = a_repo()
+        self._stale(repo)
+        real = subprocess.run
+        calls = []
+
+        def reftable_contended_once(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                calls.append(cmd)
+                if len(calls) == 1:
+                    class _F:
+                        returncode, stdout, stderr = 1, "", "error: cannot lock references"
+                    return _F()
+            return real(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), reftable_contended_once)
+        self.assertTrue(ok, note)
+        self.assertEqual(len(calls), 2, calls)
+
+    def test_a_runner_timeout_keeps_what_git_had_said(self):
+        """subprocess.TimeoutExpired carries git's stderr so far; _git must
+        not throw it away, or the refusal names a timeout and no lock."""
+        def times_out(cmd, **kw):
+            raise subprocess.TimeoutExpired(
+                cmd, 120, stderr=b"Unable to create '/r/.git/packed-refs.lock': File exists")
+        proc = W._git(["branch", "-D", "lane/A"], "/nowhere", times_out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("120 seconds", proc.stderr)
+        self.assertIn("packed-refs.lock", proc.stderr, proc.stderr)
+
+    def test_git_saying_nothing_is_reported_as_no_output_and_not_retried(self):
+        repo = a_repo()
+        self._stale(repo)
+        calls = []
+
+        def mute(cmd, **kw):
+            if "branch" in cmd and "-D" in cmd:
+                calls.append(cmd)
+
+                class _F:
+                    returncode, stdout, stderr = 1, "", ""
+                return _F()
+            return subprocess.run(cmd, capture_output=True, text=True, cwd=repo, timeout=120)
+        ok, note = W._clear_stale_lane(repo, W.branch_for("A"), mute)
+        self.assertFalse(ok)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("no output", note, note)
+
+    def test_the_same_unit_resumed_in_the_same_process_is_refused_with_the_lock_named(self):
+        """The actor is the same as last time: one process acquires unit A,
+        is 'killed' (never releases), and acquires A again with a
+        packed-refs.lock in the way. The entry point, acquire(), must hand
+        back the whole refusal, not a cut one, and must not hand back a lane."""
+        repo = a_repo()
+        subprocess.run(["git", "config", "core.packedRefsTimeout", "50"],
+                       cwd=repo, check=True, capture_output=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            first_path, first_branch, problem = W.acquire(repo, "A")
+        self.assertTrue(first_path, problem)
+        lock_path = os.path.join(repo, ".git", "packed-refs.lock")
+        with open(lock_path, "w", encoding="utf-8") as fh:
+            fh.write("")
+        with contextlib.redirect_stderr(io.StringIO()):
+            path, branch, problem = W.acquire(repo, "A")
+        self.assertIsNone(path)
+        self.assertIn("packed-refs.lock", problem, problem)
+        self.assertIn("remove the file manually", problem, problem)
+        self.assertTrue(os.path.isfile(lock_path))
+
+
 class OneDefinitionOfLiveness(unittest.TestCase):
     """E86. orphan_report() decided liveness by time alone
     (expires_at > now), while claim_store.live() also treats a dead owning pid

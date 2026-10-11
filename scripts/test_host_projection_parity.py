@@ -115,27 +115,32 @@ class RealContentBoundary(unittest.TestCase):
         with open(os.path.join(source, 'SKILL.md'), 'w', encoding='utf-8') as f:
             f.write('---\nname: %s\n---\n%s' % (skill_dir, body))
 
+    def _write_reference(self, stem, body):
+        # The fixture spells the shipped path itself (review note 4), so a
+        # drift in hpp.reference_path is caught here rather than mirrored.
+        path = os.path.join(self.bundle_skills, 'using-brother', 'references', '%s.md' % stem)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('---\ndescription: %s\n---\n%s' % (stem, body))
+
     def test_matching_mirror_passes(self):
-        for canonical, (product, skill_dir) in codex_surface.REAL_CONTENT_SKILLS.items():
-            self._seed(product, skill_dir, 'real instructions for %s\n' % canonical)
-            _write_skill(self.bundle_skills, canonical, ['name: %s' % canonical],
-                         'real instructions for %s\n' % canonical)
+        for stem, (product, skill_dir) in codex_surface.REAL_CONTENT_REFERENCES.items():
+            self._seed(product, skill_dir, 'real instructions for %s\n' % stem)
+            self._write_reference(stem, 'real instructions for %s\n' % stem)
         problems, checked = hpp.check_real_content_boundary(
             self.repo_root, self.bundle_skills)
         self.assertEqual(problems, [])
-        self.assertEqual(checked, len(codex_surface.REAL_CONTENT_SKILLS))
+        self.assertEqual(checked, len(codex_surface.REAL_CONTENT_REFERENCES))
 
     def test_a_stubbed_mirror_is_a_real_failure(self):
         """If codex_surface.py ever regressed to stubbing a
-        REAL_CONTENT_SKILLS entry instead of mirroring it, this must fail."""
-        for canonical, (product, skill_dir) in codex_surface.REAL_CONTENT_SKILLS.items():
+        REAL_CONTENT_REFERENCES entry instead of mirroring it, this must fail."""
+        for stem, (product, skill_dir) in codex_surface.REAL_CONTENT_REFERENCES.items():
             self._seed(product, skill_dir, 'real instructions\n')
-        first = list(codex_surface.REAL_CONTENT_SKILLS)[0]
-        _write_skill(self.bundle_skills, first, ['name: %s' % first],
-                     'a generic stub pointing elsewhere\n')
-        for canonical in list(codex_surface.REAL_CONTENT_SKILLS)[1:]:
-            _write_skill(self.bundle_skills, canonical, ['name: %s' % canonical],
-                         'real instructions\n')
+        first = list(codex_surface.REAL_CONTENT_REFERENCES)[0]
+        self._write_reference(first, 'a generic stub pointing elsewhere\n')
+        for stem in list(codex_surface.REAL_CONTENT_REFERENCES)[1:]:
+            self._write_reference(stem, 'real instructions\n')
         problems, _checked = hpp.check_real_content_boundary(
             self.repo_root, self.bundle_skills)
         self.assertTrue(any(first in p and 'body differs' in p for p in problems))

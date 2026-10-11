@@ -2,6 +2,12 @@
   "entries": {
     "brother": [
       "brother",
+      "brother-deliver",
+      "brother-help",
+      "brother-next",
+      "brother-review",
+      "brother-start",
+      "brother-status",
       "brotherme-auto",
       "brotherme-auto-status",
       "brotherme-brief",
@@ -56,5 +62,5 @@
   "shipped_plugins": [
     "brother"
   ],
-  "total": 50
+  "total": 56
 }

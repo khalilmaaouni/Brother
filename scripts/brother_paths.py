@@ -65,6 +65,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 
 CLAUDE = "claude"
 CODEX = "codex"
@@ -364,6 +365,29 @@ def recorded_program(transport, env=None):
     return path
 
 
+def claude_for_check(env=None):
+    """(path, None), or (None, reason): the Claude Code CLI a required check may run, resolved WITHOUT widening PATH.
+    C10, 2026-10-10: the merge gate pins PATH to the system directories (scripts/gate_merge_seq.sh), so the
+    plugin-manifest row's `command -v claude` read NO-DATA there and every verified merge read a contradiction.
+    Order: the owner's pin BROTHER_CLAUDE_BIN (an absolute path to an executable file, else refused, never a silent
+    switch to another program); the program the intake proved (recorded_program); the first installed candidate
+    (claude_candidates: the desktop app's copies, PATH, the package directories under HOME). Nothing found is a
+    reason, never a guess."""
+    pin = _get(env, CLAUDE_BIN_ENV)
+    if pin:
+        if not os.path.isabs(pin) or not _executable(pin):
+            return None, "%s=%r is not an absolute path to an executable file" % (CLAUDE_BIN_ENV, pin)
+        return pin, None
+    proven = recorded_program("claude", env)
+    if proven:
+        return proven, None
+    for path in claude_candidates(env):
+        if _executable(path):
+            return path, None
+    return None, ("no Claude Code CLI: %s is unset, no program is proven, and none is on PATH, in the package "
+                  "directories or in the desktop app" % CLAUDE_BIN_ENV)
+
+
 def decision_sentinel_path(env=None):
     """Where a rendered decision screen is stamped for the intake gate.
 
@@ -426,10 +450,47 @@ def describe(env=None):
             "package_root": package_root()}
 
 
+_LINE_BREAKS = re.compile("[\r\n\v\f\x85\u2028\u2029]+")
+
+
+def one_line(text):
+    """Every line this module prints is flattened through this choke point.
+
+    Mirrors tools/sbe_checks.py::one_line (control, format and surrogate
+    characters become their visible escape, a tab becomes a space) rather
+    than importing it, the same way tools/sbe_autosave.py and
+    tools/sbe_stall_detector.py each carry their own copy: a hook loads this
+    file by path (tools/sbe_fence_hook.py::load_brother_paths) and it stays
+    import-light on purpose. The values below are environment-supplied paths,
+    which is exactly the shape that can carry a line break or a cursor escape
+    and forge a second report line.
+    """
+    out = []
+    for ch in _LINE_BREAKS.sub(" \\n ", str(text)):
+        if ch == "\t":
+            out.append(" ")
+        elif unicodedata.category(ch) in ("Cc", "Cf", "Cs"):
+            n = ord(ch)
+            out.append("\\x%02x" % n if n <= 0xFF else
+                       "\\u%04x" % n if n <= 0xFFFF else "\\U%08x" % n)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def main(argv):
     """--json prints describe(); no argument prints the same three lines in
     plain text. Exit 2 (NO-DATA, never a pass) when the client is unknown, so
-    a shell caller can gate on the identification itself."""
+    a shell caller can gate on the identification itself.
+    --claude-for-check prints the Claude Code CLI a required check may run
+    (claude_for_check), or a NO-DATA line naming why there is none, exit 2."""
+    if "--claude-for-check" in argv[1:]:
+        path, reason = claude_for_check()
+        if path is None:
+            print(one_line("NO-DATA: %s" % reason))
+            return 2
+        print(one_line(path))
+        return 0
     facts = describe()
     if "--json" in argv[1:]:
         print(json.dumps(facts, indent=2, sort_keys=True))

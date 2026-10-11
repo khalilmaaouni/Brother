@@ -876,7 +876,7 @@ class TestProjectIdResolution(LeadCase):
         # refusal that no longer happens.
         code, out, err = self.run_cli("status")
         self.assertEqual(0, code, out + err)
-        self.assertIn("/brother:brothermode-start", out)
+        self.assertIn("/brother start", out)
         self.assertNotIn("(python3 tools/bm_project.py start)", out)
 
 
@@ -1015,8 +1015,8 @@ class TestAskAnswersFirst(LeadCase):
             "Asked: 2am outage, one line for execs", lines[0],
             "the Asked line must come first. Got:\n%s" % out)
         self.assertEqual(
-            "Route: incident, see /brother:brothersbe-start", lines[1],
-            "an incident ask must route to /brother:brothersbe-start. Got:\n%s"
+            "Route: incident, see /brother start", lines[1],
+            "an incident ask must route to /brother start. Got:\n%s"
             % out)
         self.assertTrue(
             lines[2].startswith("Verdict:"),
@@ -1098,7 +1098,7 @@ class TestAskRoutesInJapanese(LeadCase):
         self.assertEqual(0, code, out + err)
         lines = [ln for ln in out.splitlines() if ln.strip()]
         self.assertEqual(
-            "Route: incident, see /brother:brothersbe-start", lines[1],
+            "Route: incident, see /brother start", lines[1],
             "an ask of 2\u6642\u969c\u5bb3 must route to incident. "
             "Got:\n%s" % out)
 
@@ -2739,7 +2739,7 @@ class TestNoProjectTreeRead(NoProjectCase):
         self.assertIn("Add the delivery window migration", out,
                       "the last commit's subject must be named. "
                       "Got:\n%s" % out)
-        self.assertIn("/brother:brothermode-start", out)
+        self.assertIn("/brother start", out)
 
     def test_brief_lists_a_change_request_document_by_name(self):
         docs = os.path.join(self.root, "docs")

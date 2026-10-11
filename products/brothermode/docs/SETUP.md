@@ -36,7 +36,7 @@ For a pinned clone, use the sequence derived from
 `tools/bm_project_facts.py::facts()`:
 
 ```bash
-git clone --branch v1.1.0 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.1 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```
@@ -168,6 +168,7 @@ but a doctor failure is reported separately from successful consent setup.
 | `BM_VAULT_ROOT` | Vault retrieval's higher-priority environment override. Align it with the telemetry path if both are set. |
 | `bm_vault.json` in the resolved host config directory | Retrieval's `vault` setting, used after `BM_VAULT_ROOT` and `BROTHERMODE_VAULT`. No configured retrieval root means NO-DATA. |
 | `BROTHERMODE_REGISTRIES` | Optional globs for older `STATE.md` registry checks. The transactional store remains the authority for active ownership. |
+| `BROTHER_VERBOSE_START` | Set to exactly `1` to print the full session start block: the digest, startup nags, every reconciliation row and the Vault status lines. Unset, the start is quiet by default. `BROTHERMODE_MAINTAINER=1` has the same effect. Read by the SessionStart hook and by `bm_vault.py refresh`. |
 
 Export variables in the environment that launches the host, or configure its
 settings environment. A shell profile used by one terminal may not reach a
@@ -184,7 +185,7 @@ command lists differ in this tree. The sources are
 
 | Event | Clone wiring | Additional product-plugin wiring |
 |---|---|---|
-| SessionStart | `bm_sessionstart.py`: consent-gated context, digest, recovery hints, and checks. | `bm_vault.py refresh` |
+| SessionStart | `bm_sessionstart.py`: consent-gated context, recovery hints, store health warnings, and reconciliation rows that need action. The digest, startup nags and other status lines print only when `BROTHER_VERBOSE_START=1`. | `bm_vault.py refresh`: always refreshes the index; its healthy status lines print only when `BROTHER_VERBOSE_START=1` |
 | SessionEnd | `bm_telemetry.py outcomes-append`: consent-gated session ledger and correction-candidate capture. | None |
 | Stop | `bm_hookchain.py stop`: telemetry reminder, lead watchdog, view refresh, and alert tick. | None |
 | PreCompact | `bm_hookchain.py precompact`: local autosave and resume brief. | None |

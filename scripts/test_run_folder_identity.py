@@ -172,7 +172,10 @@ class TheRunnerRefusesRatherThanReuse(unittest.TestCase):
         self.assertEqual(set(self.f.folders()), planted, "a folder was made or reused")
         self.assertEqual([q for q in planted if _read(os.path.join(q, "STATUS")) != OLD_STATUS], [])
 
-    def test_a_pid_that_cannot_be_written_takes_its_own_folder_back(self):
+    def test_a_run_whose_first_file_cannot_be_written_takes_its_own_folder_back(self):
+        """No file can grow in this process, so the FIRST write after the claim fails. Since 2026-10-04 that write is
+        RUN-TAG, not PID: the old assertion on the PID message went red on main and hid that the run tag refusal left
+        its claimed folder behind (found 2026-10-10, unit U0c). Both refusals now share one take back."""
         import resource
 
         def no_file_growth():
@@ -182,7 +185,7 @@ class TheRunnerRefusesRatherThanReuse(unittest.TestCase):
                              preexec_fn=no_file_growth)
         out, _ = p.communicate(timeout=60)
         self.assertEqual(p.returncode, 2, out[-800:])
-        self.assertIn("PID file cannot be written", out, out[-800:])
+        self.assertIn("the run tag could not be written", out, out[-800:])
         self.assertEqual(self.f.folders(), [], "a folder with no PID and no STATUS was left behind")
 
 

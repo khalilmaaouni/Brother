@@ -134,9 +134,13 @@ def make_home(guard_acquire_rc=0, sentry_claim_rc=0, lanes="0", report_rc=0, pul
 # empty run folders on 2026-09-24 hid the intake's mix advice). Its disk, swap and daemon readings default to this
 # laptop, so every start case failed the night swap stood at 9170 MB: the suite measured the machine, not the script.
 # A case that tests a reading sets it itself in os.environ (as the full disk case does); otherwise it reads as roomy.
+# THE POWER SOURCE AND THE LAST WAKE ARE READINGS TOO (2026-10-05): without them here, every start case is refused on a
+# laptop running from its battery, and a low disk case reads differently in the minutes after the lid was opened.
 ESTATE = ("BROTHER_RUNS_ROOT", "BROTHER_RUN_DIR", "BROTHER_SCRATCH", "BROTHER_GRADE_SANDBOXES",
-          "BROTHER_SWAP_CEILING_MB", "BROTHER_FSEVENTSD_CEILING_KB", "BROTHER_DISK_FLOOR_KB", "BROTHER_SWAP_GUARD")
-ROOMY = {"BROTHER_DISK_FREE_KB": "9999999", "BROTHER_SWAP_USED_MB": "100", "BROTHER_FSEVENTSD_KB": "5000"}
+          "BROTHER_SWAP_CEILING_MB", "BROTHER_FSEVENTSD_CEILING_KB", "BROTHER_DISK_FLOOR_KB", "BROTHER_SWAP_GUARD",
+          "BROTHER_POWER_WINDOW_S", "BROTHER_WAKE_SETTLE_S", "BROTHER_WAKE_SETTLE_NAP_S")
+ROOMY = {"BROTHER_DISK_FREE_KB": "9999999", "BROTHER_SWAP_USED_MB": "100", "BROTHER_FSEVENTSD_KB": "5000",
+         "BROTHER_POWER_SOURCE": "AC Power", "BROTHER_WAKE_EPOCH": "0"}
 
 
 def run(home, args, timeout=90, drop=(), extra=None, script=None):
@@ -362,6 +366,378 @@ def case_the_swap_hold_is_off_unless_the_owner_turns_it_on():
     return (probe(BROTHER_SWAP_USED_MB="99999") == "" and probe(BROTHER_SWAP_USED_MB="x") == ""
             and "swap in use 99999 MB" in probe(BROTHER_SWAP_USED_MB="99999", BROTHER_SWAP_GUARD="on")
             and "daemon" in probe(BROTHER_SWAP_USED_MB="99999", BROTHER_FSEVENTSD_KB="40000000"))
+
+# ---------------------------------------------------------------- power and wake (2026-10-05: a DISK stop that was a sleep)
+# A proof pair started on battery slept at 1%, the sleep wrote a hibernation image the size of memory, and the first disk
+# reading after the wake ended the run DISK on a disk that was not full. Three readings decide these cases and each has
+# its seam in ROOMY: the power source, the last wake, the free space. A case that needs a reading to CHANGE during a
+# run empties the seam and shadows the real tool on PATH instead (pmset, df), the way the swap case shadows sysctl: a
+# file in the throwaway HOME drives the stub, and the pass stub is what writes it.
+A_DAY_AWAY = ["tomorrow 12:00", "1"]   # a deadline no power window covers at any hour of the day, and a 1 s gap
+
+
+def _shim(home, name, body):
+    _w(os.path.join(home, "shim", name), "#!/bin/bash\n" + body + "\n", 0o755)
+
+
+def _pass_script(*steps):
+    """Shell for the pass stub: pass n runs steps[n-1] and exits 0; the pass after the last step exits 42 (FINISHED)."""
+    body = 'n=$(( $(cat "$HOME/calls/passn" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$HOME/calls/passn"\n'
+    for i, step in enumerate(steps, 1):
+        body += 'if [ "$n" = %d ]; then %s; exit 0; fi\n' % (i, step)
+    return body + "exit 42"
+
+
+def _pmset_says_the_file(home):
+    """pmset stub in the shape `pmset -g batt` prints: it names the source written in $HOME/power-says, 'AC Power' when
+    the file is absent, and prints nothing at all (exit 1) when the file is empty."""
+    _shim(home, "pmset", 's="AC Power"; [ -e "$HOME/power-says" ] && s=$(cat "$HOME/power-says")\n'
+                         '[ -n "$s" ] || exit 1\necho "Now drawing from \'$s\'"\n'
+                         'echo " -InternalBattery-0 (id=1)\t50%; discharging; present: true"')
+
+
+def _df_reads(home, reads="L"):
+    """df stub. Roomy until $HOME/disk-low exists; from then on each call takes the next word of `reads`, and the last
+    word repeats for ever: L is 1000 KB free, R is roomy again (the image was released), S is L plus a second sleep
+    (the clock jumps an hour, see _clock_jumps, and the kernel reports a new wake at the jumped time)."""
+    _shim(home, "df", 'free=9999999\nif [ -e "$HOME/disk-low" ]; then\n'
+                      '  n=$(( $(cat "$HOME/calls/df-n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$HOME/calls/df-n"\n'
+                      '  set -- ' + reads + '; [ "$n" -gt $# ] && n=$#; eval "w=\\${$n}"\n'
+                      '  case "$w" in\n    R) ;;\n'
+                      '    S) free=1000; echo low >> "$HOME/calls/df-low"; touch "$HOME/clock-jump"\n'
+                      '       echo $(( $(/bin/date +%s) + 3600 )) > "$HOME/wake-says";;\n'
+                      '    *) free=1000; echo low >> "$HOME/calls/df-low";;\n  esac\nfi\n'
+                      'echo "Filesystem 1024-blocks Used Available Capacity Mounted on"\n'
+                      'echo "/dev/stub 10000000 1 $free 1% /"')
+
+
+def _clock_jumps(home):
+    """date stub for a second sleep: once $HOME/clock-jump exists `date +%s` answers an hour later, which is what a
+    wall clock does across a sleep. Every other date call is the real one."""
+    _shim(home, "date", 'if [ "$*" = "+%s" ] && [ -e "$HOME/clock-jump" ]; then echo $(( $(/bin/date +%s) + 3600 ))\n'
+                        'else exec /bin/date "$@"; fi')
+
+
+def _driver_log(home):
+    d = os.path.join(home, ".claude", "evidence")
+    return "".join(ev(home, n) or "" for n in sorted(os.listdir(d)) if n.startswith("loop-until-"))
+
+
+def _power_alerts(home):
+    return [a for a in _alerts(home) if "brother.loop POWER" in a]
+
+
+def case_on_ac_power_a_long_run_starts():
+    """The control for every power case below: 'AC Power', a deadline a day away. The run starts and finishes (the pass
+    stub exits 42) and not one word is said about power."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": "AC Power"})
+    return (r.returncode == 42 and "acquire" in called(h, "guard") and "POWER" not in r.stdout
+            and not _power_alerts(h) and "LOOP POWER" not in (ev(h, "LOOP-ALARM-HISTORY.txt") or ""))
+
+
+def case_on_battery_a_long_run_refuses_to_start():
+    """ONE condition against the control: 'Battery Power'. Exit 2, the reason names the battery, the refusal speaks on
+    the heartbeat and in the history, and neither the intake nor the lease is ever reached."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": "Battery Power"})
+    return (r.returncode == 2 and "REFUSED TO START: the machine draws from battery" in r.stdout
+            and "acquire" not in called(h, "guard") and called(h, "intake") == ""
+            and "--state REFUSED" in called(h, "heartbeat")
+            and "the machine draws from battery" in (ev(h, "LOOP-ALARM-HISTORY.txt") or ""))
+
+
+def case_an_unreadable_power_source_refuses_like_battery():
+    """An unknown source is never AC. ONE condition against the control: the reading is a source that is neither of the
+    two pmset names for mains and battery (a UPS). Exit 2 before the lease, and the reason says unreadable, not battery."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": "UPS Power"})
+    return (r.returncode == 2 and "REFUSED TO START: the power source is unreadable" in r.stdout
+            and "draws from battery" not in r.stdout and "acquire" not in called(h, "guard")
+            and "--state REFUSED" in called(h, "heartbeat"))
+
+
+def case_a_silent_pmset_on_macos_is_unreadable_and_refuses():
+    """The reading itself, no seam: uname says Darwin and the pmset on PATH prints nothing. That is UNREADABLE, never
+    NO-DATA: on macOS a pmset that cannot answer refuses. The next case changes the kernel's name and nothing else."""
+    h = make_home(lanes="1")
+    _shim(h, "uname", "echo Darwin")
+    _shim(h, "pmset", "exit 1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": ""})
+    return (r.returncode == 2 and "REFUSED TO START: the power source is unreadable" in r.stdout
+            and "NO-DATA" not in r.stdout and "acquire" not in called(h, "guard"))
+
+
+def case_a_host_that_is_not_macos_reads_no_data_and_starts():
+    """NO-DATA is not a refusal, and the direction is the driver's own decision: the same silent pmset as the case
+    above with ONE condition changed, uname says Linux. The check says POWER NO-DATA once and the run starts and ends on
+    its pass (exit 42), with no alert."""
+    h = make_home(lanes="1")
+    _shim(h, "uname", "echo Linux")
+    _shim(h, "pmset", "exit 1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": ""})
+    return (r.returncode == 42 and r.stdout.count("POWER NO-DATA") == 1 and "REFUSED" not in r.stdout
+            and "acquire" in called(h, "guard") and not _power_alerts(h))
+
+
+def case_an_unreadable_kernel_name_is_unreadable_never_no_data():
+    """NO-DATA needs a kernel name that was READ and is not macOS. ONE condition against the case above: uname prints
+    nothing. An unknown host is not a host without pmset, so the start is refused."""
+    h = make_home(lanes="1")
+    _shim(h, "uname", "exit 1")
+    _shim(h, "pmset", "exit 1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": ""})
+    return (r.returncode == 2 and "REFUSED TO START: the power source is unreadable" in r.stdout
+            and "NO-DATA" not in r.stdout and "acquire" not in called(h, "guard"))
+
+
+def case_on_battery_inside_the_window_the_run_starts():
+    """A short run may start on battery. ONE condition against the battery refusal: BROTHER_POWER_WINDOW_S now covers
+    the deadline. The start says why it was allowed, in one line, and the run ends on its pass."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": "Battery Power", "BROTHER_POWER_WINDOW_S": "999999"})
+    return (r.returncode == 42 and r.stdout.count("POWER battery: allowed to start") == 1
+            and "REFUSED" not in r.stdout and "acquire" in called(h, "guard"))
+
+
+def case_a_garbage_power_window_leaves_the_default_in_force():
+    """A window nobody can read is never a wide one. ONE condition against the case above: the window is the word
+    'soon'. The default (20 minutes) stands and the battery start a day before its deadline is refused."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": "Battery Power", "BROTHER_POWER_WINDOW_S": "soon"})
+    return (r.returncode == 2 and "the machine draws from battery" in r.stdout
+            and "more than the 20 minutes a battery start is allowed" in r.stdout and "acquire" not in called(h, "guard"))
+
+
+def case_a_window_with_a_leading_zero_is_read_in_base_ten():
+    """0900 is nine hundred seconds. Read as octal it is an arithmetic error, and an error inside the refusal skips the
+    refusal: the run then starts on battery a day before its deadline. ONE condition against the battery refusal: the
+    window is written 0900. Still refused, and the reason says 15 minutes."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": "Battery Power", "BROTHER_POWER_WINDOW_S": "0900"})
+    return (r.returncode == 2 and "more than the 15 minutes a battery start is allowed" in r.stdout
+            and "acquire" not in called(h, "guard") and "value too great" not in r.stderr)
+
+
+def case_battery_mid_run_is_announced_once_and_the_run_continues():
+    """The charger is pulled during pass 1 (the pass stub writes the file the pmset stub reads) and stays out. The
+    driver says so ONCE, before pass 2: one alert, one history entry, one log line. Before pass 3 it says nothing more,
+    and the run ends on the pass's own verdict (FINISHED, exit 42), never on the power source."""
+    h = make_home(lanes="1", pass_body=_pass_script('echo "Battery Power" > "$HOME/power-says"', ":"))
+    _pmset_says_the_file(h)
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": ""})
+    log, hist, said = _driver_log(h), ev(h, "LOOP-ALARM-HISTORY.txt") or "", "POWER: the machine draws from battery"
+    return (r.returncode == 42 and "===== pass 3 at" in log and len(_power_alerts(h)) == 1
+            and log.count(said) == 1 and hist.count("LOOP POWER at") == 1 and "the machine draws from battery" in hist
+            and log.index("===== pass 1 at") < log.index(said) < log.index("===== pass 2 at")
+            and "LOOP FINISHED at" in (ev(h, "LOOP-ALARM.txt") or "") and "REFUSED" not in r.stdout)
+
+
+def case_a_second_battery_episode_is_announced_again():
+    """Once per EPISODE, not once per run. Battery during pass 1, AC again during pass 2, battery again during pass 3:
+    two alerts, and exactly one 'back on AC' line between them. A latch that never resets would stay silent the second
+    time, which is the night the charger falls out again."""
+    h = make_home(lanes="1", pass_body=_pass_script('echo "Battery Power" > "$HOME/power-says"', 'rm -f "$HOME/power-says"',
+                                                    'echo "Battery Power" > "$HOME/power-says"'))
+    _pmset_says_the_file(h)
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": ""})
+    log, said = _driver_log(h), "POWER: the machine draws from battery"
+    return (r.returncode == 42 and len(_power_alerts(h)) == 2 and log.count(said) == 2 and log.count("POWER: back on AC") == 1
+            and log.index(said) < log.index("POWER: back on AC") < log.rindex(said)
+            and (ev(h, "LOOP-ALARM-HISTORY.txt") or "").count("LOOP POWER at") == 2)
+
+
+def case_a_power_source_that_goes_unreadable_mid_run_is_announced_once():
+    """Mid run an unreadable source is said like a battery one, in its own words, and never ends the run. ONE condition
+    against the battery case: during pass 1 pmset stops answering instead of naming the battery. (Two passes: the
+    once per episode latch is the battery case's to prove.)"""
+    h = make_home(lanes="1", pass_body=_pass_script(': > "$HOME/power-says"'))
+    _pmset_says_the_file(h)
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_POWER_SOURCE": ""})
+    log, alerts = _driver_log(h), _power_alerts(h)
+    return (r.returncode == 42 and "===== pass 2 at" in log and len(alerts) == 1 and "cannot be read" in alerts[0]
+            and log.count("POWER: the power source cannot be read") == 1 and "draws from battery" not in log)
+
+
+def _sysctl_wake_says_the_file(home):
+    """sysctl stub in the shape `sysctl -n kern.waketime` prints: the epoch written in $HOME/wake-says, and nothing at
+    all (exit 1) while that file is absent, which is a wake time nobody can read."""
+    _shim(home, "sysctl", 'if [ "$2" = kern.waketime ] && [ -s "$HOME/wake-says" ]; then\n'
+                          '  echo "{ sec = $(cat "$HOME/wake-says"), usec = 679958 } Mon Oct  5 22:49:19 2026"\n'
+                          'else exit 1; fi')
+
+
+WOKE = 'date +%s > "$HOME/wake-says"'   # a pass stub step: the machine woke from sleep during this pass
+DISK_LOW = 'touch "$HOME/disk-low"'      # a pass stub step: from now on the free space reads under the floor
+
+
+def _wake_run(steps, reads="L", settle="20", nap="1", intake=None, prepare=None):
+    """One run in which the pass stub decides, pass by pass, when the machine woke and when the free space falls, and
+    `reads` scripts what each later disk reading says. Both readings go through the real tools' own output (sysctl, df),
+    shadowed on PATH; the settle re-reads every nap s."""
+    h = make_home(lanes="1", pass_body=_pass_script(*steps))
+    _df_reads(h, reads)
+    _sysctl_wake_says_the_file(h)
+    _clock_jumps(h)
+    if intake:
+        _intake_seq(h, intake)
+    if prepare:
+        prepare(h)
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_DISK_FREE_KB": "", "BROTHER_WAKE_EPOCH": "",
+                                  "BROTHER_WAKE_SETTLE_S": settle, "BROTHER_WAKE_SETTLE_NAP_S": nap})
+    return h, r
+
+
+def _clock_s(text, pattern):
+    """Seconds of the day of the first HH:MM:SS that `pattern` captures in `text`, None when it is absent."""
+    m = re.search(pattern, text)
+    return None if not m else sum(int(x) * k for x, k in zip(m.group(1).split(":"), (3600, 60, 1)))
+
+
+HELD, BACK = "read after the machine woke from sleep", "the free disk space reads above the floor again"
+
+
+def _woke_at(home):
+    """The wake the kernel stub reported, as the driver prints it (HH:MM:SS): a sleep is named by its time, or it
+    names nothing a reader can check against pmset -g log."""
+    with open(os.path.join(home, "wake-says"), encoding="utf-8") as fh:
+        return time.strftime("%H:%M:%S", time.localtime(int(fh.read().strip())))
+
+
+def case_a_wake_then_a_recovered_disk_continues():
+    """2026-10-05 22:49:24, replayed: the machine woke during pass 1, the reading at the top of pass 2 is under the
+    floor, and the space comes back on the third reading. The driver holds, re-reads, says it was the sleep, and pass 2
+    runs: FINISHED (exit 42), no DISK anywhere."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW], reads="L L L R", settle="30")
+    log, hist = _driver_log(h), ev(h, "LOOP-ALARM-HISTORY.txt") or ""
+    return (r.returncode == 42 and "LOOP DISK" not in hist and "LOOP FINISHED at" in (ev(h, "LOOP-ALARM.txt") or "")
+            and HELD in log and BACK in log and "===== pass 2 at" in log
+            and log.index("===== pass 1 at") < log.index(HELD) < log.index(BACK) < log.index("===== pass 2 at")
+            and called(h, "df-low").count("low") == 3 and (HELD + " at " + _woke_at(h)) in log
+            # the lease is renewed at every re-read of the hold, not only by the two passes (2 renews without it)
+            and called(h, "guard").count("renew") >= 4)
+
+
+def case_a_wake_then_space_that_stays_low_raises_the_alarm_naming_the_sleep():
+    """A real full disk still stops the run after a wake: the wait is bounded and the floor is unchanged. ONE condition
+    against the case above: the space never comes back. DISK (exit 3) once the settle is over, pass 2 never runs, and
+    the alarm carries the floor, the sleep, and the hibernation image as a candidate. THE BOUND IS THE BOUND: the settle
+    is 2 s and a re-read is due only every 30 s, so the alarm must come within seconds of the hold, never a nap later."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW], settle="2", nap="30")
+    alarm, log = ev(h, "LOOP-ALARM.txt") or "", _driver_log(h)
+    held_at = _clock_s(log, r"(\d\d:\d\d:\d\d) HOLD: free disk space")
+    ended_at = _clock_s(alarm, r"LOOP DISK at \d{4}-\d\d-\d\d (\d\d:\d\d:\d\d)")
+    return (r.returncode == 3 and "LOOP DISK at" in alarm and "under the floor of 2048 MB" in alarm
+            and ("the machine woke from sleep at " + _woke_at(h)) in alarm and "hibernation image" in alarm
+            and "pmset -g log" in alarm and "===== pass 2 at" not in log and BACK not in log
+            and called(h, "df-low").count("low") == 2 and "--state DISK" in called(h, "heartbeat")
+            and held_at is not None and ended_at is not None and (ended_at - held_at) % 86400 <= 15)
+
+
+def case_no_wake_since_the_last_good_reading_raises_disk_at_once():
+    """No sleep since the previous pass, no wait. The machine woke during pass 1, the disk read fine at the top of
+    pass 2, and it fills during pass 2: that wake is older than the last good reading and explains nothing. DISK on the
+    first low reading (read low exactly once), and the alarm says nothing about a sleep."""
+    h, r = _wake_run([WOKE, DISK_LOW], settle="20")
+    alarm, log = ev(h, "LOOP-ALARM.txt") or "", _driver_log(h)
+    return (r.returncode == 3 and "LOOP DISK at" in alarm and "under the floor of 2048 MB" in alarm
+            and "woke from sleep" not in alarm and "hibernation" not in alarm and "re-reading" not in log
+            and called(h, "df-low").count("low") == 1 and "===== pass 2 at" in log and "===== pass 3 at" not in log)
+
+
+def case_an_unreadable_wake_time_raises_disk_at_once():
+    """An unknown is never a reason to wait on a full disk. ONE condition against the still full case: sysctl gives no
+    wake time at all. The same immediate DISK as with no wake, the same single low reading."""
+    h, r = _wake_run([DISK_LOW], settle="20")
+    alarm, log = ev(h, "LOOP-ALARM.txt") or "", _driver_log(h)
+    return (r.returncode == 3 and "LOOP DISK at" in alarm and "woke from sleep" not in alarm and "re-reading" not in log
+            and called(h, "df-low").count("low") == 1 and "===== pass 2 at" not in log)
+
+
+def case_the_deadline_is_read_at_every_reread_of_a_settle():
+    """A settle is a hold like every other: each re-read goes back to the top of the loop, where the deadline lives. The
+    still full case with ONE condition added: at the first re-read the intake has moved the deadline into the past (its
+    fourth answer). The run ends DEADLINE (exit 0), not DISK, and no pass runs. A settle that waited in its own loop
+    would have sat out its bound and raised DISK."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW], settle="30", intake=[("10.00", "23:59")] * 3 + [("10.00", "00:01")])
+    log = _driver_log(h)
+    return (r.returncode == 0 and "LOOP DEADLINE at" in (ev(h, "LOOP-ALARM.txt") or "") and HELD in log
+            and "LOOP DISK" not in (ev(h, "LOOP-ALARM-HISTORY.txt") or "") and "===== pass 2 at" not in log)
+
+
+def case_a_second_sleep_inside_a_settle_starts_the_settle_again():
+    """The bound is wall clock, and time asleep is not time the image had to be released. The second low reading comes
+    with a second sleep (the clock jumps an hour and the kernel reports a new wake); the space returns two readings
+    later. The driver holds again for the new wake and the run finishes. Without the restart the first reading after
+    the second wake finds the bound spent and raises DISK: the incident again."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW], reads="L S L L R", settle="30")
+    log = _driver_log(h)
+    return (r.returncode == 42 and log.count(HELD) == 2 and BACK in log and "===== pass 2 at" in log
+            and called(h, "df-low").count("low") == 4 and "LOOP DISK" not in (ev(h, "LOOP-ALARM-HISTORY.txt") or ""))
+
+
+def case_one_wake_earns_one_settle():
+    """A wake already settled for explains nothing later. The space comes back inside the settle, pass 2 runs, and the
+    space is low again at the top of pass 3 with no new wake: DISK at once, one hold in the whole run, and the alarm
+    names no sleep. A settle per low reading would let a flapping disk hold the run for ever."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW, ":"], reads="L L R L", settle="30")
+    alarm, log = ev(h, "LOOP-ALARM.txt") or "", _driver_log(h)
+    return (r.returncode == 3 and "LOOP DISK at" in alarm and "woke from sleep" not in alarm and log.count(HELD) == 1
+            and log.count(BACK) == 1 and called(h, "df-low").count("low") == 3
+            and "===== pass 2 at" in log and "===== pass 3 at" not in log)
+
+
+def case_a_wake_before_the_run_started_explains_nothing():
+    """The last good reading starts at the driver's own start check. The space is low at the very first reading of the
+    loop (the lease stub creates the flag) and the kernel's last wake is an hour before this run began: DISK at once,
+    before any pass, with no hold."""
+    def prepare(h):
+        _w(os.path.join(h, "wake-says"), str(int(time.time()) - 3600))
+        _w(os.path.join(h, ".claude", "bin", "loop_guard.sh"),
+           '#!/bin/bash\necho "$*" >> "$HOME/calls/guard"\n[ "$1" = acquire ] && touch "$HOME/disk-low"\nexit 0\n', 0o755)
+    h, r = _wake_run([":"], settle="20", prepare=prepare)
+    alarm, log = ev(h, "LOOP-ALARM.txt") or "", _driver_log(h)
+    return (r.returncode == 3 and "LOOP DISK at" in alarm and "woke from sleep" not in alarm and "re-reading" not in log
+            and called(h, "df-low").count("low") == 1 and "===== pass 1 at" not in log)
+
+
+def case_a_zero_nap_leaves_the_default_in_force():
+    """A nap of zero would re-read in a spin. The still full case with ONE condition changed: the nap is 0. The default
+    stands (30 s, capped by the 2 s left), so the disk is read low exactly twice before DISK."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW], settle="2", nap="0")
+    return (r.returncode == 3 and "LOOP DISK at" in (ev(h, "LOOP-ALARM.txt") or "")
+            and called(h, "df-low").count("low") == 2)
+
+
+def case_a_garbage_settle_bound_leaves_the_default_in_force():
+    """A bound nobody can read is never zero and never endless. The recovered case with ONE condition changed: the bound
+    is the word 'soon'. The default stands, the space comes back inside it, and the run finishes; read as a number,
+    'soon' is zero seconds of waiting and the same run ends DISK."""
+    h, r = _wake_run([WOKE + "; " + DISK_LOW], reads="L L L R", settle="soon")
+    return r.returncode == 42 and BACK in _driver_log(h) and "LOOP DISK" not in (ev(h, "LOOP-ALARM-HISTORY.txt") or "")
+
+
+def case_low_space_at_the_start_names_a_wake_inside_the_settle_window():
+    """The other caller of disk_hold. A start under the floor refuses at once either way (it never waits); what changes
+    is the reason: a wake a few seconds ago is named with the hibernation image, a wake long ago is not."""
+    def refused(wake):
+        h = make_home(lanes="1")
+        r = run(h, A_DAY_AWAY, extra={"BROTHER_DISK_FREE_KB": "1000", "BROTHER_WAKE_EPOCH": wake})
+        return r.stdout if r.returncode == 2 and "under the floor" in r.stdout and "acquire" not in called(h, "guard") else None
+    fresh, stale = refused(str(int(time.time()))), refused("1")
+    return (fresh is not None and stale is not None and "the machine woke from sleep at" in fresh
+            and "hibernation image" in fresh and "woke from sleep" not in stale and "hibernation" not in stale)
+
+
+def case_a_hostile_wake_time_is_dropped_never_evaluated():
+    """The wake time reaches shell arithmetic, and arithmetic evaluates what it is handed. A value that is not a plain
+    number is dropped before that: this one would create a file in the throwaway HOME if it were ever evaluated. The
+    start still refuses on the floor alone, with no sleep named."""
+    h = make_home(lanes="1")
+    r = run(h, A_DAY_AWAY, extra={"BROTHER_DISK_FREE_KB": "1000", "BROTHER_WAKE_EPOCH": 'x[$(touch "$HOME/evaluated")]'})
+    return (r.returncode == 2 and "under the floor" in r.stdout and "woke from sleep" not in r.stdout
+            and not os.path.exists(os.path.join(h, "evaluated")))
+
 
 def case_every_child_gets_one_run_scoped_tmpdir_and_old_runs_are_pruned():
     """The scratch block, read from the script's own source: TMPDIR is a fresh run-* folder under BROTHER_SCRATCH, a
@@ -1655,6 +2031,30 @@ CASES = CONTROL_CASES + LANE_D_CASES + [
     ("disk_hold holds when low or unreadable, passes when roomy", case_disk_hold_holds_low_and_unreadable_never_roomy),
     ("swap or a bloated file event daemon holds like a full disk, each on its own", case_swap_and_fseventsd_hold_like_a_full_disk),
     ("the swap hold is off unless the owner turns it on; the daemon hold stays", case_the_swap_hold_is_off_unless_the_owner_turns_it_on),
+    ("power: on AC a long run starts and nothing is said about power", case_on_ac_power_a_long_run_starts),
+    ("power: on battery a long run refuses to start, before the intake and the lease", case_on_battery_a_long_run_refuses_to_start),
+    ("power: an unreadable source refuses like battery", case_an_unreadable_power_source_refuses_like_battery),
+    ("power: a silent pmset on macOS is unreadable and refuses", case_a_silent_pmset_on_macos_is_unreadable_and_refuses),
+    ("power: a host that is not macOS reads NO-DATA and starts", case_a_host_that_is_not_macos_reads_no_data_and_starts),
+    ("power: an unreadable kernel name is unreadable, never NO-DATA", case_an_unreadable_kernel_name_is_unreadable_never_no_data),
+    ("power: on battery inside the window the run starts", case_on_battery_inside_the_window_the_run_starts),
+    ("power: a garbage window leaves the default in force", case_a_garbage_power_window_leaves_the_default_in_force),
+    ("power: a window with a leading zero is read in base ten", case_a_window_with_a_leading_zero_is_read_in_base_ten),
+    ("power: battery mid run is announced once and the run continues", case_battery_mid_run_is_announced_once_and_the_run_continues),
+    ("power: a second battery episode is announced again", case_a_second_battery_episode_is_announced_again),
+    ("power: a source that goes unreadable mid run is announced once", case_a_power_source_that_goes_unreadable_mid_run_is_announced_once),
+    ("wake: a low reading after a wake that recovers continues the run", case_a_wake_then_a_recovered_disk_continues),
+    ("wake: a disk still full after the settle raises DISK naming the sleep", case_a_wake_then_space_that_stays_low_raises_the_alarm_naming_the_sleep),
+    ("wake: no wake since the last good reading raises DISK at once", case_no_wake_since_the_last_good_reading_raises_disk_at_once),
+    ("wake: an unreadable wake time raises DISK at once", case_an_unreadable_wake_time_raises_disk_at_once),
+    ("wake: the deadline is read at every re-read of a settle", case_the_deadline_is_read_at_every_reread_of_a_settle),
+    ("wake: a second sleep inside a settle starts the settle again", case_a_second_sleep_inside_a_settle_starts_the_settle_again),
+    ("wake: one wake earns one settle", case_one_wake_earns_one_settle),
+    ("wake: a wake before the run started explains nothing", case_a_wake_before_the_run_started_explains_nothing),
+    ("wake: a zero nap leaves the default in force", case_a_zero_nap_leaves_the_default_in_force),
+    ("wake: a garbage settle bound leaves the default in force", case_a_garbage_settle_bound_leaves_the_default_in_force),
+    ("wake: a low disk at the start names a wake inside the settle window", case_low_space_at_the_start_names_a_wake_inside_the_settle_window),
+    ("wake: a hostile wake time is dropped, never evaluated", case_a_hostile_wake_time_is_dropped_never_evaluated),
     ("every child gets one run scoped TMPDIR and day old run folders are pruned", case_every_child_gets_one_run_scoped_tmpdir_and_old_runs_are_pruned),
     ("the run scratch is pruned by age every pass", case_the_run_scratch_is_pruned_by_age_every_pass),
     ("the recorder is on for every run: a durable BROTHER_RUN_DIR, refused when unwritable", case_the_recorder_is_on_for_every_run),

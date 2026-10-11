@@ -365,15 +365,36 @@ class SemanticDuplicateRoutes(unittest.TestCase):
         self.assertEqual(duplicates, 1)
         self.assertIn('auto', groups)
 
-    def test_the_real_umbrella_bundle_has_known_duplicates(self):
-        """Calibration against the real tree: the umbrella bundle exposes
-        each product's status/review/etc under three product prefixes on
-        purpose, so this must be > 0 today, not a fixture-only result."""
+    def test_a_moved_command_is_a_pointer_not_a_second_route(self):
+        """U1 (2026-10-11): a 1.1.0 name kept typeable as a moved command
+        beside its verb skill does not count as the route exposed twice; the
+        same file without the pointer description still does."""
+        commands_dir = os.path.join(self.root, 'commands')
+        os.makedirs(commands_dir)
+        # The real shape (review note 1): the verb skill is brother-status, and 'brother-' is a known
+        # prefix, so a non pointer brotherme-status beside it IS the same route twice.
+        with open(os.path.join(commands_dir, 'brotherme-status.md'), 'w', encoding='utf-8') as f:
+            f.write('---\ndescription: "Moved: now /brother status"\n---\npointer\n')
+        write_skill(os.path.join(self.root, 'skills'), 'brother-status', [])
+        self.assertEqual(sb.count_semantic_duplicate_routes(self.root), (0, {}))
+        self.assertEqual(sb.repo_entry_names(self.root), ['brother-status', 'brotherme-status'],
+                         'the manifest still counts the moved command as an installed entry')
+        with open(os.path.join(commands_dir, 'brotherme-status.md'), 'w', encoding='utf-8') as f:
+            f.write('---\ndescription: "Show where things stand"\n---\nroute\n')
+        duplicates, groups = sb.count_semantic_duplicate_routes(self.root)
+        self.assertEqual((duplicates, sorted(groups)), (1, ['status']))
+
+    def test_the_real_umbrella_bundle_has_no_duplicates(self):
+        """Calibration against the real tree. Until 1.1.1 the bundle exposed
+        each product's status/review/etc under three product prefixes, so
+        this asserted > 0. The owner withdrew C3 and C4 on 2026-10-10 (U1):
+        the bundle ships the door and six verb skills, one route each, so the
+        same metric on the real tree is exactly zero."""
         bundle_root = os.path.join(sb.REPO_ROOT, 'bundle')
         if not os.path.isdir(bundle_root):
             self.skipTest('no bundle/ in this checkout')
-        duplicates, _groups = sb.count_semantic_duplicate_routes(bundle_root)
-        self.assertGreater(duplicates, 0)
+        duplicates, groups = sb.count_semantic_duplicate_routes(bundle_root)
+        self.assertEqual((duplicates, groups), (0, {}))
 
 
 class CurrentArchitecture(unittest.TestCase):

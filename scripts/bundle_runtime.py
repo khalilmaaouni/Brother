@@ -579,8 +579,16 @@ def _package_join_targets(path):
             continue
         if len(node.args) < 2:
             continue
+        # A join made only of string constants names a relative path
+        # (brothermode_cli.py's os.path.join("scripts", "doctor.py")), so
+        # its first segment is part of the tail, not a root. Read as a
+        # root, that join yielded "doctor.py", resolved nowhere, and the
+        # one plugin shipped scripts/setup.py alone (DR1, 2026-10-11).
+        all_constant = all(isinstance(arg, ast.Constant)
+                           and isinstance(arg.value, str)
+                           for arg in node.args)
         tail_parts = []
-        for arg in node.args[1:]:
+        for arg in (node.args if all_constant else node.args[1:]):
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 tail_parts.append(arg.value)
             else:

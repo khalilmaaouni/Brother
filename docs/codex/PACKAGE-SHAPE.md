@@ -12,7 +12,7 @@ package or evidence that a signed-in host has run it.
 | Field | Current value or contents |
 | :-- | :-- |
 | `name` | `brother` |
-| `version` | `1.0.18` |
+| `version` | `1.1.0` |
 | `description` | `Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.` |
 | `author` | An object whose `name` is `Khalil Maaouni`. |
 | `homepage`, `repository` | Both point to `https://github.com/khalilmaaouni/Brother`. |
@@ -112,7 +112,7 @@ and hook artifacts along with the skill mirror.
 
 ## Differences from the Claude Code bundle
 
-Both manifests name `brother` at version `1.0.18`, and share the description,
+Both manifests name `brother` at version `1.1.0`, and share the description,
 author, public repository and homepage, license, and the first five keywords.
 Their remaining fields differ as follows:
 
@@ -120,7 +120,7 @@ Their remaining fields differ as follows:
 | :-- | :-- | :-- |
 | Skills declaration | Explicit `"skills": "./skills/"`. | No `skills` field. |
 | Interface metadata | The `interface` object above. | No `interface` field. |
-| Product dependencies | No `dependencies` field. | `brothermode@^3.4.2` and `brothersbe@^3.7.0`. |
+| Product dependencies | No `dependencies` field. | No `dependencies` field. |
 | Host keyword | `codex` | `claude code` |
 | Hook declaration | No `hooks` field. | No `hooks` field in the manifest; Claude Code loads the conventional `hooks/hooks.json` the bundle ships. |
 

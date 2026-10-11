@@ -184,7 +184,7 @@ def candidate_files():
         "products/brothermode/hooks/hooks.json": ("100644", jbytes(PRODUCT_HOOKS)),
         "bundle/.codex-plugin/plugin.json": ("100644", jbytes({"name": "brother", "version": "1.1.0"})),
         "bundle/skills/using-brother/SKILL.md": ("100644", b"---\nname: using-brother\n---\nthe door fixture\n"),
-        "bundle/skills/brothermode-status/SKILL.md": ("100644", b"---\nname: brothermode-status\n---\nstatus fixture\n"),
+        "bundle/skills/brother-status/SKILL.md": ("100644", b"---\nname: brother-status\n---\nstatus fixture\n"),
         "products/brothermode/tools/door.py": ("100755", b"# the product door hook fixture\n"),
         "products/brothermode/tools/guard.py": ("100755", b"# the product write guard fixture\n"),
         "products/brothermode/tools/start.py": ("100755", b"# the product session start hook fixture\n"),
@@ -407,7 +407,7 @@ class Fixture(object):
         shas = dict((name, sha(self.files["bundle/skills/%s/SKILL.md" % name][1])) for name in verifier.DOOR_SKILLS)
         return proof.install_digest(root or self.install_root(), shas)
 
-    def door_skill(self, name="brothermode-status", root=None):
+    def door_skill(self, name="brother-status", root=None):
         """A shipped skill's SKILL.md as Codex installs it, under root (default the installed plugin root)."""
         return os.path.join(root or self.install_root(), "skills", name, "SKILL.md")
 
@@ -821,7 +821,7 @@ class TestVerifierRefusals(unittest.TestCase):
         dirty candidate, RED before any leg is read."""
         self.cc_door()
         write(self.fx.door_skill(root=self.fx.roots["claude"]), b"edited\n")
-        self.assertRed("dirty", "bundle/skills/brothermode-status/SKILL.md")
+        self.assertRed("dirty", "bundle/skills/brother-status/SKILL.md")
 
     def test_a_claude_code_candidate_without_a_door_skill_is_no_data(self):
         self.cc_door()
@@ -999,7 +999,7 @@ class TestVerifierRefusals(unittest.TestCase):
         self.assertNoDoor("no PreToolUse row in the door's session loads")
 
     def test_dotdot_in_place_of_the_version_folder_is_no_load(self):
-        self.assertNotLoaded("cat %s/../skills/brothermode-status/SKILL.md" % os.path.dirname(self.fx.install_root()))
+        self.assertNotLoaded("cat %s/../skills/brother-status/SKILL.md" % os.path.dirname(self.fx.install_root()))
 
     def test_the_root_as_a_substring_of_another_path_is_no_load(self):
         self.assertNotLoaded("cat /tmp/evil%s" % self.fx.door_skill())
@@ -1014,7 +1014,7 @@ class TestVerifierRefusals(unittest.TestCase):
         self.assertNotLoaded("cat %s/../../../../../../../../tmp/fake" % self.fx.door_skill())
 
     def test_a_dotdot_that_normalises_back_to_the_skill_is_still_no_load(self):
-        self.assertNotLoaded("cat %s/skills/x/../brothermode-status/SKILL.md" % self.fx.install_root())
+        self.assertNotLoaded("cat %s/skills/x/../brother-status/SKILL.md" % self.fx.install_root())
 
     def test_a_second_command_or_pipe_is_no_load(self):
         for tail in ("; rm -rf /tmp/x", " | sh", " > /tmp/copy"):
@@ -1027,7 +1027,7 @@ class TestVerifierRefusals(unittest.TestCase):
         self.assertNotLoaded("cat '%s" % self.fx.door_skill())
 
     def test_a_relative_path_is_no_load(self):
-        self.assertNotLoaded("cat skills/brothermode-status/SKILL.md")
+        self.assertNotLoaded("cat skills/brother-status/SKILL.md")
 
     def test_a_command_that_is_not_text_is_no_load(self):
         self.door_turn()
@@ -1052,7 +1052,7 @@ class TestVerifierRefusals(unittest.TestCase):
 
     def test_a_path_that_normalises_to_the_skill_without_dotdot_loads(self):
         root = self.fx.install_root()
-        for path in (root + "/skills//brothermode-status/SKILL.md", root + "/./skills/brothermode-status/SKILL.md"):
+        for path in (root + "/skills//brother-status/SKILL.md", root + "/./skills/brother-status/SKILL.md"):
             self.door_turn()
             self.set_load("cat %s" % path)
             self.assertGreen()

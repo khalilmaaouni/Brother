@@ -180,7 +180,79 @@ disk_hold() {                   # prints why the machine holds the run, nothing 
     *) [ "$e" -gt "$FSE_CEILING_KB" ] && echo "the file event daemon holds $((e / 1024)) MB, over the ceiling of $((FSE_CEILING_KB / 1024)) MB: the machine is buffering file churn"; ;;
   esac
 }
-DISK_WHY=$(disk_hold); [ -n "$DISK_WHY" ] && { refuse "${DISK_WHY}; free space before starting a run"; exit 2; }
+# A LOW READING RIGHT AFTER A WAKE IS NOT YET A FULL DISK (2026-10-05 22:49:24: 357 MB free, five seconds after the Mac
+# woke from a low battery sleep; 17.1 GB were free again by 22:52, and by then the run had ended DISK and an hour had
+# gone into reading code for a leak. The cause is INFERRED, its file was not observed: hibernatemode 3 writes an image
+# the size of memory, 16 GiB on that Mac, into the same container, and releases it after the wake).
+# wake_epoch is the second the machine last woke (sysctl kern.waketime, which read 22:49:19 for that wake);
+# BROTHER_WAKE_EPOCH is the test seam. A wake time that cannot be read prints nothing, and nothing is never a reason to
+# wait. BROTHER_WAKE_SETTLE_S (default 240 s: the space was back at most 215 s after that reading) bounds how long a
+# hold waits for the image to be released, re-reading every BROTHER_WAKE_SETTLE_NAP_S (default 30 s); see the pass
+# loop. A SETTING THAT IS NOT A PLAIN NUMBER LEAVES ITS DEFAULT IN FORCE, and a leading zero is read in base ten, the
+# way the stop hour already is (0900 read as octal is an arithmetic error, and an error inside a refusal skips it).
+plain_number() {                # plain_number <text> <default>: the text as a base ten number, else the default
+  case "$1" in ''|*[!0-9]*) printf '%s\n' "$2";; *) printf '%s\n' "$(( 10#$1 ))";; esac
+}
+WAKE_SETTLE_S=$(plain_number "${BROTHER_WAKE_SETTLE_S:-}" 240)
+WAKE_SETTLE_NAP_S=$(plain_number "${BROTHER_WAKE_SETTLE_NAP_S:-}" 30); [ "$WAKE_SETTLE_NAP_S" -gt 0 ] || WAKE_SETTLE_NAP_S=30
+wake_epoch() {                  # prints the epoch second of the machine's last wake from sleep, nothing when unreadable
+  plain_number "${BROTHER_WAKE_EPOCH:-$(sysctl -n kern.waketime 2>/dev/null | sed -n 's/^{ sec = \([0-9][0-9]*\),.*/\1/p')}" ""
+}
+DISK_WHY=$(disk_hold)
+if [ -n "$DISK_WHY" ]; then
+  # THE START NEVER WAITS (a refused start costs a relaunch, not a run), but it names a wake inside the settle window,
+  # so the reader looks at the sleep before looking for a leak.
+  WOKE=$(wake_epoch)
+  case "$DISK_WHY" in *"free disk space"*)
+    if [ -n "$WOKE" ] && [ $(( NOW - WOKE )) -lt "$WAKE_SETTLE_S" ]; then
+      DISK_WHY="${DISK_WHY}; the machine woke from sleep at $(date -r "$WOKE" '+%H:%M:%S' 2>/dev/null), so a hibernation image may still hold the space: read the disk again in a few minutes before looking for a leak"
+    fi;;
+  esac
+  refuse "${DISK_WHY}; free space before starting a run"; exit 2
+fi
+DISK_OK_AT=$(date +%s)          # the last second this driver read the disk as fine: a wake after it explains a low reading
+
+# THE POWER PRECONDITION (2026-10-05, the same night: the pair that ended DISK had been started on battery, and at
+# 22:33 the Mac went into a low battery sleep at 1%, the sleep behind that reading). caffeinate cannot hold a low
+# battery sleep, so the one control that PREVENTS this sits here, before the hold, the intake and the lease: without AC
+# NOTHING starts unless the deadline is within BROTHER_POWER_WINDOW_S (default 1200 s, the figure the deadline drain
+# already treats as a short run; that battery went from 9% to the sleep in 36 minutes).
+# UNREADABLE REFUSES EXACTLY LIKE BATTERY: only 'AC Power' is known to last, and any other answer, a UPS included, is
+# not that. NO-DATA DOES NOT BLOCK, AND THE DIRECTION IS DELIBERATE: a host that is not macOS has no pmset, so there is
+# no reading to take; the check says NO-DATA once and the run starts. The kernel's name decides that, never the absence
+# of pmset: on macOS a pmset that is missing or silent is UNREADABLE and refuses, and a kernel name that cannot be read
+# is unreadable too. BROTHER_POWER_SOURCE is the test seam: it stands in for the words pmset prints between its quotes
+# ('AC Power', 'Battery Power').
+POWER_WINDOW_S=$(plain_number "${BROTHER_POWER_WINDOW_S:-}" 1200)
+power_source() {                # prints one word: ac, battery, unreadable, or no-data (a host that has no pmset)
+  local p=${BROTHER_POWER_SOURCE:-}
+  if [ -z "$p" ]; then
+    case "$(uname -s 2>/dev/null)" in
+      Darwin) p=$(pmset -g batt 2>/dev/null | sed -n "1s/.*drawing from '\([^']*\)'.*/\1/p");;
+      '') ;;
+      *) echo no-data; return 0;;
+    esac
+  fi
+  case "$p" in
+    "AC Power") echo ac;;
+    "Battery Power") echo battery;;
+    *) echo unreadable;;
+  esac
+}
+POWER=$(power_source)
+case "$POWER" in
+  ac) ;;
+  no-data) echo "POWER NO-DATA: this host is not macOS, so there is no pmset to read; the power check does not block";;
+  *)
+    if [ $(( STOP_EPOCH - NOW )) -gt "$POWER_WINDOW_S" ]; then
+      case "$POWER" in
+        battery) refuse "the machine draws from battery and the deadline is $(( (STOP_EPOCH - NOW) / 60 )) minutes away, more than the $(( POWER_WINDOW_S / 60 )) minutes a battery start is allowed; a low battery sleep ends the run and no caffeinate holds it: plug in the charger";;
+        *) refuse "the power source is unreadable (pmset named neither AC Power nor Battery Power) and the deadline is $(( (STOP_EPOCH - NOW) / 60 )) minutes away, more than the $(( POWER_WINDOW_S / 60 )) minutes a start without AC is allowed; an unknown source is never AC";;
+      esac
+      exit 2
+    fi
+    echo "POWER ${POWER}: allowed to start because the deadline is within ${POWER_WINDOW_S} s";;
+esac
 
 # THE OWNER'S STOP OUTRANKS EVERY SESSION. On 2026-09-22 the owner wrote "Stop the loop and fix all these issues" at
 # 07:40 and an orchestrator session restarted it at 07:58 and again at 08:03 to prove its own fixes: the order had
@@ -668,10 +740,63 @@ while :; do
   fi
   if [ "${INTAKE_HELD:-0}" = 1 ]; then INTAKE_HELD=0; echo "$(date '+%H:%M:%S') the intake's budget reads again: ${BUDGET_USD} USD" | tee -a "$LOG"; fi
   find "$RUN_TMP" -mindepth 1 -maxdepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null
+  # THE POWER SOURCE IS READ BEFORE EVERY PASS, AND A CHANGE IS SAID ONCE (2026-10-05). The precondition above keeps a
+  # long run from STARTING without AC; a charger pulled out later is no reason to end one, so this is a REPORT and not a
+  # control: one alert, one entry in the history file and one log line per episode (never one per pass), and the run
+  # goes on. Back on AC is one log line, and a later episode rings again. NOT A PROOF EVENT, on purpose: every row of
+  # <run dir>/proof/events.jsonl reads as an owner intervention (loop_receipt.py: unattended = not events), so a pulled
+  # charger alone would fail a proof.
+  POWER=$(power_source)
+  case "$POWER" in
+    battery|unreadable)
+      if [ "${POWER_SAID:-}" != "$POWER" ]; then
+        POWER_SAID=$POWER
+        case "$POWER" in
+          battery) POWER_WHY="the machine draws from battery; the run continues, and a low battery sleep would end it and read as a full disk on the wake: plug in the charger";;
+          *) POWER_WHY="the power source cannot be read, and an unknown source is never AC; the run continues: check the charger";;
+        esac
+        echo "$(date '+%H:%M:%S') POWER: ${POWER_WHY}" | tee -a "$LOG"
+        printf '%s\n' "LOOP POWER at $(date '+%Y-%m-%d %H:%M:%S %Z')" "$POWER_WHY" "log: ${LOG}" >> "$HIST"; echo "" >> "$HIST"
+        announce POWER "$POWER_WHY"
+      fi;;
+    ac) if [ -n "${POWER_SAID:-}" ]; then POWER_SAID=""; echo "$(date '+%H:%M:%S') POWER: back on AC" | tee -a "$LOG"; fi;;
+  esac
   DISK_WHY=$(disk_hold)
+  # THE WAKE SETTLE (2026-10-05, see wake_epoch above). When the free space holds AND the machine woke since this driver
+  # last read the disk as fine, the driver HOLDS instead of raising DISK: no pass runs, and the reading is taken again
+  # every WAKE_SETTLE_NAP_S for at most WAKE_SETTLE_S. IT IS A HOLD LIKE EVERY OTHER ONE HERE (nap, then back to the top
+  # of the loop), so the deadline, the intake and the power source are read again before every re-read; a deadline that
+  # arrives inside a settle ends the run DEADLINE. THE FLOOR IS UNCHANGED AND THE WAIT IS BOUNDED, PER WAKE:
+  #   ONE SETTLE PER WAKE. A wake already settled for explains nothing later: space that came back and fell again
+  #   raises at once (a flapping disk used to open a fresh settle at every low reading, without end).
+  #   A SECOND SLEEP INSIDE A SETTLE STARTS IT AGAIN. The bound is wall clock, and time spent asleep is not time the
+  #   image had to be released: without this the next wake found the bound spent and raised DISK on its first reading.
+  #   NO WAKE SINCE THE LAST GOOD READING, OR A WAKE TIME THAT CANNOT BE READ, RAISES AT ONCE: an unknown is never a
+  #   reason to wait on a full disk.
+  # Space that does not come back raises DISK exactly as before, and the alarm then names the sleep and the hibernation
+  # image as a candidate.
+  case "$DISK_WHY" in
+    *"free disk space"*)
+      WOKE=$(wake_epoch)
+      if [ -n "$WOKE" ] && [ "$WOKE" != "${WAKE_SETTLED:-}" ] && { [ -n "${SETTLE_END:-}" ] || [ "$WOKE" -ge "$DISK_OK_AT" ]; }; then
+        WAKE_SETTLED=$WOKE; WOKE_AT=$(date -r "$WOKE" '+%H:%M:%S' 2>/dev/null); SETTLE_END=$(( $(date +%s) + WAKE_SETTLE_S ))
+        echo "$(date '+%H:%M:%S') HOLD: $(printf '%s\n' "$DISK_WHY" | head -1), read after the machine woke from sleep at ${WOKE_AT}; re-reading for up to ${WAKE_SETTLE_S} s before raising DISK" | tee -a "$LOG"
+      fi
+      if [ -n "${SETTLE_END:-}" ]; then
+        SETTLE_LEFT=$(( SETTLE_END - $(date +%s) ))
+        if [ "$SETTLE_LEFT" -gt 0 ]; then
+          bash ~/.claude/bin/loop_guard.sh renew >/dev/null 2>&1
+          nap "$(( SETTLE_LEFT < WAKE_SETTLE_NAP_S ? SETTLE_LEFT : WAKE_SETTLE_NAP_S ))"; continue
+        fi
+        SETTLE_END=""
+        DISK_WHY="${DISK_WHY}; the machine woke from sleep at ${WOKE_AT} and the space did not come back within the settle of at most ${WAKE_SETTLE_S} s, so a hibernation image the size of memory is a candidate: read pmset -g log before reading code"
+      fi;;
+    *) if [ -n "${SETTLE_END:-}" ]; then SETTLE_END=""; echo "$(date '+%H:%M:%S') the free disk space reads above the floor again after the wake at ${WOKE_AT}" | tee -a "$LOG"; fi;;
+  esac
   if [ -n "$DISK_WHY" ]; then
     raise DISK "${DISK_WHY}; the run stops before a write fails half way (it died silently on a full disk on 2026-09-23)"; exit 3
   fi
+  DISK_OK_AT=$(date +%s)
   # Funding is read BEFORE spending, never after: an unfunded pass changes nothing and hides the real reason.
   # EVERY ANSWER NAMES ITS CAUSE (owner, 2026-09-27: mistaken UNFUNDED edge cases handled properly). burn_guard prints a
   # FUNDING line: SPENT (the run's budget is committed), PROVIDER-LOW (OpenRouter itself cannot pay), EXPIRED (the run's

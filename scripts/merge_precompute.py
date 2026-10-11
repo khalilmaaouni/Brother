@@ -3,8 +3,16 @@
 
 WHY THIS EXISTS. One `required_fast` run took 354 s under load, and the owner's merge waited for it. Here the pins are
 read from GitHub by the tool (never typed), the list is written, and a detached worker gates each PR in order on the
-CHAINED tree (main plus PR 1, then plus PR 2), one gate at a time, in a scratch worktree, under a run scoped TMPDIR,
-waiting on scripts/heavy_slot.py's load rules before each gate. The owner's merge then finds every row present.
+CHAINED tree (main plus PR 1, then plus PR 2), one gate at a time, in a scratch worktree, under a run scoped TMPDIR.
+The owner's merge then finds every row present.
+
+ONE QUEUE (C11, 2026-10-10). The gate child, scripts/required_fast.sh, waits on scripts/heavy_slot.py's load rules
+itself, at its own weight (REQUIRED_FAST_JOBS slots, all or nothing), so this worker holds no slot. It used to take
+one first from the same pool, which left the child unable ever to gather its weight: every gate waited out the whole
+bound (3600 s by default) and then ran unqueued. No heavy_slot name crosses into the child: its environment is
+merge_gate.CHILD_ENV_ALLOW, the fixed allowlist docs/plan/specs/MG1.md rules, so the child waits heavy_slot's default
+bound and a caller cannot shorten it. For the same reason never run this worker under scripts/heavy_slot.py: the slot
+it would hold is invisible to the child, because BROTHER_HEAVY_SLOT_HELD does not cross, and the deadlock comes back.
 
 WHAT IT PROVES, AND WHAT IT NEVER DOES. Rows are written only through merge_gate.run_gate (R-MG-2): this module never
 calls record_row and types no rc. A PR whose `mergeable` is still being computed never enters the list (NO-DATA, exit
@@ -40,11 +48,6 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import merge_gate  # noqa: E402
-
-try:
-    import heavy_slot as _heavy_slot
-except ImportError:  # no load rules readable: the gate still runs, one at a time, and says so
-    _heavy_slot = None
 
 SCHEMA = 1
 PRECOMPUTE_DIR = "precompute"
@@ -235,24 +238,7 @@ def _write_status(path, status):
         raise MergeNoData("the status at %s cannot be written (%s)" % (path, exc))
 
 
-def _take_slot(env):
-    """Wait on heavy_slot's load rules; the held slots, released by _release_slot. No rules readable: run unqueued."""
-    if _heavy_slot is None or env.get(_heavy_slot.HELD_ENV) or env.get(_heavy_slot.SWITCH_ENV, "").lower() == "off":
-        return []
-    return _heavy_slot.acquire(env)
-
-
-def _release_slot(held):
-    for _index, handle in held:
-        try:
-            handle.seek(0)
-            handle.truncate()
-        except OSError:
-            pass  # sbe: allow-silent the label is informational; closing releases the lock
-        handle.close()
-
-
-def _gate_one(runner, clone, scratch, env, tree, chained, pin, base, take_slot):
+def _gate_one(runner, clone, scratch, env, tree, chained, pin, base):
     """One gate in a scratch worktree at the CHAINED commit (the tree main will have: main plus every earlier pin
     plus this one), never at the pin's own head, which lacks the earlier pins; the row is written by
     merge_gate.run_gate alone, which itself refuses a worktree whose tree is not `tree`."""
@@ -260,15 +246,13 @@ def _gate_one(runner, clone, scratch, env, tree, chained, pin, base, take_slot):
     code, out, err = _call(runner, ["git", "worktree", "add", "--quiet", "--detach", worktree, chained], clone)
     if code != 0:
         raise MergeNoData("cannot make a scratch worktree at %s: %s" % (chained, (err or out).strip()[:200]))
-    held = take_slot(env) if take_slot is not None else []
     try:
         merge_gate.run_gate(clone, worktree, tree, pin["pr"], pin["head"], base, env, runner=runner)
     finally:
-        _release_slot(held)
         _call(runner, ["git", "worktree", "remove", "--force", worktree], clone)
 
 
-def run_precompute(clone, pins, env=None, runner=None, status_path=None, take_slot=None):
+def run_precompute(clone, pins, env=None, runner=None, status_path=None):
     """Gate every pin in list order on the chained tree. Returns the final status object (also written to
     `status_path` after every step when given): status DONE, FAILED, STALE-BASE or NO-DATA, and one entry per pin
     with result PASS, FAIL, SKIPPED-ALREADY-GATED, BLOCKED-BY #n, CONFLICT or NO-DATA."""
@@ -310,7 +294,7 @@ def run_precompute(clone, pins, env=None, runner=None, status_path=None, take_sl
                     entry["result"] = "SKIPPED-ALREADY-GATED"
                 else:
                     try:
-                        _gate_one(runner, clone, scratch, environment, tree, chained, pin, current, take_slot)
+                        _gate_one(runner, clone, scratch, environment, tree, chained, pin, current)
                     except MergeGateError as exc:
                         entry["result"] = "NO-DATA: %s" % exc
                         status["status"] = "NO-DATA"
@@ -533,7 +517,7 @@ def main(argv=None):
                 sys.stderr.write(USAGE + "\n")
                 return 2
             pins = parse_list(rest[1])
-            status = run_precompute(rest[0], pins, status_path=status_path(rest[0], rest[1]), take_slot=_take_slot)
+            status = run_precompute(rest[0], pins, status_path=status_path(rest[0], rest[1]))
             for entry in status["entries"]:
                 sys.stdout.write("#%s %s %s\n" % (entry["pr"], entry["tree"] or "-", entry["result"]))
             sys.stdout.write("%s: %d listed PR(s), %d restart(s)\n"

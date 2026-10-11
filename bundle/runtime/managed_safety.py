@@ -62,6 +62,7 @@ fix; nothing here duplicates or replaces it.
 Python 3, standard library only. No network.
 """
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -92,6 +93,61 @@ _FLOOR_ORDER = ("hooks", "fence", "claims", "git", "worktree", "worker",
 
 def _detail(state, text, remedy=None):
     return {"state": state, "detail": text, "remedy": remedy or ""}
+
+
+#: The fence hook's file name, and what a PRESENT hook check actually
+#: proved (SF1.a, 2026-10-11): a registration whose file exists. Whether
+#: the client fires it, and whether it denies, is proven by a live canary,
+#: never by reading a configuration file.
+FENCE_BASENAME = "bm_fence_hook.py"
+NOT_PROVEN = "registered; live denial not proven by this probe"
+_FENCE_TOKEN = re.compile(r"[^\s\"']*" + re.escape(FENCE_BASENAME))
+
+
+def registered_fence_path(text, source):
+    """The absolute path the hook text `text` names for the fence, or None.
+
+    The first token ending in FENCE_BASENAME (a token runs between
+    whitespace or quote characters) is resolved: ${CLAUDE_PLUGIN_ROOT} is
+    the plugin root, the directory two levels above `source` when `source`
+    ends in hooks/hooks.json (the plugin cache layout), and unresolvable
+    otherwise (a settings.json cannot carry that variable); ~ expands; a
+    relative path resolves against that plugin root. Never reads the file
+    system: existence is _check_hooks' question."""
+    if not isinstance(text, str) or not isinstance(source, str):
+        return None
+    m = _FENCE_TOKEN.search(text)
+    if not m:
+        return None
+    token = m.group(0)
+    parts = source.replace(os.sep, "/").split("/")
+    plugin_root = (os.path.dirname(os.path.dirname(source))
+                   if parts[-2:] == ["hooks", "hooks.json"] else None)
+    if "${CLAUDE_PLUGIN_ROOT}" in token:
+        if plugin_root is None:
+            return None
+        token = token.replace("${CLAUDE_PLUGIN_ROOT}", plugin_root)
+    token = os.path.expanduser(token)
+    if not os.path.isabs(token):
+        if plugin_root is None:
+            return None
+        token = os.path.join(plugin_root, token)
+    return os.path.normpath(token)
+
+
+#: The suffix brother_run.py's preflight line carries (SF1.b, 2026-10-11).
+#: An all PRESENT probe proved registrations whose files exist, nothing
+#: more, so the line says so instead of falling silent; every other state
+#: keeps today's ", not enforced".
+ENFORCEMENT_PRESENT = (", hooks registered, live denial not proven by this "
+                       "preflight")
+ENFORCEMENT_ABSENT = ", not enforced"
+
+
+def enforcement_note(state):
+    """ENFORCEMENT_PRESENT when `state` is exactly PRESENT, else
+    ENFORCEMENT_ABSENT (MISSING, NO-DATA, an empty value, a non string)."""
+    return ENFORCEMENT_PRESENT if state == PRESENT else ENFORCEMENT_ABSENT
 
 
 def _tools_dir(env=None):
@@ -305,6 +361,7 @@ def _check_hooks(env):
                                                          codex_home)),
                        remedy)
     checked = _claude_hook_sources(env)
+    stale = []
     for candidate in checked:
         if not os.path.isfile(candidate):
             continue
@@ -313,8 +370,24 @@ def _check_hooks(env):
                 text = fh_.read()
         except OSError:  # sbe: allow-silent an unreadable optional hook config cannot prove registration, so the next configured source is checked
             continue
-        if "bm_fence_hook.py" in text:
-            return _detail(PRESENT, "%s registers bm_fence_hook.py" % candidate)
+        if FENCE_BASENAME not in text:
+            continue
+        # SF1.a (2026-10-11): the text match used to be the whole proof, so
+        # a cache left by an uninstalled version, or a settings entry naming
+        # a deleted checkout, read PRESENT and lifted the floor to A0. The
+        # path the text names must be a regular file; a live registration
+        # later in the list still wins over a stale one before it.
+        path = registered_fence_path(text, candidate)
+        if path and os.path.isfile(path):
+            return _detail(PRESENT, "%s: %s %s" % (candidate, path, NOT_PROVEN))
+        stale.append((candidate, path or "unresolvable"))
+    if stale:
+        candidate, path = stale[0]
+        return _detail(MISSING, "%s registers %s at %s, which is not a file "
+                       "(%d stale registration(s), no live one)"
+                       % (candidate, FENCE_BASENAME, path, len(stale)),
+                       "reinstall the brothermode plugin, or point the "
+                       "registration at the shipped %s" % FENCE_BASENAME)
     return _detail(MISSING, "none of %d checked location(s) register "
                    "bm_fence_hook.py as a PreToolUse hook (looked: %s)"
                    % (len(checked), ", ".join(checked)),

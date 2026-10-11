@@ -130,6 +130,13 @@ class TheRefreshOnATempVault(unittest.TestCase):
         self.cfg_path = os.path.join(self.tmp, ".brotherme", "config.json")
         _write_consented_config(self.cfg_path)
         self.env["BROTHERME_CONFIG"] = self.cfg_path
+        # QS1 (1.1.1): a healthy refresh is quiet at session start unless BROTHER_VERBOSE_START=1. These tests read
+        # the refresh's own progress and status lines, so they run with the switch; self.quiet_env is the default,
+        # which test_10 pins and test_08 uses.
+        self.quiet_env = dict(self.env)
+        for name in ("BROTHER_VERBOSE_START", "BROTHERMODE_MAINTAINER"):
+            self.quiet_env.pop(name, None)
+        self.env["BROTHER_VERBOSE_START"] = "1"
         self.index = os.path.join(self.tmp, ".claude", "bm_vault_index.sqlite3")
         code, out = run(["refresh"], self.env)
         self.assertEqual(code, 0, "the first refresh exited %d: %s" % (code, out[:400]))
@@ -218,7 +225,8 @@ class TheRefreshOnATempVault(unittest.TestCase):
     def test_08_a_corrupt_index_is_no_data_and_exit_zero_on_both_commands(self):
         _write(self.index, "this is not a sqlite database\n")
         for argv in (["refresh"], ["status-line"]):
-            code, out = run(argv, self.env)
+            # without the switch: a NO-DATA line prints in every mode (QS1)
+            code, out = run(argv, self.quiet_env)
             self.assertEqual(code, 0, "%s exited %d on a corrupt index; a session start is "
                                       "never blocked by the index:\n%s" % (argv, code, out))
             self.assertIn("vault-index: NO-DATA:", out,
@@ -231,6 +239,14 @@ class TheRefreshOnATempVault(unittest.TestCase):
         code, out = run(["refresh"], env)
         self.assertEqual(code, 0)
         self.assertIn("vault-index: NO-DATA:", out, out)
+
+    def test_10_a_healthy_refresh_is_quiet_by_default(self):
+        """QS1: with no switch, a refresh of an index that holds every note prints nothing and writes nothing."""
+        before = os.path.getmtime(self.index)
+        code, out = run(["refresh"], self.quiet_env)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "", "a healthy refresh printed without BROTHER_VERBOSE_START=1:\n%s" % out)
+        self.assertEqual(os.path.getmtime(self.index), before)
 
 
 class ThePointOfNeedHookShowsTheIndexAge(unittest.TestCase):

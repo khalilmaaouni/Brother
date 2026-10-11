@@ -26,7 +26,7 @@ Read [Hook scope](hooks.md), inspect install path, marker, and `.brother/config`
 
 ## Vault returns no memory
 
-Confirm a Vault root is configured. Unconfigured is not retrieval failure.
+Confirm a Vault root is configured. Unconfigured is not retrieval failure. Since 1.1.1 the session start no longer prints the "no vault root configured" line by default; set `BROTHER_VERBOSE_START=1` to see it again.
 
 ## Public doc references a missing file
 
