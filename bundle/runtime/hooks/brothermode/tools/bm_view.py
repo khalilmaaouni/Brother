@@ -306,8 +306,8 @@ VIEW_SECTIONS = (
 # The three first-run commands (design section 5.3). An empty state may
 # teach these and nothing else, so a section cannot teach a command the
 # founder has not met.
-OFFERED_COMMANDS = ("/brotherme-start", "/brotherme-status",
-                    "/brotherme-next")
+OFFERED_COMMANDS = ("/brother start", "/brother status",
+                    "/brother next")
 
 # Carbon's empty state anatomy (design section 4.4): a positive title,
 # one short body, ONE action in verb plus noun form, and the exact
@@ -319,97 +319,97 @@ EMPTY_STATES = {
         "body": "The top of the page shows the outcome, where the work "
                 "is, and how far the setup has come.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "needs-you": {
         "title": "You are free to keep going",
         "body": "Anything that stops the work until you act appears "
                 "here first, with the one thing that clears it.",
         "action": "Check where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "next-step": {
         "title": "There is always one recommended step",
         "body": "This section names exactly one next step, why it is "
                 "the one, and the exact command that runs it.",
         "action": "Ask for the next step",
-        "command": "/brotherme-next"},
+        "command": "/brother next"},
     "pipeline": {
         "title": "The path of the work will be drawn here",
         "body": "A drawing of the stages from set up to delivered, with "
                 "the current one marked NOW.",
         "action": "Start the work",
-        "command": "/brotherme-start"},
+        "command": "/brother start"},
     "programme": {
         "title": "The phases of your work will be charted here",
         "body": "Each phase gets a bar, and each piece a box that ticks "
                 "when it is finished and checked.",
         "action": "Start the work",
-        "command": "/brotherme-start"},
+        "command": "/brother start"},
     "progress": {
         "title": "Progress by lane will build here",
         "body": "As pieces of work are planned, each one shows its lane, "
                 "how far it has moved, and what checked it.",
         "action": "Ask for the next step",
-        "command": "/brotherme-next"},
+        "command": "/brother next"},
     "counts": {
         "title": "The counts will build here",
         "body": "Plain counts of checks passed and the work budget "
                 "used, each against its agreed limit.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "risks": {
         "title": "You are clear of open risks right now",
         "body": "When something could still go wrong, it lands here with "
                 "what would settle it and who is watching it.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "decisions": {
         "title": "Decisions will wait for you here",
         "body": "When a choice needs your answer, it appears here with "
                 "a recommendation and what happens either way.",
         "action": "Ask for the next step",
-        "command": "/brotherme-next"},
+        "command": "/brother next"},
     "insights": {
         "title": "What I learn lands here",
         "body": "Each thing learned is shown with what proved it, what "
                 "was rejected, and what would change it.",
         "action": "Ask for the next step",
-        "command": "/brotherme-next"},
+        "command": "/brother next"},
     "gates": {
         "title": "The checks before shipping will be listed here",
         "body": "Each thing that has to be true before the work ships, "
                 "with whether it has passed yet.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "lanes": {
         "title": "You hold the pen on everything open right now",
         "body": "When the work is split between you and BrotherMode, "
                 "this shows who owns each open step.",
         "action": "Ask for the next step",
-        "command": "/brotherme-next"},
+        "command": "/brother next"},
     "documents": {
         "title": "What gets produced will be listed here",
         "body": "Each finished piece of work shows the paths it produced "
                 "and the checks that ran on it.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "timeline": {
         "title": "The story of the work will build here",
         "body": "Each short catch-up lands here in order, so you can "
                 "replay the work from the start.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "your-move": {
         "title": "The offer to take over always stands",
         "body": "Taking the work back is one paste away, whether or not "
                 "a decision is open.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
     "help": {
         "title": "Help lives at the bottom of the page",
         "body": "What this page is, what fills each section, and what "
                 "the page cannot do.",
         "action": "See where things stand",
-        "command": "/brotherme-status"},
+        "command": "/brother status"},
 }
 
 # One entry per section (design section 9.3): a one line "what this is"
@@ -613,7 +613,7 @@ def handback_prompt(decision):
     button that could not act anyway."""
     subject = ((decision or {}).get("subject") or "").strip() \
         or "the work as it stands"
-    lines = ["/brotherme-handback", "", "Take back: %s" % subject]
+    lines = ["/brother deliver", "", "Take back: %s" % subject]
     if decision:
         lines.append("Decision id: %s"
                      % (decision.get("insight_id") or ""))
@@ -1150,8 +1150,8 @@ def doorway_text(consented):
         "do on your behalf, and answer the choices that matter. You can "
         "take the work back at any moment.",
         "",
-        "Start: /brotherme-start \"<what you want>\"",
-        "More first: /brotherme-help",
+        "Start: /brother start \"<what you want>\"",
+        "More first: /brother help",
     ])
     return "\n".join(lines)
 

@@ -5737,8 +5737,7 @@ def main(argv=None):
             "(%s)%s"
             % (worst_state, requested_dial,
                autonomy_dial.ACTIONS[requested_dial],
-               "" if worst_state == managed_safety.PRESENT
-               else ", not enforced"))
+               managed_safety.enforcement_note(worst_state)))
 
     if not args.resume and args.cont is None and not args.outcome.strip():
         print("brother_run: an outcome, --resume or --continue is required",

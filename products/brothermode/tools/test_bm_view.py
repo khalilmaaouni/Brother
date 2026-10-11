@@ -41,6 +41,15 @@ import tempfile
 import unittest
 from html.parser import HTMLParser
 
+#: Every slash form a page or the doorway can offer: the door's verbs
+#: (`/brother start`), the bare door, a 1.1.0 spelling (`/brotherme-status`)
+#: or a namespaced one (`/brother:brothermode-status`). Review C1,
+#: 2026-10-11: a bound that saw only `/brother <verb>` let the old spellings
+#: through unseen.
+OFFERED_RE = r"/brother(?:[a-z]*-[a-z-]+|:[a-z-]+)?(?: [a-z]+)?"
+#: The 1.1.0 spellings, which the one door no longer teaches anywhere.
+RETIRED_FORM_RE = r"/brother(?:me|mode|sbe)-[a-z-]+|/brother:[a-z-]+"
+
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
 _e100_sys.path.append(_e100_os.path.join(
@@ -693,8 +702,10 @@ class TestEmptyStatesAreDesigned(ViewCase):
                     % (key, term))
 
     def test_every_action_command_is_in_the_offered_set(self):
-        self.assertEqual(("/brotherme-start", "/brotherme-status",
-                          "/brotherme-next"), bw.OFFERED_COMMANDS)
+        # U1 (release 1.1.1, 2026-10-11): the three first-run commands are the
+        # door's verbs; the 1.1.0 names route through the door for one release.
+        self.assertEqual(("/brother start", "/brother status",
+                          "/brother next"), bw.OFFERED_COMMANDS)
         for key, entry in bw.EMPTY_STATES.items():
             self.assertIn(entry["command"], bw.OFFERED_COMMANDS,
                           "empty state %r teaches %r, which is not one of "
@@ -774,7 +785,7 @@ class TestTheHandbackIsAlwaysVisible(ViewCase):
         _html, _fp, doc = self.page()
         move = doc.by_id("your-move")
         text = Doc.text_of(move)
-        self.assertIn("/brotherme-handback", text)
+        self.assertIn("/brother deliver", text)
         self.assertIn(written["insight_id"], text,
                       "the pasted prompt must name the decision id")
 
@@ -784,7 +795,7 @@ class TestTheHandbackIsAlwaysVisible(ViewCase):
         move = doc.by_id("your-move")
         self.assertIsNotNone(move)
         text = Doc.text_of(move)
-        self.assertIn("/brotherme-handback", text)
+        self.assertIn("/brother deliver", text)
         self.assertIn(bw.PROMISE_TEXT, text,
                       "the panel must say what taking it back would do")
 
@@ -1270,11 +1281,16 @@ class TestFirstFifteenMinutes(ViewCase):
         self.unconsent()
         code, out, err = self.run_cli("doorway")
         self.assertEqual(0, code, out + err)
-        self.assertIn("/brotherme-start", out)
-        self.assertIn("/brotherme-help", out)
-        commands = set(re.findall(r"/brotherme-[a-z-]+", out))
+        self.assertIn("/brother start", out)
+        self.assertIn("/brother help", out)
+        # Review C1 (2026-10-11): the bound sees every slash form, the door's
+        # verbs and any 1.1.0 spelling, so a stray `/brotherme-status` or
+        # `/brother:brothermode-status` goes red rather than slipping past.
+        commands = set(re.findall(OFFERED_RE, out))
+        self.assertNotRegex(out, RETIRED_FORM_RE,
+                            "the doorway offers a 1.1.0 spelling")
         self.assertLessEqual(
-            commands, {"/brotherme-start", "/brotherme-help"},
+            commands, {"/brother start", "/brother help"},
             "the doorway offered %s; minute zero teaches one action and "
             "one link, never the command list" % sorted(commands))
         self.assertRegex(out, r"\d+ to \d+",
@@ -1333,9 +1349,10 @@ class TestFirstFifteenMinutes(ViewCase):
     def test_at_most_three_commands_are_offered_before_first_completion(self):
         self.seed()
         _html, _fp, doc = self.page()
-        offered = set(re.findall(r"/brotherme-[a-z-]+",
-                                 doc.visible_text()))
-        allowed = set(bw.OFFERED_COMMANDS) | {"/brotherme-handback"}
+        offered = set(re.findall(OFFERED_RE, doc.visible_text()))
+        self.assertNotRegex(doc.visible_text(), RETIRED_FORM_RE,
+                            "the page offers a 1.1.0 spelling; only the door's verbs are taught")
+        allowed = set(bw.OFFERED_COMMANDS) | {"/brother deliver"}
         self.assertLessEqual(
             offered, allowed,
             "the page offered %s before the first piece completed; the "

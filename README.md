@@ -18,6 +18,8 @@ Open a repository and invoke Brother. With no unfinished work, the bare door ask
 
 If unfinished Brother work exists in that repository, the door should discover it and offer/resume the plain-language outcome instead of exposing a run id as the user experience.
 
+For the quick start, use an authenticated Claude Code session, with Git and Python available. Start a fresh Claude Code session after installation.
+
 ### Cursor
 
 Cursor loads a local plugin from `~/.cursor/plugins/local/brother`. From a Brother checkout:
@@ -50,7 +52,125 @@ The goal is to let you step away for more useful work as the system earns confid
 
 [The problem](#why-brother) · [Who it is for](#who-brother-is-for) · [Why this approach](#what-makes-brother-different) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Get started](#start-in-sixty-seconds) · [Documentation](docs/README.md)
 
-**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [Where Brother fits](docs/explanation/choosing-a-workflow.md) or [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md).
+**Start small:** [install for your host](docs/reference/install-matrix.md), [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. Already using another workflow? Read [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
+
+## What changed in 1.1.1
+
+Brother now has one door and seven skills: `using-brother`, the door, and `brother-start`, `brother-status`, `brother-next`, `brother-review`, `brother-deliver` and `brother-help`. In Claude Code, type `/brother <what you are trying to do>`; the six verbs are optional shortcuts. Every skill name from 1.1.0 still works for this release: it prints a one-line pointer to its new verb, then routes.
+
+A session also starts quietly. In an established project, the start block that 1.1.0 printed before your first prompt (6,014 bytes, measured 2026-10-10 in a fixture) is now 281 bytes. Housekeeping nags, the progress page check, handover and forecast lines, no-drift reconciliation rows and Vault status lines are no longer printed; setup, first run, update, recovery, store health and needs-action lines still are. To bring the full block back, set `BROTHER_VERBOSE_START=1` in the environment that launches your host (`BROTHERMODE_MAINTAINER=1` also works; only the exact value `1` counts). The limits in [Limits before adoption](#limits-before-adoption) still apply.
+
+## What changed in 1.1.0
+
+Brother addresses the trust gap between delegating work and knowing whether the result stayed within scope and has evidence behind it. It aims to reduce the need to watch every action while leaving review and consequential decisions with you.
+
+One plugin named `brother` replaces the three older plugins in the catalog, and its install line has no dependency on another catalog entry. Lesson recall can work in the one plugin when the Vault folder variables are set. The release proof is one completed unattended run of eight hours, not an endurance guarantee. For migration details, see [Migrate to the Brother plugin](docs/how-to/migrate-to-one-plugin.md). The older plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog; pinned installs of `brothermode` and `brothersbe` still resolve. Claim verification, formerly `brotherds`, is not carried by the one plugin and remains experimental. The limits of 1.1.0 are listed in [Limits before adoption](#limits-before-adoption).
+
+## Problems developers report, and what to type
+
+The slash-command examples below are for Claude Code. Codex users should invoke the installed Brother skill with the same request.
+
+### Agent says done without running anything
+
+Developers report agents claiming tests passed when no test ran or a later check failed.
+
+**How Brother handles it:** Each completed Brother run writes a receipt listing changed files, exact checks, exit codes, and cases where the evidence cannot answer. Read the receipt path printed last and rerun its listed checks.
+
+**Use it**
+
+```text
+/brother <outcome>
+```
+
+**Limit:** A receipt cannot make a weak test sufficient, and an auditable record is not an independent audit.
+
+### Edits outside the asked scope
+
+Developers report agents making unrelated edits that expand the diff beyond the request.
+
+**How Brother handles it:** A work unit declares its allowed writes, objective, check, and dependencies. Out-of-scope writes should be quarantined or refused; enforcement depends on the active mode and host.
+
+**Use it**
+
+```text
+/brother make add() reject non-numeric input and prove the behavior with a test; only change mathlib.py and test_mathlib.py
+```
+
+**Limit:** Scope controls are not an operating system sandbox, and Cursor enforcement is advisory.
+
+### Green checks that prove nothing
+
+Developers report green checks after tests were weakened, skipped, or disconnected from the requested behavior.
+
+**How Brother handles it:** A check that was already green or stays green when the implementation is reverted is reported as `NO-DATA`. A unit that changed no file is also `NO-DATA`.
+
+**Use it**
+
+For your project, read the verdict on each check in the receipt; an already-green or revert-insensitive check shows as `NO-DATA`. From a Brother checkout, run Brother's own self-test with:
+
+```text
+python3 scripts/test_brother_run.py
+```
+
+**Limit:** The same agent can write code and tests that agree on the wrong answer, so bring independent expected results.
+
+### Context lost between sessions
+
+Developers report having to restate decisions and project context when a new session starts.
+
+**How Brother handles it:** Brother can discover unfinished work by its plain-language outcome and resume it. Its local Vault can retain useful lessons, subject to checking them against current code and evidence.
+
+**Use it**
+
+From a Brother checkout, set `TARGET_REPO` to the absolute path of the repository Brother was changing, then resume the repository work with:
+
+```text
+python3 scripts/brother_run.py --continue --cwd "$TARGET_REPO"
+```
+
+For Vault recall, set `BM_VAULT_ROOT`, then from a Brother checkout index and recall lessons:
+
+```text
+python3 products/brothermode/tools/bm_vault.py index --vault "$BM_VAULT_ROOT"
+python3 products/brothermode/tools/bm_vault.py recall --query "retry timeout duplicate charge" --limit 3 --fast --explain
+```
+
+**Limit:** Memory is not evidence or a secrets store, and recalled text can reach the model provider.
+
+### Unattended runs going wrong
+
+Developers report unattended loops retrying, losing constraints, or consuming usage while no one is watching.
+
+**How Brother handles it:** Before launch, including resume, Brother probes managed capabilities; an explicit A0 higher-autonomy request is refused when those capabilities are insufficient, while other modes report `not enforced`. Failed work can be resumed with its run directory and worktrees.
+
+**Use it**
+
+```text
+/brother <outcome>
+```
+
+**Limit:** Brother does not cap token spend for you in this release, and one completed eight-hour run is not a guarantee of unattended operation.
+
+### Review burden
+
+Developers report that producing code faster can leave more work for reviewers to understand and verify.
+
+**How Brother handles it:** The receipt links evidence to each changed file. Reviewers are advised to read risky, unproven, and scope-surprising changes first, then mechanical ones.
+
+**Use it**
+
+Open the receipt path printed last and read the changed files and checks.
+
+**Limit:** Reading order assists review, but it is not acceptance and no review-time improvement has been demonstrated.
+
+## How Brother is different
+
+- Verdicts are `PASS`, `FAIL`, or `NO-DATA`; `NO-DATA` is never a pass.
+- A check that cannot fail does not count as proof.
+- Each completed Brother run writes a receipt.
+- Allowed writes are declared up front, and enforcement depends on your host and mode.
+- Memory never overrides current evidence.
+- You keep the decisions.
 
 ## Installation
 
@@ -330,6 +450,8 @@ The shipped engine has `RUNTIME-MANIFEST.json`: run `python3 bundle/runtime/veri
 
 Claim verification is an experimental product boundary unless the current public release explicitly says otherwise.
 
+The door is the one way in: say what you want done, and Brother routes it to the right outcome. Six optional shortcuts are available: /brother start, /brother status, /brother next, /brother review, /brother deliver, and /brother help. The names from the previous release keep working for this release; each points to its /brother verb, then routes.
+
 ## Bring the work that matters
 
 These are example requests, not claims that a particular project has passed verification.
@@ -444,6 +566,22 @@ It is not an automatic source of truth, a secrets store, or proof that repeat er
 - Hook scope depends on install path/configuration; read [Hook scope](docs/reference/hooks.md).
 - Tiny reversible tasks can still cost more through Brother than doing them directly, but not in every case any more: when a request already names its own existing file or files, and its own existing check written the one way Brother already knows how to run today (in the specific, narrow shape it already recognizes, not yet any test file in any framework), uses no risky wording, and the tree it runs against is already clean, Brother skips straight to doing the work and never opens a separate model session just to plan it, automatically, with nothing to turn on. Most everyday requests do not qualify, including one phrased only as plain instructions with no file or check named in it. Measured here with the model calls stood in by a script rather than a real one, so the figures below are Brother's own code and never a wait on a real model: four small requests were driven through the one command a person types, and all four finished successfully; the two that qualified opened no separate planning session at all, against one each for the two that did not, while Brother's own code took between 5.62 and 8.4 seconds either way. What a person waiting on a real model actually experiences from this is not recorded on this page.
 - Exact version capability belongs in the public release and generated `SYSTEM.md`, not copied historical prose.
+- The full instructions for older plugins' individual verb skills remain under `products/` and cannot be installed through the one plugin in this release. Carrying them is the first unit of the next release.
+- Users of `brotherds` should keep their existing copy and install `brother` beside it; do not uninstall `brotherds`. Old pinned copies keep their commands, and new work arrives only in `brother`.
+- For Codex upgrades, rerun status after the upgrade, repeat managed-hook setup and check, keep the hook checkout at the chosen version, start a fresh Codex session, and try a small task.
+- Brother's local Vault is not a secrets store. Do not store credentials or raw customer data; local storage does not mean recalled content stays off the network.
+- Lesson capture reads its folder from `BROTHERMODE_VAULT_ROOT`. If unset, capture is skipped and reads `NO-DATA`.
+- When acceptance cites a run, a review receipt or an explicit recorded review skip with its reason and decision maker is required, but the plugin's acceptance record does not check for it. The enforcement tool is in the repository, not in the plugin.
+- The deliver verb reads receipts recorded in an outcome contract, not the receipt of an engine run.
+- The session spend guard, decision intake gate, disk floor gate, and workflow cost wall are maintainer safety hooks and are not shipped in 1.1.0. Where shipped text cites one, it describes the maintainer's environment.
+- Antigravity's host data guard is opt in. Set `BROTHER_ANTIGRAVITY_GUARD_HOST_DATA=1` to turn it on; by default Antigravity has full access to its data folder. On Antigravity, the hook does not block a `run_command` whose command reaches outside the workspace (limitation F-007).
+- The release proof is one completed unattended run of eight hours. A second consecutive run did not start; the two run proof will be run after this release on the shipped runtime and published with the next release.
+- The planned automated pre-cut review is built only in part: its first two parts exist as tooling and the other four do not. This release had independent adversarial reviews for each change set and a machine wide inventory of everything developed since 1.0.21.
+- Three declared test exceptions stand in 1.1.0, each with a review date of 2026-10-20. The external verification score was not re-measured; its last recorded run reads 1 of 5. The long release note perturbation check runs only when `BROTHER_LONG_CHECKS=1` is set and was not run. Two tag signature tests are skipped on a machine without gpg.
+- The loop driver does not check the power source. On a laptop, low battery sleep can end a run with a disk alarm because the sleep image is read as missing free space. Keep the machine on AC power for an unattended run. The unattended build loop under `scripts/loop` is maintainer tooling, not a supported public feature.
+- A killed then resumed run with a stale `.git/packed-refs.lock` may refuse one unit, and the refusal message does not name the lock file. Remove the stale lock by hand and resume; a repair is planned for 1.1.1.
+- Reproduce the export from a clone with `git checkout v1.1.0` then `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.0`.
+- Lesson recall can work in the one plugin when `BROTHERMODE_VAULT_ROOT` and `BM_VAULT_ROOT` are set to the same folder until the unified resolver is available.
 
 ## Documentation is part of the evidence system
 
@@ -460,6 +598,8 @@ Brother checks that the shipped version statements in its public documentation m
 ```text
 python3 scripts/test_version_truth.py
 ```
+
+To check a fresh clone before you trust it, run `sh scripts/required_fast.sh` from the repository root. It drives Brother's delivery engine with scripted stand-ins for the model, so it proves the mechanism works, not how a real model behaves. A run prints a summary line of the form `pass N   fail N   no-data N`, and a check with no data is listed as NO-DATA, never counted as a pass. It is not a live client check: that is `sh scripts/bundle-install-smoke.sh`, which needs the `claude` binary on your PATH and exits 2 with BLOCKED when it is missing. A human acceptance trial (you run one real task and judge its receipt) reads NO-DATA until someone runs it.
 
 ## Mobile development and claim verification
 

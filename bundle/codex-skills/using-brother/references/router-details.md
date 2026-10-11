@@ -15,8 +15,10 @@ The door (`commands/brother.md`) carries one row per verb either product
 ships, GENERATED from the installed skills by `scripts/gen_door_table.py`
 and never typed by hand. A second table typed here drifted from it, which is
 exactly the failure a generated table exists to prevent, so read the door's
-own table and trust nothing else. The long `brotherme-` names are the landed
-forms; never promise a short form that does not exist.
+own table and trust nothing else. Since 1.1.1 the rows are the six verb
+skills, `brother-<verb>`; the 1.1.0 names (`brotherme-`, `brothermode-`,
+`brothersbe-`) route through references/retired-names.md for one release.
+Never promise a name that does not exist in the door's table or that file.
 
 ## What this router must never do
 

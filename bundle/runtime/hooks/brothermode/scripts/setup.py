@@ -235,7 +235,7 @@ def _run_doctor():
 
 def _next_action():
     _out("")
-    _out("Next: run /brotherme-start (inside Claude Code), or "
+    _out("Next: run /brother start <what you want> (inside Claude Code), or "
          "python3 tools/bm_project.py start, to begin a project.")
 
 

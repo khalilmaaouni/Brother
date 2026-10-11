@@ -12,7 +12,7 @@ package or evidence that a signed-in host has run it. See
 | Field | Current value or contents |
 | :-- | :-- |
 | `name` | `brother` |
-| `version` | `1.0.18` |
+| `version` | `1.1.0` |
 | `description` | `Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.` |
 | `author` | An object whose `name` is `Khalil Maaouni`. |
 | `homepage`, `repository` | Both point to `https://github.com/khalilmaaouni/Brother`. |
@@ -75,7 +75,7 @@ directly, unedited. There is no Cursor-specific skill mirror to regenerate.
 
 ## Differences from the Codex and Claude Code bundles
 
-All three manifests name `brother` at version `1.0.18` and share the
+All three manifests name `brother` at version `1.1.0` and share the
 description, author, public repository and homepage, license, and the first
 five keywords. Cursor's remaining fields differ from Codex's as follows
 (Codex's own table is in [../codex/PACKAGE-SHAPE.md](../codex/PACKAGE-SHAPE.md)):

@@ -134,7 +134,7 @@ def count_repo_surface(repo_root):
 #: bundle/skills). Stripping them is how a route exposed twice, once under
 #: its product's own name and once under the umbrella's prefixed name, is
 #: recognised as the same route rather than two different ones.
-KNOWN_ROUTE_PREFIXES = ('brotherme-', 'brothermode-', 'brothersbe-')
+KNOWN_ROUTE_PREFIXES = ('brotherme-', 'brothermode-', 'brothersbe-', 'brother-')
 
 
 def _frontmatter_bytes(path):
@@ -180,6 +180,33 @@ def count_startup_metadata_footprint(repo_root):
     return footprint, file_count
 
 
+#: A command whose description opens with this is a MOVED COMMAND: a 1.1.0
+#: name kept typeable for one release (U1, 2026-10-11) that prints a pointer
+#: and follows a verb skill. It is an installed entry (the manifest counts
+#: it) but a pointer, never a second route, so the duplicate metric skips it.
+POINTER_PREFIX = 'Moved: now /brother '
+
+
+def _is_pointer_stub(path):
+    """True when the file's frontmatter description opens with
+    POINTER_PREFIX. No frontmatter, no description, or an unreadable file
+    is False: an entry is a route unless it says it is a pointer."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            if f.readline().strip() != '---':
+                return False
+            for line in f:
+                stripped = line.strip()
+                if stripped == '---':
+                    return False
+                if stripped.lower().startswith('description:'):
+                    value = stripped.split(':', 1)[1].strip().strip('"\'')
+                    return value.startswith(POINTER_PREFIX)
+        return False
+    except OSError:
+        return False
+
+
 def _normalize_route_name(name):
     """Strips one known per-product prefix so 'brotherme-status' and
     'status' compare equal. Only one prefix is ever stripped: these
@@ -200,7 +227,9 @@ def count_semantic_duplicate_routes(repo_root):
     duplicate_count is every entry beyond the first in each colliding
     group; groups maps the normalized name to every raw name that
     produced it, restricted to groups with more than one member."""
-    names = repo_entry_names(repo_root)
+    # A moved command (POINTER_PREFIX) is a pointer at a route, not a route,
+    # so it is left out and the metric still means "one capability twice".
+    names = repo_entry_names(repo_root, include_pointers=False)
     by_norm = {}
     for name in names:
         by_norm.setdefault(_normalize_route_name(name), []).append(name)
@@ -277,16 +306,19 @@ def shipped_plugins(marketplace_path=None):
     return names, ''
 
 
-def repo_entry_names(repo_root):
+def repo_entry_names(repo_root, include_pointers=True):
     """Every user-invocable entry name in one tree, as a sorted list.
 
     Command basenames lose their .md, because that is the name they register
-    under, which is the name an install can be checked against."""
+    under, which is the name an install can be checked against. With
+    include_pointers False a moved command (POINTER_PREFIX) is left out."""
     names = []
     for commands_dir in sorted(_find_named_dirs(repo_root, 'commands')):
         for entry in sorted(os.listdir(commands_dir)):
             full = os.path.join(commands_dir, entry)
             if entry.endswith('.md') and os.path.isfile(full):
+                if not include_pointers and _is_pointer_stub(full):
+                    continue
                 names.append(entry[:-3])
     for skills_dir in sorted(_find_named_dirs(repo_root, 'skills')):
         for entry in sorted(os.listdir(skills_dir)):

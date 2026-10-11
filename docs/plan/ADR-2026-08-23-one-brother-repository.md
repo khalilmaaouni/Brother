@@ -20,6 +20,11 @@ from that record are still load bearing and are named in `docs/CHARTER.md`: C3, 
 product installable alone, and C4, the frozen tool surface, no skill or command renamed
 and no new public command.
 
+Amendment, 2026-10-10 (release 1.1.1, `docs/plan/specs/U1.md`): the owner withdrew C3
+and C4. One plugin ships the door and six verb skills (`brother-<verb>`), no product is
+installable alone, and the 48 skill names 1.1.0 shipped route as arguments to the door
+for one release. The no new public command half of C4 still holds.
+
 ## The three products, and which of them ship
 
 `products/` holds three directories: `products/brothermode`, `products/brothersbe`,

@@ -1,6 +1,6 @@
 ---
 name: using-brother
-description: "Use whenever someone starts real work another person will later have to trust: adding or changing a database column or table without breaking a report or export, reviewing a migration or pull request before merging, explaining why a number or weekly report looks wrong, pulling a list of customers or records that feeds a decision, or touching money, customer data, logins, or a live production path. Reads what the work is and applies the right amount of checking, never a menu. Routes only: it owns no verdicts, no task registry and no release decision. Invoke as /brother:using-brother."
+description: "Use whenever someone starts real work another person will later have to trust: adding or changing a database column or table without breaking a report or export, reviewing a migration or pull request before merging, explaining why a number or weekly report looks wrong, pulling a list of customers or records that feeds a decision, or touching money, customer data, logins, or a live production path. Reads what the work is and applies the right amount of checking, never a menu. Also the route for any 1.1.0 skill name (brotherme-, brothermode-, brothersbe-). Routes only: it owns no verdicts, no task registry and no release decision. Invoke as /brother:using-brother."
 ---
 
 # Using Brother
@@ -27,7 +27,19 @@ this one and fixes the other. Evaluate in order, stop at the first match:
    do?" No menu of products.
 3. **Explicit words.** "continue"/"resume": row 1's path. An implementation
    outcome: the execution spine, never accidentally resuming old work. An
-   assurance ask (verify, review, migration, a number): BrotherSBE.
+   assurance ask (verify, review, migration, a number): the review verb in
+   assurance mode. "Show me what happened": the status verb, which reads the
+   run's receipt; no second run database.
+4. **A 1.1.0 skill name opens the request** (`brotherme-`, `brothermode-` or
+   `brothersbe-` and a verb): look it up in references/retired-names.md, say
+   one line, `<old name> is now the brother-<verb> skill (in Claude Code:
+   /brother <verb>)`, then route as that verb with the words the table gives
+   it and the rest of the request. A name the table does not list is
+   unknown: say so and ask row 2's question, never guess a verb.
+
+Whatever the row, a normal task is asked at most one genuinely blocking
+question, and never to choose a product name, an autonomy code, a plan
+format, a run id or a test framework.
 
 ## Any task that names Brother: run the engine, then read the receipt
 
@@ -88,7 +100,10 @@ for evidence afterwards: stay quiet and do the work.
 
 ## The three routes
 
-Route on what the work IS, not what was asked for. `/brother` is the one door.
+Route on what the work IS, not what was asked for. `/brother` is the one door,
+and six verbs stand behind it, each a skill named `brother-<verb>`: start,
+status, next, review, deliver, help. The two routes below are modes those
+verbs run in, read from the work, never a choice put to the person.
 
 **Execution provenance, BrotherMode.** A substantial change someone must
 later trust: several files, several sessions, anything a person will be asked
@@ -109,7 +124,9 @@ within the existing execution route and product verdicts.
 For the three shipped Cursor agent personas (`brother-planner`,
 `brother-executor`, `brother-reviewer`), what each is allowed to do, and
 how Cursor's own Plan/Agent/Ask modes map onto them, load
-references/cursor-native.md.
+references/cursor-native.md. The harness packet instructions that shipped in
+1.1.0 as the cursor-dispatch and cursor-execute skills are
+references/cursor-dispatch.md and references/cursor-execute.md.
 
 
 ## The loop

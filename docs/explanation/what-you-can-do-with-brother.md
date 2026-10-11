@@ -44,7 +44,7 @@ over.
 
 ### How to use it
 
-Type `/brothermode:stop` to stop the current run. Later, type `/brother resume the unfinished work` in the same repository.
+Type `/brother stop the current run`. Later, type `/brother resume the unfinished work` in the same repository.
 
 ### What it will not do
 
@@ -209,7 +209,7 @@ through the same amount of ceremony.
 
 ### How to use it
 
-Type `/brothersbe:adopt this workflow for our team, starting with one risky change and clear acceptance authority`.
+Type `/brother adopt this workflow for our team, starting with one risky change and clear acceptance authority`.
 
 ### What it will not do
 

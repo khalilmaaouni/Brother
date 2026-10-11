@@ -278,12 +278,12 @@ def _resolve_project_id(kv, store, usage, reader=False):
     _err(usage)
     if not rows:
         _err("bm_lead: this folder holds no project yet, and none is "
-             "invented. Start one with: /brother:brothermode-start (or, on a "
+             "invented. Start one with: /brother start <what you want> (or, on a "
              'clone install: python3 "${CLAUDE_PLUGIN_ROOT}/tools/'
              'bm_project.py" start)')
     else:
         _err("bm_lead: --project-id is required here: this folder holds "
-             "%d projects (%s). Run: /brother:brothermode-status (or, on a "
+             "%d projects (%s). Run: /brother status (or, on a "
              'clone install: python3 "${CLAUDE_PLUGIN_ROOT}/tools/'
              'bm_project.py" list)'
              % (len(rows), ", ".join(r["project_id"] for r in rows)))
@@ -540,7 +540,7 @@ def _no_project_tree_read(root, want_verdict=False):
     else:
         lines.append("Dossiers and change requests found: none")
     lines.append("")
-    lines.append("Next: /brother:brothermode-start to make this a Brother project "
+    lines.append("Next: /brother start <what you want> to make this a Brother project "
                  "(or, on a clone install: python3 "
                  '"${CLAUDE_PLUGIN_ROOT}/tools/bm_project.py" start)')
     return lines
@@ -591,7 +591,7 @@ def _reader_project_id(kv, usage, want_verdict=False):
                 not os.path.isfile(bs.store_path(root)):
             _err("bm_lead: warning: R-11: git containment (%s) refused a "
                  "store that does not exist on disk; reading the "
-                 "repository tree instead. Run /brother:brothermode-start (or, "
+                 "repository tree instead. Run /brother start (or, "
                  "on a clone install: python3 \"${CLAUDE_PLUGIN_ROOT}/"
                  "tools/bm_project.py\" start) to create the store, "
                  "which also adds the missing ignore line."
@@ -2157,7 +2157,7 @@ def _print_ask_lines(ask_text):
     _out("Asked: %s" % text)
     route = _ask_route(text)
     if route == "incident":
-        _out("Route: incident, see /brother:brothersbe-start")
+        _out("Route: incident, see /brother start")
     elif route == "audit":
         _out("Route: audit")
 

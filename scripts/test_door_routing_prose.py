@@ -435,6 +435,140 @@ class HandsOneCommand(unittest.TestCase):
         self.assertIn("brother-run --continue", commands[0])
 
 
+#: The 48 skill names v1.1.0 shipped beside the door, read from
+#: `git ls-tree origin/main bundle/skills` at that tag, each with the route
+#: docs/plan/specs/U1.md section 2 gives it (the verb, plus the words the
+#: door passes with it). Spelled out here, independent of the generator's own
+#: table, so a name dropped from codex_surface.RETIRED, or remapped to
+#: another verb, fails its own case below rather than vanishing.
+RETIRED_1_1_0 = {
+    "brotherme-auto": "start", "brotherme-auto-status": "status", "brotherme-brief": "status",
+    "brotherme-decisions": "next", "brotherme-deliver": "deliver", "brotherme-handback": "deliver",
+    "brotherme-handover-pack": "deliver", "brotherme-help": "help", "brotherme-next": "next",
+    "brotherme-review": "review", "brotherme-start": "start", "brotherme-status": "status",
+    "brotherme-stop": "start stop", "brotherme-update": "help", "brotherme-view": "status",
+    "brothermode-auto": "start", "brothermode-auto-status": "status", "brothermode-brief": "status",
+    "brothermode-brotherme": "help", "brothermode-cursor-dispatch": "start dispatch",
+    "brothermode-cursor-execute": "next", "brothermode-decisions": "next", "brothermode-deliver": "deliver",
+    "brothermode-doctor": "help", "brothermode-handback": "deliver", "brothermode-handover-pack": "deliver",
+    "brothermode-help": "help", "brothermode-next": "next", "brothermode-review": "review",
+    "brothermode-start": "start", "brothermode-status": "status", "brothermode-stop": "start stop",
+    "brothermode-update": "help", "brothermode-view": "status",
+    "brothersbe-adopt": "start", "brothersbe-design": "review", "brothersbe-handover": "deliver",
+    "brothersbe-help": "help", "brothersbe-kickoff": "start", "brothersbe-learn": "deliver",
+    "brothersbe-next": "next", "brothersbe-prove-this-change": "review", "brothersbe-review": "review",
+    "brothersbe-spec-and-data-prep": "start", "brothersbe-start": "start", "brothersbe-status": "status",
+    "brothersbe-verify": "review", "brothersbe-work": "start",
+}
+RETIRED_TABLE_PATH = os.path.join(BUNDLE_DIR, "skills", "using-brother", "references", "retired-names.md")
+RETIRED_ROW = re.compile(
+    r"^\| (?P<name>[a-z-]+) \| `/brother (?P<route>[a-z]+(?: [a-z]+)*)` \(`brother-(?P<verb>[a-z]+)`\) \|", re.M)
+
+
+def retired_route(name, table_text):
+    """The route the door's table gives a 1.1.0 name (the verb and any words
+    passed with it), or None when the table carries no row for it. A row
+    whose skill cell disagrees with its route's verb is a ValueError, never a
+    route. Pure, over the text the door reads."""
+    if not isinstance(name, str) or not isinstance(table_text, str):
+        raise ValueError("retired_route needs the name and the table as str")
+    for match in RETIRED_ROW.finditer(table_text):
+        if match.group("name") == name:
+            if match.group("route").split()[0] != match.group("verb"):
+                raise ValueError("%s: route %r names skill brother-%s" % (name, match.group("route"), match.group("verb")))
+            return match.group("route")
+    return None
+
+
+class RetiredNamesRoute(unittest.TestCase):
+    """U1 (release 1.1.1; owner ruling 2026-10-10 withdrawing C3 and C4, the
+    1.1.0 names routed for one release). The door's entry point is the rule in
+    bundle/commands/brother.md plus the table it looks a name up in; one case
+    per 1.1.0 name proves the row exists, routes to one of the six verbs, and
+    that verb's skill ships. Deleting any one routing entry fails exactly that
+    name's case."""
+
+    def test_the_door_carries_the_lookup_rule_and_the_pointer_line(self):
+        door = _read(COMMAND_PATH)
+        # Review note 9: the door names the table from the plugin root, never a bare relative path.
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/using-brother/references/retired-names.md", door)
+        self.assertIn("is now /brother <verb>", door)
+        self.assertIn("never guess a verb", door)
+        # Review note 10: on Codex the door skill names the skill, with the Claude Code form beside it.
+        # The skill wraps its prose at 72 columns, so the phrase is compared with its whitespace folded.
+        skill = re.sub(r"\s+", " ", _authoritative_section_text(_read(SKILL_PATH)))
+        self.assertIn("references/retired-names.md", skill)
+        self.assertIn("is now the brother-<verb> skill (in Claude Code: /brother <verb>)", skill)
+
+    def test_the_door_asks_the_one_question_the_skill_asks_and_never_a_second_route_for_bare(self):
+        """Review note 5: Step 2's question is the door skill's row 2 question, word for word, and the
+        bare section asks exactly one question; the sentence that sent a bare door to `start` or `next`
+        behind Steps 1 and 2 is gone."""
+        door = _read(COMMAND_PATH)
+        skill_order = re.sub(r"\s+", " ", _authoritative_section_text(_read(SKILL_PATH)))
+        question = re.search(r'Ask one question: "([^"]+\?)"', skill_order)
+        self.assertIsNotNone(question, "the skill's row 2 lost its quoted question")
+        lines = door.splitlines()
+        start = next(i for i, ln in enumerate(lines) if ln.startswith("## Bare `/brother`"))
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("## "))
+        bare = "\n".join(lines[start:end])
+        self.assertIn(question.group(1), re.sub(r"\s+", " ", bare))
+        self.assertEqual(bare.count("?"), 1, "the bare door asks more than one question:\n%s" % bare)
+        self.assertNotIn("goes to `start`", door)
+        self.assertNotIn("with work begun, to `next`", door)
+
+    def test_the_door_routes_continue_and_show_me_to_existing_machinery(self):
+        door = _read(COMMAND_PATH)
+        self.assertIn("brother-run --continue", door)
+        self.assertIn("never a second run database", door)
+        self.assertRegex(door, r"[Ss]how\s+me what happened\" is `status`")
+        self.assertIn("one genuinely blocking question", door)
+        for forbidden in ("product name", "autonomy code", "plan format", "run id", "test framework"):
+            self.assertIn(forbidden, door, "the door must name %r as a thing it never asks" % forbidden)
+
+    def test_an_unknown_old_name_has_no_row(self):
+        self.assertIsNone(retired_route("brothermode-nothing", _read(RETIRED_TABLE_PATH)))
+        for bad in (None, 1, b"x"):
+            with self.assertRaises(ValueError):
+                retired_route(bad, "")
+
+    def test_the_table_carries_exactly_the_48_names_with_their_routes(self):
+        """Review note 2: the whole map, name to route, pinned independently of the generator."""
+        table = _read(RETIRED_TABLE_PATH)
+        routes = dict((m.group("name"), m.group("route")) for m in RETIRED_ROW.finditer(table))
+        self.assertEqual(routes, RETIRED_1_1_0)
+        self.assertEqual(len(routes), 48)
+        with self.assertRaises(ValueError):
+            retired_route("x", "| x | `/brother start` (`brother-help`) |\n")
+
+
+def _routing_case(name):
+    expected_route = RETIRED_1_1_0[name]
+    expected_verb = expected_route.split()[0]
+
+    def case(self):
+        route = retired_route(name, _read(RETIRED_TABLE_PATH))
+        self.assertIsNotNone(route, "%s has no row in %s" % (name, RETIRED_TABLE_PATH))
+        self.assertEqual(route, expected_route, "%s routes to %r, U1.md section 2 says %r" % (name, route, expected_route))
+        self.assertIn(expected_verb, GDT.CORE_ORDER, "%s routes to %r, which is no door verb" % (name, expected_verb))
+        target = os.path.join(BUNDLE_DIR, "skills", "brother-%s" % expected_verb, "SKILL.md")
+        self.assertTrue(os.path.isfile(target), "%s routes to %s, which does not ship" % (name, target))
+        self.assertIn("`%s`" % name, _read(target), "%s is not named by its verb skill" % name)
+        # Option B (2026-10-11): the 1.1.0 invocation itself, /brother:<name>, is a moved command
+        # that prints the same pointer and follows the same verb skill from the plugin root.
+        stub = os.path.join(BUNDLE_DIR, "commands", "%s.md" % name)
+        self.assertTrue(os.path.isfile(stub), "/brother:%s has no moved command at %s" % (name, stub))
+        stub_text = _read(stub)
+        self.assertIn("`%s is now /brother %s`" % (name, expected_route), stub_text)
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/brother-%s/SKILL.md" % expected_verb, stub_text)
+    case.__doc__ = "%s routes through the door to its verb" % name
+    return case
+
+
+for _name in RETIRED_1_1_0:
+    setattr(RetiredNamesRoute, "test_routes_" + _name.replace("-", "_"), _routing_case(_name))
+
+
 class RefusesHostileInput(unittest.TestCase):
     """Both helpers refuse a non-str body with ValueError, never a crash."""
 
