@@ -83,12 +83,14 @@ pass. Python 3, standard library only.
 """
 import argparse
 import collections.abc
+import concurrent.futures
 import hashlib
 import importlib.util
 import json
 import math
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -777,32 +779,46 @@ def declared_exceptions(root, runner=None):
                    + ["  " + l for l in out[-12:]])
 
 
-def preflight(root, version, runner=None):
+def preflight(root, version, runner=None, cheap_only=False, resume_sha=None):
     """(ok, lines): scripts/cut_preflight.py, every gate that can refuse the
     cut LATE, asked now. Measured 2026-09-20: the 1.0.21 cut was refused six
     times, each behind an 84 minute chain or on the public runner, and each
     knowable in minutes: clock gates that lapse mid cut, a leftover public
     release branch, a secret shape in the changelog text, and tests that
     pass only in the author's tree or the author's home folder. Anything but
-    exit 0 blocks, NO-DATA (2) and a missing script (127) included."""
+    exit 0 blocks, NO-DATA (2) and a missing script (127) included.
+    `cheap_only` (RC1.b2, the reuse path only): --cheap-only, so the two
+    export rows are left to the chain, which reuses or runs each one.
+    `resume_sha` (CR1.a, a resume only): --resume, the one commit whose own
+    generated release note the no-cut-commit row lets through."""
     proc = _stream("cut_preflight.py",
                    [sys.executable, os.path.join(root, "scripts",
                                                  "cut_preflight.py"),
-                    "--version", version], root, runner)
+                    "--version", version]
+                   + (["--cheap-only"] if cheap_only else [])
+                   + (["--resume", resume_sha] if resume_sha else []), root, runner)
     if proc.returncode == 0:
-        return True, ["preflight: CLEAR"]
+        return True, ["preflight: CLEAR" + (
+            " (cheap rows only; the chain reuses or runs the export rows)"
+            if cheap_only else "")]
     return False, ["REFUSED: cut_preflight.py exit %d; clear every line it "
                    "marked REFUSED or NO-DATA above before cutting"
                    % proc.returncode]
 
 
-def required_fast(root, version, runner=None, heartbeat=None):
+def required_fast(root, version, runner=None, heartbeat=None, capture=None):
     """(ok, lines). The whole gate output is kept in a file keyed the way
     required_fast.sh keys its own captures (worktree plus pid); the lines
-    returned are its condensed summary plus any FAILED:/NO-DATA: line."""
+    returned are its condensed summary plus any FAILED:/NO-DATA: line.
+    `capture` (RC1.b1), a dict or None: gains the full text and the seconds,
+    so the chain can record the hub row from the run it already made."""
+    started = time.monotonic()
     proc = _stream("required_fast.sh",
                    ["sh", os.path.join(root, "scripts", "required_fast.sh")],
                    root, runner, heartbeat=heartbeat)
+    if capture is not None:
+        capture["text"] = _text(proc) + "\n"
+        capture["seconds"] = max(time.monotonic() - started, 0.0)
     keep = os.path.join(os.environ.get("TMPDIR", "/tmp"),
                         "cut-required-fast-%s-%s-%d.txt"
                         % (version, os.path.basename(root), os.getpid()))
@@ -942,7 +958,8 @@ def _print(lines):
 
 
 def readiness(root, version, bm, paths, force, runner=None,
-              stop_early=True, include_fast=True, own_uuid=None):
+              stop_early=True, include_fast=True, own_uuid=None,
+              cheap_only=False, resume_sha=None):
     """The read-only steps shared by both modes: fences, tree, required
     fast. Returns the list of blocking reasons, empty when ready.
     Conflicts block unless forced; a dirty tree blocks; a red gate blocks.
@@ -1002,7 +1019,8 @@ def readiness(root, version, bm, paths, force, runner=None,
     if not ok:
         reasons.append("declared battery exception(s) not current")
     if not (reasons and stop_early):
-        ok, lines = preflight(root, version, runner)
+        ok, lines = preflight(root, version, runner, cheap_only=cheap_only,
+                              resume_sha=resume_sha)
         _print(lines)
         if not ok:
             reasons.append(PREFLIGHT_REFUSED)
@@ -1015,6 +1033,221 @@ def readiness(root, version, bm, paths, force, runner=None,
     return reasons
 
 
+#: RC1.b1: the two export rows, run once by the chain on the tree that ships.
+EXPORT_ROWS = ("export-real-home", "virgin-gate")
+EXPORT_ROW_HOMES = {"export-real-home": "real", "virgin-gate": "empty"}
+EXPORT_TREE_TIMEOUT_S = 1800
+
+
+def export_tree(root, version, runner=None):
+    """(export tree id, '') from `cut_preflight.py --export-tree-id`, run
+    through the runner, or ('', reason). Every use of the id in this module
+    goes through here, so a scripted runner can answer it."""
+    proc = _run([sys.executable, os.path.join(root, "scripts",
+                                              "cut_preflight.py"),
+                 "--version", version, "--export-tree-id"], root, runner,
+                timeout=EXPORT_TREE_TIMEOUT_S)
+    found = CR.EXPORT_TREE_RE.findall(proc.stdout or "")
+    if proc.returncode != 0 or len(found) != 1:
+        last = (_text(proc).splitlines() or ["no output"])[-1][:200]
+        return "", ("cut_preflight.py --export-tree-id exit %d: %s"
+                    % (proc.returncode, last))
+    return found[0], ""
+
+
+def canary_check(root, version, runner=None):
+    """(record path, '') when a Linux canary PASS record covers HEAD's export
+    tree (LX1.b2), else ('', reason). The tree id comes from export_tree; the
+    answer from linux_canary.py --covering. Anything but exit 0 with a path
+    printed refuses, and so does a tree id that cannot be read."""
+    tree, why = export_tree(root, version, runner)
+    if why or not tree:
+        return "", ("no Linux canary PASS for the export tree: its id cannot "
+                    "be read (%s)" % (why or "no id"))
+    proc = _run([sys.executable,
+                 os.path.join(root, "scripts", "linux_canary.py"),
+                 "--covering", tree, "--version", version], root, runner)
+    out = [l.strip() for l in (proc.stdout or "").splitlines() if l.strip()]
+    if proc.returncode == 0 and out:
+        return out[-1], ""
+    last = (_text(proc).splitlines() or ["no output"])[-1][:300]
+    return "", ("no Linux canary PASS for the export tree %s: %s (exit %d)"
+                % (tree[:12], last or "no output", proc.returncode))
+
+
+def canary_refusal(root, version, runner=None):
+    """'' when a canary PASS record covers HEAD's export tree, else the
+    reason: the second half of canary_check."""
+    return canary_check(root, version, runner)[1]
+
+
+def _head_tree(root, runner=None):
+    """HEAD^{tree} of `root`, or '' when it cannot be read."""
+    proc = _run(["git", "rev-parse", "HEAD^{tree}"], root, runner)
+    out = (proc.stdout or "").strip()
+    return out if proc.returncode == 0 and CR.SHA_RE.fullmatch(out) else ""
+
+
+def emit_row(name, argv, key, home, verdict, seconds, text):
+    """Record one rehearsal row: its full text as a log in the cut evidence
+    folder, then the CUTROW line the rehearsal parent parses. Returns the
+    row; raises ValueError on a row cut_rehearsal.validate_row refuses (an
+    empty key included) and OSError when the log cannot be written, before
+    any line is printed."""
+    row = {"row": name, "argv": list(argv) if isinstance(argv, (list, tuple))
+           else argv, "key": key, "home": home, "verdict": verdict,
+           "seconds": seconds, "log_path": "pending", "log_sha256": "0" * 64}
+    why = CR.validate_row(row)
+    if why:
+        raise ValueError(why)
+    directory = CR.evidence_dir()
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "row-%s-%s-%s-%d.log"
+                        % (name, key[:12], home, int(time.time())))
+    data = (text if isinstance(text, str) else "").encode("utf-8")
+    with open(path, "wb") as fh:
+        fh.write(data)
+    row["log_path"] = path
+    row["log_sha256"] = hashlib.sha256(data).hexdigest()
+    row["seconds"] = float(seconds)
+    print(CR.row_line(row), flush=True)
+    return row
+
+
+def _row_verdict(verdict):
+    """A preflight verdict as a row verdict: OK is PASS, REFUSED is FAIL,
+    anything else NO-DATA."""
+    return {"OK": "PASS", "REFUSED": "FAIL"}.get(verdict, "NO-DATA")
+
+
+def export_rows(root, version, runner=None, checks=None, heartbeat=None,
+                names=EXPORT_ROWS, key=""):
+    """(ok, lines): the export-real-home row (the exporter's dry run with its
+    required_fast proof and tag-time checks, real HOME) and the virgin-gate
+    row (required_fast.sh on the export tree, empty HOME), once, on the tree
+    that ships, each recorded by emit_row under the export tree id. On the
+    real path the two run side by side (each one's required_fast.sh queues
+    itself in heavy_slot.py); with an injected runner they run in order.
+    `checks` maps a row name to a callable(keep_path) returning the
+    preflight's (verdict, name, detail). ok only when both rows are PASS: an
+    unreadable tree id, a check that raises, an exporter that names another
+    tree or none, or a row that cannot be recorded is NO-DATA. `names` and
+    `key` (RC1.b2) run only those rows under a tree id already read."""
+    import cut_preflight as P
+    if not key:
+        key, why = export_tree(root, version, runner)
+        if not key:
+            return False, ["NO-DATA: export rows not run: the export tree "
+                           "id cannot be read: %s" % why]
+    remote = EP.DEFAULT_REMOTE
+    argv = {"export-real-home": ["python3", "scripts/export_public.py",
+                                 "--dry-run", "--prove-required-fast",
+                                 "--tag-time-checks", "--remote", remote],
+            "virgin-gate": ["sh", "scripts/required_fast.sh"]}
+    if checks is None:
+        checks = {
+            "export-real-home": lambda keep: P.check_export_real_home(
+                root, remote, runner, tag_time_checks=True, keep=keep),
+            "virgin-gate": lambda keep: P.check_virgin_gate(root, runner,
+                                                            keep=keep)}
+    tmp = tempfile.mkdtemp(prefix="cut-export-rows-")
+
+    def one(name):
+        keep = os.path.join(tmp, name + ".txt")
+        start = time.monotonic()
+        try:
+            verdict, _name, detail = checks[name](keep)
+        except Exception as exc:  # sbe: allow-silent the row reads NO-DATA and fails the chain
+            verdict, detail = "NO-DATA", "the check raised: %s" % exc
+        seconds = max(time.monotonic() - start, 0.0)
+        try:
+            with open(keep, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            text = ""
+        return verdict, detail, seconds, text
+
+    try:
+        if runner is None:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                futures = dict((n, pool.submit(one, n)) for n in names)
+                pending = set(futures.values())
+                while pending:
+                    _done, pending = concurrent.futures.wait(
+                        pending, timeout=HEARTBEAT_INTERVAL_S)
+                    if heartbeat is not None:
+                        heartbeat.maybe("export rows")
+                results = dict((n, f.result()) for n, f in futures.items())
+        else:
+            results = dict((n, one(n)) for n in names)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    ok, lines = True, []
+    for name in names:
+        verdict, detail, seconds, text = results[name]
+        said = _row_verdict(verdict)
+        if name == "export-real-home" and said == "PASS":
+            named = CR.EXPORT_TREE_RE.findall(text)
+            if named[-1:] != [key]:
+                said = "NO-DATA"
+                detail = ("the exporter measured %s, not the export tree %s"
+                          % (named[-1][:12] if named else "no named tree",
+                             key[:12]))
+        try:
+            emit_row(name, argv[name], key, EXPORT_ROW_HOMES[name], said,
+                     seconds, text)
+        except (OSError, ValueError) as exc:
+            said = "NO-DATA"
+            detail = "%s; the row could not be recorded: %s" % (detail, exc)
+        lines.append("%s %s (%s HOME, export tree %s): %s"
+                     % (name, said, EXPORT_ROW_HOMES[name], key[:12], detail))
+        ok = ok and said == "PASS"
+    return ok, lines
+
+
+def reuse_record(root, version, resume_sha, runner=None):
+    """(record, path, '') of the rehearsal record covering a --resume cut,
+    or (None, '', reason): RC1.b2. Not a resume, a record that does not
+    cover, or one that is missing, corrupt or malformed is no reuse, and the
+    cut runs every row as before."""
+    if resume_sha is None:
+        return None, "", "not a --resume cut, so every row runs"
+    path, why = _covering_record(root, version, resume_sha, runner)
+    if why or not path:
+        return None, "", why or "no rehearsal record covers this commit"
+    record, why = CR.load_record(path)
+    if record is None:
+        return None, "", why
+    return record, path, ""
+
+
+def reused_or_run_export_rows(root, version, record, record_path,
+                              runner=None, checks=None, heartbeat=None):
+    """(ok, lines): each export row is reused from `record` only on its exact
+    export tree id, home and a PASS (cut_rehearsal.reusable_row); every
+    other row runs as export_rows runs it. An unreadable tree id is NO-DATA
+    and reuses nothing."""
+    key, why = export_tree(root, version, runner)
+    if not key:
+        return False, ["NO-DATA: export rows not run: the export tree id "
+                       "cannot be read: %s" % why]
+    lines, missed = [], []
+    for name in EXPORT_ROWS:
+        row, why = CR.reusable_row(record, name, key,
+                                   EXPORT_ROW_HOMES[name])
+        if row is not None:
+            print("REUSED %s %s %s" % (name, key[:12], record_path))
+            lines.append("%s reused (export tree %s)" % (name, key[:12]))
+        else:
+            print("%s not reused: %s" % (name, why))
+            missed.append(name)
+    if not missed:
+        return True, lines
+    ok, ran = export_rows(root, version, runner, checks, heartbeat,
+                          names=tuple(missed), key=key)
+    return ok, lines + ran
+
+
 def _record(passed, label, lines):
     """A step that says NOT APPLICABLE is n/a, never a pass."""
     if any("NOT APPLICABLE" in line for line in lines):
@@ -1023,8 +1256,126 @@ def _record(passed, label, lines):
         passed.append(label)
 
 
+#: LX1.b1: the longest the chain waits for the canary after its last local
+#: row. The canary itself stops at 120 s to find its run plus 1,320 s to
+#: wait for it, after a build of minutes; past this the child is stopped.
+CANARY_WAIT_S = 3600
+
+
+class CanaryHandle(object):
+    """A started Linux canary: `proc` (a Popen writing to `log`) on the real
+    path, or `result` (a CompletedProcess) when a test runner ran it at once."""
+
+    def __init__(self, proc=None, log="", result=None):
+        self.proc, self.log, self.result = proc, log, result
+
+
+def start_canary(root, version, runner=None):
+    """Start scripts/linux_canary.py --version V --root ROOT beside the local
+    rows (LX1.b1): a Popen whose output goes to a log under the scratch root,
+    or, with a test `runner`, run at once through _run. None when it cannot
+    start, which await_canary reads as a failed row, never a skipped one."""
+    cmd = [sys.executable, os.path.join(root, "scripts", "linux_canary.py"),
+           "--version", version, "--root", root]
+    print("[cut %s] start linux canary (beside the local rows)" % _clock(),
+          flush=True)
+    if runner is not None:
+        return CanaryHandle(result=_run(cmd, root, runner))
+    try:
+        folder = CR.scratch_root()
+        os.makedirs(folder, exist_ok=True)
+        log = os.path.join(folder, "linux-canary-%s-%d-%d.log"
+                           % (version, int(time.time()), os.getpid()))
+        with open(log, "w", encoding="utf-8") as fh:
+            proc = subprocess.Popen(cmd, cwd=root, stdout=fh,
+                                    stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL,
+                                    env=dict(os.environ, PYTHONUNBUFFERED="1"))
+    except OSError as exc:
+        print("NO-DATA: the linux canary could not start: %s" % exc)
+        return None
+    print("  linux canary | log %s" % log, flush=True)
+    return CanaryHandle(proc=proc, log=log)
+
+
+def stop_canary(handle):
+    """SIGTERM the canary child and wait for it (its own handler deletes the
+    hub branch and records NO-DATA interrupted); SIGKILL after 60 s."""
+    proc = getattr(handle, "proc", None)
+    if proc is None or proc.poll() is not None:
+        return
+    print("linux canary: stopped, the chain did not reach its end")
+    proc.terminate()
+    try:
+        proc.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def await_canary(handle, version):
+    """(ok, lines): wait for the canary, read its last CANARY line. ok only
+    for `CANARY PASS` with exit 0; a FAIL, a NO-DATA, no line at all, a child
+    that never started or never finished is not ok."""
+    if handle is None:
+        return False, ["linux canary: NO-DATA for %s, it did not start"
+                       % version]
+    if handle.proc is not None:
+        try:
+            code = handle.proc.wait(timeout=CANARY_WAIT_S)
+        except subprocess.TimeoutExpired:
+            stop_canary(handle)
+            return False, ["linux canary: NO-DATA for %s, no verdict within "
+                           "%d s, stopped" % (version, CANARY_WAIT_S)]
+        try:
+            with open(handle.log, "r", encoding="utf-8",
+                      errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            return False, ["linux canary: NO-DATA for %s, its log cannot be "
+                           "read (%s)" % (version, exc)]
+    else:
+        code, text = handle.result.returncode, _text(handle.result)
+    lines = [l for l in text.splitlines()
+             if l.startswith(("CANARY ", "REUSED linux-canary "))]
+    verdicts = [l for l in lines if l.startswith("CANARY ")]
+    if not verdicts:
+        return False, lines + ["linux canary: NO-DATA for %s, no CANARY line "
+                               "(exit %d)" % (version, code)]
+    ok = verdicts[-1].split()[1:2] == ["PASS"] and code == 0
+    return ok, lines
+
+
 def chain(root, version, runner=None, stop_early=True, resume=False,
-         heartbeat=None):
+          heartbeat=None, reuse=None, reuse_path=""):
+    """_chain_rows, plus the Linux canary (LX1.b1): started when the export
+    tree exists (cut_v1.0.0.sh passed, never on a resume), awaited after the
+    last local row, terminated when the chain stops early. A FAIL or NO-DATA
+    canary is the failed row `linux canary`. Returns (passed, failed)."""
+    canary = []
+    try:
+        passed, failed = _chain_rows(root, version, runner, stop_early, resume,
+                                     heartbeat, reuse, reuse_path, canary)
+    except BaseException:
+        if canary:
+            stop_canary(canary[0])
+        raise
+    if not canary:
+        return passed, failed
+    if failed and stop_early:
+        stop_canary(canary[0])
+        return passed, failed
+    ok, lines = await_canary(canary[0], version)
+    _print(lines)
+    if ok:
+        passed.append("linux canary")
+    else:
+        failed.append("linux canary")
+    return passed, failed
+
+
+def _chain_rows(root, version, runner=None, stop_early=True, resume=False,
+                heartbeat=None, reuse=None, reuse_path="", canary=None):
     """The release chain in the order it can be true: cut_v1.0.0.sh first
     (bump, regenerate, commit, manifest and note, all LOCAL: it pushes
     nothing), then plugin_bump_gate.py and required_fast.sh on that bumped
@@ -1065,6 +1416,10 @@ def chain(root, version, runner=None, stop_early=True, resume=False,
         if not ok:
             return passed, ["cut_v1.0.0.sh"]
         passed.append("cut_v1.0.0.sh")
+        if canary is not None:
+            # LX1.b1: the export tree exists now (step 2t committed the
+            # note), so the Linux canary runs beside the local rows below
+            canary.append(start_canary(root, version, runner))
     # Seconds, so it runs BEFORE the minutes-long gate, on --resume too, and
     # on the bumped tree: cut_v1.0.0.sh itself writes into a product
     # directory, which the preflight's read of the unbumped tree cannot see.
@@ -1082,14 +1437,60 @@ def chain(root, version, runner=None, stop_early=True, resume=False,
         failed.append("plugin_bump_gate")
         if stop_early:
             return passed, failed
-    ok, lines = required_fast(root, version, runner, heartbeat=heartbeat)
-    _print(lines)
-    if ok:
+    hub_key = _head_tree(root, runner)
+    hub_row = None
+    if reuse is not None:
+        # RC1.b2: the rehearsal's own hub run, on exactly this tree
+        hub_row, why = CR.reusable_row(reuse, "required-fast-hub", hub_key,
+                                       "real") if hub_key else (
+            None, "HEAD^{tree} cannot be read")
+        if hub_row is not None:
+            print("REUSED required-fast-hub %s %s" % (hub_key[:12],
+                                                       reuse_path))
+        else:
+            print("required-fast-hub not reused: %s" % why)
+    if hub_row is not None:
+        ok = True
+        passed.append("required_fast (reused)")
+    else:
+        capture = {}
+        ok, lines = required_fast(root, version, runner, heartbeat=heartbeat,
+                                  capture=capture)
+        _print(lines)
+        # RC1.b1: the hub row, from the run just made; an unrecorded row only
+        # means a later cut cannot reuse it, so it never fails the chain
+        try:
+            emit_row("required-fast-hub", ["sh", "scripts/required_fast.sh"],
+                     hub_key, "real", "PASS" if ok else "FAIL",
+                     capture.get("seconds", 0.0), capture.get("text", ""))
+        except (OSError, ValueError) as exc:
+            print("NO-DATA: the required-fast-hub row was not recorded: %s"
+                  % exc)
+    if hub_row is not None:
+        pass
+    elif ok:
         passed.append("required_fast")
     else:
         failed.append("required_fast.sh did not pass")
         if stop_early:
             return passed, failed
+    if not failed:
+        # RC1.b1: the export dry run and the virgin gate, once, here, on the
+        # bytes that ship (cut_v1.0.0.sh step 4 no longer runs a dry run)
+        if reuse is not None:
+            ok, lines = reused_or_run_export_rows(root, version, reuse,
+                                                  reuse_path, runner,
+                                                  heartbeat=heartbeat)
+        else:
+            ok, lines = export_rows(root, version, runner,
+                                    heartbeat=heartbeat)
+        _print(lines)
+        if ok:
+            passed.append("export rows")
+        else:
+            failed.append("export rows")
+            if stop_early:
+                return passed, failed
     for label, cmd in (
         ("refresh_cut --check", [sys.executable,
                                  os.path.join(root, "scripts", "refresh_cut.py"),
@@ -1449,7 +1850,8 @@ def _local_tagged_commit(text, version):
     return matches[0] if len(matches) == 1 else None
 
 
-def export_public_push(root, version, runner=None, heartbeat=None):
+def export_public_push(root, version, runner=None, heartbeat=None,
+                       rehearsal_record="", canary_record=""):
     """(ok, lines, local_commit): runs export_public.py --push --tag
     --prove-required-fast and reads the commit it tagged locally out of
     its OWN full captured output. step()'s usual tail-only summary is not
@@ -1459,9 +1861,20 @@ def export_public_push(root, version, runner=None, heartbeat=None):
     position ever staying true. `lines` is the same shape step() would
     have returned (the tail line on success, the full output on failure),
     so every existing caller-facing behavior (what run_chain prints,
-    park notes, DONE evidence) is unchanged."""
+    park notes, DONE evidence) is unchanged. `rehearsal_record` (RC1.b2):
+    the covering record, passed as --rehearsal-record; the exporter decides
+    on its own whether its tree is the recorded one (a request, never a
+    grant). `canary_record` (FP1.b): the Linux canary record that covered
+    HEAD's export tree, passed as --canary-record so the exporter may rerun
+    a failed public check once; on success the exporter's `RERUN:` and
+    `public check:` lines are kept after the tail line, so the DONE evidence
+    never reads a second attempt as a clean first pass."""
     cmd = [sys.executable, os.path.join(root, "scripts", "export_public.py"),
           "--push", "--tag", "v%s" % version, "--prove-required-fast"]
+    if rehearsal_record:
+        cmd += ["--rehearsal-record", rehearsal_record]
+    if canary_record:
+        cmd += ["--canary-record", canary_record]
     proc = _stream("export_public --push", cmd, root, runner,
                    heartbeat=heartbeat)
     text = _text(proc)
@@ -1469,7 +1882,8 @@ def export_public_push(root, version, runner=None, heartbeat=None):
         return False, (["export_public --push: exit %d" % proc.returncode]
                        + text.splitlines()), None
     tail = text.splitlines()[-1] if text else "(no output)"
-    return (True, ["export_public --push: exit 0  %s" % tail],
+    attempts = [l for l in text.splitlines() if l.startswith(RERUN_PREFIXES)]
+    return (True, ["export_public --push: exit 0  %s" % tail] + attempts,
            _local_tagged_commit(text, version))
 
 
@@ -1514,8 +1928,13 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
     was pushed and reproduced. `heartbeat` (R3) is threaded through every
     long step so the fence's own liveness evidence stays fresh for as long
     as this process actually runs."""
+    # RC1.b2: a --resume cut covered by a rehearsal record reuses its rows
+    reuse, reuse_path, why = reuse_record(root, version, resume_sha, runner)
+    print("REUSE: %s" % reuse_path if reuse is not None
+          else "NO REUSE: %s" % why)
     reasons = readiness(root, version, bm, paths, force, runner,
-                        include_fast=False, own_uuid=own_uuid)
+                        include_fast=False, own_uuid=own_uuid,
+                        cheap_only=reuse is not None, resume_sha=resume_sha)
     if reasons:
         return EXIT_REFUSED, None, ("refused before any write: %s"
                                     % "; ".join(reasons))
@@ -1533,7 +1952,8 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         print("cut starts from %s; the chain's commits stay local until the "
               "push" % (head or "?"))
     passed, failed = chain(root, version, runner,
-                           resume=resume_sha is not None, heartbeat=heartbeat)
+                           resume=resume_sha is not None, heartbeat=heartbeat,
+                           reuse=reuse, reuse_path=reuse_path)
     if failed:
         return EXIT_REFUSED, None, "%s failed" % failed[0]
     print()
@@ -1561,6 +1981,13 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
                                    runner)
     if why or not record:
         reason = why or "no rehearsal record covers %s" % cut_head
+        print("refused before the question, nothing pushed: %s" % reason)
+        return EXIT_REFUSED, None, (
+            "refused before the question: %s" % reason)
+    # LX1.b2: no Linux verdict from the shipping host for this export tree,
+    # no question
+    canary_record, reason = canary_check(root, version, runner)
+    if reason:
         print("refused before the question, nothing pushed: %s" % reason)
         return EXIT_REFUSED, None, (
             "refused before the question: %s" % reason)
@@ -1601,14 +2028,16 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         return EXIT_REFUSED, None, ("refused before the push, nothing "
                                     "pushed: %s" % why)
     push_ok, lines, local_commit = export_public_push(
-        root, version, runner, heartbeat=heartbeat)
+        root, version, runner, heartbeat=heartbeat, rehearsal_record=record,
+        canary_record=canary_record)
     _print(lines)
+    attempts = [l for l in lines if l.startswith(RERUN_PREFIXES)]
     if not push_ok:
         # CV1.e: a failed push is a STOP with a record, never a retry. A
         # refusal shape, or any text not positively a network error, is the
         # host refusing, and that record blocks every later cut of this
         # version until the owner deletes it.
-        detail = "\n".join(lines)
+        detail = stop_detail(lines)
         # the exporter's own text, without export_public_push's header line,
         # so its first line is the exporter's first line (FX4.b)
         kind = classify_push_failure("\n".join(lines[1:]))
@@ -1754,6 +2183,8 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         evidence += "; forced over live fences: %s" % force
     if gh_note:
         evidence += "; %s" % gh_note
+    if attempts:
+        evidence += "; %s" % "; ".join(attempts)
     print("DONE: %s" % evidence)
     return EXIT_OK, evidence, None
 
@@ -1822,8 +2253,10 @@ def _cut_own_paths(root):
     names = [c.label.replace(" ", ":").split(":")[0]
              for c, _want in version_source.product_carriers(
                  pathlib.Path(root))]
+    # cut_v1.0.0.sh step 2 drops the release-invariant exception from this file when one is declared (it is red by
+    # design between releases); without it here the cut refused its own edit (1.1.3 rehearsal, 2026-10-12)
     return tuple(release_paths(root)) + tuple(version_source.CARRIER_FILES_REL) + tuple(
-        n for n in names if n.startswith("products/"))
+        n for n in names if n.startswith("products/")) + (os.path.join("docs", "plan", "BATTERY-EXPECTATIONS.json"),)
 
 
 def rehearsal_refusal(root, version, resume_sha=None, runner=None):
@@ -1860,6 +2293,21 @@ STOP_LOCAL_REFUSED = "local-refused"
 STOP_KINDS = (STOP_HOST_REFUSED, STOP_PUSH_FAILED, STOP_LOCAL_REFUSED)
 _ARMED_RE = re.compile(re.escape(EP.REMOTE_WRITE_ARMED) + r" ([0-9a-f]{16})")
 STOP_DETAIL_CHARS = 400
+#: FP1.b: the lines a stop record's kept characters begin with, and the two
+#: of them that name a public check rerun.
+STOP_KEY_PREFIXES = ("FAIL:", "RERUN:", "public check:", "REFUSED:", "NO-DATA:")
+RERUN_PREFIXES = ("RERUN:", "public check:")
+
+
+def stop_detail(lines):
+    """FP1.b: the push output with every line that starts with a prefix of
+    STOP_KEY_PREFIXES first, in their order, then the rest, so the first
+    STOP_DETAIL_CHARS that write_stop_record keeps are the failure and its
+    attempts, not the exporter's preamble. With no key line it is the plain
+    join."""
+    key = [l for l in lines if l.startswith(STOP_KEY_PREFIXES)]
+    rest = [l for l in lines if not l.startswith(STOP_KEY_PREFIXES)]
+    return "\n".join(key + rest)
 
 
 def _stdin_is_tty():
@@ -2108,6 +2556,10 @@ def pre_push_recheck(root, version, head, record_path, resume_sha=None,
     if proc.returncode != 0:
         return ("REFUSED: retire_catalogs --check exited %d after the answer: "
                 "%s" % (proc.returncode, _text(proc) or "no output"))
+    # LX1.b2: the export tree at this moment, never the one the question saw
+    why = canary_refusal(root, version, runner)
+    if why:
+        return "REFUSED: %s" % why
     return ""
 
 

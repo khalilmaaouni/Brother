@@ -34,6 +34,28 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 
+def bind_receipt(run_dir, project):
+    """AC1.a: main() resolves a cited run's canonical receipt and refuses one
+    it cannot bind, so a CLI acceptance fixture carries what a real run
+    folder does: a target.json naming its project and receipt/receipt.json
+    bound to its own path (the shape scripts/test_acceptance_binding.py
+    builds). Returns the arguments that name the project."""
+    import brother_run as _br
+    os.makedirs(project, exist_ok=True)
+    with open(os.path.join(run_dir, _br.TARGET_FILENAME), "w",
+              encoding="utf-8") as fh:
+        json.dump({"cwd": os.path.abspath(project)}, fh)
+    path = os.path.join(run_dir, _br.RECEIPT_DIRNAME, _br.RECEIPT_FILENAME)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    body = {k: "x" for k in _br.RECEIPT_REQUIRED_FIELDS}
+    body.update(scope={"changed": [{"unit": "guard", "file": "mathlib.py"}]},
+                evidence=[{"id": "guard", "state": "verified"}], unproven=[],
+                host_capability={"receipt_path": path})
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(body, fh)
+    return ["--project-cwd", project]
+
+
 class RecordFunction(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="accept-delivery-test-")
@@ -375,7 +397,8 @@ class ChecksDerivedFromARunDirectory(unittest.TestCase):
                         "files_changed_by_unit": ["mathlib.py"],
                     }],
                     "review_skip": {"reason": "covered by its own test class",
-                                    "skipped_by": "test fixture"},
+                                    "skipped_by": "test fixture",
+                                    "skipped_at": "2026-09-04T09:00:00"},
                 }, fh)
         if claims:
             with open(os.path.join(self.run, "claims.json"), "w",
@@ -424,6 +447,7 @@ class ChecksDerivedFromARunDirectory(unittest.TestCase):
                 "--accepted-by", "Khalil Maaouni",
                 "--accepted-at", "2026-09-04", "--recorded-by", "person",
                 "--run-dir", self.run, "--dir", out,
+                *bind_receipt(self.run, os.path.join(self.tmp, "project")),
                 "--pattern-root", os.path.join(self.tmp, "vault")])
         self.assertEqual(code, 0, buf.getvalue())
         with open(ad.record_path("toy-1", out), encoding="utf-8") as fh:
@@ -443,6 +467,7 @@ class ChecksDerivedFromARunDirectory(unittest.TestCase):
                 "--accepted-by", "Khalil Maaouni",
                 "--accepted-at", "2026-09-04", "--recorded-by", "person",
                 "--run-dir", self.run, "--dir", out,
+                *bind_receipt(self.run, os.path.join(self.tmp, "project")),
                 "--pattern-root", os.path.join(self.tmp, "vault")])
         self.assertEqual(code, 0, buf.getvalue())
         with open(ad.record_path("toy-identity", out), encoding="utf-8") as fh:
@@ -566,7 +591,8 @@ class ReviewReceiptFromARunDirectory(unittest.TestCase):
     def test_a_review_skip_with_reason_and_name_is_accepted(self):
         self.write_work(review_skip={
             "reason": "docs-only change, no risk boundary crossed",
-            "skipped_by": "Khalil Maaouni"})
+            "skipped_by": "Khalil Maaouni",
+            "skipped_at": "2026-09-09T10:00:00"})
         review, reason = ad.review_from_run_dir(self.run)
         self.assertEqual(reason, "")
         self.assertTrue(review["skipped"])
@@ -704,6 +730,7 @@ class ReviewReceiptFromARunDirectory(unittest.TestCase):
                 "--accepted-by", "Khalil Maaouni",
                 "--accepted-at", "2026-09-09", "--recorded-by", "person",
                 "--run-dir", self.run, "--dir", out,
+                *bind_receipt(self.run, os.path.join(self.tmp, "project")),
                 "--pattern-root", os.path.join(self.tmp, "vault")])
         self.assertEqual(code, 0, buf.getvalue())
         with open(ad.record_path("toy-reviewed", out), encoding="utf-8") as fh:

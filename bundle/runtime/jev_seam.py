@@ -685,8 +685,25 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: foundation module, not reimplemented per call site or duplicated into a
 #: second module). Both are TREE content, reviewed and shipped with the
 #: code that reads them -- unlike DEFAULT_LEDGER_DIR below, which is not.
-DEFAULT_SEAMS_CONFIG_PATH = os.path.join(_REPO_ROOT, "data", "jev-seams.json")
-DEFAULT_REGISTRY_PATH = os.path.join(_REPO_ROOT, "data", "jev-registry.json")
+#: JWP.a: the same two files also ship inside bundle/runtime, at
+#: <runtime>/data/<name>, where _REPO_ROOT is bundle/ and holds no data/.
+#: The checkout path wins when both exist; when neither does the checkout
+#: path is returned, so a missing file reads exactly as it did before.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _data_file(name, repo_root, here):
+    """The first existing of <repo_root>/data/<name> (a checkout) and
+    <here>/data/<name> (an installed runtime), else the checkout path."""
+    for candidate in (os.path.join(repo_root, "data", name),
+                      os.path.join(here, "data", name)):
+        if os.path.isfile(candidate):
+            return candidate
+    return os.path.join(repo_root, "data", name)
+
+
+DEFAULT_SEAMS_CONFIG_PATH = _data_file("jev-seams.json", _REPO_ROOT, _HERE)
+DEFAULT_REGISTRY_PATH = _data_file("jev-registry.json", _REPO_ROOT, _HERE)
 
 #: BROTHER_JEV_SEAMS_OFF, a kill-only switch read ONCE, here, at import
 #: (finding 31, loop audit 2026-09-26). Any non-empty value, "0" and
@@ -826,6 +843,34 @@ def load_registry(path=None):
     seam brief) is what turns that into a safe current_answer fallback,
     this loader does not swallow it a second time."""
     return _registry.load(path or DEFAULT_REGISTRY_PATH)
+
+
+def _short_path(path):
+    """`path` with the home folder written as ~, so a NO-DATA line never
+    prints the account's home path."""
+    text = str(path)
+    for home in {os.path.expanduser("~"), os.path.realpath(os.path.expanduser("~"))}:
+        home = home.rstrip(os.sep)
+        if home and (text == home or text.startswith(home + os.sep)):
+            return "~" + text[len(home):]
+    return text
+
+
+def registry_or_nodata(path=None):
+    """(registry, "") when load_registry(path) succeeds, else (None, one
+    NO-DATA sentence naming the short path and the exception class). Never
+    raises (JWP.b): a public install with no registry, a corrupt file, a
+    folder in its place, a NUL byte or a non-string path all read the same
+    way, as no Jev call, never a guess."""
+    resolved = path or DEFAULT_REGISTRY_PATH
+    try:
+        if not isinstance(resolved, str):
+            raise TypeError("registry path is %s, not a string" % type(resolved).__name__)
+        return load_registry(resolved), ""
+    except (_registry.RegistryError, OSError, ValueError, TypeError) as exc:
+        return None, ("Jev is not installed here: %s was not found or is "
+                      "unreadable (%s); every Jev check reads NO-DATA"
+                      % (_short_path(resolved), type(exc).__name__))
 
 
 #: Where the canary's reset marker is expected when seams_config does not

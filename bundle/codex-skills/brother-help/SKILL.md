@@ -15,7 +15,7 @@ The engine owns execution, assurance and the receipt:
 python3 "${BROTHER_PLUGIN_ROOT}/runtime/brother_run.py" "<outcome>" --cwd <repo>
 ```
 
-(`${CLAUDE_PLUGIN_ROOT}` under Claude Code, `${PLUGIN_ROOT}` under Cursor.) Its last line is `brother_run: receipt: <path>`; open that receipt and report every entry before claiming anything. Keep PASS, FAIL and NO-DATA distinct.
+(`${CLAUDE_PLUGIN_ROOT}` under Claude Code, `${PLUGIN_ROOT}` under Cursor.) Its last line is `brother_run: receipt: <path>`; read it with `python3 "${BROTHER_PLUGIN_ROOT}/runtime/receipt_door.py" --verdict <path>`, report exactly what it prints, and treat its exit code as the run's exit code. Keep PASS, FAIL and NO-DATA distinct.
 
 ## 1.1.0 names that route here
 

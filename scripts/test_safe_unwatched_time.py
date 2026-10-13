@@ -133,9 +133,12 @@ class TheSpan(Sandbox):
         run = write_run(self.root, "clean", UNBROKEN,
                         {"u1": claim("u1", 30), "u2": claim("u2", 60)})
         report, _ = sut.measure(run)
+        # SUT1.b: the prefix is unchanged; a run with no capture marker (this
+        # fixture has none) now says on the line that it is an upper bound.
         self.assertEqual(
             sut.report_line(report),
-            "safe unwatched time: 90.0 min over 2 units, broken by none")
+            "safe unwatched time: 90.0 min over 2 units, broken by none"
+            " (upper bound)")
 
     def test_a_refuted_claim_at_minute_40_of_90_reads_40(self):
         """The whole point. The record runs to minute 90 either way; only the
@@ -258,6 +261,178 @@ class DamagedRecords(Sandbox):
         self.assertAlmostEqual(report["minutes"], 90.0, places=3)
 
 
+INTERVENED = sut.EV_OPERATOR_INTERVENTION
+CAPTURE = sut.EV_CAPTURE_ON
+
+
+def operator(minute, action="scope_fix", effect="changed_run", actor="human"):
+    return event(minute, INTERVENED, {"actor_class": actor,
+                                      "action_kind": action, "effect": effect})
+
+
+class Interventions(Sandbox):
+    """SUT1.b: the span stops at the first intervention that changed the run,
+    and the bound says whether a person could have been seen at all."""
+
+    def run_with(self, extra, marker=True, name="run", base=None):
+        events = list(UNBROKEN if base is None else base) + list(extra)
+        if marker:
+            events.append(event(0, CAPTURE))
+        events = sorted(events, key=lambda e: e["at"])
+        run = write_run(self.root, name, events, {})
+        report, code = sut.measure(run)
+        self.assertEqual(code, 0)
+        return report
+
+    def test_an_uninterrupted_run_with_the_marker_is_strict(self):
+        report = self.run_with([])
+        self.assertAlmostEqual(report["minutes"], 90.0, places=3)
+        self.assertEqual(report["broken_by"], "none")
+        self.assertIs(report["upper_bound"], False)
+        self.assertEqual(report["interventions"], 0)
+        self.assertEqual(report["status_reads"], 0)
+        self.assertEqual(
+            sut.report_line(report),
+            "safe unwatched time: 90.0 min over 2 units, broken by none")
+
+    def test_the_same_run_without_the_marker_is_an_upper_bound(self):
+        report = self.run_with([], marker=False)
+        self.assertAlmostEqual(report["minutes"], 90.0, places=3)
+        self.assertIs(report["upper_bound"], True)
+        self.assertTrue(sut.report_line(report).endswith(" (upper bound)"))
+
+    def test_an_operator_fix_at_minute_40_closes_the_span_at_40(self):
+        report = self.run_with([operator(40)])
+        self.assertAlmostEqual(report["minutes"], 40.0, places=3)
+        self.assertEqual(report["broken_by"], sut.INTERVENTION)
+        self.assertEqual(report["detail"], "scope_fix by human")
+        self.assertEqual(report["units"], 1)
+        self.assertEqual(report["interventions"], 1)
+
+    def test_a_status_read_that_changed_nothing_is_not_an_intervention(self):
+        report = self.run_with([operator(40, "status_read", "none")])
+        self.assertAlmostEqual(report["minutes"], 90.0, places=3)
+        self.assertEqual(report["broken_by"], "none")
+        self.assertEqual(report["status_reads"], 1)
+        self.assertEqual(report["interventions"], 0)
+
+    def test_two_hundred_status_reads_then_one_change_at_80(self):
+        reads = [operator(1 + i * 0.25, "status_read", "none")
+                 for i in range(200)]
+        report = self.run_with(reads + [operator(80, "restart")])
+        self.assertAlmostEqual(report["minutes"], 80.0, places=3)
+        self.assertEqual(report["status_reads"], 200)
+        self.assertEqual(report["interventions"], 1)
+
+    def test_an_earlier_scope_break_wins_over_a_later_fix(self):
+        report = self.run_with([event(35, REFUSED, {
+            "reason": "QUARANTINE: 1 path(s) changed that u1 never declared: "
+                      "x.txt"}), operator(50)])
+        self.assertAlmostEqual(report["minutes"], 35.0, places=3)
+        self.assertEqual(report["broken_by"], sut.SCOPE)
+
+    def test_an_earlier_fix_wins_over_a_later_scope_break(self):
+        report = self.run_with([operator(35), event(50, REFUSED, {
+            "reason": "QUARANTINE: 1 path(s) changed that u1 never declared: "
+                      "x.txt"})])
+        self.assertAlmostEqual(report["minutes"], 35.0, places=3)
+        self.assertEqual(report["broken_by"], sut.INTERVENTION)
+
+    def test_on_a_shared_timestamp_the_intervention_is_named_first(self):
+        report = self.run_with([event(35, REFUSED, {
+            "reason": "QUARANTINE: 1 path(s) changed that u1 never declared: "
+                      "x.txt"}), operator(35)])
+        self.assertAlmostEqual(report["minutes"], 35.0, places=3)
+        self.assertEqual(report["broken_by"], sut.INTERVENTION)
+
+    def test_an_unproven_receipt_still_breaks_as_before(self):
+        report = self.run_with([event(15, ISSUED, {"receipts": 2,
+                                                   "unproven": 1})])
+        self.assertEqual(report["broken_by"], sut.UNPROVEN)
+        self.assertAlmostEqual(report["minutes"], 15.0, places=3)
+
+    def test_a_self_recovered_crash_is_not_a_break(self):
+        report = self.run_with([event(20, "run.killed", {"signal": 9}),
+                                event(21, RESUMED, {"harness": "abc"})])
+        self.assertAlmostEqual(report["minutes"], 90.0, places=3)
+        self.assertEqual(report["broken_by"], "none")
+        self.assertIs(report["upper_bound"], False)
+
+    def test_an_idle_run_reports_zero_productive_units(self):
+        idle = [event(0, OPENED, {"units": 0}),
+                event(90, ISSUED, {"receipts": 1, "unproven": 0})]
+        report = self.run_with([], base=idle)
+        self.assertAlmostEqual(report["minutes"], 90.0, places=3)
+        self.assertEqual(report["units"], 0)
+        self.assertIn(" over 0 units,", sut.report_line(report))
+
+    def test_an_unreadable_operator_event_closes_the_span(self):
+        for name, payload in (
+                ("string", "human fixed it"),
+                ("extra", {"actor_class": "human", "action_kind": "restart",
+                           "effect": "none", "prompt": "do the thing"}),
+                ("future", {"actor_class": "human",
+                            "action_kind": "teleport", "effect": "none"}),
+                ("contradiction", {"actor_class": "human",
+                                   "action_kind": "status_read",
+                                   "effect": "changed_run"})):
+            report = self.run_with([event(25, INTERVENED, payload)],
+                                   name=name)
+            self.assertAlmostEqual(report["minutes"], 25.0, places=3,
+                                   msg=name)
+            self.assertEqual(report["broken_by"], sut.INTERVENTION, name)
+            self.assertEqual(report["detail"],
+                             "unreadable intervention event", name)
+
+    def test_a_legacy_human_intervention_event_closes_the_span(self):
+        """scripts/intervention_events.py writes human.intervention; a person
+        stepped in, so the span cannot run past it."""
+        report = self.run_with([event(30, "human.intervention", {
+            "category": "correction", "reason": "x",
+            "could_continue_without_it": False})])
+        self.assertAlmostEqual(report["minutes"], 30.0, places=3)
+        self.assertEqual(report["broken_by"], sut.INTERVENTION)
+
+    def test_find_interventions_returns_breaks_reads_and_the_marker(self):
+        events = [dict(e, _at=sut._parse_at(e["at"])) for e in (
+            event(0, CAPTURE), event(1, CAPTURE),
+            operator(5, "status_read", "none"), operator(9))]
+        breaks, reads, capture_on = sut.find_interventions(events)
+        self.assertEqual(len(breaks), 1)
+        self.assertEqual(breaks[0][1:], (sut.INTERVENTION,
+                                         "scope_fix by human"))
+        self.assertEqual(reads, 1)
+        self.assertIs(capture_on, True)
+        self.assertEqual(sut.find_interventions([])[2], False)
+
+    def test_measuring_twice_gives_the_same_figure(self):
+        events = sorted(list(UNBROKEN) + [operator(40), event(0, CAPTURE)],
+                        key=lambda e: e["at"])
+        run = write_run(self.root, "twice", events, {})
+        self.assertEqual(sut.measure(run), sut.measure(run))
+
+    def test_main_prints_which_bound_the_figure_is(self):
+        import io
+        from contextlib import redirect_stdout
+        for marker, expected in (
+                (True, "lower bound: intervention capture was on; "
+                       "1 interventions, 1 status read(s)"),
+                (False, "upper bound: no intervention capture was on for "
+                        "this run")):
+            events = list(UNBROKEN) + [operator(40),
+                                       operator(10, "status_read", "none")]
+            if marker:
+                events.append(event(0, CAPTURE))
+            run = write_run(self.root, "main-%s" % marker,
+                            sorted(events, key=lambda e: e["at"]), {})
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(sut.main([run]), 0)
+            self.assertIn(expected, out.getvalue())
+            self.assertNotIn("no operator-input event kind exists yet",
+                             out.getvalue())
+
+
 class TheRealRunStore(unittest.TestCase):
     """Read only, and it asserts nothing about any particular figure: a real
     run's number is a property of that night, not of this suite."""
@@ -275,6 +450,9 @@ class TheRealRunStore(unittest.TestCase):
             self.assertIn(code, (0, 3), "%s returned %d" % (name, code))
             if code == 0:
                 self.assertGreaterEqual(report["minutes"], 0.0)
+                # SUT1.b: no committed run carries a capture marker, so none
+                # may read as a strict figure.
+                self.assertIs(report["upper_bound"], True, name)
                 measured += 1
             else:
                 self.assertTrue(report["nodata"].strip())

@@ -105,6 +105,10 @@ docs/MERGE-PLAN.md
 # note saying which hooks are unsupported is the half that reads as a claim.
 docs/codex
 docs/deliveries
+# Added 2026-10-12, DOC3: the pain point pages the README links from its
+# "Problems developers report" section; without this line every link breaks
+# on the public tree. scripts/test_readme_commands.py (ThePages) pins it.
+docs/pain-points
 # Added 2026-09-04, rows E67 and E70. A fresh clone of the public tag
 # v1.0.1 ran its own scripts/readiness_gate.py and printed NOT READY on one
 # critical item (Restore drill, NO-DATA) while the hub printed ready,
@@ -184,6 +188,14 @@ docs/for-analysts/00-START-HERE.md
 # leaf, never as a directory (the 2026-09-04 security finding above), so a
 # future file added under this folder never exports until it is named here
 # too. All three scanned clean of the private terms before being added.
+# Added 2026-10-12, unit JWP.b: the Jev registry and seams config that
+# scripts/jev_seam.py reads from data/ in a clone install. Named leaf by
+# leaf, never the bare data directory (the 2026-09-04 security finding
+# above), so data/jev-canary-baseline.json and any later file under data/
+# stay private until named here. The registry was scrubbed of owner
+# machine paths in JWP.a before this line was added.
+data/jev-registry.json
+data/jev-seams.json
 scripts
 tests
 tools

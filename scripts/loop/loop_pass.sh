@@ -209,6 +209,20 @@ if [ "${DRC:-0}" -ne 0 ]; then
   echo "LOOP BLOCKED: pass_digest exit=$DRC; without the digest this pass cannot see what is READY, so it lands nothing and starts nothing"
   exit 44
 fi   # this pass fetched hub at reconcile seconds ago; a second round trip is 1 s of nothing
+# THE READY CONTRACT (RD1.a) 2026-10-12: run 1 of 2026-10-11 read 8 READY paths under a header of 93 and landed only
+# those. The digest says whether its count and its list agree; a disagreement, or a guard that cannot answer, lands nothing.
+RCOUT=$(printf '%s\n' "$D" | python3 ~/.claude/bin/pass_digest.py --ready-counts 2>&1); RCRC=$?
+if [ "${RCRC:-1}" -ne 0 ]; then
+  echo "LOOP BLOCKED: the digest's READY count and list disagree ($(printf '%s' "$RCOUT" | tail -1 | cut -c1-120)); nothing is landed"
+  exit 44
+fi
+READY_N=${RCOUT%% *}; READY_K=${RCOUT##* }
+case "$READY_N" in -) READY_N=0;; esac
+case "$READY_N.$READY_K" in *[!0-9.]*|.*|*.) # an older digest without the verb answers with its whole text and exit 0
+  echo "LOOP BLOCKED: the digest's READY counts could not be read ($(printf '%s' "$RCOUT" | tail -1 | cut -c1-120)); nothing is landed"
+  exit 44;;
+esac
+# END OF THE READY CONTRACT
 READY=$(echo "$D" | grep -E '^ +/.*-build\.json$' | tr -d ' ')
 # THE CHECKER IS GONE (owner decision 2026-10-02, docs/decisions/remove-checker-2026-10-02.json): no measured unique catch
 # in its history, and tonight's gate sent back 6 of 6 grader and probe clean builds. Nothing runs between READY and the snapshot.
@@ -232,7 +246,7 @@ for p in sys.stdin.read().split():
     echo "                  Refusing to land work that cannot be attributed. Look before continuing."
     exit 44
   fi
-  LANDED_LINE=$(python3 ~/.claude/bin/land_batch.py $PICK); LB=$?
+  LANDED_LINE=$(BROTHER_READY_COUNT="$READY_N" BROTHER_READY_LISTED="$READY_K" python3 ~/.claude/bin/land_batch.py $PICK); LB=$?
   echo "$LANDED_LINE"; echo "land_batch exit=$LB"
   # a refused landing leaves builds applied but uncommitted: a runner briefed from that tree builds on sand
   # A REFUSED LANDING IS NOT A SUCCESSFUL PASS, and this line used to exit 0.

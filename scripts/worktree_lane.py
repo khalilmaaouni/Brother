@@ -76,6 +76,7 @@ only loses the fast path orphan_report() uses to name its unit_id later.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -109,6 +110,16 @@ BRANCH_PREFIX = "lane/"
 LOCK_RETRY_ATTEMPTS = 4
 LOCK_RETRY_PAUSE_S = 0.5
 _LOCK_FAILURE = re.compile(r"Unable to create '[^']*\.lock'|cannot lock")
+
+#: RS1.a, THE DIAGNOSIS. When the window above is exhausted the refusal
+#: says what a human needs to act: the lock's path, its age, whether any
+#: git process works in this repository, and the exact command. A lock with
+#: no git holder seen and younger than this many seconds reads TOO-RECENT
+#: (the holder may have just exited, or not yet been listed); at or over it,
+#: NO-HOLDER-OLD. No verdict removes anything: the human decides.
+MIN_OLD_AGE_S = 60.0
+_PACKED_LOCK_NAMED = re.compile(r"Unable to create '([^']*packed-refs\.lock)'")
+_ANY_LOCK_NAMED = re.compile(r"Unable to create '[^']*\.lock'")
 
 #: THE BREADCRUMB. acquire() sees only a repo and a unit_id, never an owner or
 #: a claim store, so it cannot write a full claim record. What it CAN write,
@@ -782,6 +793,170 @@ def _clear_stale_branch_lock(repo, branch, runner=None):
             "checkout) was removed before creating a fresh lane" % branch)
 
 
+def _system_tool(name):
+    """A system tool by name, found on PATH or in the system folders: a PATH without /bin (a stripped test or CI
+    environment, 2026-10-12) must not make ps or lsof unreadable when the binary is present."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for folder in ("/bin", "/usr/bin", "/usr/sbin", "/sbin"):
+        cand = os.path.join(folder, name)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return name
+
+
+def _run_plain(cmd, runner=None):
+    if runner is not None:
+        return runner(cmd)
+    return subprocess.run([_system_tool(cmd[0])] + list(cmd[1:]), capture_output=True, text=True, timeout=30)
+
+
+def packed_refs_lock_path(message, repo, runner=None):
+    """The packed-refs.lock git could not take: the path git named, or
+    `<common dir>/packed-refs.lock` when git named no path at all ("cannot
+    lock references"). None when git named a DIFFERENT lock (a branch's own
+    ref lock is not this diagnosis) or the common dir cannot be resolved."""
+    message = message or ""
+    named = _PACKED_LOCK_NAMED.search(message)
+    if named:
+        path = named.group(1)
+        return path if os.path.isabs(path) else os.path.normpath(os.path.join(repo, path))
+    if _ANY_LOCK_NAMED.search(message):
+        return None
+    common = _git(["rev-parse", "--git-common-dir"], repo, runner)
+    common_dir = (common.stdout or "").strip() if common.returncode == 0 else ""
+    if not common_dir:
+        return None
+    if not os.path.isabs(common_dir):
+        common_dir = os.path.normpath(os.path.join(repo, common_dir))
+    return os.path.join(common_dir, "packed-refs.lock")
+
+
+def _cwd_of(pid, runner=None):
+    """A process's working directory, from lsof (macOS) or /proc (Linux),
+    or None when neither could read it."""
+    try:
+        got = _run_plain(["lsof", "-a", "-d", "cwd", "-Fn", "-p", str(pid)], runner)
+        for line in (got.stdout or "").splitlines():
+            if line.startswith("n") and len(line) > 1:
+                return line[1:]
+    except Exception:  # noqa: BLE001  no lsof: try /proc below
+        pass
+    try:
+        return os.readlink("/proc/%d/cwd" % pid)
+    except OSError:
+        return None
+
+
+def git_holders(repo, runner=None):
+    """Sorted pids of the `git` processes whose working directory is inside
+    this repository or any of its worktrees; [] when there are none; None
+    when this could not look (no ps, an unparsable ps line, a live git whose
+    cwd could not be read). UNREADABLE IS NOT NONE: None never reads as []."""
+    listed = _git(["worktree", "list", "--porcelain"], repo, runner)
+    if listed.returncode != 0:
+        return None
+    roots = [os.path.realpath(line[len("worktree "):])
+             for line in (listed.stdout or "").splitlines()
+             if line.startswith("worktree ")]
+    if not roots:
+        return None
+    try:
+        ps = _run_plain(["ps", "-axo", "pid=,comm="], runner)
+    except Exception:  # noqa: BLE001
+        return None
+    if ps.returncode != 0:
+        return None
+    holders = []
+    for line in (ps.stdout or "").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            return None
+        if os.path.basename(parts[1].strip()) != "git":
+            continue
+        pid = int(parts[0])
+        cwd = _cwd_of(pid, runner)
+        if cwd is None:
+            if not claim_store.pid_alive(pid):
+                continue  # exited since ps listed it: it holds nothing now
+            return None
+        cwd = os.path.realpath(cwd)
+        if any(cwd == r or cwd.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
+            holders.append(pid)
+    return sorted(holders)
+
+
+def diagnose_lock(lock_path, repo, now=None, runner=None):
+    """{"path", "exists", "age_s", "holders", "verdict"}: what was OBSERVED
+    about a lock file, claiming no cause. Reads the file's stat only, never
+    its bytes, and never removes, renames or touches it. Verdicts: ABSENT,
+    HELD, TOO-RECENT, NO-HOLDER-OLD, CANNOT-TELL."""
+    out = {"path": lock_path, "exists": False, "age_s": None,
+           "holders": None, "verdict": "ABSENT"}
+    try:
+        mtime = os.stat(lock_path).st_mtime
+    except FileNotFoundError:
+        return out
+    except OSError:
+        out["verdict"] = "CANNOT-TELL"  # there, maybe, but unreadable: never ABSENT
+        return out
+    out["exists"] = True
+    out["age_s"] = max(0.0, (time.time() if now is None else now) - mtime)
+    holders = git_holders(repo, runner)
+    out["holders"] = holders
+    if holders is None:
+        out["verdict"] = "CANNOT-TELL"
+    elif holders:
+        out["verdict"] = "HELD"
+    elif out["age_s"] < MIN_OLD_AGE_S:
+        out["verdict"] = "TOO-RECENT"
+    else:
+        out["verdict"] = "NO-HOLDER-OLD"
+    return out
+
+
+def lock_remedy(diagnosis):
+    """The one sentence the operator needs for a diagnose_lock() answer."""
+    path = shlex.quote(str(diagnosis.get("path")))
+    age = diagnosis.get("age_s")
+    verdict = diagnosis.get("verdict")
+    if verdict == "ABSENT":
+        return "the lock is gone now (its holder let go); resume the run"
+    if verdict == "HELD":
+        pids = diagnosis.get("holders") or []
+        shown = ", ".join(str(p) for p in pids[:5])
+        if len(pids) > 5:
+            shown += " and %d more" % (len(pids) - 5)
+        return ("a git command is running in this repository (pids %s); "
+                "wait for it, then resume" % shown)
+    if verdict == "TOO-RECENT":
+        return "the lock is %.1f s old; wait a minute and resume" % age
+    if verdict == "NO-HOLDER-OLD":
+        return ("no git process was seen in this repository and the lock is "
+                "%.0f s old; only you can confirm nothing else uses it; if "
+                "you are sure, remove it yourself with `rm %s`, then resume "
+                "the run" % (age, path))
+    return ("this tool could not tell whether a git command is running; "
+            "check with `ps` and remove it yourself with `rm %s` only if "
+            "none is" % path)
+
+
+def _lock_diagnosis_note(repo, message, runner=None):
+    path = packed_refs_lock_path(message, repo, runner)
+    if path is None:
+        return ("lock diagnosis: NO-DATA (git named no packed-refs.lock this "
+                "tool can locate)")
+    d = diagnose_lock(path, repo, runner=runner)
+    age = "NO-DATA" if d["age_s"] is None else "%.0f s" % d["age_s"]
+    holders = ("NO-DATA (could not look)" if d["holders"] is None
+               else (", ".join(str(p) for p in d["holders"]) or "none seen"))
+    return ("lock diagnosis: %s, path %s, age %s, git holders %s; what to do: %s"
+            % (d["verdict"], d["path"], age, holders, lock_remedy(d)))
+
+
 def _clear_stale_lane(repo, branch, runner=None, sleep=time.sleep):
     """Refuse to reuse a leftover `lane/<unit>` branch from an earlier run:
     remove it first, or say why it could not be removed. Called from
@@ -847,12 +1022,17 @@ def _clear_stale_lane(repo, branch, runner=None, sleep=time.sleep):
         if attempts < LOCK_RETRY_ATTEMPTS and _names_a_lock(branch_del):
             sleep(LOCK_RETRY_PAUSE_S)
             continue
-        return False, ("%s: stale lane %s from an earlier run exists at %s "
-                       "and could not be deleted (%d attempt(s) over %.1f s; "
-                       "git said: %s), so the unit was refused rather than "
-                       "risk reusing its old work"
-                       % (NODATA, branch, sha_short, attempts,
-                          time.monotonic() - started, _said(branch_del)))
+        refusal = ("%s: stale lane %s from an earlier run exists at %s "
+                   "and could not be deleted (%d attempt(s) over %.1f s; "
+                   "git said: %s), so the unit was refused rather than "
+                   "risk reusing its old work"
+                   % (NODATA, branch, sha_short, attempts,
+                      time.monotonic() - started, _said(branch_del)))
+        if _names_a_lock(branch_del):
+            # RS1.a: the window is spent on a lock; say what was observed
+            # and what a human can do. The lock itself is never touched.
+            refusal += "; " + _lock_diagnosis_note(repo, _said(branch_del), runner)
+        return False, refusal
     return True, ("stale lane %s from an earlier run exists at %s, not "
                   "reused: it was removed%s"
                   % (branch, sha_short,

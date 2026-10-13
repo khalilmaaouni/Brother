@@ -223,35 +223,18 @@ DISK_OK_AT=$(date +%s)          # the last second this driver read the disk as f
 # of pmset: on macOS a pmset that is missing or silent is UNREADABLE and refuses, and a kernel name that cannot be read
 # is unreadable too. BROTHER_POWER_SOURCE is the test seam: it stands in for the words pmset prints between its quotes
 # ('AC Power', 'Battery Power').
-POWER_WINDOW_S=$(plain_number "${BROTHER_POWER_WINDOW_S:-}" 1200)
-power_source() {                # prints one word: ac, battery, unreadable, or no-data (a host that has no pmset)
-  local p=${BROTHER_POWER_SOURCE:-}
-  if [ -z "$p" ]; then
-    case "$(uname -s 2>/dev/null)" in
-      Darwin) p=$(pmset -g batt 2>/dev/null | sed -n "1s/.*drawing from '\([^']*\)'.*/\1/p");;
-      '') ;;
-      *) echo no-data; return 0;;
-    esac
-  fi
-  case "$p" in
-    "AC Power") echo ac;;
-    "Battery Power") echo battery;;
-    *) echo unreadable;;
-  esac
+# THE RULE LIVES IN power_rule.py (LA3.a, 2026-10-12), the one module start_run.sh also asks before its intake, so the
+# launcher and the driver can never disagree; the texts above are its texts, unchanged. Only its 0 (start, the text
+# said when there is one) and 2 (refuse) are answers: a rule that cannot run refuses, an unknown is never AC.
+power_word() {                  # one word: ac, battery, unreadable or no-data; a reader that cannot answer is unreadable
+  local w; w=$(python3 -B "${LOOP_DIR}/power_rule.py" source 2>/dev/null)
+  case "$w" in ac|battery|unreadable|no-data) echo "$w";; *) echo unreadable;; esac
 }
-POWER=$(power_source)
-case "$POWER" in
-  ac) ;;
-  no-data) echo "POWER NO-DATA: this host is not macOS, so there is no pmset to read; the power check does not block";;
-  *)
-    if [ $(( STOP_EPOCH - NOW )) -gt "$POWER_WINDOW_S" ]; then
-      case "$POWER" in
-        battery) refuse "the machine draws from battery and the deadline is $(( (STOP_EPOCH - NOW) / 60 )) minutes away, more than the $(( POWER_WINDOW_S / 60 )) minutes a battery start is allowed; a low battery sleep ends the run and no caffeinate holds it: plug in the charger";;
-        *) refuse "the power source is unreadable (pmset named neither AC Power nor Battery Power) and the deadline is $(( (STOP_EPOCH - NOW) / 60 )) minutes away, more than the $(( POWER_WINDOW_S / 60 )) minutes a start without AC is allowed; an unknown source is never AC";;
-      esac
-      exit 2
-    fi
-    echo "POWER ${POWER}: allowed to start because the deadline is within ${POWER_WINDOW_S} s";;
+POWER_WHY=$(python3 -B "${LOOP_DIR}/power_rule.py" check --remaining "$(( STOP_EPOCH - NOW ))" 2>&1); POWER_RC=$?
+case "$POWER_RC" in
+  0) [ -z "$POWER_WHY" ] || echo "$POWER_WHY";;
+  2) refuse "${POWER_WHY:-the power rule refused without a reason}"; exit 2;;
+  *) refuse "the power rule could not run (exit ${POWER_RC}): $(printf '%s' "$POWER_WHY" | tr '\n' ' ' | cut -c1-160)"; exit 2;;
 esac
 
 # THE OWNER'S STOP OUTRANKS EVERY SESSION. On 2026-09-22 the owner wrote "Stop the loop and fix all these issues" at
@@ -746,7 +729,7 @@ while :; do
   # goes on. Back on AC is one log line, and a later episode rings again. NOT A PROOF EVENT, on purpose: every row of
   # <run dir>/proof/events.jsonl reads as an owner intervention (loop_receipt.py: unattended = not events), so a pulled
   # charger alone would fail a proof.
-  POWER=$(power_source)
+  POWER=$(power_word)
   case "$POWER" in
     battery|unreadable)
       if [ "${POWER_SAID:-}" != "$POWER" ]; then

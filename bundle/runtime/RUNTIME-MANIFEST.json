@@ -43,11 +43,19 @@
   },
   {
    "path": "continuity.py",
-   "sha256": "fdaf9f53f9b74437b7656d070d29368819c210480613b24b594e5bb8caa019a8"
+   "sha256": "adb80c11179b6f4b5615a9e40d06d02c7d29f1e3156ddb0923c0d5f82e9754e1"
   },
   {
    "path": "contract_check.py",
    "sha256": "ac7563ea29787de4d8cfa10ee886a83c6b33413bec031d006fd6f3005c5b0022"
+  },
+  {
+   "path": "data/jev-registry.json",
+   "sha256": "bbbb047e009c81ba2be2be742cb37702571ddce3dd0bb1d72ee365ae41466c05"
+  },
+  {
+   "path": "data/jev-seams.json",
+   "sha256": "d02abcc8dd3b849701f06c887a28829807b30c51bc8f037e0ce24d82ef087343"
   },
   {
    "path": "decide.py",
@@ -95,7 +103,7 @@
   },
   {
    "path": "host_capability.py",
-   "sha256": "f06b1ba8b59d8b038adf3f733eb5c0fff7342f0533458ef67713443e1d2c567c"
+   "sha256": "1f481661fb1988c735ffba25215f152c8b5eca8700411b0b12195ba343feba62"
   },
   {
    "path": "integrate.py",
@@ -111,15 +119,23 @@
   },
   {
    "path": "jev_checks.py",
-   "sha256": "b0a0516838f54769be142d5fe32726901435a9f58f38b1af6144361df3586854"
+   "sha256": "7d0ba203326a4490c7d8ff52311cd3f10ba2c9181bb455501a92c76b4c547561"
   },
   {
    "path": "jev_decide.py",
    "sha256": "0b7e0ca5f99e6e3aeb552a6ed2fa06f8c1a114c4b43017d98b6f749ae83e1964"
   },
   {
+   "path": "jev_door.py",
+   "sha256": "39c2f500b2d7070fd387ea9a0bb5f11366fed001b4f5c568e80932ec1a898ebf"
+  },
+  {
    "path": "jev_g1_seam_cache.py",
    "sha256": "2f36b06c3a5e8ec6b6ae908112dad2ab02812509188d941d844664382255df79"
+  },
+  {
+   "path": "jev_outcome.py",
+   "sha256": "48965d76cd60bda1880b82d7e4014759422ca52a63377f2e22e8d40442a6cafa"
   },
   {
    "path": "jev_registry.py",
@@ -127,7 +143,15 @@
   },
   {
    "path": "jev_seam.py",
-   "sha256": "2dd3ab7c52d5844d1ed01a8396d29c263b761b5152f53b75ac75f8bd6458f07a"
+   "sha256": "66542dff7997a89532e1df31a2d29c0b18058e1aeb34ddff090341bb129fd451"
+  },
+  {
+   "path": "jev_start_refusal.py",
+   "sha256": "e4e46ac4e82a290bbb3fdd1f25086774ddac68b840e43e28f55d321a936fae81"
+  },
+  {
+   "path": "jev_status.py",
+   "sha256": "28e8041291749822715fbf02e5900fe2fefefb1d48ed359b9c8eb7df0da302ec"
   },
   {
    "path": "journal.py",
@@ -151,7 +175,7 @@
   },
   {
    "path": "loop_bridge.py",
-   "sha256": "dcc0e7f4e1fa6b2aaa4289282c09e28e7ab8c8475ec1f78b5cd3fa1818283afd"
+   "sha256": "819536e3c374ad9821fe2cc89f55332fc029d47fbdaa233ae45b4530accf0dfd"
   },
   {
    "path": "machine_reservation.py",
@@ -166,8 +190,16 @@
    "sha256": "2a6d45e650865ed58c5469f0872c34221df8c9535c2e9bc6d2fa49c0e677d8e1"
   },
   {
+   "path": "mobile_project_profile.py",
+   "sha256": "6d4875df7404d251bbf2c17515e056e926a6dc7fa3799c865ce8a3a03c4e016e"
+  },
+  {
+   "path": "mobile_simulator_pool.py",
+   "sha256": "b58c037e0eb9ab770922ffff73951a70c2701fb2b00d04905d0ded00a20c4fbf"
+  },
+  {
    "path": "mobile_workflow.py",
-   "sha256": "623fbf8d7b343ec4ac77c22dcd7d54d77a113d60b86fd3d5a2fa2716e7694bff"
+   "sha256": "54f3651f0c6f47a491421a9edc40ae781020566f0ac434ca61240aabe6a980a9"
   },
   {
    "path": "model_worker.py",
@@ -251,7 +283,7 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "962fe75570aa26000acce59ff51cda7a251f686c63a8592621366ce11a5d1edf"
+   "sha256": "cde9f8d0f2c1dcb107d216397d2cc66ec803686ed291a143f8ef7f76531e37c8"
   },
   {
    "path": "resource_gate.py",
@@ -267,7 +299,7 @@
   },
   {
    "path": "safe_unwatched_time.py",
-   "sha256": "e1f44fcdb94e857476650a0bb8ba086346145f864b8b57fc11c95737c92a32c7"
+   "sha256": "446dc79144cfb47402c29d69ccb94d6dfd309f1faf9bcee260d7c9ff70790d30"
   },
   {
    "path": "scope_audit.py",
@@ -291,10 +323,10 @@
   },
   {
    "path": "worktree_lane.py",
-   "sha256": "96e7041e8205404de71a857c4e532b19564f47530aa6294513a383eedf212b75"
+   "sha256": "5df1db05f9653c5bf4bce2077fc2a582edc0c4c0102cb2b17bc1f7e56237d081"
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "preflight/20260926-182529-1794-g7a558b6a9-dirty",
- "source_revision": "7a558b6a9d5414e21544609e4f5331ff5b360814"
+ "source_describe": "preflight/20260926-182529-1960-g38dba76c7-dirty",
+ "source_revision": "38dba76c7499a3bfbc6a998230ede69bd65ec57a"
 }

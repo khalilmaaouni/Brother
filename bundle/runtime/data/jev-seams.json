@@ -1,0 +1,13 @@
+{
+ "audit_rate": 0.05,
+ "daily_call_budget": 4000,
+ "modes": {
+  "J030": "shadow",
+  "J064": "shadow",
+  "J063": "shadow",
+  "J102": "shadow",
+  "J117": "shadow",
+  "J065": "off"
+ },
+ "_note": "Every entry defaults to off. A seam's mode is set here in the same change that adds its call site; nothing is in shadow before its call site exists. Runtime state (ledger, canary marker and history) lives under JEV_STATE_DIR (BROTHER_JEV_STATE_DIR, default ~/.brother/jev), never in a checkout."
+}

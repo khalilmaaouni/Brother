@@ -1,0 +1,1 @@
+PASSED: every shipped version string in README.md, docs/VERSIONING.md, docs/plan/PROJECT.public.md agrees with .claude-plugin/marketplace.json (brother=1.1.2), metadata.version matches the bundle, the manifest agrees with the plugin.json the installer resolves for brother, and every plugin.json repository field agrees with the marketplace source url for brother

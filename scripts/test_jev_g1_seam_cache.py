@@ -25,7 +25,11 @@ class ACacheHitNeverTouchesJevSeam(unittest.TestCase):
 
     def test_first_call_is_a_miss_second_call_is_a_hit(self):
         real_cfg = {"modes": {"J025": "off"}}
-        with mock.patch.object(jev_seam, "load_seams_config", return_value=real_cfg) as loader:
+        # The cache's clock held at one instant: a stall over the one second
+        # window between the two calls must not turn the hit into a miss.
+        held = mock.NonCallableMock(spec_set=["monotonic"], monotonic=lambda: 0.0)
+        with mock.patch.object(jev_seam, "load_seams_config", return_value=real_cfg) as loader, \
+                mock.patch.object(cache, "time", held):
             first = cache.is_off("J025")
             second = cache.is_off("J025")
         self.assertTrue(first)

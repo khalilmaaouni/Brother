@@ -1,0 +1,16 @@
+{
+  "certification_evidence": "documentation only, not a live test: products/brothermode/docs/RUNTIMES.md, capability table, row Claude Code. Live end-to-end evidence: NO-DATA: no live end-to-end evidence is recorded (docs/plan/evidence/HP1-host-live.jsonl is absent)",
+  "certification_freshness": "documentation changed 2026-08-31T10:40:26+09:00; not a live test",
+  "enforceable_deny": "NO-DATA: no deny is shown to block a write on this host version by anything this receipt reads (see certification_evidence). Documented, payload-tested mechanism: bm_fence_hook.py returns a PreToolUse deny when another live record owns the path (products/brothermode/tools/test_bm_fence_hook.py).",
+  "environment": "interactive coding session (CLAUDECODE set)",
+  "host": "claude",
+  "host_version": "2.31226.1",
+  "known_limitations": "no signed-in end-to-end proof exists for a host version unless certification_evidence names a sealed live run for it; the live probe's guarded write expects no deny on this host (scripts/host_live_verify.py, EXPECTED_GUARDED_WRITE: unguarded); bm_fence_hook.py, by mode and path: it denies a write to a path another live record owns, and an apply_patch envelope whose file directives cannot be read; a project path no record covers is allowed unless BM_FENCE_STRICT is set; its own errors allow the write in the default advisory mode and deny it under BM_FENCE_MODE=enforced, except when no project root is found; a write outside the project root, or by a shell command other than apply_patch, is not checked; hooks are not an operating system sandbox (docs/reference/safety-boundaries.md); plus the scoping sentence every receipt already carries (receipt_door.SCOPING_SENTENCE)",
+  "network_control": "NO-DATA: not measured by this receipt",
+  "pre_tool_hook": "yes, documented: PreToolUse (docs/HOOKS.md; RUNTIMES.md row Claude Code). The mechanism is documented and payload-tested; it is not a signed-in end-to-end test on this host version.",
+  "receipt_path": "NO-DATA",
+  "resume": "yes: brother_run.py --resume / --continue, capsule.json (E73.1/E73.2)",
+  "signed_in_headless": "yes: claude -p, model_worker.py's own default worker command",
+  "structured_tool_events": "yes: Claude Code's own PreToolUse/PostToolUse JSON contract, the shape docs/HOOKS.md documents and every other adapter is translated into",
+  "workspace_isolation": "yes: git worktrees, single-writer fence (claim_store)"
+}

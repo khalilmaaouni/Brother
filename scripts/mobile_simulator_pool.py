@@ -38,6 +38,7 @@ Python 3.9, standard library only (subprocess is required here, unlike
 bm_device_lease.py, to actually drive simctl). No em or en dashes anywhere
 in this file, its comments, or its output.
 """
+import contextlib
 import dataclasses
 import json
 import os
@@ -509,6 +510,35 @@ class SimulatorPool(object):
         raise NoSimulatorAvailable(
             "every discovered simulator (%d) is leased or dirty" % tried, tried=tried)
 
+    def claim_named(self, udid, owner, session_id, ttl_seconds):
+        """Claim exactly `udid` (a run's profile names its simulator, so
+        there is nothing to choose). A device this pool quarantined as
+        pool-used is rehabilitated and claimed, warm_reused=True: a run
+        installs its app fresh and never relies on a clean device. Any
+        other refusal (held by another owner, a foreign quarantine, a lost
+        race) raises NoSimulatorAvailable naming the reason. Boots nothing
+        and erases nothing; the caller drives the device itself."""
+        warm = False
+        try:
+            claimed = self.lease_store.claim(udid, owner, session_id, ttl_seconds)
+        except L.LeaseRefused as exc:
+            if exc.reason == "device-dirty" and self._pool_used_dirty(udid):
+                claimed, warm = self._rehabilitate(udid, owner, session_id, ttl_seconds), True
+                if claimed is None:
+                    raise NoSimulatorAvailable(
+                        "simulator %s changed while it was being reclaimed; retry" % udid, tried=1) from exc
+            elif exc.reason == "device-dirty":
+                raise NoSimulatorAvailable(
+                    "simulator %s is quarantined (device-dirty: %s); a person checks it, then runs "
+                    "python3 products/brothermode/tools/bm_device_lease.py clear-dirty --device %s"
+                    % (udid, exc.details.get("dirty_reason", ""), udid), tried=1) from exc
+            else:
+                raise NoSimulatorAvailable(
+                    "simulator %s refused by the device lease store (%s): %s" % (udid, exc.reason, exc),
+                    tried=1) from exc
+        return DeviceHandle(device_id=udid, lease_uuid=claimed["lease_uuid"], name="", runtime="",
+                            warm_reused=warm)
+
     def release(self, device_id, lease_uuid, reset_after=False):
         """Hand `device_id` back, recording WHAT STATE IT IS IN rather than
         dropping the lease and leaving the next caller to guess.
@@ -546,3 +576,20 @@ class SimulatorPool(object):
             device_id,
             DIRTY_USED_PREFIX + " released by %s with no reset" % lease_uuid,
             lease_uuid=lease_uuid)
+
+
+@contextlib.contextmanager
+def hold_device(udid, owner, session_id, ttl_seconds=3600, lease_store=None):
+    """Hold `udid`'s device lease for the body, through claim_named(). On
+    exit the lease is released with no reset, which leaves the pool-used
+    quarantine, so a later strict acquire() erases the device. A store
+    this function opened is closed; a store the caller passed is not."""
+    pool = SimulatorPool(lease_store=lease_store)
+    try:
+        handle = pool.claim_named(udid, owner, session_id, ttl_seconds)
+        try:
+            yield handle
+        finally:
+            pool.release(handle.device_id, handle.lease_uuid)
+    finally:
+        pool.close()

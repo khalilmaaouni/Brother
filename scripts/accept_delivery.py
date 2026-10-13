@@ -74,8 +74,10 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
+import brother_run
 import pattern_note
 import receipt_door
 
@@ -128,7 +130,8 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
     closes: it refuses to call a unit done without a code-review receipt or
     an explicit, recorded skip. A delivery cited by `run` (a completed run
     directory) must carry one: `review` is either the review_skip shape
-    ({"skipped": True, "reason", "skipped_by"}, both non-empty) or
+    ({"skipped": True, "reason", "skipped_by", "skipped_at"}, all three
+    non-empty, skipped_at an ISO date) or
     review.json's own shape (see _validate_review). `run` given with
     `review` missing or malformed is refused here too, never only by the
     caller that derived it from --run-dir, because a run cited with no
@@ -401,8 +404,10 @@ def _validate_review(review):
     """(True, "") when `review` is a usable review value; (False, reason)
     otherwise. Two shapes, and only two:
 
-    A SKIP: {"skipped": True, "reason": "...", "skipped_by": "..."}, both
-    reason and skipped_by non-empty. review_skip is never inferred from a
+    A SKIP: {"skipped": True, "reason": "...", "skipped_by": "...",
+    "skipped_at": "<ISO date>"}, all three non-empty and skipped_at a real
+    ISO date (AC1.b: a skip with no time was a claim nobody could place).
+    review_skip is never inferred from a
     unit's own tier or an absent reviewer; a run that never asked the
     question does not get to answer it as skipped.
 
@@ -425,6 +430,14 @@ def _validate_review(review):
             return False, "review_skip names no reason"
         if not skipped_by:
             return False, "review_skip names no skipped_by"
+        skipped_at = str(review.get("skipped_at") or "").strip()
+        if not skipped_at:
+            return False, "review_skip names no skipped_at"
+        try:
+            parse_iso(skipped_at)
+        except ValueError:
+            return False, ("review_skip skipped_at %r is not an ISO date"
+                           % skipped_at)
         return True, ""
     if not str(review.get("reviewer") or "").strip():
         return False, "review.json names no reviewer"
@@ -485,6 +498,36 @@ def _claims_delivered_revision(claims):
     if len(revs) > 1:
         return "", sorted(revs)
     return "", None
+
+
+def human_skip(reason, skipped_by, skipped_at):
+    """(skip, "") for a review skip a person stated with the three
+    --review-skip-* flags, or ({}, why) naming the part that is blank or
+    malformed. AC1.b: a skip read from the Work document is one the engine
+    wrote; this is the human authored one, validated by the same rule."""
+    entry = {"skipped": True, "reason": str(reason or "").strip(),
+             "skipped_by": str(skipped_by or "").strip(),
+             "skipped_at": str(skipped_at or "").strip()}
+    ok, why = _validate_review(entry)
+    return (entry, "") if ok else ({}, why)
+
+
+def review_line(entry):
+    """The review state of one delivery record, in words: a real review, a
+    SKIPPED one (never folded into the reviewed count), or NO-DATA for a
+    record written before the field or carrying a block nobody can read."""
+    review = entry.get("review")
+    if review is None:
+        return "review: %s (record predates the field)" % NODATA
+    if isinstance(review, dict) and review.get("skipped") is True:
+        return "review: SKIPPED by %s at %s because %s" % (
+            review.get("skipped_by") or NODATA,
+            review.get("skipped_at") or NODATA,
+            review.get("reason") or NODATA)
+    if isinstance(review, dict) and str(review.get("reviewer") or "").strip():
+        return "review: %s at %s" % (review["reviewer"],
+                                     review.get("reviewed_revision") or NODATA)
+    return "review: %s (the review block cannot be read)" % NODATA
 
 
 def review_from_run_dir(run_dir):
@@ -554,7 +597,8 @@ def review_from_run_dir(run_dir):
         if isinstance(skip, dict):
             entry = {"skipped": True,
                     "reason": str(skip.get("reason") or "").strip(),
-                    "skipped_by": str(skip.get("skipped_by") or "").strip()}
+                    "skipped_by": str(skip.get("skipped_by") or "").strip(),
+                    "skipped_at": str(skip.get("skipped_at") or "").strip()}
             ok, reason = _validate_review(entry)
             if not ok:
                 return None, "%s review_skip: %s" % (work[0], reason)
@@ -563,6 +607,218 @@ def review_from_run_dir(run_dir):
     return None, ("--run-dir %r carries neither %s nor an explicit "
                  "review_skip (a reason and the name of who skipped it) "
                  "in its own record" % (run_dir, REVIEW_FILE))
+
+
+#: AC1.a: every way resolve_receipt refuses, cheapest first. The kind is
+#: the first word of the refusal so a reader (or a test) can tell them apart.
+REFUSALS = ("unreadable", "foreign-project", "other-run", "old-revision",
+            "superseded", "duplicate")
+_SHA_REF = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+
+def _receipt_file(run_dir):
+    return os.path.join(os.path.abspath(run_dir), brother_run.RECEIPT_DIRNAME,
+                        brother_run.RECEIPT_FILENAME)
+
+
+def _named_receipt_path(path):
+    """The path the receipt at `path` names as its own
+    (host_capability.receipt_path), or None when it names none or cannot be
+    read. Read only to tell a copied receipt from this run's own."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            body = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    host = body.get("host_capability") if isinstance(body, dict) else None
+    named = host.get("receipt_path") if isinstance(host, dict) else None
+    return named if isinstance(named, str) and named else None
+
+
+def receipt_view(run_dir):
+    """The run's canonical receipt as receipt_door.read_receipt_verdict (TV1.a,
+    the one reader) reads it. The reader binds a receipt to the exact path
+    string it names, so the receipt's own spelling is passed whenever it
+    resolves to this run's receipt file; any other receipt is read at this
+    run's path and the reader refuses it."""
+    path = _receipt_file(run_dir)
+    named = _named_receipt_path(path)
+    if named and os.path.realpath(named) == os.path.realpath(path):
+        path = named
+    return receipt_door.read_receipt_verdict(path)
+
+
+def scan_receipts(directory=None):
+    """({receipt_sha256: ref}, [record files that could not be parsed]) over
+    every delivery record on disk. Unlike load_all, an unparseable record is
+    reported, never skipped: a corrupt record could be the one holding a
+    receipt, so resolve_receipt refuses while the list is non empty."""
+    directory = directory or DELIVERIES_DIR
+    held, bad = {}, []
+    if not os.path.isdir(directory):
+        return held, bad
+    for fname in sorted(os.listdir(directory)):
+        if not fname.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directory, fname), encoding="utf-8") as fh:
+                entry = json.load(fh)
+        except (OSError, ValueError):
+            bad.append(fname)
+            continue
+        if not isinstance(entry, dict):
+            bad.append(fname)
+            continue
+        run = entry.get("run")
+        sha = run.get("receipt_sha256") if isinstance(run, dict) else None
+        if isinstance(sha, str) and sha:
+            held[sha] = str(entry.get("ref") or fname)
+    return held, bad
+
+
+def _git_rev(cwd, rev):
+    """The full object name `rev` resolves to in `cwd`, or "" when it does
+    not resolve (or git cannot run): never a guess."""
+    try:
+        proc = subprocess.run(["git", "-C", cwd, "rev-parse", "--verify",
+                               "--quiet", rev],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              universal_newlines=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _run_outcome(run_dir):
+    """The outcome the run's one W-*.json Work document names, or ""."""
+    try:
+        work = sorted(n for n in os.listdir(run_dir)
+                      if n.startswith("W-") and n.endswith(".json"))
+        if len(work) != 1:
+            return ""
+        with open(os.path.join(run_dir, work[0]), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return ""
+    return str(doc.get("outcome") or "") if isinstance(doc, dict) else ""
+
+
+def _run_claims(run_dir):
+    try:
+        with open(os.path.join(run_dir, "claims.json"), encoding="utf-8") as fh:
+            claims = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def resolve_receipt(run_dir, project_cwd, ref, directory=None):
+    """(binding, "") when the run's canonical receipt can be bound to this
+    acceptance, else (None, "<kind>: <sentence>") with kind one of REFUSALS.
+
+    AC1.a: an acceptance used to rebuild its checks from the Work document
+    and claims.json and never opened receipt/receipt.json, so it could not be
+    traced to the receipt a reviewer read, and any run directory, of any
+    project, at any revision, already accepted under another ref, was
+    accepted. Every check below refuses what it cannot prove; the only
+    unproven value recorded rather than refused is a revision check for a
+    ref that is not a SHA resolving in the project (revision_check NO-DATA,
+    never counted as a match)."""
+    ref = (ref or "").strip()
+    run_id = os.path.basename(os.path.abspath(run_dir))
+    path = _receipt_file(run_dir)
+
+    def refuse(kind, sentence):
+        return None, "%s: run %s, receipt %s: %s" % (kind, run_id, path,
+                                                       sentence)
+
+    if not os.path.isfile(path):
+        return refuse("unreadable", "there is no receipt file under the run "
+                      "directory")
+    real_run = os.path.realpath(run_dir)
+    real_path = os.path.realpath(path)
+    if not real_path.startswith(real_run + os.sep):
+        return refuse("other-run", "the receipt resolves to %s, outside the "
+                      "run directory %s" % (real_path, real_run))
+    named = _named_receipt_path(path)
+    if named and os.path.realpath(named) != real_path:
+        return refuse("other-run", "the receipt names %s as its own path, not "
+                      "%s: a copied receipt is another run's" % (named,
+                                                                 real_path))
+    view = receipt_view(run_dir)
+    if not view.get("readable"):
+        return refuse("unreadable", str(view.get("why") or NODATA))
+    try:
+        with open(path, "rb") as fh:
+            blob = fh.read()
+    except OSError as exc:
+        return refuse("unreadable", "the receipt could not be read (%s)" % exc)
+
+    target = brother_run._read_run_target(run_dir)
+    if target is None:
+        return refuse("foreign-project", "the run carries no readable %s "
+                      "naming the project it is for, so it cannot be bound "
+                      "to %s" % (brother_run.TARGET_FILENAME, project_cwd))
+    if os.path.realpath(target) != os.path.realpath(project_cwd):
+        return refuse("foreign-project", "the run is for %s, not for %s"
+                      % (target, project_cwd))
+
+    revision_check = NODATA
+    wanted = _git_rev(project_cwd, ref) if _SHA_REF.match(ref) else ""
+    if wanted:
+        delivered, conflicting = _claims_delivered_revision(
+            _run_claims(run_dir))
+        if conflicting:
+            return refuse("old-revision", "the run's claims disagree on its "
+                          "delivered revision (%s), so none of them is the "
+                          "ref %s (%s)" % (", ".join(conflicting), ref,
+                                           wanted))
+        if delivered:
+            have = _git_rev(project_cwd, delivered) or delivered
+            if have != wanted:
+                return refuse("old-revision", "the run delivered revision %s "
+                              "but the ref %s is %s" % (delivered, ref,
+                                                        wanted))
+            revision_check = "PASS"
+
+    outcome = brother_run._normalize_outcome(_run_outcome(run_dir))
+    parent, me = os.path.split(real_run)
+    try:
+        siblings = sorted(os.listdir(parent))
+    except OSError as exc:
+        return refuse("superseded", "the runs folder %s could not be listed "
+                      "(%s), so a later run cannot be ruled out" % (parent,
+                                                                   exc))
+    for name in siblings:
+        if name <= me:
+            continue
+        sibling = os.path.join(parent, name)
+        if not os.path.isfile(os.path.join(sibling, brother_run.RECEIPT_DIRNAME,
+                                           brother_run.RECEIPT_FILENAME)):
+            continue
+        other = brother_run._read_run_target(sibling)
+        if other is None or os.path.realpath(other) != os.path.realpath(target):
+            continue
+        if brother_run._normalize_outcome(_run_outcome(sibling)) != outcome:
+            continue
+        return refuse("superseded", "the later run %s of the same outcome %r "
+                      "for the same project holds its own receipt"
+                      % (name, outcome))
+
+    digest = hashlib.sha256(blob).hexdigest()
+    held, bad = scan_receipts(directory)
+    if bad:
+        return refuse("duplicate", "delivery record(s) %s could not be read, "
+                      "so an earlier acceptance of this receipt cannot be "
+                      "ruled out" % ", ".join(bad))
+    holder = held.get(digest)
+    if holder is not None and holder != ref:
+        return refuse("duplicate", "receipt sha256 %s is already accepted "
+                      "under %s, not %s" % (digest, holder, ref))
+    return {"run_id": run_id, "receipt_sha256": digest,
+            "receipt_state": view.get("state"),
+            "receipt_exit_code": view.get("exit_code"),
+            "revision_check": revision_check}, ""
 
 
 def main(argv=None):
@@ -600,6 +856,18 @@ def main(argv=None):
                          "record never has to be hand-written to carry the "
                          "changed files and the command that verified each "
                          "one. Mutually exclusive with --checks-file")
+    ap.add_argument("--project-cwd", default=None,
+                    help="the project the accepted run must be for "
+                         "(default: the current directory); with --run-dir "
+                         "the run's receipt is resolved against it")
+    ap.add_argument("--review-skip-reason", default=None,
+                    help="why the review of the cited run was skipped; with "
+                         "--review-skip-by and --review-skip-at, all three "
+                         "or none, and only with --run-dir")
+    ap.add_argument("--review-skip-by", default=None,
+                    help="the person who skipped the review")
+    ap.add_argument("--review-skip-at", default=None,
+                    help="when the review was skipped, an ISO date")
     args = ap.parse_args(argv)
 
     if args.list:
@@ -621,8 +889,14 @@ def main(argv=None):
                          "(delegation: %r)" % e.get("delegation", ""))
             else:
                 line += "  recorded_by: %s" % rb
+            line += "  " + review_line(e)
             print(line)
         print()
+        kinds = [review_line(e) for e in entries]
+        skipped = sum(k.startswith("review: SKIPPED") for k in kinds)
+        nodata = sum(k.startswith("review: %s" % NODATA) for k in kinds)
+        print("reviewed: %d, skipped: %d, no-data: %d"
+              % (len(kinds) - skipped - nodata, skipped, nodata))
         # Per-week acceptance counts, over person-recorded entries only (row E49):
         # an agent-recorded acceptance is honest about who typed it and is never
         # folded into the count of actual human decisions.
@@ -647,6 +921,16 @@ def main(argv=None):
         ap.error("--recorded-by agent requires --delegation \"<the exact "
                  "sentence the founder said>\"")
 
+    skip_flags = (args.review_skip_reason, args.review_skip_by,
+                  args.review_skip_at)
+    if any(v is not None for v in skip_flags):
+        if not all(v is not None for v in skip_flags):
+            ap.error("--review-skip-reason, --review-skip-by and "
+                     "--review-skip-at come together: all three or none")
+        if not args.run_dir:
+            ap.error("--review-skip-* records a skipped review of a cited run "
+                     "and requires --run-dir")
+
     checks = None
     if args.checks_file and args.run_dir:
         ap.error("--checks-file and --run-dir both name where the per-file "
@@ -662,10 +946,24 @@ def main(argv=None):
         if run is None:
             print("accept-delivery: refused: %s" % reason, file=sys.stderr)
             return 2
-        review, reason = review_from_run_dir(args.run_dir)
+        if args.review_skip_reason is not None:
+            review, reason = human_skip(*skip_flags)
+            review = review or None
+        else:
+            review, reason = review_from_run_dir(args.run_dir)
         if review is None:
             print("accept-delivery: refused: %s" % reason, file=sys.stderr)
             return 2
+        # AC1.a: resolved last, immediately before the write, so the digest
+        # scan is as fresh as it can be (a window of one scan remains between
+        # two racing acceptances under two refs; the O_EXCL guard is per ref).
+        binding, reason = resolve_receipt(args.run_dir,
+                                          args.project_cwd or os.getcwd(),
+                                          args.ref, args.dir)
+        if binding is None:
+            print("accept-delivery: refused: %s" % reason, file=sys.stderr)
+            return 2
+        run.update(binding)
     if args.checks_file:
         try:
             with open(args.checks_file, "r", encoding="utf-8") as fh:

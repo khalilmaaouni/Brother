@@ -764,6 +764,123 @@ def numbers_manifest_evidence(row, run_dir):
     return "", message
 
 
+#: AS1.a: the five BrotherSBE hard gates, in sbe_gate.GATES' own order. The
+#: matrix compares this to the live registry on every read and prints a FAIL
+#: `gate-set` row when they differ, so a sixth gate or a rename cannot hide.
+GATE_NAMES = ("numbers", "migration", "approval", "ran", "proof")
+
+#: Risk classes (attention.risk_triggers) that make a gate required.
+#: `ran` and `proof` are always required; `numbers` by evidence family.
+_RISK_REQUIRES = {"migration": ("migration", "approval"),
+                  "auth": ("approval",), "money": ("approval",),
+                  "irreversibility": ("approval",),
+                  "public API": ("approval",)}
+
+ASSURANCE_DISCLOSURE = (
+    "4 of 5 assurance gates are not run by the engine: their verdicts are "
+    "read from files a person or another tool left; numbers is the only "
+    "gate the engine feeds")
+
+
+def _sbe_gate_modules():
+    """(sbe_gate, sbe_checks, "") from the same tools folder
+    _sbe_gate_numbers mounts, or (None, None, a NO-DATA reason)."""
+    if _SBE_TOOLS not in sys.path:
+        sys.path.insert(0, _SBE_TOOLS)
+    try:
+        import sbe_gate  # noqa: E402  (mounted onto sys.path just above)
+        import sbe_checks  # noqa: E402
+    except ImportError as exc:
+        return None, None, ("%s: the BrotherSBE gate modules could not be "
+                            "imported from %s (%s)" % (NODATA, _SBE_TOOLS,
+                                                       exc))
+    return sbe_gate, sbe_checks, ""
+
+
+def required_gates(view, risk_classes):
+    """The gates a delivery must PASS, in GATE_NAMES order: ran and proof
+    always, numbers when a unit's evidence family is a numbers family,
+    migration and approval by the receipt's risk classes. A class this table
+    does not list adds nothing."""
+    need = {"ran", "proof"}
+    units = view.get("units") if isinstance(view.get("units"), list) else []
+    if any(isinstance(u, dict) and str(u.get("evidence_family") or "")
+           in NUMBERS_EVIDENCE_FAMILIES for u in units):
+        need.add("numbers")
+    for cls in risk_classes or ():
+        need.update(_RISK_REQUIRES.get(cls, ()))
+    return [n for n in GATE_NAMES if n in need]
+
+
+def assurance_matrix(root, view, risk_classes):
+    """AS1.a: every hard gate over `root` as sbe_gate.main runs it, read now.
+    A refused exemption or a crashing gate is FAIL, an all waived gate is
+    NO-DATA, a gate with no artifact answers for itself (NO-DATA), so an
+    unrun gate is never PASS. assurance_complete is true only when every
+    required gate is PASS and no gate at all is FAIL."""
+    required = required_gates(view, risk_classes)
+    gates, note = {}, "read now from %s, not as it was at run time" % root
+    sbe_gate, sbe_checks, why = _sbe_gate_modules()
+
+    def row(verdict, evidence, name):
+        return {"verdict": verdict, "evidence": evidence,
+                "required": name in required,
+                "mode": "automated" if name == "numbers" else "manual"}
+
+    if sbe_gate is None or not os.path.isdir(root or ""):
+        reason = why or "%s is not a readable directory" % root
+        note += "; %s" % reason
+        for name in GATE_NAMES:
+            gates[name] = row(NODATA, "", name)
+        gates["gate-set"] = row(NODATA, reason, "gate-set")
+    else:
+        for name in GATE_NAMES:
+            check = sbe_gate.GATES.get(name)
+            if check is None:
+                gates[name] = row(NODATA, "", name)
+                continue
+            hits, waived, refused, _scope = sbe_gate.find(
+                root, check.reads[0], name)
+            evidence = os.path.relpath(hits[0], root) if hits else ""
+            if refused:
+                verdict = "FAIL"
+            elif waived and not hits:
+                verdict = NODATA
+            else:
+                verdict, _ev = sbe_checks.run_guarded(name, check, root)
+            gates[name] = row(verdict, evidence, name)
+        if tuple(sbe_gate.GATES) != GATE_NAMES:
+            gates["gate-set"] = row("FAIL", "sbe_gate.GATES is %s, not %s"
+                                    % (", ".join(sbe_gate.GATES),
+                                       ", ".join(GATE_NAMES)), "gate-set")
+    complete = (all(gates[n]["verdict"] == "PASS" for n in required)
+                and not any(g["verdict"] == "FAIL" for g in gates.values()))
+    return {"gates": gates, "assurance_complete": complete,
+            "disclosure": ASSURANCE_DISCLOSURE, "note": note}
+
+
+def assurance_lines(matrix):
+    """The matrix as text: the root line, one GATE line per gate, the
+    complete line and the disclosure line."""
+    lines = ["ASSURANCE: %s" % _one_line(matrix["note"])]
+    missing = []
+    for name, g in matrix["gates"].items():
+        if g["verdict"] == "FAIL" or (g["required"] and g["verdict"] != "PASS"):
+            missing.append(name)
+        if name not in GATE_NAMES:
+            lines.append("GATE-SET | %s | %s" % (g["verdict"],
+                                                 _one_line(g["evidence"])))
+            continue
+        lines.append("GATE %s | %s | %s | evidence %s | %s" % (
+            name, g["verdict"], "required" if g["required"] else
+            "not required", _one_line(g["evidence"]) or "none", g["mode"]))
+    lines.append("ASSURANCE COMPLETE: %s" % (
+        "yes" if matrix["assurance_complete"] else
+        "no, because %s" % ", ".join(missing)))
+    lines.append(matrix["disclosure"])
+    return lines
+
+
 #: E74: the states a recalled lesson can hold once its own applies_to
 #: anchors are checked against the tree a session actually runs in
 #: (products/brothermode/tools/vault_recall_hook.py's lesson_states). Not a
@@ -2829,3 +2946,148 @@ def render_receipt_screen(record, receipts, run_dir, before=None, after=None,
     path, problem = write_screen(spec, out_path)
     return (path or problem), view, receipt_text(view, log_path, record_path,
                                                  path)
+
+
+def read_receipt_verdict(receipt_path, stdout=None, exit_code=None):
+    """TV1.a: the one reader of a run's canonical receipt. The state, counts,
+    release and next words are brother_run.delivery_conclusion over the
+    receipt's own per unit entries (evidence plus unproven, the refused ones
+    as the refused list, attention.risk_triggers as the risk list) and the
+    exit code is EXIT_FOR_STATE of that state: this function holds no state
+    rule of its own. A receipt brother_run._load_receipt refuses (missing,
+    not JSON, short a field, not naming its own path) is the engine's own
+    no-receipt conclusion, NOT DONE, exit 1, with `why` naming the problem.
+
+    Given the run's `stdout` and `exit_code`, brother_run.read_run_result
+    reads them too; a state that differs from the receipt's own is reported
+    in `disagrees` (the reader's sentence), never trusted, and a
+    disagreement never leaves exit 0. Terminal text is never an input to the
+    state. Imported at call time: brother_run imports this module at load."""
+    import brother_run
+    body, problem = brother_run._load_receipt(receipt_path)
+    units, entries, refused, risk = [], [], [], []
+    if not problem:
+        entries = body["evidence"] + body["unproven"]
+        refused = [(e["id"], e.get("reason") or NODATA) for e in entries
+                   if e["state"] == "refused"]
+        attention = body.get("attention")
+        risk = attention.get("risk_triggers") if isinstance(
+            attention, dict) else None
+        risk = risk if isinstance(risk, list) else []
+        changed = [c for c in body["scope"]["changed"] if isinstance(c, dict)]
+        for e in entries:
+            verdict = brother_run._verdict_for(e)
+            units.append({
+                "unit": e["id"],
+                "files": [c.get("file") for c in changed
+                          if c.get("unit") == e["id"]],
+                "command": e.get("command") or NODATA,
+                "exit_code": e.get("exit_code"),
+                "verdict": verdict,
+                "evidence_family": e.get("evidence_family") or NODATA,
+                "unproven_reason": (None if verdict == "PASS"
+                                    else e.get("reason") or NODATA),
+            })
+    conclusion = brother_run.delivery_conclusion(
+        entries, refused, [], not problem, risk, None)
+    disagrees = ""
+    if stdout is not None and exit_code is not None:
+        line_state, why = brother_run.read_run_result(stdout, exit_code)
+        if line_state != conclusion["state"]:
+            disagrees = why or ("the run's result line reads %s but its "
+                                "receipt reads %s"
+                                % (line_state, conclusion["state"]))
+            if brother_run.EXIT_FOR_STATE[conclusion["state"]] == 0:
+                # A clean receipt beside a run output that disagrees with
+                # it is not a clean delivery: the no-receipt conclusion.
+                conclusion = brother_run.delivery_conclusion(
+                    entries, refused, [], False, risk, None)
+    view = dict(conclusion)
+    view.update(exit_code=brother_run.EXIT_FOR_STATE[conclusion["state"]],
+                readable=not problem, why=problem or conclusion["reason"],
+                units=units, disagrees=disagrees,
+                risk_classes=sorted({str(t.get("class")) for t in risk
+                                     if isinstance(t, dict)
+                                     and t.get("class")}))
+    return view
+
+
+def _one_line(value):
+    return " ".join(str(value).split())
+
+
+def verdict_lines(view):
+    """TV1.a: the reader's view as text. The engine's own result line first
+    (brother_run.format_result_line), then `RECEIPT: <why>` for a receipt
+    that could not be read, then one line per unit and changed file:
+    `UNIT <id> | FILE <file or none> | CHECK <command> | EXIT <code> |
+    <PASS|FAIL|NO-DATA>`, every non PASS line ending ` | UNPROVEN: <reason>`
+    with the receipt's reason verbatim (whitespace folded to one line)."""
+    import brother_run
+    units = view.get("units") if isinstance(view.get("units"), list) else []
+    # The view's `units` is the row list; the conclusion counts it.
+    lines = [brother_run.format_result_line(dict(view, units=len(units)))]
+    if not view.get("readable"):
+        lines.append("RECEIPT: %s" % _one_line(view.get("why") or NODATA))
+    for unit in units:
+        for f in unit["files"] or ["none"]:
+            line = "UNIT %s | FILE %s | CHECK %s | EXIT %s | %s" % tuple(
+                _one_line(v) for v in (unit["unit"], f, unit["command"],
+                                       unit["exit_code"], unit["verdict"]))
+            if unit["verdict"] != "PASS":
+                line += " | UNPROVEN: %s" % _one_line(unit["unproven_reason"])
+            lines.append(line)
+    return lines
+
+
+def main(argv=None):
+    """TV1.b: the one command the status and deliver skills call.
+    `--verdict RECEIPT` prints verdict_lines of read_receipt_verdict and
+    exits with the view's exit code (0 DONE, 1 NOT DONE, 2 PARTIAL or
+    UNVERIFIED). `--stdout-file F --exit-code N`, given together, add the
+    run's own output: a disagreement prints `DISAGREES: <why>`. Any other
+    argument, or one of that pair alone, is an argparse refusal, exit 2,
+    with nothing read. An unreadable stdout file reads as empty output, so
+    it disagrees rather than passing."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="receipt_door.py",
+        description="Read a run's receipt and print the engine's verdict.")
+    parser.add_argument("--verdict", required=True, metavar="RECEIPT_PATH")
+    parser.add_argument("--stdout-file", metavar="PATH")
+    parser.add_argument("--exit-code", type=int, metavar="N")
+    parser.add_argument("--assurance", action="store_true",
+                        help="also print the five assurance gate lines")
+    args = parser.parse_args(argv)
+    if (args.stdout_file is None) != (args.exit_code is None):
+        parser.error("--stdout-file and --exit-code go together")
+    stdout = None
+    if args.stdout_file is not None:
+        try:
+            with open(args.stdout_file, encoding="utf-8") as fh:
+                stdout = fh.read()
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("receipt_door: the run's stdout could not be "
+                             "read: %s\n" % exc)
+            stdout = ""
+    view = read_receipt_verdict(args.verdict, stdout, args.exit_code)
+    for line in verdict_lines(view):
+        print(line)
+    if view["disagrees"]:
+        print("DISAGREES: %s" % _one_line(view["disagrees"]))
+    code = view["exit_code"]
+    if args.assurance:
+        import brother_run
+        run_dir = os.path.dirname(os.path.dirname(os.path.abspath(
+            args.verdict)))
+        root = brother_run._read_run_target(run_dir) or ""
+        matrix = assurance_matrix(root, view, view["risk_classes"])
+        for line in assurance_lines(matrix):
+            print(line)
+        if any(g["verdict"] == "FAIL" for g in matrix["gates"].values()):
+            code = max(code, 1)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

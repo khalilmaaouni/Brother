@@ -5,8 +5,12 @@ WHY THIS FILE EXISTS, measured 2026-09-21 on this branch. Unit R4 ("no test
 reads or spends real machine state") owns two suites and carries this
 done_check:
 
-    env -i PATH="$PATH" HOME=$(mktemp -d) python3 scripts/test_jev_checks.py &&
-    env -i PATH="$PATH" HOME=$(mktemp -d) python3 scripts/test_jev_seam.py
+    env -i PATH="$PATH" HOME=$(mktemp -d "${TMPDIR:-/tmp}/r4-home.XXXXXX") python3 scripts/test_jev_checks.py &&
+    env -i PATH="$PATH" HOME=$(mktemp -d "${TMPDIR:-/tmp}/r4-home.XXXXXX") python3 scripts/test_jev_seam.py
+
+(shown with an explicit mktemp template: the recorded check ran a bare
+mktemp -d, which on macOS ignores TMPDIR and fails in a sandbox that denies
+the host temp folder)
 
 Both suites decorate EVERY TestCase class with one skipUnless, so a single
 missing input skips the whole suite. Relocating the tree one directory away

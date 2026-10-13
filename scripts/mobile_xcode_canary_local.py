@@ -1,230 +1,243 @@
 #!/usr/bin/env python3
 """mobile_xcode_canary_local: a real, local canary for Brother's mobile
-evidence pipeline (M0.04).
+evidence pipeline (M0.04, MB4).
 
-WHY THIS EXISTS. scripts/test_mobile_workflow.py says so itself: "These
-fixtures prove orchestration and refusal behavior, not Xcode compatibility."
-Every self-test in the mobile spine drives a fake xcodebuild/simctl on PATH.
-This script closes that gap by driving a real Xcode project (the founder's
-own iOS app, or, when none is given, the tiny checked-in fixture app at
-scripts/fixtures/mobile_canary_app) through the exact same steps
-scripts/mobile_workflow.py's ``run`` action performs for a real project:
-build, test, resolve the built .app, install, launch, screenshot, and bind
-every step to scripts/native_evidence.py's evidence record. It reuses that
-existing machinery (native_evidence.record, mobile_workflow.doctor/invoke/
-identity/screenshot_identity/lease) rather than re-implementing it.
+WHAT IT RUNS. The door's own sequence, in process, never a copy of it:
+mobile_workflow.doctor, then profile_init, then reference_init, then
+run_workflow, against the checked-in fixture app at
+scripts/fixtures/mobile_canary_app (copied into a throwaway clean git
+repository under <out>/source, so a maintainer's dirty checkout cannot refuse
+it) or against a real project passed with --repo/--project/--scheme and one
+or more exact --expected-test identities. Its green therefore means the path a
+user is taught works; a defect in run_workflow shows here. It takes no lease
+of its own: each of the three workflow steps takes the per user lease in turn.
 
-GENERIC BY DESIGN, like mobile_workflow.py itself: the target repo, project,
-scheme, app target, and expected test identities are all CLI parameters,
-never hardcoded. This file never names any specific product; a caller with
-a real iOS project passes its own path, scheme and one (or more) exact test
-identities at the command line, which is data, not something this script or
-any file in this repository commits.
+GENERIC BY DESIGN: project, scheme and expected tests are parameters, never
+hardcoded product facts. Simulated devices only: the target is always an id
+from `xcrun simctl list devices available`, so a physical device cannot be
+selected. Output stays outside the repository; nothing leaves the machine.
 
-This is a LOCAL, hand-run (or local pre-push/pre-merge hook) canary. It is
-NOT wired into GitHub Actions macOS CI. Brother's own enforced cost-shield
-rule (~/.claude/hooks/github_cost_wall.py) refuses any `.github/workflows/*.yml`
-using a macos-* runner under any trigger, including workflow_dispatch,
-without a separate founder decision naming an expected monthly cost. The
-roadmap's original M0.04 text ("on macOS CI") stays BLOCKED, not done, until
-the founder makes that decision; see docs/plan/MOBILE-PLATFORM-ROADMAP-1.0.18.md.
+LOCAL ONLY. This is a hand-run canary, not wired into GitHub Actions macOS CI
+(the cost shield refuses macOS runners without a founder decision).
 
-DERIVED DATA. By default no -derivedDataPath is passed, so Xcode uses its
-own shared default (~/Library/Developer/Xcode/DerivedData); pass --derived-data
-only when a caller's own project rules require an isolated root, and only to
-a path under that shared Xcode cache, never into a repository or ~/Documents.
+DERIVED DATA. --derived-data is refused by name: the workflow run uses
+Xcode's own shared DerivedData and adds no override.
 
-Exit status: 0 PASS, 1 FAIL, 2 NO-DATA. NO-DATA (no Xcode/simulator toolchain,
-no simulator to target, or another mobile run holding the native tool lease)
-is never a pass. This script never falls back to a fixture command in place
-of the real one: every listed step runs real xcodebuild/simctl/xcresulttool,
-or the run is FAIL/NO-DATA and says which step and why.
+Exit status: 0 PASS, 1 FAIL, 2 NO-DATA. A missing platform, tool, simulator
+or an unreadable simulator list prints one NO-DATA line naming the missing
+piece and writes nothing. A skipped or unexecuted run is never 0. The canary
+receipt path is the last line printed whenever a receipt was written.
 """
 import argparse
 import datetime
 import json
+import re
+import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
+from typing import Callable, List, Optional
 
-import native_evidence as N
-from mobile_workflow import (
-    Refusal, require, write_new, digest, outside, lease, invoke,
-    json_output, identity, same_identity, screenshot_identity, doctor,
-)
+try:
+    import mobile_workflow as W
+    from mobile_workflow import Refusal, require, write_new, digest, outside, doctor
+    IMPORT_ERROR = None
+except ImportError as exc:  # e.g. no fcntl off macOS and Linux
+    W = None
+    IMPORT_ERROR = exc
 
 SCHEMA = "brother-mobile-xcode-canary-local-v1"
+PREFIX = "mobile_xcode_canary_local: "
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURE_DIR = REPO_ROOT / "scripts" / "fixtures" / "mobile_canary_app"
 FIXTURE_PROJECT = "scripts/fixtures/mobile_canary_app/CanaryFixture.xcodeproj"
 FIXTURE_SCHEME = "CanaryFixture"
 FIXTURE_EXPECTED_TESTS = [
     "test://com.apple.xcode/CanaryFixture/CanaryFixtureTests/CanaryFixtureTests/testArithmeticSanity",
     "test://com.apple.xcode/CanaryFixture/CanaryFixtureTests/CanaryFixtureTests/testCanaryLabelExists",
 ]
+STEPS = ["doctor", "profile-init", "reference-init", "run"]
+IOS_RUNTIME = re.compile(r"(?:^|[.])iOS-")
+# A throwaway identity and no signing or hooks, so no global git setting decides the fixture commit.
+GIT = ["git", "-c", "user.name=Brother Canary", "-c", "user.email=canary@example.invalid",
+       "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
 
 
-def booted_simulator():
-    """The first booted iOS Simulator UDID, or None. Real simctl only."""
-    try:
-        proc = subprocess.run(["xcrun", "simctl", "list", "devices", "booted", "-j"],
-                              capture_output=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    try:
-        data = json.loads(proc.stdout)
-    except ValueError:
-        return None
-    for runtime, group in data.get("devices", {}).items():
-        if "iOS" not in runtime or not isinstance(group, list):
-            continue
-        for entry in group:
-            if isinstance(entry, dict) and entry.get("state") == "Booted" and entry.get("udid"):
-                return entry["udid"]
+def preflight(platform: str = "", which: Optional[Callable] = None) -> Optional[str]:
+    """None when this is macOS with xcodebuild and xcrun on PATH, else the first missing piece."""
+    platform = platform or sys.platform
+    which = which or shutil.which
+    if platform != "darwin":
+        return "not macOS (sys.platform is %s)" % platform
+    for tool in ("xcodebuild", "xcrun"):
+        if not which(tool):
+            return "%s is not on PATH" % tool
     return None
 
 
+def available_simulators() -> Optional[List[dict]]:
+    """The iOS simulators `simctl list devices available` names, or None when unreadable."""
+    try:
+        proc = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "-j"],
+                              capture_output=True, timeout=60)
+        data = json.loads(proc.stdout) if proc.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("devices"), dict):
+        return None
+    return [{"udid": d["udid"], "name": d.get("name"), "state": d.get("state")}
+            for runtime, group in sorted(data["devices"].items())
+            if IOS_RUNTIME.search(runtime) and isinstance(group, list)
+            for d in group if isinstance(d, dict) and isinstance(d.get("udid"), str)]
+
+
+def booted_simulator():
+    """The first booted available iOS simulator UDID, or None."""
+    booted = [d["udid"] for d in available_simulators() or [] if d["state"] == "Booted"]
+    return booted[0] if booted else None
+
+
+def fixture_source(out):
+    """A clean one-commit git repository holding a copy of the fixture app."""
+    source = out / "source"
+    shutil.copytree(FIXTURE_DIR, source)
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "canary fixture"]):
+        proc = subprocess.run(GIT + ["-C", str(source)] + args, capture_output=True, text=True, timeout=60)
+        require(proc.returncode == 0, "fixture repository: git %s exited %s: %s"
+                % (args[0], proc.returncode, (proc.stderr or proc.stdout).strip()[:300]), "NO-DATA")
+    return source
+
+
 def run_canary(repo, out, simulator_id, project=None, scheme=None, app_target=None,
-                expected_tests=None, only_testing=None, derived_data=None):
-    """Drive one real xcodebuild build+test+install+launch+screenshot.
+               expected_tests=None, only_testing=None, derived_data=None):
+    """Run doctor, profile-init, reference-init and run on one simulator.
 
-    repo: the source repository this run's evidence is bound to (native_evidence
-    snapshots it before and after). project/scheme/app_target/expected_tests
-    default to the checked-in fixture app when omitted, so this also serves as
-    Brother's own always-available proof that the pipeline still works.
-    """
-    repo, out = Path(repo).resolve(), Path(out).resolve()
-    require(outside(out, repo), "Canary output must stay outside the source repository")
+    repo None: the fixture app, copied into <out>/source. A Refusal from any
+    step becomes the canary status with its message as the reason."""
+    require(derived_data is None, "--derived-data is not supported; the canary runs the workflow, "
+            "which uses Xcode's shared DerivedData")
+    out = Path(out).resolve()
+    fixture = repo is None
+    if fixture:
+        require(outside(out, REPO_ROOT), "Canary output must stay outside the source repository")
+        require(FIXTURE_DIR.is_dir(), "Project is missing: %s" % FIXTURE_DIR)
+    else:
+        repo = Path(repo).resolve()
+        require(outside(out, repo), "Canary output must stay outside the source repository")
     require(not out.exists(), "Canary output already exists; preserve it and use a fresh path")
-    project_path = Path(project) if project else (repo / FIXTURE_PROJECT)
-    if not project_path.is_absolute():
-        project_path = repo / project_path
     scheme = scheme or (FIXTURE_SCHEME if not project else None)
-    app_target = app_target or scheme
-    expected_tests = list(expected_tests) if expected_tests else (list(FIXTURE_EXPECTED_TESTS) if not project else None)
     require(bool(scheme), "A scheme is required for a real project")
-    require(bool(expected_tests), "At least one --expected-test identity is required for a real project")
-    require(project_path.is_dir(), "Project is missing: %s" % project_path)
-    with lease():
-        out.mkdir(parents=True)
-        stages = []
-        report = {"schema": SCHEMA, "status": "FAIL", "stages": stages,
-                  "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                  "project": str(project_path), "scheme": scheme, "app_target": app_target,
-                  "requested_simulator": simulator_id,
-                  "limits": ["Proves the real toolchain executes the pipeline, not application quality.",
-                             "One project on one simulator is not the full device matrix.",
-                             "No phone install, device erase, or store upload was performed."]}
-        try:
-            doctor_result = doctor(repo, out / "doctor.json")
-            report["doctor"] = digest(out / "doctor.json")
-            missing = [name for name in ("xcodebuild", "simctl", "xcresulttool")
-                      if doctor_result["tools"][name]["status"] != "PASS"]
-            require(not missing, "Toolchain unavailable: %s" % ", ".join(missing), "NO-DATA")
-            raw = invoke(["xcrun", "simctl", "list", "devices", "available", "-j"], repo, out, stages, "simulators")
-            devices = json_output(raw, "simctl")
-            require(isinstance(devices, dict) and isinstance(devices.get("devices"), dict), "Malformed simulator list")
-            found = [(runtime, d) for runtime, group in devices["devices"].items() if isinstance(group, list)
-                     for d in group if isinstance(d, dict) and d.get("udid") == simulator_id]
-            require(len(found) == 1, "Selected simulator is unavailable", "NO-DATA")
-            runtime, device = found[0]
-            report["simulator"] = {"runtime": runtime, **device}
-            if device.get("state") != "Booted":
-                invoke(["xcrun", "simctl", "boot", simulator_id], repo, out, stages, "boot")
-            invoke(["xcrun", "simctl", "bootstatus", simulator_id, "-b"], repo, out, stages, "boot-ready", timeout=240)
-
-            derived_data_args = ["-derivedDataPath", str(derived_data)] if derived_data else []
-            destination = "platform=iOS Simulator,id=" + simulator_id
-            command = (["xcodebuild", "-project", str(project_path), "-scheme", scheme,
-                        "-destination", destination] + derived_data_args +
-                       ["test", "-parallel-testing-enabled", "NO",
-                        "-resultBundlePath", str(out / "canary.xcresult")] +
-                       ["-only-testing:" + value for value in (only_testing or [])])
-            native_args = argparse.Namespace(repo=str(repo), out=str(out / "native-evidence.json"),
-                result_bundle=str(out / "canary.xcresult"), command=command, requirement=[], artifact=[],
-                log=str(out / "test.log"), tests_json=str(out / "tests.json"), expected_test=expected_tests,
-                xcrun="xcrun", timeout=1800)
-            verdict, detail = N.record(native_args)
-            report["native_evidence"] = digest(out / "native-evidence.json")
-            stages.append({"name": "native-tests", "status": verdict, "detail": detail, "argv": command})
-            require(verdict == "PASS", "Native evidence did not pass: " + "; ".join(detail), verdict)
-
-            settings_raw = invoke(["xcodebuild", "-project", str(project_path), "-scheme", scheme,
-                                    "-destination", destination] + derived_data_args +
-                                   ["-showBuildSettings", "-json"], repo, out, stages, "product-path", timeout=180)
-            settings = json_output(settings_raw, "build settings")
-            require(isinstance(settings, list), "Build settings must be an array")
-            matches = [item.get("buildSettings") for item in settings if isinstance(item, dict) and item.get("target") == app_target]
-            require(len(matches) == 1 and isinstance(matches[0], dict), "Built app target is ambiguous or missing")
-            values = matches[0]
-            require(all(isinstance(values.get(k), str) and values[k] for k in ("TARGET_BUILD_DIR", "FULL_PRODUCT_NAME")), "Built app path is incomplete")
-            product_name = values["FULL_PRODUCT_NAME"]
-            require(Path(product_name).name == product_name and product_name.endswith(".app"), "Target product is not an app")
-            app = Path(values["TARGET_BUILD_DIR"]) / product_name
-            built = identity(app)
-            report["built_app"] = built
-            bundle_id = built["bundle_id"]
-
-            invoke(["xcrun", "simctl", "install", simulator_id, str(app)], repo, out, stages, "install", timeout=180)
-            installed_path = invoke(["xcrun", "simctl", "get_app_container", simulator_id, bundle_id, "app"], repo, out, stages, "installed-path").strip()
-            installed = identity(installed_path)
-            require(same_identity(built, installed) and built["executable"]["sha256"] == installed["executable"]["sha256"]
-                    and built["plist"]["sha256"] == installed["plist"]["sha256"], "Installed app differs from the tested build")
-            report["installed_app"] = installed
-
-            invoke(["xcrun", "simctl", "launch", "--terminate-running-process", simulator_id, bundle_id], repo, out, stages, "launch")
-            # ponytail: real launch->render is async; a fixed settle window beats a
-            # flaky race, upgrade to polling the accessibility tree if this ever flakes.
-            time.sleep(2)
-            invoke(["xcrun", "simctl", "io", simulator_id, "screenshot", str(out / "preview.png")], repo, out, stages, "capture")
-            report["screenshot"] = screenshot_identity(out / "preview.png")
-
-            report["status"] = "PASS"
-        except (Refusal, OSError, ValueError) as exc:
-            report["status"] = getattr(exc, "status", "FAIL")
-            report["reason"] = str(exc)
-        finally:
-            receipt = out / "receipt.json"
-            write_new(receipt, report)
-        return report, receipt
+    expected_tests = list(expected_tests or ()) or (list(FIXTURE_EXPECTED_TESTS) if not project else [])
+    if not fixture:
+        project_path = Path(project) if project else repo / FIXTURE_PROJECT
+        project_path = project_path if project_path.is_absolute() else repo / project_path
+        require(project_path.is_dir(), "Project is missing: %s" % project_path)
+        require(project_path.resolve().is_relative_to(repo), "Project is outside the repository: %s" % project_path)
+        project = str(project_path.resolve().relative_to(repo))
+    out.mkdir(parents=True)
+    report = {"schema": SCHEMA, "status": "FAIL", "stages": [], "steps": list(STEPS),
+              "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "scheme": scheme, "app_target": app_target, "requested_simulator": simulator_id,
+              "limits": ["Proves the real toolchain executes the door's sequence, not application quality.",
+                         "One project on one simulator is not the full device matrix.",
+                         "No phone install, device erase, or store upload was performed."]}
+    step = "source"
+    try:
+        if fixture:
+            repo = fixture_source(out)
+            project = "CanaryFixture.xcodeproj"
+        report["repo"], report["project"] = str(repo), project
+        step = "doctor"
+        doctor_result = doctor(repo, out / "doctor.json")
+        report["doctor"] = digest(out / "doctor.json")
+        missing = [name for name in ("xcodebuild", "simctl", "xcresulttool")
+                   if doctor_result["tools"][name]["status"] != "PASS"]
+        require(not missing, "Toolchain unavailable: %s" % ", ".join(missing), "NO-DATA")
+        step = "profile-init"
+        profile = W.profile_init(repo, out / "profile.json", project=project, scheme=scheme, simulator_id=simulator_id,
+                                 expected_tests=expected_tests, only_testing=only_testing or ())
+        report["profile"] = digest(out / "profile.json")
+        require(app_target in (None, profile["target"]),
+                "--app-target %s is not the project's app target %s" % (app_target, profile["target"]))
+        step = "reference-init"
+        W.reference_init(repo, out / "profile.json", out / "reference.json")
+        report["reference"] = digest(out / "reference.json")
+        step = "run"
+        run, run_receipt = W.run_workflow(repo, out / "profile.json", out / "reference.json", out / "run")
+        report["run_receipt"] = digest(run_receipt)
+        for key in ("stages", "simulator", "built_app", "installed_app", "screenshot", "reason"):
+            if key in run:
+                report[key] = run[key]
+        report["limits"] += run.get("limits", [])
+        report["status"] = run["technical_status"]
+        if report["status"] != "PASS":
+            report["failed_step"] = step
+    except (Refusal, OSError, ValueError) as exc:
+        report["status"] = getattr(exc, "status", "FAIL")
+        report["reason"] = str(exc)
+        report["failed_step"] = step
+    finally:
+        receipt = out / "receipt.json"
+        write_new(receipt, report)
+    return report, receipt
 
 
-def main(argv=None):
+def no_data(message):
+    print(PREFIX + "NO-DATA: " + message)
+    return 2
+
+
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--repo", default=".",
-                        help="Source repo this run's evidence binds to; defaults to the fixture's own repo")
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--repo", default=None,
+                        help="A real project's repository; omit to run the checked-in fixture app")
+    parser.add_argument("--out", required=True, help="A new folder outside the repository")
     parser.add_argument("--simulator-id", default=None,
-                        help="Exact simulator UDID; defaults to the first booted iOS Simulator")
-    parser.add_argument("--project", default=None,
-                        help="Path to a real .xcodeproj/.xcworkspace; omit to run the checked-in fixture app")
+                        help="Exact available simulator UDID; defaults to the booted iOS simulator")
+    parser.add_argument("--project", default=None, help="Path to the .xcodeproj/.xcworkspace inside --repo")
     parser.add_argument("--scheme", default=None)
-    parser.add_argument("--app-target", default=None, help="Defaults to --scheme")
+    parser.add_argument("--app-target", default=None, help="Checked against the project's one app target")
     parser.add_argument("--expected-test", action="append", default=[],
                         help="Exact test://... nodeIdentifierURL expected to execute; repeatable")
     parser.add_argument("--only-testing", action="append", default=[],
                         help="Passed through as -only-testing:VALUE; repeatable")
-    parser.add_argument("--derived-data", default=None,
-                        help="Omit to use Xcode's own shared default; pass only a path under "
-                             "~/Library/Developer/Xcode/DerivedData if a caller's project requires isolation")
+    parser.add_argument("--derived-data", default=None, help="Refused: the workflow uses Xcode's shared DerivedData")
     args = parser.parse_args(argv)
-    simulator_id = args.simulator_id or booted_simulator()
-    if not simulator_id:
-        print("mobile_xcode_canary_local: NO-DATA: no --simulator-id given and no iOS Simulator is booted")
-        return 2
+    if args.derived_data is not None:
+        print(PREFIX + "FAIL: --derived-data is not supported; the canary runs the workflow, "
+              "which uses Xcode's shared DerivedData")
+        return 1
+    if IMPORT_ERROR is not None:
+        return no_data("cannot import the workflow module (%s)" % IMPORT_ERROR)
+    missing = preflight()
+    if missing:
+        return no_data(missing)
+    devices = available_simulators()
+    if devices is None:
+        return no_data("the simulator list could not be read")
+    if not devices:
+        return no_data("no iOS simulator is installed for any runtime")
+    simulator_id = args.simulator_id
+    if simulator_id is not None:
+        if simulator_id.lower() not in {d["udid"].lower() for d in devices}:
+            return no_data("selected simulator %s is not an available simulator" % simulator_id)
+    else:
+        booted = [d["udid"] for d in devices if d["state"] == "Booted"]
+        if not booted:
+            return no_data("no iOS simulator is booted; boot one or pass --simulator-id")
+        simulator_id = booted[0]
     try:
         report, receipt = run_canary(args.repo, args.out, simulator_id, project=args.project,
             scheme=args.scheme, app_target=args.app_target, expected_tests=args.expected_test,
-            only_testing=args.only_testing, derived_data=args.derived_data)
+            only_testing=args.only_testing)
     except (Refusal, OSError, ValueError) as exc:
         status = getattr(exc, "status", "FAIL")
-        print("mobile_xcode_canary_local: %s: %s" % (status, exc))
+        print(PREFIX + "%s: %s" % (status, exc))
         return 2 if status == "NO-DATA" else 1
-    print("mobile_xcode_canary_local: %s: %s" % (report["status"], report.get("reason",
-          "Real xcodebuild build+test, install, launch and screenshot all verified against the real toolchain.")))
+    print(PREFIX + "%s: %s" % (report["status"], report.get("reason",
+          "doctor, profile-init, reference-init and run all passed against the real toolchain")))
     print(receipt)
-    return {"PASS": 0, "FAIL": 1, "NO-DATA": 2}[report["status"]]
+    return {"PASS": 0, "FAIL": 1, "NO-DATA": 2}.get(report["status"], 1)
 
 
 if __name__ == "__main__":

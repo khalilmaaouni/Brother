@@ -147,8 +147,8 @@ fi
 # safe while the export treats it as unshipped and unsafe.
 ALLOWLIST_FILE="docs/plan/EXPORT-ALLOWLIST.txt"
 DENYLIST_FILE="docs/plan/EXPORT-DENYLIST.txt"
-PRODUCTS_ALLOWED_FILE="$(mktemp 2>/dev/null || echo /tmp/cleanse-products-allowed-$$)"
-PRODUCTS_DENIED_FILE="$(mktemp 2>/dev/null || echo /tmp/cleanse-products-denied-$$)"
+PRODUCTS_ALLOWED_FILE="$(mktemp "${TMPDIR:-/tmp}/cleanse-products-allowed.XXXXXX" 2>/dev/null || echo "${TMPDIR:-/tmp}/cleanse-products-allowed-$$")"
+PRODUCTS_DENIED_FILE="$(mktemp "${TMPDIR:-/tmp}/cleanse-products-denied.XXXXXX" 2>/dev/null || echo "${TMPDIR:-/tmp}/cleanse-products-denied-$$")"
 # ALLOWLIST_MODE, added 2026-09-03. An auditor drove this backwards inside a
 # CANDIDATE EXPORT TREE, where docs/plan/EXPORT-ALLOWLIST.txt is itself never
 # exported (it is not a shippable path on any real allowlist): the old code

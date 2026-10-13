@@ -9,7 +9,7 @@
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-log="$(mktemp)"
+log="$(mktemp "${TMPDIR:-/tmp}/required-fast-triage.XXXXXX")"
 trap 'rm -f "$log"' EXIT
 
 bash "$here/required_fast.sh" "$@" 2>&1 | tee "$log"

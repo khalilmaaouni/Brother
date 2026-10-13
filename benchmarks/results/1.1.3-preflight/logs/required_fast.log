@@ -1,0 +1,131 @@
+heavy_slot: waiting under the load ceiling (up to 3600 s): cores busy 4.06 + 0 run(s) admitted in the last 15 s + 4 would pass the ceiling 6
+heavy_slot: 4 of 4 slots taken after 64 s
+Brother: required-fast, the pre-merge contract
+
+PASS    exit 0   version-truth           0s  PASSED: every shipped version string in README.md, docs/VERSIONING.md, d  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-version-truth-plan-113-44578.txt]
+PASS    exit 0   brother-run-2          59s  brother_run: A's rate limit park is over; re-admitting it  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-brother-run-2-plan-113-44578.txt]
+PASS    exit 0   export-public         123s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-export-public-plan-113-44578.txt]
+PASS    exit 0   native-evidence        12s  native_evidence: FAIL: test result is malformed: result JSON names zero   [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-native-evidence-plan-113-44578.txt]
+PASS    exit 0   mobile-workflow        21s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-mobile-workflow-plan-113-44578.txt]
+PASS    exit 0   mobile-design           0s  mobile_design: FAIL: [Errno 17] File exists: '/var/folders/bx/4mv547hj3n  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-mobile-design-plan-113-44578.txt]
+PASS    exit 0   export-public-2       162s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-export-public-2-plan-113-44578.txt]
+PASS    exit 0   surface                 4s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-surface-plan-113-44578.txt]
+PASS    exit 0   bundle-runtime        111s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-bundle-runtime-plan-113-44578.txt]
+PASS    exit 0   brother-run           178s  brother_run: U1 was already delivered by an earlier attempt within this   [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-brother-run-plan-113-44578.txt]
+PASS    exit 0   packs                   0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-packs-plan-113-44578.txt]
+PASS    exit 0   receipt-contract-v1     9s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-receipt-contract-v1-plan-113-44578.txt]
+PASS    exit 0   worktree-lane          19s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-worktree-lane-plan-113-44578.txt]
+PASS    exit 0   no-data-semantics       4s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-no-data-semantics-plan-113-44578.txt]
+PASS    exit 0   no-data-class-lints     3s  lint-only: 40 check(s) found in 6 registries across 138 module(s), scena  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-no-data-class-lints-plan-113-44578.txt]
+PASS    exit 0   brothersbe-verify-install   18s  verify-install: this does not prove the manifest itself is authentic; it  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-brothersbe-verify-install-plan-113-44578.txt]
+PASS    exit 0   charter-paths           0s  PASS  14 repository path(s) named by <HOME>/Brother/.clau  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-charter-paths-plan-113-44578.txt]
+PASS    exit 0   receipt-door           56s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-receipt-door-plan-113-44578.txt]
+PASS    exit 0   cursor-plugin-self      2s  removed /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T/brother-cursor-  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-cursor-plugin-self-plan-113-44578.txt]
+PASS    exit 0   cursor-hook-run-self    4s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-cursor-hook-run-self-plan-113-44578.txt]
+PASS    exit 0   client-parity           2s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-client-parity-plan-113-44578.txt]
+PASS    exit 0   brothermode-verify-install   52s  verify-install: this does not prove the manifest itself is authentic; it  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-brothermode-verify-install-plan-113-44578.txt]
+PASS    exit 0   key-components          0s  PASS: every component's tool, guard and artifact is in the tree, and eve  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-key-components-plan-113-44578.txt]
+PASS    exit 0   release-cut            32s  READY for 9.9.9: fences clear, tree clean, and the rehearsed cut passed   [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-release-cut-plan-113-44578.txt]
+PASS    exit 0   intake-screen           4s  NO-DATA: 10 source(s) are web pages, not files, so their existence was n  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-intake-screen-plan-113-44578.txt]
+PASS    exit 0   handover-ceremony       1s  handover-ceremony: nothing to do; pass --collect, --emit-vault DIR, --em  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-handover-ceremony-plan-113-44578.txt]
+PASS    exit 0   closing-ceremony        0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-closing-ceremony-plan-113-44578.txt]
+PASS    exit 0   closing-ceremony-real    2s  PASS: pack 2026-10-11-brother-1.1.2-cut satisfies the closing ceremony l  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-closing-ceremony-real-plan-113-44578.txt]
+PASS    exit 0   doc-assurance           0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-doc-assurance-plan-113-44578.txt]
+FAIL    exit 1   readiness-gate         36s    - Reproducible release artifact (FAIL)  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-fail-readiness-gate-plan-113-44578.txt]
+PASS    exit 0   evidence-obligation     1s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-evidence-obligation-plan-113-44578.txt]
+PASS    exit 0   system-inventory       25s  SYSTEM.md still describes the code  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-system-inventory-plan-113-44578.txt]
+PASS    exit 0   board-status           40s  Notes written this week: 54 (python3 scripts/board_status.py --vault-cou  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-board-status-plan-113-44578.txt]
+PASS    exit 0   readme-honesty        135s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-readme-honesty-plan-113-44578.txt]
+PASS    exit 0   loop-wiring            85s  103 tool(s): 102 wired, 1 declared entry point(s), 0 ORPHAN  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-wiring-plan-113-44578.txt]
+PASS    exit 0   supply-chain-gate      18s  PASS: 0 rows, 0 findings; l3b vault rows out of scope, deferred to 1.1.2  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-supply-chain-gate-plan-113-44578.txt]
+PASS    exit 0   bm-clock-guard          0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-bm-clock-guard-plan-113-44578.txt]
+PASS    exit 0   plugin-runtime-tests-fast   34s  plugin_runtime_fast_discover: PASS exit 0, Ran 1926 tests in 30.944s  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-plugin-runtime-tests-fast-plan-113-44578.txt]
+PASS    exit 0   integrate              47s    lane-cleanup A          removed lane lane/A removed  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-integrate-plan-113-44578.txt]
+PASS    exit 0   proof-card-self         0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-proof-card-self-plan-113-44578.txt]
+PASS    exit 0   codex-doc-release-refs    0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-codex-doc-release-refs-plan-113-44578.txt]
+PASS    exit 0   cursor-doc-release-refs    0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-cursor-doc-release-refs-plan-113-44578.txt]
+PASS    exit 0   no-promise              0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-no-promise-plan-113-44578.txt]
+PASS    exit 0   plugin-bump-gate       12s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-plugin-bump-gate-plan-113-44578.txt]
+PASS    exit 0   readiness-board         6s  readiness-board: wrote ../../../../../../var/folders/bx/4mv547hj3nxdv72r  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-readiness-board-plan-113-44578.txt]
+PASS    exit 0   daybook                 0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-daybook-plan-113-44578.txt]
+PASS    exit 0   torture-demo-self       0s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-torture-demo-self-plan-113-44578.txt]
+PASS    exit 0   shared-config           0s  OK: <HOME>/Brother/.git/config carries no fixture damage   [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-shared-config-plan-113-44578.txt]
+PASS    exit 0   git-location-config     0s    [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-git-location-config-plan-113-44578.txt]
+PASS    exit 0   loop-ownership-race     4s  42 case(s), OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-ownership-race-plan-113-44578.txt]
+PASS    exit 0   loop-health             0s  selftest: 25 cases, OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-health-plan-113-44578.txt]
+PASS    exit 0   loop-lifecycle          0s  0 finding(s)  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-lifecycle-plan-113-44578.txt]
+PASS    exit 0   loop-reporting          0s  selftest: 34 cases, OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-reporting-plan-113-44578.txt]
+PASS    exit 0   loop-model-routing      0s  selftest: 85 cases, OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-model-routing-plan-113-44578.txt]
+PASS    exit 0   loop-model-call         0s  selftest: 19 cases, OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-model-call-plan-113-44578.txt]
+PASS    exit 0   loop-tool-parity        6s  PASS: every executed loop tool matches its versioned copy, none referenc  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-tool-parity-plan-113-44578.txt]
+PASS    exit 0   loop-owns-complete      0s  PASS: unit BL names 225 component(s); every one exists and every one is   [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-owns-complete-plan-113-44578.txt]
+PASS    exit 0   loop-silent-failure     4s  OK  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-loop-silent-failure-plan-113-44578.txt]
+PASS    exit 0   one-plugin-readiness-static    0s  {"id": "skill-descriptions", "verdict": "PASS", "detail": "7 skill descr  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-one-plugin-readiness-static-plan-113-44578.txt]
+PASS    exit 0   plugin-manifest         0s  ✔ Validation passed  [NO-DATA: gate ledger append refused: [Errno 2] No such file or directory: 'logs/gate-ledger.jsonl']  [full: /var/folders/bx/4mv547hj3nxdv72rb00whvjsgmklcm/T//required-fast-pass-plugin-manifest-plan-113-44578.txt]
+width 4
+
+pass 59   fail 1   no-data 0
+FAILED: readiness-gate
+
+version-truth	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+brother-run-2	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+export-public	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+native-evidence	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+mobile-workflow	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+mobile-design	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+export-public-2	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+surface	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+bundle-runtime	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+brother-run	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+packs	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+receipt-contract-v1	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+worktree-lane	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+no-data-semantics	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+no-data-class-lints	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+brothersbe-verify-install	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+charter-paths	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+receipt-door	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+cursor-plugin-self	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+cursor-hook-run-self	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+client-parity	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+brothermode-verify-install	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+key-components	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+release-cut	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+intake-screen	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+handover-ceremony	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+closing-ceremony	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+closing-ceremony-real	PASS	REQUIRED_FOR_RELEASE	ALLOWED	PASS_ALLOWED
+doc-assurance	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+readiness-gate	FAIL	REQUIRED_FOR_MERGE	BLOCKED	FAIL_BLOCKING
+evidence-obligation	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+system-inventory	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+board-status	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+readme-honesty	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-wiring	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+supply-chain-gate	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+bm-clock-guard	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+plugin-runtime-tests-fast	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+integrate	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+proof-card-self	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+codex-doc-release-refs	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+cursor-doc-release-refs	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+no-promise	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+plugin-bump-gate	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+readiness-board	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+daybook	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+torture-demo-self	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+shared-config	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+git-location-config	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-ownership-race	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-health	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-lifecycle	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-reporting	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-model-routing	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-model-call	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-tool-parity	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-owns-complete	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+loop-silent-failure	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+one-plugin-readiness-static	PASS	REQUIRED_FOR_RELEASE	ALLOWED	PASS_ALLOWED
+plugin-manifest	PASS	REQUIRED_FOR_MERGE	ALLOWED	PASS_ALLOWED
+transition: BLOCKED (readiness-gate)
+exit=1

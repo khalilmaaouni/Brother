@@ -23,6 +23,8 @@ import sys
 import tempfile
 import time
 import unittest
+import json
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import release_note_perturb as P  # noqa: E402
@@ -610,6 +612,198 @@ class E116TheRealPerturbationIsALongCheckTheBatterySkips(unittest.TestCase):
             out, ran, _code = self.drive(value)
             self.assertFalse(ran, "BROTHER_LONG_CHECKS=%r ran it" % value)
             self.assertIn("NO-DATA", out)
+
+
+def _git(root, *args):
+    env = dict((k, v) for k, v in os.environ.items() if not k.startswith("GIT_"))
+    env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.test", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@example.test")
+    proc = subprocess.run(["git", "-c", "commit.gpgsign=false"] + list(args), cwd=root, env=env,
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+class TheReceiptsAreReusedOnlyOnAnExactRedMatch(unittest.TestCase):
+    """RC1.d1 (docs/plan/specs/RC1.md): step 2b leaves one red receipt per table row with a suite, keyed by the
+    file's and the suite's sha256 and the git tree ids of the script folders; step 2d accepts a row on a receipt only
+    when the verdict is red, both digests match today's bytes, the trees match and the script folders are clean, and
+    the receipt file is younger than 24 hours. Any doubt drives the row exactly as before."""
+
+    ROWS = [("called", "scripts/mod_called.py", "scripts/test_calls.py"),
+            ("other", "scripts/mod_no_guard.py", "scripts/test_calls.py"),
+            ("orphan", "scripts/mod_imported.py", None)]
+
+    def setUp(self):
+        import cut_rehearsal as CR
+        self.CR = CR
+        self.tmp = tempfile.mkdtemp(prefix="test-perturb-receipts-")
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        self.note = fixture_tree(self.tmp, self.ROWS[:1])
+        for rel in CR.SCRIPT_DIRS:
+            os.makedirs(os.path.join(self.tmp, rel), exist_ok=True)
+            with open(os.path.join(self.tmp, rel, "keep.txt"), "w", encoding="utf-8") as fh:
+                fh.write("keep\n")
+        _git(self.tmp, "init", "-q")
+        _git(self.tmp, "add", "-A")
+        _git(self.tmp, "commit", "-q", "-m", "fixture")
+        self.ev = os.path.join(self.tmp, "evidence")
+
+    def write(self, rows=None, now=None):
+        rows = self.ROWS[:1] if rows is None else rows
+        return P.write_receipts(rows, "9.9.9", root=self.tmp, directory=self.ev, now=now)
+
+    def load(self, path, now=None):
+        return P.load_receipts(path, root=self.tmp, now=now)
+
+    def drive(self, receipts):
+        """(code, lines, covers calls) of drive with a spy on covers."""
+        calls = []
+        real = P.covers
+
+        def spy(suite, source, **kw):
+            calls.append(source)
+            return real(suite, source, **kw)
+        with mock.patch.object(P, "covers", side_effect=spy):
+            code, lines = P.drive(self.note, root=self.tmp, receipts=receipts)
+        return code, lines, calls
+
+    def edit(self, rel, text="\n# changed\n", commit=False):
+        with open(os.path.join(self.tmp, rel), "a", encoding="utf-8") as fh:
+            fh.write(text)
+        if commit:
+            _git(self.tmp, "add", "-A")
+            _git(self.tmp, "commit", "-q", "-m", "change")
+
+    def test_an_exact_red_receipt_is_reused_and_nothing_runs(self):
+        path, why = self.write()
+        self.assertEqual(why, "")
+        self.assertEqual(path, P.receipt_path("9.9.9", self.ev))
+        receipts, why = self.load(path)
+        self.assertEqual(why, "")
+        code, lines, calls = self.drive(receipts)
+        self.assertEqual(code, 0, "\n".join(lines))
+        self.assertEqual(calls, [])
+        self.assertIn("REUSED: scripts/mod_called.py goes red under scripts/test_calls.py (receipt %s)" % path,
+                      lines)
+        self.assertIn("release-note-perturb: PASS", lines[-1])
+
+    def test_rows_without_a_suite_get_no_receipt(self):
+        path, why = self.write(self.ROWS)
+        receipts, why = self.load(path)
+        self.assertEqual(sorted(receipts), [("scripts/mod_called.py", "scripts/test_calls.py"),
+                                            ("scripts/mod_no_guard.py", "scripts/test_calls.py")])
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data["schema"], P.RECEIPT_SCHEMA)
+        self.assertEqual(set(data["trees"]), set(self.CR.SCRIPT_DIRS))
+        self.assertTrue(all(r["verdict"] == "red" for r in data["receipts"]))
+
+    def test_a_file_or_suite_changed_after_the_receipt_drives_the_row(self):
+        for rel in ("scripts/mod_called.py", "scripts/test_calls.py"):
+            with self.subTest(changed=rel):
+                receipts, why = self.load(self.write()[0])
+                self.assertEqual(why, "")
+                original = open(os.path.join(self.tmp, rel), encoding="utf-8").read()
+                self.edit(rel)
+                try:
+                    code, lines, calls = self.drive(receipts)
+                finally:
+                    with open(os.path.join(self.tmp, rel), "w", encoding="utf-8") as fh:
+                        fh.write(original)
+                self.assertEqual(calls, ["scripts/mod_called.py"], "\n".join(lines))
+                self.assertFalse([l for l in lines if l.startswith("REUSED")])
+
+    def test_a_green_receipt_drives_the_row(self):
+        path, _why = self.write()
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["receipts"][0]["verdict"] = "green"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        receipts, why = self.load(path)
+        code, lines, calls = self.drive(receipts)
+        self.assertEqual(calls, ["scripts/mod_called.py"])
+
+    def test_a_row_with_no_receipt_is_driven_and_a_green_one_still_fails(self):
+        self.note = fixture_tree(self.tmp, [self.ROWS[0], ("imported", "scripts/mod_imported.py",
+                                                           "scripts/test_calls.py")])
+        _git(self.tmp, "add", "-A")
+        _git(self.tmp, "commit", "-q", "-m", "two rows")
+        receipts, why = self.load(self.write(self.ROWS[:1])[0])
+        self.assertEqual(why, "")
+        code, lines, calls = self.drive(receipts)
+        self.assertEqual(calls, ["scripts/mod_imported.py"])
+        self.assertEqual(code, 1, "\n".join(lines))
+        self.assertTrue(any(l.startswith("FAIL") and "mod_imported.py" in l for l in lines))
+
+    def test_a_changed_script_tree_refuses_the_whole_file(self):
+        path, _why = self.write()
+        self.edit("products/brothersbe/tools/keep.txt", commit=True)
+        receipts, why = self.load(path)
+        self.assertEqual(receipts, {})
+        self.assertIn("tree", why)
+
+    def test_a_dirty_script_tree_writes_and_reads_no_receipts(self):
+        path, _why = self.write()
+        self.edit("products/brothermode/tools/keep.txt")
+        receipts, why = self.load(path)
+        self.assertEqual(receipts, {})
+        self.assertIn("uncommitted", why)
+        os.remove(path)
+        path2, why = self.write()
+        self.assertEqual(path2, "")
+        self.assertIn("uncommitted", why)
+        self.assertFalse(os.path.exists(P.receipt_path("9.9.9", self.ev)))
+        trees, why = P.script_tree_key(self.tmp)
+        self.assertEqual(trees, {})
+
+    def test_a_stale_corrupt_or_missing_file_is_ignored(self):
+        path, _why = self.write(now=time.time() - 25 * 3600)
+        receipts, why = self.load(path)
+        self.assertEqual(receipts, {})
+        self.assertIn("stale", why)
+        path, _why = self.write(now=time.time() - 23 * 3600)
+        self.assertEqual(self.load(path)[1], "")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text[: len(text) // 2])
+        for p in (path, os.path.join(self.ev, "absent.json"), ""):
+            with self.subTest(path=p):
+                receipts, why = self.load(p)
+                self.assertEqual(receipts, {})
+                self.assertTrue(why)
+        path, _why = self.write()
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for bad in (dict(data, schema="cv1.perturb.0"), dict(data, receipts="x"), [], dict(data, written_at=7)):
+            with self.subTest(bad=str(bad)[:40]):
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(bad, fh)
+                self.assertEqual(self.load(path)[0], {})
+
+    def test_main_reads_the_receipts_only_when_asked(self):
+        seen = {}
+
+        def drive(path, root=P.ROOT, receipts=None):
+            seen["receipts"] = receipts
+            return 0, ["release-note-perturb: PASS"]
+        receipts = {("a", "b"): {"verdict": "red"}}
+        with mock.patch.object(P, "drive", side_effect=drive), \
+                mock.patch.object(P, "load_receipts", return_value=(receipts, "")) as load:
+            P.main(["--version", "9.9.9"])
+            self.assertIsNone(seen["receipts"])
+            self.assertEqual(load.call_count, 0)
+            P.main(["--version", "9.9.9", "--receipts", "auto"])
+            self.assertEqual(seen["receipts"], receipts)
+            self.assertEqual(load.call_args[0][0], P.receipt_path("9.9.9"))
+            P.main(["--version", "9.9.9", "--receipts", "/x/r.json"])
+            self.assertEqual(load.call_args[0][0], "/x/r.json")
+        with mock.patch.object(P, "drive", side_effect=drive), \
+                mock.patch.object(P, "load_receipts", return_value=({}, "stale")):
+            P.main(["--version", "9.9.9", "--receipts", "auto"])
+            self.assertEqual(seen["receipts"], {})
 
 
 if __name__ == "__main__":

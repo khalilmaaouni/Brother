@@ -1945,9 +1945,33 @@ def run_boxed(args):
     return r.returncode
 
 
+def ready_refusal(builds, env=None):
+    """"" or why this build list is not the digest's READY list (RD1.a, 2026-10-12). Run 1 of 2026-10-11 handed the lander
+    8 of 93 READY paths and a "... 85 more" line, and the 8 landed as if they were the whole list. A literal ellipsis is a
+    truncation marker, never a path. loop_pass.sh exports the digest's header count and listed number as
+    BROTHER_READY_COUNT and BROTHER_READY_LISTED: they must both be whole numbers, agree, and the list may be SHORTER
+    (one build per unit) but never longer. Neither set is a manual run: only the ellipsis rule applies."""
+    env = os.environ if env is None else env
+    for b in builds:
+        if b == "..." or b.endswith("...") or "..." in os.path.basename(b):
+            return "the build list carries an ellipsis (%r): a truncated READY list is never landed" % b[-60:]
+    has_n, has_k = "BROTHER_READY_COUNT" in env, "BROTHER_READY_LISTED" in env
+    if not has_n and not has_k: return ""
+    if has_n != has_k: return "the READY contract is half given: BROTHER_READY_COUNT and BROTHER_READY_LISTED come together"
+    n, k = env["BROTHER_READY_COUNT"], env["BROTHER_READY_LISTED"]
+    if not (re.fullmatch(r"[0-9]+", n) and re.fullmatch(r"[0-9]+", k)):
+        return "the READY contract is unreadable (count %r, listed %r): only whole numbers are read" % (n[:20], k[:20])
+    if int(n) != int(k): return "the digest said %s READY and listed %s: a partial list is never landed" % (n, k)
+    if len(builds) > int(k): return "the build list (%d) is longer than the %s paths the digest listed" % (len(builds), k)
+    return ""
+
+
 def main():
     if "--selftest" in sys.argv: return selftest()
     if sys.argv[1:2] == ["--boxed"]: return run_boxed(sys.argv[2:])
+    # THE READY CONTRACT (RD1.a): pure argument checks, before the hold gate, the upstream read and any git call
+    why = ready_refusal([a for a in sys.argv[1:] if not a.startswith("--")])
+    if why: print("REFUSED: " + why); return 2
     # THE LOOP'S HOLD BINDS THE LANDING ITSELF (D13, 2026-10-03): only the driver read LOOP-PAUSE.txt and LOOP-HOLD.txt
     # between passes, so a manual or in-flight land_batch.py landed, closed or pushed while the loop was held. The one
     # reader, loop_hold.gate, from THIS bin (the deployed copy, never the frozen copy or the landing tree), asks before any

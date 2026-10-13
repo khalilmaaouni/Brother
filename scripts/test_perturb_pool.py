@@ -1,6 +1,8 @@
 """perturb_pool.py driven both ways. The copy rules run against a real, tiny
 git repository this file makes for itself; the pool runs on fakes so each
 NO-DATA rule is shown without a minutes long suite."""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -8,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -105,6 +108,34 @@ class W4TheWorkerCap(unittest.TestCase):
         self.assertEqual(PP.capped_workers(0, load1=0.0, ncpu=8), 1)
 
 
+class W4bTheCountSettles(unittest.TestCase):
+    """The load spike from the baselines must not fix the pool at one worker."""
+
+    def _fake(self, loads, wait_s=120):
+        loads, t, slept = list(loads), [0.0], []
+
+        def cap(requested, load1=None):
+            return PP.capped_workers(requested, load1=loads.pop(0) if load1 is None else load1, ncpu=8)
+
+        def sleep(s):
+            slept.append(s)
+            t[0] += s
+        n = PP.settled_workers(4, wait_s=wait_s, cap=cap, sleep=sleep, clock=lambda: t[0])
+        return n, slept
+
+    def test_a_spike_that_decays_gets_the_full_count(self):
+        n, slept = self._fake([12.0, 9.0, 3.0])
+        self.assertEqual((n, len(slept)), (4, 2))
+
+    def test_a_load_that_stays_high_gives_up_at_the_wait(self):
+        n, slept = self._fake([12.0] * 40, wait_s=20)
+        self.assertEqual(n, 1)
+        self.assertEqual(sum(slept), 20)
+
+    def test_a_quiet_machine_never_waits(self):
+        self.assertEqual(self._fake([2.0]), (4, []))
+
+
 class FakeProc(object):
     def __init__(self, returncode=0, err=b""):
         self.returncode, self._err = returncode, err
@@ -181,6 +212,146 @@ class ThePool(Base):
         self.assertEqual([e for e in os.listdir(self.top) if e.startswith("copy")], [])
         self.assertEqual(sh(["git", "status", "--porcelain"], self.src).stdout, "")
         self.assertEqual(sh(["git", "rev-parse", "HEAD"], self.src).stdout.strip(), self.sha)
+
+
+NOTE = """# Brother 9.9.9
+
+## Files behind these claims
+
+| Claim | Source file | Goes red when this file breaks |
+|---|---|---|
+| one | `scripts/a.py` | `scripts/test_x.py` |
+| one | `scripts/b.py` | `scripts/test_x.py` |
+| two | `scripts/c.py` | NO-DATA |
+| two | `scripts/a.py` | `scripts/test_x.py` |
+| three | `scripts/d.py` | `scripts/test_y.py` |
+
+## After
+"""
+FILES = ("scripts/a.py", "scripts/b.py", "scripts/d.py")
+
+
+class TheMeasurement(Base):
+    """PP1.a: measure_table runs the pool over a note's table and records
+    wall, workers used, load and counts; infra Nones are counted apart."""
+
+    def note(self, text=NOTE):
+        path = os.path.join(self.top, "note.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def test_table_rows_reads_only_suite_rows_once_each_in_order(self):
+        self.assertEqual(PP.table_rows(self.note()),
+                         [("scripts/a.py", "scripts/test_x.py"),
+                          ("scripts/b.py", "scripts/test_x.py"),
+                          ("scripts/d.py", "scripts/test_y.py")])
+
+    def test_a_missing_note_or_one_without_a_table_has_no_rows(self):
+        self.assertEqual(PP.table_rows(os.path.join(self.top, "absent.md")), [])
+        self.assertEqual(PP.table_rows(self.note("# no table here\n")), [])
+
+    def fake_runner(self, answers, seen):
+        def runner(rows, source_root, baseline_wall, workers):
+            seen.append((list(rows), source_root, baseline_wall, workers))
+            return [(f, s) + answers[f] for f, s in rows]
+        return runner
+
+    def test_the_result_counts_infra_nones_apart_from_data_nones(self):
+        answers = {"scripts/a.py": (True, "red"),
+                   "scripts/b.py": (None, "no work copy: W6: disk floor"),
+                   "scripts/d.py": (None, "scripts/d.py does not parse")}
+        seen = []
+        ticks = iter([100.0, 107.5])
+        out = PP.measure_table(self.note(), self.src, 4, 42.0,
+                               runner=self.fake_runner(answers, seen),
+                               clock=lambda: next(ticks), load=lambda: 1.0)
+        self.assertEqual(out["rows"], 3)
+        self.assertEqual((out["covered"], out["uncovered"], out["no_data"], out["infra"]),
+                         (1, 0, 1, 1))
+        self.assertEqual(out["wall_seconds"], 7.5)
+        self.assertEqual(out["baseline_wall"], 42.0)
+        self.assertEqual(out["workers_requested"], 4)
+        self.assertEqual(out["load1_before"], 1.0)
+        self.assertEqual(out["load1_after"], 1.0)
+        self.assertEqual(out["commit"], self.sha)
+        self.assertEqual(seen[0][2], 42.0)
+
+    def test_each_infra_prefix_is_infra(self):
+        details = ["no work copy: x", "the worker ended before this row (exit 1): y",
+                   "baseline in the copy is not green (1): z"]
+        for detail in details:
+            out = PP.measure_table(self.note(), self.src, 2, 10.0,
+                                   runner=self.fake_runner({f: (None, detail) for f in FILES}, []),
+                                   load=lambda: 0.0)
+            self.assertEqual((out["infra"], out["no_data"]), (3, 0), detail)
+
+    def test_the_worker_count_is_the_capped_one(self):
+        seen = []
+        ncpu = os.cpu_count() or 1
+        out = PP.measure_table(self.note(), self.src, 4, 10.0,
+                               runner=self.fake_runner({f: (False, "green") for f in FILES}, seen),
+                               load=lambda: float(ncpu) + 50.0)
+        self.assertEqual(out["workers_used"], 1)
+        self.assertEqual(seen[0][3], 1, "the runner was asked for more than the cap")
+        self.assertEqual(out["uncovered"], 3)
+
+    def test_an_empty_table_never_calls_the_runner(self):
+        seen = []
+        out = PP.measure_table(self.note("# none\n"), self.src, 4, 10.0,
+                               runner=self.fake_runner({}, seen), load=lambda: 0.0)
+        self.assertEqual(seen, [])
+        self.assertEqual((out["rows"], out["wall_seconds"], out["no_data"]), (0, 0, 0))
+
+    def cli(self, argv, runner=None):
+        err, outbuf = io.StringIO(), io.StringIO()
+        runner = runner or self.fake_runner({f: (True, "red") for f in FILES}, [])
+        with mock.patch.object(PP, "run_rows", runner), \
+                mock.patch.object(PP, "SOURCE_ROOT", self.src), \
+                contextlib.redirect_stdout(outbuf), contextlib.redirect_stderr(err):
+            code = PP.main(argv)
+        return code, outbuf.getvalue(), err.getvalue()
+
+    def test_the_cli_prints_one_json_line_and_writes_out_whole(self):
+        out_path = os.path.join(self.top, "measured.json")
+        with open(out_path, "w") as fh:
+            fh.write("{corrupt")
+        code, out, _ = self.cli(["--measure", self.note(), "--workers", "2",
+                                 "--baseline-wall", "30", "--out", out_path])
+        self.assertEqual(code, 0)
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 1, out)
+        printed = json.loads(lines[0])
+        self.assertEqual(printed["covered"], 3)
+        with open(out_path) as fh:
+            self.assertEqual(json.load(fh), printed)
+        self.assertEqual(sorted(os.listdir(self.top)), ["measured.json", "note.md", "src"],
+                         "a temp file was left beside --out")
+
+    def test_the_cli_refuses_an_empty_table_and_writes_nothing(self):
+        out_path = os.path.join(self.top, "measured.json")
+        code, out, _ = self.cli(["--measure", self.note("# none\n"), "--workers", "2",
+                                 "--baseline-wall", "30", "--out", out_path])
+        self.assertEqual(code, 2)
+        self.assertIn("NO-DATA", out)
+        self.assertFalse(os.path.exists(out_path))
+
+    def test_a_runner_that_raises_leaves_no_out_file(self):
+        def boom(*a, **k):
+            raise OSError("no space")
+        out_path = os.path.join(self.top, "measured.json")
+        code, out, _ = self.cli(["--measure", self.note(), "--workers", "2",
+                                 "--baseline-wall", "30", "--out", out_path], runner=boom)
+        self.assertEqual(code, 2)
+        self.assertIn("NO-DATA", out)
+        self.assertEqual(sorted(os.listdir(self.top)), ["note.md", "src"])
+
+    def test_any_other_argument_shape_is_the_usage_error(self):
+        for argv in ([], ["--measure"], ["--measure", "n", "--workers", "x",
+                                          "--baseline-wall", "3"], ["--bogus"]):
+            with self.assertRaises(SystemExit) as ctx:
+                self.cli(argv)
+            self.assertIn("usage", str(ctx.exception.code), argv)
 
 
 if __name__ == "__main__":

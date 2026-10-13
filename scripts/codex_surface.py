@@ -109,7 +109,8 @@ VERBS = (
      "Never show a run id or a run directory; name the outcome. The page that shows where a project "
      "stands is written by `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_view.py\"` "
      "(`${CLAUDE_PLUGIN_ROOT}` under Claude Code) from the project's own records; offer it, never retype it."
-     " Answer \"loop status\" or \"is the loop healthy\" from `runtime/loop/loop_watch.py --log <the newest driver log>` and `runtime/loop/loop_intake.py status --running`, saying each line as printed."),
+     " Answer \"loop status\" or \"is the loop healthy\" from `runtime/loop/loop_watch.py --log <the newest driver log>` and `runtime/loop/loop_intake.py status --running`, saying each line as printed."
+     " Second opinions: show the one readout from `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/jev_status.py\"` (`${CLAUDE_PLUGIN_ROOT}` under Claude Code): per check its decisions, outcomes, agreement with Brother's own rule and what is missing, every line ending recorded, not acted on, and NO-DATA where nothing was recorded."),
     ("next",
      "Use when someone asks what to do next, which decision is waiting on them, or which packet to pick up. "
      "Returns exactly one recommended action with a one sentence reason, never a menu. Invoke as /brother "
@@ -132,7 +133,8 @@ VERBS = (
      "read is NO-DATA and never a pass. Report what passes, what does not, and the one next action. A design "
      "review judges the shape of a system before it is built: what it is for, how the process runs, the "
      "architecture and the data model, each against the law for that phase and nothing else."
-     " Answer \"What did the loop land\" from `runtime/loop/loop_report.py --run <the driver log>`, giving every figure with the file it names."),
+     " Answer \"What did the loop land\" from `runtime/loop/loop_report.py --run <the driver log>`, giving every figure with the file it names."
+     " When a check fails and the person wants a second look, save the failing output to a file and run `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/jev_door.py\" review --output <the file>` (`${CLAUDE_PLUGIN_ROOT}` under Claude Code); show its one line under the verdict, labelled second opinion. It is recorded, never acted on, and never changes the verdict."),
     ("deliver",
      "Use when work is finished and must close with evidence in hand: a delivery summary, a handover to "
      "another person, taking a decision back, or turning a lesson into a rule. Reads the receipt and refuses "
@@ -145,8 +147,10 @@ VERBS = (
      "handover pages another person takes a project over from are written by `python3 "
      "\"${BROTHER_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/bm_handover.py\"` (`${CLAUDE_PLUGIN_ROOT}` "
      "under Claude Code) from the records, never by hand. No receipt, or a refused entry, is a NOT DONE "
-     "report."
-     " Give the loop's morning report from `runtime/loop/loop_report.py --since-hours N` in the report shape (key takeaway, actions, blockers, next steps, facilitators) before any handover pack."),
+     "report. For a delivery, add `--assurance` to the receipt_door.py --verdict command below and report "
+     "all five gate lines."
+     " Give the loop's morning report from `runtime/loop/loop_report.py --since-hours N` in the report shape (key takeaway, actions, blockers, next steps, facilitators) before any handover pack."
+     " When a done note exists, run `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/jev_door.py\" deliver --note <the note file> --quotes yes|no` (yes when the note quotes a verifying command run after the last edit) and show its one line under the report. It is recorded, never acted on, and never changes whether the work is done."),
     ("help",
      "Use when someone asks what Brother does, how to use it, whether the install is healthy, or whether a "
      "newer release exists. Explains in plain language and checks the install; never prints a menu of skills. "
@@ -314,7 +318,9 @@ def render_skill(verb, description, body, root):
         "The engine owns execution, assurance and the receipt:\n\n"
         "```bash\npython3 \"${BROTHER_PLUGIN_ROOT}/runtime/brother_run.py\" \"<outcome>\" --cwd <repo>\n```\n\n"
         "(`${CLAUDE_PLUGIN_ROOT}` under Claude Code, `${PLUGIN_ROOT}` under Cursor.) Its last line is "
-        "`brother_run: receipt: <path>`; open that receipt and report every entry before claiming anything. "
+        "`brother_run: receipt: <path>`; read it with "
+        "`python3 \"${BROTHER_PLUGIN_ROOT}/runtime/receipt_door.py\" --verdict <path>`, report exactly what "
+        "it prints, and treat its exit code as the run's exit code. "
         "Keep PASS, FAIL and NO-DATA distinct.\n\n"
         "## 1.1.0 names that route here\n\n%s\n\n"
         "A request opening with one of them gets one line, `<old name> is now /brother %s` (with the words "

@@ -545,7 +545,9 @@ class EvTest(_Fixture):
 
     def test_round_cost_matches_the_runner_rule(self):
         self.assertEqual(ev_gate.DEFAULT_ARM_COST, "deepseek:0.02,muse:0.02,sonnet:0.10,astra:0.10")
-        self.assertAlmostEqual(ev_gate.round_cost_from_env({}), 5 * 0.02 + 2 * 0.02 + 0.10)
+        # the registry default mix since muse was retired (0a2cbc42d, 2026-10-05): deepseek:5,sonnet:1
+        self.assertEqual(ev_gate.WM.default_mix(), "deepseek:5,sonnet:1")
+        self.assertAlmostEqual(ev_gate.round_cost_from_env({}), 5 * 0.02 + 0.10)
         self.assertAlmostEqual(ev_gate.round_cost_from_env(self.ENV), 0.16)
         self.assertAlmostEqual(ev_gate.round_cost_from_env({"BROTHER_WORKER_MIX": "jev:2"}), 0.04)   # unpriced arm: 0.02
         self.assertIsNone(ev_gate.round_cost_from_env({"BROTHER_ARM_COST": "deepseek=0.02"}))

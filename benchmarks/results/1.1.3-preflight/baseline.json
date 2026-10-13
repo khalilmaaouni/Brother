@@ -1,0 +1,62 @@
+{
+ "schema": "brother-baseline-113/1",
+ "v112_tag_commit": "2e9a92f878957dbcf585f555397f5b5c7f6c7943",
+ "hub_release_commit": "89a543d13bc00cb6698cfc538f160774936610a8",
+ "base_commit": "665c956c4facab8622e5f6fdd28f60d64fb8bc2e",
+ "python3": "Python 3.13.14",
+ "usr_bin_python3": "Python 3.9.6",
+ "macos": "27.0.1",
+ "entries": [
+  {
+   "name": "required_fast",
+   "command": "sh scripts/required_fast.sh",
+   "exit_code": 1,
+   "counts": {
+    "pass": 59,
+    "fail": 1,
+    "no_data": 0
+   },
+   "log": "required_fast.log",
+   "log_sha256": "3e17dcd6e1b366971429c7059abde247af172a24032aff4c61e68ae2cf591a18",
+   "captured_at": "2026-10-12T02:35:01",
+   "provenance": "EXECUTED",
+   "verdict": "FAIL"
+  },
+  {
+   "name": "version_truth",
+   "command": "-B scripts/test_version_truth.py",
+   "exit_code": 0,
+   "counts": null,
+   "log": "version_truth.log",
+   "log_sha256": "0035dce26879857def4593f55ee9dad8773c84f009797417e6727c11620c0b31",
+   "captured_at": "2026-10-12T04:58:01",
+   "provenance": "EXECUTED",
+   "verdict": "PASS"
+  },
+  {
+   "name": "host_capability",
+   "command": "scripts/host_capability.py",
+   "exit_code": 0,
+   "counts": null,
+   "log": "host_capability.log",
+   "log_sha256": "2233b9a60d253dee749a19f99474490ce60b6d46153ab2aa00e88cc5622dcccb",
+   "captured_at": "2026-10-12T04:58:02",
+   "provenance": "EXECUTED",
+   "verdict": "PASS"
+  },
+  {
+   "name": "competitive_controls",
+   "command": "scripts/baseline_113.py --controls benchmarks/competitive/CONTROLS.json",
+   "exit_code": 0,
+   "counts": {
+    "no_data": 12,
+    "set": 33
+   },
+   "log": "competitive_controls.log",
+   "log_sha256": "c7f82ab7b0e45c6d7d338883f856daa9964e12be75a1db2f2f51d454200b2150",
+   "captured_at": "2026-10-12T04:58:02",
+   "provenance": "EXECUTED",
+   "verdict": "NO-DATA"
+  }
+ ]
+}

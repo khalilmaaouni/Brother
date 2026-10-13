@@ -46,6 +46,38 @@ Brother connects scoped execution, verification, delivery evidence, and local me
 
 **Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
 
+## What changed in 1.1.3
+
+Fast cut reuses each row receipt only when its bytes match, and one resumable driver prints a line for each phase, never pushes, and leaves the release question unanswered. A stopped cut leaves the release branch at the candidate; step 2b runs in parallel clones, and the Linux verdict checks the exact export tree before the question. Tests: `python3 -B scripts/test_cut_receipts.py`, `python3 -B scripts/test_cut_driver.py`, `python3 -B scripts/test_cut_preflight.py`, `python3 -B scripts/test_perturb_pool.py`, `python3 -B scripts/test_linux_canary.py`.
+
+Loop start names the real cause when a model seat is unavailable, times every launch step and prints the total, and refuses a battery launch before slow work. Intake checks run in parallel, content keyed gates are cached, and the READY list cannot be truncated. One maintainer machine measurement on 2026-10-12 took 79 s from command to first claimed unit. Tests: `python3 -B scripts/loop/test_seat_refusal_line.py`, `python3 -B scripts/loop/test_start_run.py`, `python3 -B scripts/loop/test_intake_parallel.py`, `python3 -B scripts/loop/test_loop_gate_cache.py`, `python3 -B scripts/loop/test_ready_contract.py`.
+
+Status, deliver and the engine's `receipt_door.py --verdict` command now read the same receipt verdict. Test: `python3 -B scripts/test_verdict_parity.py`.
+
+Recovery diagnoses a stale packed-refs.lock and refuses with the exact human remedy, without deleting the lock. A killed run resumes without losing a unit or merging one twice. Tests: `python3 -B scripts/test_stale_lock_refusal.py`, `python3 -B scripts/test_kill_boundaries.py`.
+
+Jev second opinions stay in shadow and do not change a verdict. Each check has a readout with measured agreement, review and deliver label second opinions, and the registry ships with installs or gives one NO-DATA reason. Tests: `python3 -B scripts/test_jev_status.py`, `python3 -B scripts/test_jev_door.py`, `python3 -B scripts/test_jev_public_install.py`.
+
+Ask for an iPhone check in plain words to get the doctor, profile-init, reference-init and run sequence, ending in a simulator receipt. It uses simulated devices, and screenshots stay local. Tests: `python3 -B scripts/test_mobile_door.py`, `python3 -B scripts/test_mobile_profile_init.py`, `python3 -B scripts/test_mobile_xcode_canary_local.py`.
+
+Memory now has one vault setting, `BROTHERMODE_VAULT_ROOT`, with the old names as aliases; two names pointing to two folders cause a refusal instead of a guess. Test: `python3 -B products/brothermode/tools/test_vault_resolver.py`.
+
+Human acceptance binds to the exact receipt it accepts. A review skip records who skipped, why and when. Tests: `python3 -B scripts/test_acceptance_binding.py`.
+
+Delivery shows all five assurance gates, not only numbers; an unrun gate reads `NO-DATA`. Test: `python3 -B scripts/test_assurance_matrix.py`.
+
+Safe unwatched time stops at the first human intervention, and a run without capture reads as an upper bound. Test: `python3 -B scripts/test_sut_interventions.py`.
+
+Host claims read certified, advisory or `NO-DATA` from re-parsed evidence. A host is not called enforced without a recorded denial. Test: `python3 -B scripts/test_host_evidence_binding.py`.
+
+Escape attempts are measured per host, door overhead uses samples rather than one run, and benchmark controls refuse a ranking while anything is `NO-DATA`. Tests: `python3 -B scripts/test_escape_measure.py`, `python3 -B scripts/test_door_overhead.py`, `python3 -B scripts/test_bench_controls.py`.
+
+Timing-sensitive tests are found and refused at the push. The battery runs in shards and only the rows a change reaches. Tests: `python3 -B scripts/test_timing_hunt.py`, `python3 -B scripts/test_check_all_merge.py`.
+
+A failed public check is rerun once only when the same export tree already passed on Linux. A refused loop start gets a labelled second opinion that never changes the refusal. Tests: `python3 -B scripts/test_export_public.py`, `python3 -B scripts/test_jev_start_refusal.py`.
+
+For the seven pain point pages, see [docs/pain-points/README.md](docs/pain-points/README.md).
+
 ## What changed in 1.1.2
 
 A run that reports PASS beside NO-DATA now exits 2, meaning unverified. If its receipt cannot be written or read back, it exits 1. The result line and exit code now reflect the run’s whole delivery verdict.
@@ -104,6 +136,8 @@ A developer described a regression suite whose failures were reported as passing
 
 **Limit:** A receipt is not an independent audit, and a test can be poorly designed.
 
+More: [The change says "done" without running the tests](docs/pain-points/done-without-running-tests.md).
+
 ### A small request expands into unrelated edits
 
 A [Cursor forum report](https://forum.cursor.com/t/linear-cursor-cloud-agent-sonnet-4-5-makes-overly-broad-edits-touches-18-files-when-only-1-2-expected/165633) (2026-07-13) describes a copy button change that touched about 18 files, including unrelated cleanup.
@@ -146,6 +180,8 @@ python3 scripts/brother_run.py --continue --cwd "$TARGET_REPO"
 
 **Limit:** A cash budget for Claude seats is not established. A prior eight-hour run does not guarantee unattended operation.
 
+More: [Headless sign-in lapses silently](docs/pain-points/headless-sign-in-lapses.md).
+
 ### A scheduled run cannot answer a prompt
 
 A report says scheduled tasks ask for folder and tool permissions again on each run: [issue #47180](https://github.com/anthropics/claude-code/issues/47180) (2026-04-13).
@@ -163,6 +199,8 @@ A report says scheduled tasks ask for folder and tool permissions again on each 
 **Evidence left:** The intake result and, if work proceeds, the run receipt.
 
 **Limit:** The specific sign-in warning and scheduled-run refusal improvements described in the plan are not part of this release.
+
+More: [Scheduled runs prompt for permission every time](docs/pain-points/scheduled-runs-that-prompt.md).
 
 ### Constraints disappear as the conversation grows
 
@@ -255,6 +293,8 @@ For your own task, ask Brother to show which check proves the requested behavior
 
 **Limit:** The agent may write code and tests that agree on the wrong answer. Use independent expected results where the outcome matters.
 
+More: [Second opinions you can read](docs/pain-points/second-opinions-you-can-read.md).
+
 ### An iOS simulator result needs context
 
 A report says the simulator tool failed after frameworks moved: [issue #79991](https://github.com/anthropics/claude-code/issues/79991) (2026-07-22). The simulator documentation also says screenshots are sent under conversation retention: [simulator documentation](https://code.claude.com/docs/en/desktop-ios-simulator.md).
@@ -264,14 +304,18 @@ A report says the simulator tool failed after frameworks moved: [issue #79991](h
 **Type:**
 
 ```text
-python3 scripts/mobile_workflow.py run
+python3 scripts/mobile_workflow.py profile-init --repo . --out ../evidence/profile.json --simulator-name "iPhone 16" --xcresult ../evidence/first-tests.xcresult
+python3 scripts/mobile_workflow.py reference-init --repo . --profile ../evidence/profile.json --out ../evidence/reference.json
+python3 scripts/mobile_workflow.py run --repo . --profile ../evidence/profile.json --reference ../evidence/reference.json --out ../evidence/run-1
 ```
 
-**What Brother does:** The mobile workflow records simulator evidence, including runtime and screenshot hash, for a run.
+**What Brother does:** The first two commands write the run profile and the working reference from your project, with no JSON to author; a missing simulator, a second candidate scheme or an absent test list stops with NO-DATA and the next step. The third builds, tests, installs and launches on the simulator you chose and records the simulator runtime and a screenshot hash for the run.
 
 **Evidence left:** A run receipt with the simulator runtime and screenshot SHA-256. Human acceptance remains a separate decision.
 
-**Limit:** Use simulated devices, not accounts containing real data. The plain-language mobile guidance and broader device matrix are planned work.
+**Limit:** Use simulated devices, not accounts containing real data. Run the reference command at the last good commit with a clean tree, then change, commit and run. The broader device matrix is planned work.
+
+More: [iOS simulator tooling breaks, and screenshots can leave the machine](docs/pain-points/ios-simulator-tooling.md) and [Say it, get a simulator run](docs/pain-points/say-it-get-a-simulator-run.md).
 
 ### A late release failure means repeating earlier steps
 
@@ -290,6 +334,8 @@ python3 scripts/cut.py
 **Evidence left:** The rehearsal record and the checks it reports.
 
 **Limit:** The planned fast path does not ship in this release.
+
+More: [A late release failure makes the whole chain run again](docs/pain-points/late-release-failure-reruns-everything.md).
 
 ## Installation
 

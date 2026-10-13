@@ -392,7 +392,15 @@ def main(argv=None):
             print(line)
         if refusal is not None:
             return refusal
-        ok, lines = regenerate(version)
+        prior = os.environ.pop(RN.ALLOW_DIRTY_ENV, None)
+        if args.allow_dirty:
+            os.environ[RN.ALLOW_DIRTY_ENV] = args.allow_dirty.strip()
+        try:
+            ok, lines = regenerate(version)
+        finally:
+            os.environ.pop(RN.ALLOW_DIRTY_ENV, None)
+            if prior is not None:
+                os.environ[RN.ALLOW_DIRTY_ENV] = prior
         for line in lines:
             print(line)
         if not ok:

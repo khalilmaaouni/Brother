@@ -49,6 +49,183 @@ def ev():
     return os.environ.get("INTAKE_EVIDENCE") or os.path.expanduser("~/.claude/evidence")
 
 
+# THE GATE CACHE (LA4.a, 2026-10-12). A relaunch on unchanged tools re-ran the parity test, the canary and the plan lint
+# (1:29 at 14:37:49). A deterministic gate now stores ONLY an OK, keyed by a sha256 over the bytes it reads; a hit
+# answers "<detail> (cached, key xxxxxxxx)" without running it. Every doubt runs the gate: a changed byte, a corrupt,
+# future dated or 24 h old cache, a key that cannot be computed. A FAIL, a NO-DATA or a FINDINGS is never stored. The
+# proofs, the tree, the hold and the live checks are never cached. A hit never refreshes `at`, so the real gate runs at
+# least daily (the bound on whatever ambient state a key does not name).
+GATE_CACHE_SCHEMA = "loop-gate-cache-v1"
+GATE_CACHE_MAX_AGE_S = 86400
+_SKIP_DIRS = ("__pycache__", ".git")
+
+
+def gate_cache_path(env=None):
+    env = os.environ if env is None else env
+    return os.path.join(env.get("INTAKE_EVIDENCE") or os.path.expanduser("~/.claude/evidence"), "loop-intake", "gate-cache.json")
+
+
+def _sha_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _raise(exc):
+    raise exc
+
+
+def _file_pairs(root, recursive=True, suffixes=None):
+    """[(relative path, sha256)] of the regular files under root (a symlink is followed), sorted; None when the root or
+    any file cannot be read. __pycache__ and .git are skipped."""
+    out = []
+    try:
+        if recursive:
+            walked = []
+            for d, dirs, files in os.walk(root, onerror=_raise):
+                dirs[:] = [x for x in dirs if x not in _SKIP_DIRS]
+                walked += [os.path.join(d, f) for f in files if f not in _SKIP_DIRS]
+        else:
+            walked = [os.path.join(root, f) for f in os.listdir(root)]
+        for p in walked:
+            if suffixes and not p.endswith(suffixes):
+                continue
+            if os.path.isfile(p):
+                out.append((os.path.relpath(p, root), _sha_file(p)))
+    except OSError:  # sbe: allow-silent a key that cannot be computed is None, and None means the real gate runs (LA4: any doubt runs the gate)
+        return None
+    return sorted(out)
+
+
+def _digest(parts):
+    import hashlib
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def tree_digest(root, names_only_top=False):
+    """sha256 over the sorted (relative path, file sha256) of root (only its top level files with names_only_top);
+    None when any file cannot be read."""
+    pairs = _file_pairs(root, recursive=not names_only_top)
+    return None if pairs is None else _digest(pairs)
+
+
+def stat_signature(path):
+    """"missing" for a missing file, "<size>:<mtime_ns>" otherwise, None for any other error (an outside input too big
+    or too live to hash, the ledger, is keyed by its signature)."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return "missing"
+    except (OSError, ValueError, TypeError):
+        return None
+    return "%d:%d" % (st.st_size, st.st_mtime_ns)
+
+
+def parity_key(repo, bin_dir, python_version=None):
+    """The parity test's inputs: scripts/loop (recursive), the top level scripts/*.py and *.sh, every file directly in
+    the bin directory (the deploy stamp included) and the interpreter. None when any of them cannot be read."""
+    parts = [_file_pairs(os.path.join(repo, "scripts", "loop")),
+             _file_pairs(os.path.join(repo, "scripts"), recursive=False, suffixes=(".py", ".sh")),
+             _file_pairs(bin_dir, recursive=False)]
+    if any(p is None for p in parts):
+        return None
+    return _digest(["parity", parts, python_version or sys.version, sys.executable])
+
+
+def lint_key(repo, plan_rel, scope, mode, ledger=None, roles=None, council=None, council_dir=None):
+    """The plan lint's inputs. Beyond the spec's list (plan, scope, mode, scripts/loop, docs/plan/specs, roles, the
+    ledger and council signatures) the WHOLE working tree is keyed by content: the lint asks whether paths named by
+    the plan exist (NEW-EXISTS, TEST-FOUND) and reads call site files anywhere, so a narrower key could serve a wrong
+    OK. ponytail: about a second over a 150 MB tree on a miss; name the read paths if that ever matters."""
+    import plan_lint
+    ledger = ledger or os.path.expanduser(plan_lint.LEDGER_PATH)
+    council = council or os.path.expanduser(plan_lint.COUNCIL_PATH)
+    council_dir = council_dir or os.path.expanduser(plan_lint.COUNCIL_DIR)
+    roles = roles or os.path.join(repo, "docs", "plan", "loop-roles.json")
+    plan = plan_rel if os.path.isabs(plan_rel) else os.path.join(repo, plan_rel)
+    try:
+        files = [_sha_file(plan), _sha_file(roles) if os.path.exists(roles) else "missing"]
+    except OSError:  # sbe: allow-silent an unreadable plan or roles file gives no key, so the plan lint runs for real; nothing is skipped
+        return None
+    tree = _file_pairs(repo)
+    council_tree = "missing" if not os.path.exists(council_dir) else _file_pairs(council_dir)
+    sigs = [stat_signature(ledger), stat_signature(council)]
+    if tree is None or council_tree is None or None in sigs:
+        return None
+    return _digest(["lint", files, scope, mode, tree, council_tree, sigs, sys.version])
+
+
+def _read_cache(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or doc.get("schema") != GATE_CACHE_SCHEMA or not isinstance(doc.get("gates"), dict):
+        return None
+    return doc
+
+
+def gate_cache_get(gate, key, now=None, path=None):
+    """The stored detail on an exact, fresh hit; None on anything else (a damaged file included)."""
+    doc = _read_cache(path or gate_cache_path())
+    row = doc["gates"].get(gate) if doc else None
+    if not isinstance(row, dict) or not isinstance(key, str) or row.get("key") != key or not isinstance(row.get("detail"), str):
+        return None
+    at, now = row.get("at"), time.time() if now is None else now
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or at > now or now - at > GATE_CACHE_MAX_AGE_S:
+        return None
+    return row["detail"]
+
+
+def gate_cache_put(gate, key, detail, now=None, path=None):
+    """"" when stored, else why not. Read modify write under an fcntl lock (the probes run in threads, LA2.a), written
+    through a temp file and os.replace, so a reader never sees half a document."""
+    import fcntl
+    path = path or gate_cache_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".lock", "a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            doc = _read_cache(path) or {"schema": GATE_CACHE_SCHEMA, "gates": {}}
+            doc["gates"][gate] = {"key": key, "detail": detail, "at": time.time() if now is None else now}
+            fd, tmp = tempfile.mkstemp(prefix=".gate-cache-", dir=os.path.dirname(path))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh, sort_keys=True)
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+    except OSError as exc:
+        return "the gate cache %s cannot be written (%s)" % (path, type(exc).__name__)
+    return ""
+
+
+def cached_gate(gate, key, run, path=None):
+    """(state, detail): a fresh exact hit without calling run; otherwise run(), stored only when it answered OK.
+    A None key runs the gate and stores nothing."""
+    if key is None:
+        return run()
+    hit = gate_cache_get(gate, key, path=path)
+    if hit is not None:
+        return "OK", "%s (cached, key %s)" % (hit, key[:8])
+    state, detail = run()
+    if state == "OK":
+        gate_cache_put(gate, key, detail, path=path)   # a store that fails costs a later rerun, never the verdict
+    return state, detail
+
+
+def _key_or_none(fn, *a, **k):
+    try:
+        return fn(*a, **k)
+    except Exception:   # sbe: allow-silent an uncomputable key runs the real gate, which is the safe direction
+        return None
+
+
 def qualifying(role, spec, reg):
     """Model names that loop_roles would NOT refuse for this role, BEST FIRST by the registry's own quality figure for
     the role's kind of work, so the first name is a sensible suggestion and not an accident of file order."""
@@ -189,6 +366,17 @@ def deployed_switch(env, bin_dir, jev_path=None):
     return "OK", "BROTHER_TRANSPORTS=%s: the deployed model router %s and the tree's Jev entry carry the allowlist" % (raw, path)
 
 
+def launcher_alive(env, now=None):
+    """LA3.b: the launcher's own live check, when it read nothing alive (exit exactly 0) at most LIVE_FRESH_S ago, as
+    the alive probe's answer; None in every other case, and the probe runs stop_loop.sh --dry as before."""
+    if env.get("START_RUN_LIVE_RC") != "0":
+        return None
+    age = _age(env.get("START_RUN_LIVE_AT", ""), now)
+    if age is None or age > LIVE_FRESH_S:
+        return None
+    return "OK", "nothing of the loop is alive (the launcher checked %d s ago)" % int(age)
+
+
 def real_probes():
     """The outside facts, each as (state, detail) with state OK, REFUSED or NO-DATA. Injected whole in tests."""
     if os.environ.get("INTAKE_PROBES") == "stub":
@@ -199,6 +387,9 @@ def real_probes():
         except (OSError, subprocess.SubprocessError):
             return None
     def alive():
+        said = launcher_alive(os.environ)
+        if said is not None:
+            return said
         r = run(["bash", os.path.join(HERE, "stop_loop.sh"), "--dry"])
         return ("NO-DATA", "stop_loop.sh --dry could not run") if r is None else ("OK", "nothing of the loop is alive") if r.returncode == 0 else ("REFUSED", (r.stdout.strip().splitlines() or ["something is alive"])[0][:120])
     def lease():
@@ -207,8 +398,11 @@ def real_probes():
     def parity():
         if not os.path.isfile(os.path.join(os.path.dirname(HERE), "test_loop_tool_parity.py")):
             return "NO-DATA", "the parity test is not beside this copy: run prepare from the repository, scripts/loop/loop_intake.py"
-        r = run([sys.executable, "-B", os.path.join(os.path.dirname(HERE), "test_loop_tool_parity.py")], 300)
-        return ("NO-DATA", "the parity test could not run") if r is None else ("OK", "executed tools equal the versioned ones") if r.returncode == 0 else ("REFUSED", "the executed tools differ from the repository: deploy first")
+        def go():
+            r = run([sys.executable, "-B", os.path.join(os.path.dirname(HERE), "test_loop_tool_parity.py")], 300)
+            return ("NO-DATA", "the parity test could not run") if r is None else ("OK", "executed tools equal the versioned ones") if r.returncode == 0 else ("REFUSED", "the executed tools differ from the repository: deploy first")
+        bin_dir = os.path.abspath(os.path.expanduser(os.environ.get("BROTHER_DEPLOY_TARGET", "~/.claude/bin")))   # the parity test's own BIN
+        return cached_gate("parity", _key_or_none(parity_key, os.path.dirname(os.path.dirname(HERE)), bin_dir), go)   # the repository root
     def headroom():
         r = run([sys.executable, os.path.join(HERE, "burn_guard.py"), "--stop-hour", "10"])
         return parse_headroom(r.stdout) if r is not None else None
@@ -218,14 +412,23 @@ def real_probes():
         tool = os.path.join(HERE, "loop_canary.py")
         if not os.path.isfile(tool):
             return "NO-DATA", "no end to end canary exists yet, so nothing proves the whole path before a start"
-        r = run([sys.executable, "-B", tool], 1800)
-        return ("NO-DATA", "the canary could not run") if r is None else ("OK", "a known good build went end to end") if r.returncode == 0 else ("REFUSED", (r.stdout.strip().splitlines() or ["the canary failed"])[-1][:140])
+        def go():
+            r = run([sys.executable, "-B", tool], 1800)
+            return ("NO-DATA", "the canary could not run") if r is None else ("OK", "a known good build went end to end") if r.returncode == 0 else ("REFUSED", (r.stdout.strip().splitlines() or ["the canary failed"])[-1][:140])
+        def key():
+            import loop_canary as LC
+            spec = LC.load_spec()
+            return LC.canary_key(spec, os.path.dirname(os.path.dirname(HERE))) if spec is not None else None
+        return cached_gate("canary", _key_or_none(key), go)
     # THE TREE THE DRIVER WILL RUN IN, checked with the SAME predicate loop_pass.sh applies on its first pass (a
     # dirty tree or unpushed commits exit 44 BLOCKED and ring the alarm). Measured 2026-09-22 13:16: an intake read
     # READY, two uncommitted files were written into the launch worktree after it, and the driver refused at pass 1.
     # An intake that does not look at the tree certifies a run the first pass will refuse.
     def tree():
-        return tree_state(os.path.dirname(os.path.dirname(HERE)))
+        sha = os.environ.get("START_RUN_UPSTREAM_SHA", "")
+        at = os.environ.get("START_RUN_FETCHED_AT", "")
+        return tree_state(os.path.dirname(os.path.dirname(HERE)), fetched_sha=sha if _SHA40.fullmatch(sha) else None,
+                          fetched_at=at if _EPOCH.fullmatch(at) else None)
     # THE PASS DIGEST IS RUN FOR REAL. It is the first tool every pass needs; on 2026-09-22 14:10 it crashed on a
     # formatting error and the driver was BLOCKED at pass 1 after an intake that had read READY.
     # Every tool the pass calls has a read only verb; each is run here, from the launch worktree, and must answer with
@@ -238,14 +441,99 @@ def real_probes():
     # THE PLAN LINT (FX-13.5), its CLI in a child process so a lint crash is a NO-DATA line, never an intake traceback.
     # The scope is the pool's own: BROTHER_SCOPE reaches the child through the environment it inherits (plan_lint reads
     # it when no --scope is given), never as a computed argument; unset, the whole plan (a default never narrows the work).
-    lint = pass_tool("plan_lint.py", ["--report", LINT_PLAN], (0,), read=lambda r: lint_answer(r.returncode, r.stdout, r.stderr))
+    # LA4.a: cached by its inputs, read where the lint reads them (root "." is the launch cwd); only an OK is stored.
+    lint_run = pass_tool("plan_lint.py", ["--report", LINT_PLAN], (0,), read=lambda r: lint_answer(r.returncode, r.stdout, r.stderr))
+    def lint_key_now():
+        import plan_lint
+        repo = os.path.dirname(os.path.dirname(HERE))
+        if not os.path.samefile(os.getcwd(), repo):   # samefile, not realpath: this disk ignores case
+            return None   # the lint reads ".", which is not the tree this copy keys: run it
+        return lint_key(repo, LINT_PLAN, os.environ.get("BROTHER_SCOPE") or ".", plan_lint.lint_mode(os.environ)[0], roles=plan_lint._roles_path())
+    lint = lambda: cached_gate("lint", _key_or_none(lint_key_now), lint_run)
     switch = lambda: deployed_switch(os.environ, os.path.abspath(os.path.expanduser(os.environ.get("BROTHER_DEPLOY_TARGET", "~/.claude/bin"))))
     # REACHABILITY (2026-09-30): one real minimal call per model the run will call, through the program it will use.
     def reach(plan):
         import model_reachability as MR
-        return seat_gate(MR.resolve_and_prove(plan))   # the newest proven program per transport, the owner pin first; then a seat
+        prev = read_current()
+        epoch = prev.get("epoch") if isinstance(prev, dict) else None
+        since = float(epoch) if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) else 0.0
+        fresh = fresh_transports(prev, breaker_events(since))   # SEAT1.c: a seat that failed last time is proved live
+        return seat_gate(MR.resolve_and_prove(plan, fresh=fresh))   # the newest proven program per transport, the owner pin first; then a seat
     return {"alive": alive, "lease": lease, "parity": parity, "switch": switch, "headroom": headroom, "canary": canary, "tree": tree, "digest": digest, "done": done, "salvage": salvage, "pool": pool, "lint": lint,
             "reach": reach, "hold": lambda: os.path.exists(os.path.join(ev(), "LOOP-HOLD.txt")), "now": datetime.datetime.now}
+
+
+#: The transports whose cached proofs a relaunch may refuse (SEAT1.c). Claude is out of scope: its seat is probed live
+#: every intake (seat_gate) and has its own breaker, and a forced Claude proof costs a paid call each launch.
+NON_CLAUDE = ("codex", "bridge")
+_TRIP_EVENTS = ("trip", "reopen", "config_trip")
+
+
+def fresh_transports(prev, events):
+    """The transports whose cached proofs are NOT trusted at this launch. Every doubt widens the set:
+    1. no previous record (missing, unreadable, corrupt, not a mapping): every NON_CLAUDE transport;
+    2. a previous record that is not READY: the transports in its seat_failures, or all of them when that key is
+       missing or not a list (a 1.1.2 record, or a corrupt one);
+    3. an event log that cannot be read (events is None): all of them;
+    4. a trip, reopen or config_trip event newer than the previous record: that event's transport."""
+    every = set(NON_CLAUDE)
+    if not isinstance(prev, dict):
+        return every
+    out = set()
+    if prev.get("verdict") != "READY":
+        failed = prev.get("seat_failures")
+        if not isinstance(failed, list):
+            return every
+        out |= {t for t in failed if t in NON_CLAUDE}
+    if events is None:
+        return every
+    epoch = prev.get("epoch")
+    since = float(epoch) if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) else 0.0
+    for row in events:
+        if not isinstance(row, dict) or row.get("event") not in _TRIP_EVENTS:
+            continue
+        t, key = row.get("t"), row.get("key")
+        if isinstance(t, (int, float)) and not isinstance(t, bool) and t <= since:
+            continue   # older than the previous record; a trip with no readable time counts
+        if not isinstance(key, str):
+            return every   # a trip on an unknown key: which seat failed cannot be said
+        parts = key.split(":")
+        transport = (parts[1] if len(parts) > 1 else "") if parts[0] == "config" else parts[0]
+        if transport in NON_CLAUDE:
+            out.add(transport)
+    return out
+
+
+def breaker_events(since, path=None):
+    """The breaker event rows newer than `since`; [] when the log does not exist (a fresh machine), None when it cannot
+    be read or a row cannot be parsed (an unknown never reads as "no trip")."""
+    if path is None:
+        try:
+            import breaker as BR
+            path = os.path.join(BR.state_root(), "breaker-events.jsonl")
+        except (ImportError, ValueError, OSError):
+            return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        return None
+    rows = []
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except ValueError:  # sbe: allow-silent a corrupt cache row makes the whole cache unreadable, which serves nothing and runs every gate
+            return None
+        if not isinstance(row, dict):
+            return None
+        t = row.get("t")
+        if not isinstance(t, (int, float)) or isinstance(t, bool) or t > since:
+            rows.append(row)   # a row with no readable time is kept: the reader decides, widening
+    return rows
 
 
 def seat_gate(proofs, probe=None, native=None):
@@ -271,23 +559,47 @@ def seat_gate(proofs, probe=None, native=None):
     return out
 
 
-def tree_state(repo):
+FETCH_FRESH_S = 120   # LA3.b: a launcher fetch younger than this, of the sha the upstream still names, is not repeated
+LIVE_FRESH_S = 30     # LA3.b: a launcher live check younger than this, that read nothing alive, is not repeated
+_SHA40 = re.compile(r"[0-9a-f]{40}")
+_EPOCH = re.compile(r"[0-9]+(\.[0-9]+)?")
+
+
+def _age(at, now):
+    """Seconds since `at`, or None when `at` is not a plain epoch number or lies in the future (stale-unknown)."""
+    if not isinstance(at, (int, float)) and not (isinstance(at, str) and _EPOCH.fullmatch(at)):
+        return None
+    age = (time.time() if now is None else now) - float(at)
+    return age if age >= 0 else None
+
+
+def tree_state(repo, fetched_sha=None, fetched_at=None, now=None, run=None):
     """(state, detail) for the tree a driver would run in: OK only when it is clean AND equal to its upstream.
     THE UPSTREAM IS READ FROM GIT, NEVER WRITTEN AS A LITERAL (owner, 2026-09-22: fix it at the root, for anyone who
     clones this repository). A literal remote and branch name is true on one laptop and false in every other clone.
-    No upstream, or git unable to answer, is NO-DATA: an unknown tree never reads as a clean one."""
-    def run(cmd, timeout):
+    No upstream, or git unable to answer, is NO-DATA: an unknown tree never reads as a clean one.
+    ONE FETCH (LA3.b, 2026-10-12): start_run.sh has just fetched and passes the upstream sha it read and when. The
+    fetch here is skipped only when that sha is a full sha, still what git names for the upstream, and at most
+    FETCH_FRESH_S old; any doubt (no sha, an odd one, a moved upstream, a stale or unreadable time) fetches as before."""
+    def _run(cmd, timeout):
         try:
             return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.SubprocessError):
             return None
+    run = run or _run
     if not os.path.isdir(os.path.join(repo, ".git")) and not os.path.isfile(os.path.join(repo, ".git")):
         return "NO-DATA", "no git checkout at %s: run prepare from the launch worktree" % repo
     up = run(["git", "-C", repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], 60)
     if up is None or up.returncode != 0 or "/" not in up.stdout.strip():
         return "NO-DATA", "this branch has no upstream, so nothing says where a landing pushes: git branch --set-upstream-to <remote>/<branch>"
     up = up.stdout.strip()
-    run(["git", "-C", repo, "fetch", "-q", up.split("/", 1)[0]], 120)
+    fresh = False
+    age = _age(fetched_at, now)
+    if isinstance(fetched_sha, str) and _SHA40.fullmatch(fetched_sha) and age is not None and age <= FETCH_FRESH_S:
+        head = run(["git", "-C", repo, "rev-parse", up], 60)
+        fresh = head is not None and head.returncode == 0 and head.stdout.strip() == fetched_sha
+    if not fresh:
+        run(["git", "-C", repo, "fetch", "-q", up.split("/", 1)[0]], 120)
     st = run(["git", "-C", repo, "status", "--porcelain"], 60)
     ah = run(["git", "-C", repo, "rev-list", "--count", up + "..HEAD"], 60)
     if st is None or ah is None or st.returncode != 0 or ah.returncode != 0 or not ah.stdout.strip().isdigit():
@@ -463,13 +775,93 @@ def role_plan(roles, reg, env=None):
 AFTER_RUN = ("after_run", "after_final_check")   # a role that acts only after the loop has exited cannot stop a run from working
 
 
-def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), accepted_by="", pair=False, env=None, plan=None, tree_root=None):
+def _clock_read(clock):
+    """One reading, or None when the clock raises or answers anything but a finite number (never a bool)."""
+    try:
+        t = clock()
+    except Exception:   # sbe: allow-silent a clock that cannot be read is a NO-DATA timing row, never a verdict (LA1)
+        return None
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or t != t or t in (float("inf"), float("-inf")):
+        return None
+    return float(t)
+
+
+def timed(name, fn, sink, clock=time.monotonic):
+    """THE STEP TIMER (LA1.a, reporting only): call fn() and append (name, seconds or None, raised) to sink. An exception
+    from fn propagates unchanged after its row is recorded; a clock that cannot be read records None. Nothing here
+    reads or changes a state, so the verdict is exactly what it is without the timer."""
+    t0 = _clock_read(clock)
+    raised = True
+    try:
+        out = fn()
+        raised = False
+        return out
+    finally:
+        t1 = _clock_read(clock)
+        sink.append((name, None if t0 is None or t1 is None else max(0.0, t1 - t0), raised))
+
+
+def time_lines(sink):
+    """One `TIME <step> <seconds>` line per row, `TIME NO-DATA <step>: ...` for a clock that could not be read. Every
+    line starts with TIME, so the launcher's refusal reader (^(REFUSED|NO-DATA)) can never match one. Never raises."""
+    out = []
+    for row in sink:
+        try:
+            name, sec = str(row[0]), row[1]
+            out.append("TIME NO-DATA %s: the clock could not be read" % name if sec is None else "TIME %s %.1f" % (name, float(sec)))
+        except Exception:   # sbe: allow-silent a row of an unknown shape is a NO-DATA line, the timer never breaks an intake
+            out.append("TIME NO-DATA: a timing row could not be read")
+    return out
+
+
+#: LA2.a: the intake's independent read only probes run together, at most PROBE_WORKERS at once, and are READ (lines,
+#: states, TIME rows) in PROBE_ORDER, never in completion order. Every real probe is a subprocess with its own timeout.
+PROBE_WORKERS = 8
+PROBE_ORDER = ("headroom", "alive", "lease", "parity", "switch", "tree", "digest", "done", "salvage", "pool", "lint", "canary", "reach", "hold")
+_TIME_NAME = {"lint": "plan_lint"}   # the plan lint keeps ONE line naming it (FX-13.5)
+_CANARY_AFTER = ("tree", "digest")   # the canary's `git worktree add` never overlaps their git status / fetch
+
+
+def _raised(name, exc):
+    """A probe that raised, as the value its existing NO-DATA branch in prepare reads (never the safe case)."""
+    if name in ("headroom", "reach"):
+        return None   # "could not be read" / "no proof was run": NO-DATA
+    if name == "hold":
+        return True   # an unreadable hold reads as HELD: nothing starts
+    return "NO-DATA", "probe %s raised %s: %s" % (name, type(exc).__name__, str(exc)[:120])
+
+
+def run_probes(probes, reach_plan, sink, workers=PROBE_WORKERS, clock=time.monotonic):
+    """{name: result} for every probe in PROBE_ORDER the dictionary holds (reach only with a plan, lint only when
+    callable), run in a pool of `workers`; the canary is submitted only after tree and digest have finished. Each call
+    is timed (LA1.a) and its rows reach `sink` in PROBE_ORDER after the join. A probe that raises is _raised(name)."""
+    import concurrent.futures as cf
+    names = [n for n in PROBE_ORDER if n in probes and (n != "reach" or reach_plan) and (n != "lint" or callable(probes[n]))]
+    rows = {n: [] for n in names}
+    def task(name):
+        fn = probes[name]
+        try:
+            return timed(_TIME_NAME.get(name, name), (lambda: fn(reach_plan)) if name == "reach" else fn, rows[name], clock)
+        except Exception as exc:   # sbe: allow-silent a raising probe is a NO-DATA result its verdict branch reads, never a traceback
+            return _raised(name, exc)
+    with cf.ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
+        futs = {n: pool.submit(task, n) for n in names if n != "canary"}
+        if "canary" in names:
+            cf.wait([futs[n] for n in _CANARY_AFTER if n in futs])
+            futs["canary"] = pool.submit(task, "canary")
+    for n in names:
+        sink.extend(rows[n])
+    return {n: futs[n].result() for n in names}
+
+
+def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), accepted_by="", pair=False, env=None, plan=None, tree_root=None, clock=time.monotonic):
     """(record, lines). Every check appends exactly one line; the verdict is derived from the states, nowhere else.
     pair=True makes the record the proof pair's: its deadline is the pair's end and must cover RB and RC.
     plan: the --plan value, the plan file this run reads and writes (through plan_path, the one selector); None keeps
     the selected plan (BROTHER_WBS or the default). tree_root: the launch tree the plan is read in (default: the
     checkout this file lives in)."""
     lines, states, waived = [], [], []
+    timings = []   # LA1.a: one (step, seconds, raised) row per probe call, in call order; printed before the verdict
     def add(state, text, hint=""):
         states.append(state); lines.append("%-8s %s%s" % (state, text, ("  HINT: " + hint) if hint and state != "OK" else ""))
     def advise(key, text, risk):
@@ -503,7 +895,12 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
             "name the pair's end at least %.1f h ahead" % (PAIR_COVER_S["RB"] / 3600.0))
     else:
         add("OK", "deadline %s%s" % (deadline, " today" if "-" not in str(deadline) else ""))
-    room = probes["headroom"]()
+    # LA2.a: every independent probe runs here, together (run_probes); each is READ below at its old position, so the
+    # lines, the states and the verdict are the serial ones. The role plan is pure, so reach can start with the rest.
+    role_models = {r: choices.get(r) or roles[r].get("default") for r in roles}
+    reach_plan = role_plan(role_models, reg, os.environ if env is None else env)
+    results = run_probes(probes, reach_plan, timings, workers=PROBE_WORKERS, clock=clock)
+    room = results["headroom"]
     if budget is None or budget <= 0:
         add("REFUSED", "budget %r is not a positive number of USD" % budget, "say what this run may spend, for example --budget-usd 10")
     elif room is None:
@@ -556,7 +953,7 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
     except model_router.Refused as exc:
         add("REFUSED", "BROTHER_TRANSPORTS is not a transport allowlist: %s" % exc, "name transports only, comma separated: claude, or claude,codex, or leave it unset")
     for name in ("alive", "lease", "parity", "switch", "tree", "digest", "done", "salvage", "pool"):
-        state, detail = probes[name](); add(state, detail, {"alive": "bash scripts/loop/stop_loop.sh --drain (runners leave at their checkpoints, nothing is killed), then bash scripts/loop/stop_loop.sh once it says DRAINED", "lease": "another driver holds it: stop that one first", "parity": "run the deploy tool, it never starts a driver",
+        state, detail = results[name]; add(state, detail, {"alive": "bash scripts/loop/stop_loop.sh --drain (runners leave at their checkpoints, nothing is killed), then bash scripts/loop/stop_loop.sh once it says DRAINED", "lease": "another driver holds it: stop that one first", "parity": "run the deploy tool, it never starts a driver",
                                                           "switch": "deploy the repository's model router (bash scripts/loop/deploy_stamped.sh deploy), then prepare again; a Claude only run never starts on a bin that ignores the switch",
                                                           "tree": "commit and push through the gate, or move the files out of the launch worktree; then prepare again",
                                                           "digest": "fix pass_digest.py first: a pass cannot run without it", "done": "fix loop_done.py first: the pass cannot tell FINISHED from WORKING without it",
@@ -576,7 +973,7 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
     elif not callable(probes["lint"]):
         state, detail = "NO-DATA", "the lint probe given is not callable"
     else:
-        answer = probes["lint"]()
+        answer = results["lint"]   # timed as plan_lint, not lint: the plan lint keeps ONE line naming it (FX-13.5, test_plan_lint)
         if isinstance(answer, tuple) and len(answer) == 2 and isinstance(answer[0], str) and answer[0] in ("OK", "FINDINGS", "NO-DATA") and isinstance(answer[1], str):
             state, detail = answer
         else:
@@ -588,7 +985,7 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
         add("OK", said)
     else:
         advise("lint", said, "units with blocking findings will be skipped by the pool; the report names each")
-    state, detail = probes["canary"]()
+    state, detail = results["canary"]
     if state == "NO-DATA":   # it could not be RUN, which is different from running and failing
         advise("canary", "canary: " + detail, "nothing proves the whole path end to end before money is spent; on 2026-09-22 that cost a night")
     else:
@@ -599,10 +996,9 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
     # AN EXECUTABLE IS NOT A PROOF (2026-09-30): the pinned claude existed and was executable, and it did not know the
     # model; 78 calls and 7 sub units were spent before anyone saw it. Every model the run will call answers, through the
     # program the run will use, or the run does not start. REQUIRED: a FAIL or a NO-DATA here can never be waived.
-    role_models = {r: choices.get(r) or roles[r].get("default") for r in roles}
     import model_reachability as MR
-    plan = role_plan(role_models, reg, os.environ if env is None else env)
-    proofs = probes["reach"](plan) if "reach" in probes and plan else None
+    plan = reach_plan
+    proofs = results.get("reach")   # absent when no reach probe was given or the plan is empty, as before
     if not plan:
         add("NO-DATA", "reachability: the role plan names no model the registry knows, so nothing proves a call can be answered")
     elif not isinstance(proofs, list) or len(proofs) != len(plan):
@@ -626,19 +1022,24 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
             programs[b["transport"]] = {"path": b["program"], "version": b["version"], "fingerprint": b["fingerprint"],
                                         "selected_by": "pin" if pr.get("pinned") else pr.get("selected_by") or "resolved",
                                         "rejected": pr.get("rejected") or []}
-    held = probes["hold"]()
+    held = results["hold"]
     lines.append("%-8s the owner's HOLD is %s" % ("HELD" if held else "OK", "IN FORCE: no driver may start until he orders it" if held else "absent"))
     if accept and not accepted_by.strip():
         states.append("REFUSED"); lines.append("REFUSED  --accept was given without --accepted-by: a waiver nobody signed is not a waiver")
     required_bad = any(s not in ("OK", "ASK") for s in states)
     verdict = "NOT READY" if required_bad else "NEEDS YOUR DECISION" if "ASK" in states else ("HELD" if held else "READY")
+    lines.extend(time_lines(timings))   # before the verdict: the launcher reads the LAST INTAKE line, unchanged
     lines.append("INTAKE %s" % verdict)
     rec = {"verdict": verdict, "at": now.isoformat(timespec="seconds"), "epoch": time.time(), "deadline": deadline, "budget_usd": budget, "scope": scope,
            "plan": plan_sel,   # the plan file this run reads and writes (plan_path): the run's plan identity, on disk
            "plan_refused": plan_refused,   # "" or why the plan above was refused: launch_env exports nothing for a refused plan
            "transports": _transports,   # the canonical allowlist text the driver runs under, or None
            "roles": {r: choices.get(r) or roles[r].get("default") for r in roles}, "waived": waived, "accepted_by": accepted_by.strip() if waived else "", "pins": pins, "lines": lines,
-           "reach": reach, "programs": programs, "proven": sorted(MR.cache_key(b) for b in reach)}   # the proven bindings startable() revalidates, and the programs the run uses
+           "reach": reach, "programs": programs, "proven": sorted(MR.cache_key(b) for b in reach),   # the proven bindings startable() revalidates, and the programs the run uses
+           # the non Claude transports whose proof was not OK: the next launch proves them live (SEAT1.c)
+           "seat_failures": sorted({pr.get("transport") for pr in (proofs or []) if isinstance(pr, dict)
+                                    and pr.get("status") != "OK" and pr.get("transport") in NON_CLAUDE}),
+           "timings": {row[0]: row[1] for row in timings}}   # LA1.a: step to seconds, None where the clock failed
     if pair and dl is not None:
         rec.update(pair=True, pair_until=dl.astimezone().isoformat(timespec="seconds"))
     return rec, lines
@@ -973,12 +1374,17 @@ def main():
         # ROUTING ADVICE FROM THE JOURNAL (P4, 2026-09-24): the newest runs' per model validity and cost, as a proposed
         # worker mix. Advice, never a decision: the owner or the start script sets BROTHER_WORKER_MIX. Best effort: an
         # intake never fails on advice it could not compute, it says NO-DATA.
-        try:
-            _adv = subprocess.run([sys.executable, "-B", os.path.join(HERE, "mix_advice.py"), "--runs", "3"], capture_output=True, text=True, timeout=180)
-            _line = next((l for l in (_adv.stdout or "").splitlines() if l.startswith(("ADVICE", "NO-DATA"))), "NO-DATA: mix_advice printed no advice line")
-        except (OSError, subprocess.SubprocessError, ValueError) as exc:
-            _line = "NO-DATA: mix advice could not run (%s)" % type(exc).__name__
+        def _mix():
+            try:
+                _adv = subprocess.run([sys.executable, "-B", os.path.join(HERE, "mix_advice.py"), "--runs", "3"], capture_output=True, text=True, timeout=180)
+                return next((l for l in (_adv.stdout or "").splitlines() if l.startswith(("ADVICE", "NO-DATA"))), "NO-DATA: mix_advice printed no advice line")
+            except (OSError, subprocess.SubprocessError, ValueError) as exc:
+                return "NO-DATA: mix advice could not run (%s)" % type(exc).__name__
+        _mix_t = []
+        _line = timed("mix_advice", _mix, _mix_t)
         lines.append("MIX      %s" % _line[:220])
+        lines.extend(time_lines(_mix_t))   # after the verdict, like MIX itself: information, never read as one
+        rec.setdefault("timings", {}).update({row[0]: row[1] for row in _mix_t})
         # THE PROGRAM RECORD (2026-09-30): rewritten only when the proven programs change, so its mtime is the fact that
         # re-seats a sub unit parked by a configuration fault (runner_pool.fact_time).
         try:

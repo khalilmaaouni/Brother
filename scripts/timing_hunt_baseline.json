@@ -1,0 +1,10 @@
+{
+ "schema": "timing-hunt-baseline-v1",
+ "tests": [
+  "scripts/loop/test_model_reachability.py::TheProofsRunTogether.test_one_key_two_threads_one_call",
+  "scripts/test_jev_loop_outcomes.py::Concurrency.test_eight_threads_lose_nothing",
+  "scripts/test_loop_bridge.py::ARenewedLeaseSurvivesAWorkerLongerThanItsLease.test_a_batch_slower_than_the_lease_is_not_read_as_abandoned",
+  "scripts/test_salvage_race.py::Race.test_promote_waits_for_the_shared_status_lock",
+  "scripts/test_spine.py::RollingRunStartsADependentWhileASiblingIsStillLive.test_dependent_starts_while_unrelated_sibling_still_runs"
+ ]
+}

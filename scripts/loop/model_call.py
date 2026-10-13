@@ -114,6 +114,7 @@ class Attempt(object):
             raise ValueError("status must be None or a member of breaker.STATUSES")
         self.status = status if status is not None else ("ANSWERED" if ok else "MALFORMED")
         self.raw = None   # the transport's {returncode, stdout, stderr} when a program ran, else None
+        self.slot_busy = False   # True when no admission slot came free in the wait (SEAT1.d: a proof says so fast)
 
     def __repr__(self):
         return "<%s %s %s>" % (self.model, "ok" if self.ok else "FAILED", self.detail[:50])
@@ -350,7 +351,9 @@ def config_outcome(transport, model_id, returncode, stdout, stderr, call_id, pro
     if status != "CONFIG":
         return False
     try:
-        BR.record(BR.config_key(transport, model_id), "CONFIG", call_id, (err + "\n" + out).strip())
+        # the reason is the cause word plus the LAST line (SEAT1.b): codex prints a banner first, and the breaker keeps
+        # only the detail's first line
+        BR.record(BR.config_key(transport, model_id), "CONFIG", call_id, BR.cause_text(err, out))
     except ValueError as exc:
         sys.stderr.write("model_call: CONFIG for %s:%s could not open its breaker (%s); the call is still CONFIG\n"
                          % (transport, model_id, exc))
@@ -486,6 +489,10 @@ def _next_other_family(order, reg, start, refused):
     return None
 
 
+#: The longest a reachability PROOF waits for an admission slot (SEAT1.d); a busy pool is then said, as NO-DATA, fast.
+PROOF_SLOT_WAIT_S = 20.0
+
+
 def call_one(name, prompt, kind, sensitivity, timeout=300, reg=None, runner=None, program=None, proof=False,
              expect=None, shadow=False):
     """One attempt against one model, with the wire check first. Never raises for a wire failure:
@@ -550,11 +557,15 @@ def call_one(name, prompt, kind, sensitivity, timeout=300, reg=None, runner=None
         # Every transport shares the bridge's pool. The machine policy, not
         # the number of workers in this caller, decides how many calls fit.
         limit = admission.effective_slots(root, sys.maxsize)
+        # a PROOF waits at most PROOF_SLOT_WAIT_S for a slot (SEAT1.d: five 120 s waits in one intake); production waits
+        # its full timeout
         slot = admission.acquire_slot(root, limit, "model-call-%s-%s" % (os.getpid(), name),
-                                      timeout_seconds=timeout)
+                                      timeout_seconds=min(timeout, PROOF_SLOT_WAIT_S) if proof else timeout)
     except (admission.NoSlotAvailable, OSError, ValueError) as exc:
-        return Attempt(name, False, "", "admission refused: %s" % exc, time.time() - t0,
-                       status="REFUSED_BY_GATE")
+        refused = Attempt(name, False, "", "admission refused: %s" % exc, time.time() - t0,
+                          status="REFUSED_BY_GATE")
+        refused.slot_busy = isinstance(exc, admission.NoSlotAvailable)
+        return refused
     try:
         # THE FINAL ADMISSION, after the slot wait: a trip another call recorded while this one queued stops it here, before
         # anything is transmitted. A call already transmitted is allowed to finish; a queued one never starts after a trip.
@@ -698,7 +709,13 @@ def _judge_body(name, reg, kind, prompt, r, secs, call_id="judge"):
             config_outcome(_t, (reg.get(name) or {}).get("id") or name, rc, r.get("stdout") or "", r.get("stderr") or "", call_id,
                            prompt=prompt):
         _log_bridge(name, reg, kind, prompt, err, False, secs)
-        _why = next((l for l in BR.config_channels(_t, out, err, _claude_doc(out), prompt).splitlines() if BR.is_config(l)), (err or out)[:200])
+        _chan = BR.config_channels(_t, out, err, _claude_doc(out), prompt)
+        _seat = BR.seat_cause(_chan)   # a dead seat names its cause and its last line, never the banner (SEAT1.b)
+        if _seat:
+            _what = "the seat is out of credits" if _seat == "credits" else "the seat's login is rejected"
+            return Attempt(name, False, "", "%s: %s: %s" % (CONFIG_WAIT, _what, BR.last_line(err) or BR.last_line(out)),
+                           secs, failure="CONFIG")
+        _why = next((l for l in _chan.splitlines() if BR.is_config(l)), (err or out)[:200])
         return Attempt(name, False, "", "%s: the program does not know this model: %s" % (CONFIG_WAIT, _why.strip()[:200]),
                        secs, failure="CONFIG")
     try:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ONE pass in ONE command, at most 25 lines: parity, load, plan counts, builds ready to land, runners that need a fact, council.
 usage (repo root of the launch worktree): pass_digest.py [--no-fetch]      pass_digest.py --selftest
+       pass_digest.py --ready-counts < digest   ("N K": the READY header count and the listed paths; exit 3 when they differ)
 Counts and the first 3 items only; details stay on disk. An unreadable source prints NO-DATA, never a zero and never a pass.
 The READY line is the exact argument list for land_batch.py."""
 import collections, json, os, re, subprocess, sys
@@ -209,6 +210,32 @@ def first3(xs):
         raise ValueError("first3 needs a sized sequence of strings, got %s" % type(xs).__name__)
     return "%d%s" % (len(xs), (": " + ", ".join(xs[:3]) + (" ..." if len(xs) > 3 else "")) if xs else "")
 
+# THE READY CONTRACT (RD1.a, 2026-10-12): run 1 of 2026-10-11 printed 8 READY paths then "... 85 more", the pass landed
+# the 8 it could read, and three in scope PASS builds were never landed. The writer and the reader share this text, so
+# the block has ONE printer and one parser, and the reader can ask whether the header's count equals the listed paths.
+READY_HEADER = re.compile(r"^READY   (\d+) to land:?$")
+READY_PATH = re.compile(r"^ +/.*-build\.json$")   # the pattern loop_pass.sh reads the paths with
+
+def ready_block(ready):
+    """The header line, then one line per path indented by eight spaces. The only printer of the READY list."""
+    return ["READY   %d to land%s" % (len(ready), ":" if ready else "")] + ["        " + p for p in ready]
+
+def parse_ready(digest):
+    """(the header's count, the listed build paths). No header, two headers or a header whose count is not a
+    number gives count None: unknown, never zero."""
+    lines = digest.splitlines()
+    heads = [l for l in lines if l.startswith("READY   ")]
+    m = READY_HEADER.match(heads[0]) if len(heads) == 1 else None
+    return (int(m.group(1)) if m else None), [l.strip() for l in lines if READY_PATH.match(l)]
+
+def ready_counts(digest):
+    """("N K", exit code): 0 when the header count N equals the K listed paths, or when the digest has no READY
+    header and no path at all (it could not read the runs, and its RUNS NO-DATA line says so); 3 otherwise."""
+    n, listed = parse_ready(digest)
+    if n is None and not listed and not any(l.startswith("READY   ") for l in digest.splitlines()):
+        return "- 0", 0
+    return "%s %d" % ("-" if n is None else n, len(listed)), (0 if n == len(listed) else 3)
+
 def selftest():
     """Answer the question even when a case RAISES. Measured 2026-09-22: eleven selftests in this
     directory exited 1 with a bare traceback and no verdict, so a pipeline reading the exit code and
@@ -240,6 +267,10 @@ def _selftest_body():
              ("dead runner is a stall, live one is not", stalled == ["D6.2"]),
              ("a sub unit of a CLOSED unit is never a blocker", closed_only == ["Y.1"]),
              ("closed_subs reads only DONE units", closed_subs(plan_closed) == {"Z.1"}), ("first3 truncates", first3(list("abcde")) == "5: a, b, c ...")]
+    _many = ["/b/N%d.a-r0-build.json" % i for i in range(1, 91)]; _block = "\n".join(ready_block(_many))
+    cases.append(("the many edge: 90 READY builds print every path under a header that counts them",
+                  _block.count("\n        /b/") == 90 and parse_ready(_block) == (90, _many) and ready_counts(_block) == ("90 90", 0)
+                  and ready_counts("READY   93 to land:\n        /b/N1.a-r0-build.json\n        ... 85 more") == ("93 1", 3)))
     import tempfile
     _d = tempfile.mkdtemp(prefix="upstream-"); _g = lambda *a: subprocess.run(["git"] + list(a), capture_output=True, text=True, timeout=60)
     _bare = os.path.join(_d, "r.git"); _clone = os.path.join(_d, "c"); _g("init", "-q", "--bare", "-b", "main", _bare); _g("clone", "-q", _bare, _clone)
@@ -276,6 +307,8 @@ def out(cmd, timeout=120):
 
 def main():
     if "--selftest" in sys.argv: return selftest()
+    if "--ready-counts" in sys.argv:   # loop_pass.sh's guard: a digest on stdin, no repository read
+        text, rc = ready_counts(sys.stdin.read()); print(text); return rc
     r = out(["date", "+%Y-%m-%d %H:%M %Z"]); print("TIME    " + (r.stdout.strip() if r else "NO-DATA"))
     global REMOTE, BRANCH
     up = upstream()
@@ -323,8 +356,7 @@ def main():
         if orphan: print("READY in no plan unit, not offered to land: %d" % orphan)
         ready, unprobed, need, stalled = partition(last, landed_subs(plan), {s for _, s in alive},
                                                    closed_subs(plan) | outside | (set(last) - in_plan))
-        print("READY   %d to land%s" % (len(ready), ":" if ready else ""))
-        for p in ready: print("        " + p)
+        for line in ready_block(ready): print(line)
         skipped = skipped_ready(last, landed_subs(plan), closed_subs(plan))
         if skipped: print("READY on closed units: %d skipped: %s" % (len(skipped), ", ".join(skipped)))
         print("UNPROBED %s (never landed: probe_round re-probes it, then a fresh runner rebuilds it)" % first3(unprobed))

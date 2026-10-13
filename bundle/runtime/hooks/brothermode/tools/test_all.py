@@ -621,6 +621,9 @@ SUITES = (
     # Registered in the same change that creates the suite, same lesson as every vault
     # entry here: the inventory gate refuses a test_*.py on disk that SUITES does not name.
     "test_vault_index_refresh.py",
+    # VR1 (1.1.3): the one vault resolver (BROTHERMODE_VAULT_ROOT and its aliases agree
+    # or FAIL), registered in the same change that creates the suite.
+    "test_vault_resolver.py",
     # Same lesson, same window: this branch's own retrieval-fusion suite
     # was left unregistered too. Registered here rather than left for the
     # next thing to trip over the same hole.

@@ -98,7 +98,7 @@ def stubbed_measurement(rows=None, problem=None, suite_result=None):
     def fake_run_suite(rel_path):
         return dict(result)
 
-    def fake_measured_file_rows(claim_suites, perturb=None):
+    def fake_measured_file_rows(claim_suites, perturb=None, version=None):
         return ([] if problem else list(table)), problem
 
     with mock.patch.object(R, "run_suite", fake_run_suite), \
@@ -907,6 +907,240 @@ class TheFilesTableIsMeasuredNotInferred(unittest.TestCase):
             "the same suite was driven twice for one file: %s" % fake.driven)
 
 
+class PoolPerturb(FakePerturb):
+    """FakePerturb plus the two names pooled_rows reads for the wall."""
+    TIMEOUT = 300
+
+    def __init__(self, caught, walls=None, **kw):
+        FakePerturb.__init__(self, caught, **kw)
+        self.walls = walls or {}
+
+    def wall_for(self, suite):
+        return self.walls.get(suite, self.TIMEOUT)
+
+
+class FakePool:
+    """Plays perturb_pool.run_rows: records every call and answers from
+    `answers[(file, suite)]` (default: covered when `caught` says so)."""
+
+    def __init__(self, caught=None, answers=None):
+        self.caught = caught or {}
+        self.answers = answers or {}
+        self.calls = []
+
+    def __call__(self, rows, root, wall, workers):
+        self.calls.append((list(rows), root, wall, workers))
+        return [(f, s) + self.answers.get(
+            (f, s), (self.caught.get((s, f), False), "detail")) for f, s in rows]
+
+
+class ThePoolMeasuresTheTable(unittest.TestCase):
+    """PP1.b: measured_file_rows hands its rows to perturb_pool in two
+    batches; any pool infrastructure doubt refuses the whole table."""
+
+    GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+
+    def setUp(self):
+        import subprocess
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        for name, text in (("subject.py", "x = 1\n"), ("other.py", "x = 1\n"),
+                           ("test_subject.py", "x = 1\n"),
+                           ("test_thing.py", "import subject\nimport other\n")):
+            with open(os.path.join(self.tmp, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+        for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "one"]):
+            subprocess.run(self.GIT + args, cwd=self.tmp, env=env, check=True,
+                           capture_output=True)
+        patcher = mock.patch.object(R, "ROOT", self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_pool_is_asked_once_per_pair_with_the_quiet_wall(self):
+        fake = PoolPerturb({}, walls={"test_thing.py": 42})
+        pool = FakePool(caught={("test_thing.py", "subject.py"): True,
+                                ("test_thing.py", "other.py"): True})
+        rows, problem = R.pooled_rows(
+            [("claim", "test_thing.py"), ("claim2", "test_thing.py")], fake, pool)
+        self.assertIsNone(problem)
+        self.assertEqual(len(pool.calls), 1, pool.calls)
+        pairs, root, wall, workers = pool.calls[0]
+        self.assertEqual(pairs, [("other.py", "test_thing.py"),
+                                 ("subject.py", "test_thing.py")])
+        self.assertEqual((root, wall, workers), (self.tmp, 42, 4))
+        self.assertEqual(fake.baselines_run, ["test_thing.py"])
+        self.assertEqual(fake.driven, [], "the live tree was perturbed")
+        self.assertEqual(rows, [("claim", "other.py", "test_thing.py"),
+                                ("claim", "subject.py", "test_thing.py"),
+                                ("claim2", "other.py", "test_thing.py"),
+                                ("claim2", "subject.py", "test_thing.py")])
+
+    def test_row_assembly_equals_the_serial_rule(self):
+        scenarios = [
+            ({("test_thing.py", "subject.py"): True, ("test_thing.py", "other.py"): True}, {}),
+            ({("test_subject.py", "subject.py"): True, ("test_thing.py", "other.py"): True},
+             {"subject.py": "test_subject.py"}),
+            ({("test_thing.py", "other.py"): True}, {"subject.py": "test_subject.py"}),
+            ({}, {"subject.py": "test_thing.py"}),
+        ]
+        for caught, siblings in scenarios:
+            serial, _ = R.measured_file_rows([("claim", "test_thing.py")],
+                                             perturb=FakePerturb(caught, siblings=siblings))
+            pool = FakePool(caught=caught)
+            pooled, problem = R.pooled_rows([("claim", "test_thing.py")],
+                                            PoolPerturb(caught, siblings=siblings), pool)
+            self.assertIsNone(problem)
+            self.assertEqual(pooled, serial, (caught, siblings))
+            asked = [p for call in pool.calls for p in call[0]]
+            self.assertEqual(len(asked), len(set(asked)), "a pair was asked twice: %s" % asked)
+
+    def test_the_sibling_goes_in_a_second_batch_with_its_own_wall(self):
+        fake = PoolPerturb({}, siblings={"subject.py": "test_subject.py"},
+                           walls={"test_thing.py": 42, "test_subject.py": 7})
+        pool = FakePool(caught={("test_subject.py", "subject.py"): True})
+        rows, _ = R.pooled_rows([("claim", "test_thing.py")], fake, pool)
+        self.assertEqual(len(pool.calls), 2)
+        self.assertEqual(pool.calls[1][0], [("subject.py", "test_subject.py")])
+        self.assertEqual(pool.calls[1][2], 7)
+        self.assertIn(("claim", "subject.py", "test_subject.py"), rows)
+
+    def test_each_pool_infrastructure_failure_refuses_the_whole_table(self):
+        for detail in ("no work copy: W6: 12.0 GiB free",
+                       "the worker ended before this row (exit 1): killed",
+                       "baseline in the copy is not green (1): FAILED"):
+            pool = FakePool(answers={("subject.py", "test_thing.py"): (None, detail)})
+            rows, problem = R.pooled_rows([("claim", "test_thing.py")],
+                                          PoolPerturb({}), pool)
+            self.assertEqual(rows, [], detail)
+            self.assertTrue(problem.startswith(R.NODATA), problem)
+            self.assertIn("could not be measured by the pool", problem)
+            self.assertIn(detail, problem)
+
+    def test_an_ordinary_none_stays_a_no_data_cell(self):
+        pool = FakePool(answers={("subject.py", "test_thing.py"): (None, "timed out after 60s")},
+                        caught={("test_thing.py", "other.py"): True})
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}), pool)
+        self.assertIsNone(problem)
+        self.assertIn(("claim", "subject.py", None), rows)
+
+    def test_a_pool_that_raises_or_drops_a_row_refuses_the_table(self):
+        def boom(*a):
+            raise OSError("no space left")
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}), boom)
+        self.assertEqual(rows, [])
+        self.assertIn("no space left", problem)
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}),
+                                      lambda rows, *a: [])
+        self.assertEqual(rows, [])
+        self.assertTrue(problem.startswith(R.NODATA), problem)
+
+    def test_a_dirty_tree_refuses_before_any_copy(self):
+        with open(os.path.join(self.tmp, "untracked.py"), "w") as fh:
+            fh.write("y = 2\n")
+        fake, pool = PoolPerturb({}), FakePool()
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], fake, pool)
+        self.assertEqual(rows, [])
+        self.assertIn("the tree is dirty", problem)
+        self.assertEqual(pool.calls, [])
+        self.assertEqual(fake.baselines_run, [])
+
+    def write(self, rel, text="x\n"):
+        full = os.path.join(self.tmp, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def test_the_two_release_files_refresh_cut_writes_are_tolerated(self):
+        self.write("docs/releases/9.9.9.md")
+        self.write("docs/releases/9.9.9.export-manifest.txt")
+        pool = FakePool()
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}),
+                                      pool, version="9.9.9")
+        self.assertIsNone(problem)
+        self.assertTrue(pool.calls)
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}),
+                                      FakePool(), version="9.9.8")
+        self.assertIn("the tree is dirty", problem, "another version's note was tolerated")
+
+    def test_a_third_dirty_path_still_refuses(self):
+        self.write("docs/releases/9.9.9.md")
+        self.write("docs/releases/9.9.9.notes.txt")
+        pool = FakePool()
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}),
+                                      pool, version="9.9.9")
+        self.assertEqual(rows, [])
+        self.assertIn("the tree is dirty", problem)
+        self.assertIn("9.9.9.notes.txt", problem)
+        self.assertEqual(pool.calls, [])
+
+    def test_allow_dirty_with_a_reason_passes_and_a_blank_reason_refuses(self):
+        self.write("scratch.txt")
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}),
+                                      FakePool(), version="9.9.9",
+                                      allow_dirty="merged main")
+        self.assertIsNone(problem)
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}),
+                                      FakePool(), version="9.9.9", allow_dirty="  ")
+        self.assertIn("the tree is dirty", problem)
+
+    def test_the_real_path_passes_the_version_and_the_allow_dirty_reason(self):
+        with mock.patch.object(R, "pooled_rows", return_value=([], "seen")) as pr, \
+                mock.patch.dict(os.environ, {R.ALLOW_DIRTY_ENV: "merged main"}):
+            R.measured_file_rows([("claim", "test_thing.py")], pool=FakePool(),
+                                 version="9.9.9")
+        self.assertEqual(pr.call_args[1]["version"], "9.9.9")
+        self.assertEqual(pr.call_args[1]["allow_dirty"], "merged main")
+
+    def test_a_red_live_baseline_sends_no_row_to_the_pool(self):
+        fake = PoolPerturb({}, baseline_for={"test_thing.py": 1, "test_subject.py": 1},
+                           siblings={"subject.py": "test_subject.py"})
+        pool = FakePool()
+        rows, problem = R.pooled_rows([("claim", "test_thing.py")], fake, pool)
+        self.assertIsNone(problem)
+        self.assertEqual([p for call in pool.calls for p in call[0]], [])
+        self.assertEqual(rows, [("claim", "other.py", None), ("claim", "subject.py", None)])
+
+    def test_the_prefixes_match_what_the_real_pool_writes(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import perturb_pool as PP
+
+        class Dead:
+            returncode = 1
+
+            def communicate(self):
+                return b"", b"killed"
+
+        def no_copy(src, dest):
+            raise PP.CopyFailed("W6: 12.0 GiB free")
+
+        def fake_copy(src, dest):
+            os.makedirs(dest)
+            with open(dest + PP.MARKER_SUFFIX, "w") as fh:
+                fh.write("x\n")
+
+        for copier, spawn, want in ((no_copy, None, "no work copy"),
+                                    (fake_copy, lambda argv, env: Dead(),
+                                     "the worker ended before this row")):
+            base = os.path.realpath(tempfile.mkdtemp())
+            self.addCleanup(shutil.rmtree, base, True)
+
+            def pool(rows, root, wall, workers, copier=copier, spawn=spawn, base=base):
+                return PP.run_rows(rows, root, wall, workers, base=base,
+                                   spawn=spawn, copier=copier)
+            rows, problem = R.pooled_rows([("claim", "test_thing.py")], PoolPerturb({}), pool)
+            self.assertEqual(rows, [], want)
+            self.assertIn(want, problem)
+
+    def test_the_real_path_routes_through_the_pool(self):
+        pool = FakePool()
+        with mock.patch.object(R, "pooled_rows", return_value=([], "seen")) as pr:
+            out = R.measured_file_rows([("claim", "test_thing.py")], pool=pool)
+        self.assertEqual(out, ([], "seen"))
+        self.assertIs(pr.call_args[0][2], pool)
+
+
 class E116TheExpensiveStepsAreStillWhatRefusesTheNote(unittest.TestCase):
     """The refusals only build()'s two subprocess steps can raise. All new
     here: before E116 gave those steps a seam, reaching any of them cost a
@@ -1024,18 +1258,27 @@ class ThePreflightStepRunsBeforeTheLongSteps(unittest.TestCase):
             "python3 scripts/export_public.py --dry-run --tag-time-checks",
             step_1c_body)
 
-    def test_step_4_dry_run_also_passes_the_flag(self):
-        """So the final CLEAR before the STOP line means the same thing
-        the real --push --tag will check, not only what step 1c already
-        covers earlier."""
+    def test_step_4_runs_only_the_invariant_and_the_chain_runs_the_dry_run(self):
+        """RC1.b1: step 4 keeps release_invariant.py and no longer runs a
+        second export dry run on the same bytes; cut.py's chain runs it
+        once (export_rows), after this script, on the tree that ships, with
+        --tag-time-checks, so the final check before the question still
+        means what the real --push --tag will check."""
         with open(R.CUT_SCRIPT, encoding="utf-8") as fh:
             text = fh.read()
         four = text.index("== 4.")
         stop = text.index("STOP. Review")
         step_4_body = text[four:stop]
-        self.assertIn(
-            "python3 scripts/export_public.py --dry-run --tag-time-checks",
-            step_4_body)
+        self.assertIn("python3 scripts/release_invariant.py", step_4_body)
+        code = [l for l in step_4_body.splitlines()
+                if l.strip() and not l.lstrip().startswith(("#", "echo"))]
+        self.assertFalse([l for l in code if "export_public.py" in l],
+                         step_4_body)
+        cut_py = os.path.join(os.path.dirname(R.CUT_SCRIPT), "cut.py")
+        with open(cut_py, encoding="utf-8") as fh:
+            body = fh.read()
+        self.assertIn("export_rows(", body)
+        self.assertIn('"--tag-time-checks"', body)
 
 
 class Night0912ReleaseNoteFromTree(unittest.TestCase):
@@ -1056,6 +1299,100 @@ class Night0912ReleaseNoteFromTree(unittest.TestCase):
             self.assertIn("a" * 40, line)
         finally:
             shutil.rmtree(d, ignore_errors=True)
+
+
+class TheNoteWritesItsReceipts(unittest.TestCase):
+    """RC1.d2 (docs/plan/specs/RC1.md): --write and --write-table leave step 2b's red receipts for exactly the table
+    rows that name a suite, a failure to write them never fails or alters the note, and step 2d passes
+    --receipts auto."""
+
+    def setUp(self):
+        import release_note_perturb as P
+        import cut_rehearsal as CR
+        self.P = P
+        self.tmp = tempfile.mkdtemp(prefix="release-note-receipts-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.releases = os.path.join(self.tmp, "releases")
+        self.ev = os.path.join(self.tmp, "evidence")
+        os.makedirs(self.releases)
+        trees = dict((d, "b" * 40) for d in CR.SCRIPT_DIRS)
+        for patcher in (mock.patch.object(R, "RELEASES_DIR", self.releases),
+                        mock.patch.object(P, "script_tree_key", return_value=(trees, "")),
+                        mock.patch.dict(os.environ, {"BROTHER_CUT_TEST": "1", "BROTHER_CUT_EVIDENCE_DIR": self.ev})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def main(self, argv, rows=None):
+        out = io.StringIO()
+        with stubbed_measurement(rows=rows), contextlib.redirect_stdout(out):
+            code = R.main(argv)
+        return code, out.getvalue()
+
+    def receipts(self):
+        with open(self.P.receipt_path("1.0.1"), encoding="utf-8") as fh:
+            return json.load(fh)["receipts"]
+
+    def test_write_leaves_receipts_for_exactly_the_rows_with_a_suite(self):
+        code, out = self.main(["--write", "--version", "1.0.1"])
+        self.assertEqual(code, 0, out)
+        got = sorted((r["source"], r["suite"], r["verdict"]) for r in self.receipts())
+        self.assertEqual(got, [("scripts/brother_run.py", "scripts/test_brother_run.py", "red"),
+                               ("scripts/receipt_door.py", "scripts/test_receipt_door.py", "red")])
+        self.assertIn("receipts: wrote %s" % self.P.receipt_path("1.0.1"), out)
+
+    def test_write_table_rewrites_the_receipts_from_the_new_table(self):
+        self.assertEqual(self.main(["--write", "--version", "1.0.1"])[0], 0)
+        os.remove(self.P.receipt_path("1.0.1"))
+        code, out = self.main(["--write-table", "--version", "1.0.1"], rows=CANNED_ROWS[:1] + CANNED_ROWS[2:])
+        self.assertEqual(code, 0, out)
+        self.assertEqual([r["source"] for r in self.receipts()], ["scripts/receipt_door.py"])
+
+    def test_a_table_with_no_suite_row_writes_no_file(self):
+        code, out = self.main(["--write", "--version", "1.0.1"], rows=CANNED_ROWS[2:])
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.path.exists(self.P.receipt_path("1.0.1")))
+        self.assertIn("receipts: not written:", out)
+
+    def test_a_receipt_write_failure_never_fails_or_alters_the_note(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores file permissions")
+        code, out = self.main(["--write", "--version", "1.0.1"])
+        self.assertEqual(code, 0, out)
+        with open(R.notes_path_for("1.0.1"), "rb") as fh:
+            before = fh.read()
+        shutil.rmtree(self.ev)
+        os.makedirs(self.ev)
+        os.chmod(self.ev, 0o500)
+        self.addCleanup(os.chmod, self.ev, 0o700)
+        code, out = self.main(["--write", "--version", "1.0.1"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("receipts: not written:", out)
+        with open(R.notes_path_for("1.0.1"), "rb") as fh:
+            self.assertEqual(fh.read(), before)
+        self.assertFalse(os.path.exists(self.P.receipt_path("1.0.1")))
+
+    def test_step_2d_passes_receipts_auto(self):
+        with open(R.CUT_SCRIPT, encoding="utf-8") as fh:
+            text = fh.read()
+        body = text[text.index("== 2d."):text.index("== 2t.")]
+        self.assertIn('python3 scripts/release_note_perturb.py --version "$VERSION" --receipts auto', body)
+
+
+def setUpModule():
+    # RC1.d2: main --write now leaves step 2b's receipts in the cut evidence
+    # folder; every case here points that folder at a throwaway one, so no
+    # test writes into the real ~/.claude/evidence/cut.
+    root = tempfile.mkdtemp(prefix="release-note-evidence-")
+    unittest.addModuleCleanup(shutil.rmtree, root, True)
+    patcher = mock.patch.dict(os.environ, {"BROTHER_CUT_TEST": "1",
+                                           "BROTHER_CUT_EVIDENCE_DIR": root})
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9 runs module cleanups only when this hook exists.
+    pass
 
 
 if __name__ == "__main__":

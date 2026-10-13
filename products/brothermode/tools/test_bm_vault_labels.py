@@ -20,6 +20,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "bm_vault.py")
+# VR1 (1.1.3): every child below sets BM_VAULT_ROOT to a temp vault. Two vault names on
+# two folders now FAIL by contract, so the developer's own BROTHERMODE_VAULT(_ROOT) must not
+# leak in: the real vault is never read by a test.
+for _vr1_name in ("BROTHERMODE_VAULT_ROOT", "BROTHERMODE_VAULT"):
+    os.environ.pop(_vr1_name, None)
 sys.path.insert(0, HERE)
 import bm_vault_labels as labels    # noqa: E402
 import bm_vault_compose as compose  # noqa: E402

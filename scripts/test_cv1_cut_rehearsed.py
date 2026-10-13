@@ -1246,6 +1246,15 @@ class CV1bRehearsal(unittest.TestCase):
         self.assertIn("NOT READY for %s" % RV, out)
         self.assertNotIn("\nREADY for", "\n" + out)
 
+    def test_the_cut_s_own_files_include_the_exception_file_its_step_2_edits(self):
+        # cut_v1.0.0.sh step 2 drops the release-invariant exception from BATTERY-EXPECTATIONS.json; the exit rule must
+        # treat that edit as the cut's own (the 1.1.3 rehearsal of 2026-10-12 refused it)
+        root = os.path.dirname(HERE) if "HERE" in globals() else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        own = C._cut_own_paths(root)
+        self.assertIn(os.path.join("docs", "plan", "BATTERY-EXPECTATIONS.json"), own)
+        with open(os.path.join(root, "scripts", "cut_v1.0.0.sh"), encoding="utf-8") as fh:
+            self.assertIn("BATTERY-EXPECTATIONS.json", fh.read())
+
     def test_resume_refuses_a_change_outside_the_cut_s_own_files(self):
         self.record()
         self.cut_chain(note_files={"docs/elsewhere.md": "x\n"})
@@ -1580,7 +1589,8 @@ class CV1cRetireCatalogs(unittest.TestCase):
         self.assertGreater(last, names.index("donecheck_u8.py"))
         self.assertEqual(calls[last][1][2:], ["--check", "--version", "1.1.0"])
         self.assertIn("retire_catalogs --apply", passed)
-        self.assertEqual(passed[-1], "retire_catalogs --check")
+        # LX1.b1: the last local row, then the canary awaited after it
+        self.assertEqual(passed[-2:], ["retire_catalogs --check", "linux canary"])
 
     def test_a_refused_check_stops_the_chain_and_a_refused_apply_stops_before_the_cut(self):
         calls, (passed, failed) = self.chain_calls(outputs={"retire_catalogs.py": (1, "NOT DONE\n")})
@@ -2333,6 +2343,33 @@ class CV1eAnswerSeam(unittest.TestCase):
         self.assertEqual(code, C.EXIT_NODATA, out)
         self.assertIn("drift", out)
         self.assertEqual(runner.claims(), [])
+
+
+def setUpModule():
+    # RC1.b1: the chain now runs the two export rows (a real export tree
+    # build) after required_fast; every scripted chain here (run through
+    # _cut_main, C.main, C.cut_mode, C.check_mode, C.chain and C.run_chain)
+    # is about something else, so the rows are answered PASS for the whole
+    # module. scripts/test_cut.py's TheExportRowsRunOnce proves the rows.
+    # LX1.b1: the same for the Linux canary, which every chain here would
+    # otherwise run through its scripted runner; scripts/test_cut.py's
+    # TheChainDispatchesTheCanary proves it.
+    for patcher in (mock.patch.object(C, "export_rows",
+                                      return_value=(True, ["export rows: stubbed"])),
+                    mock.patch.object(C, "start_canary", return_value=None),
+                    # LX1.b2: the record lookup answers covered; proven in
+                    # test_cut.py's TheQuestionNeedsTheCanary
+                    mock.patch.object(C, "canary_check",
+                                      return_value=("/fixture/canary.json", "")),
+                    mock.patch.object(C, "await_canary",
+                                      return_value=(True, ["linux canary: stubbed"]))):
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
+def tearDownModule():
+    # Python 3.9 runs module cleanups only when this hook exists.
+    pass
 
 
 if __name__ == "__main__":

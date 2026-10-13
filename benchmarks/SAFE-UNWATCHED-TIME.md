@@ -97,13 +97,26 @@ about.
   and this instrument measures the duration half. Consequence is a property of
   the workload family the run belongs to, declared with the benchmark that
   commissions the run, not derivable from a journal.
-- **Human interventions.** No event kind in this estate records an operator
-  input scoped to a run (`benchmarks/gauntlets/long-horizon-recovery.json`
-  reports HUMAN INTERVENTIONS as NO INSTRUMENT YET). So the script treats the
-  whole recorded run as unattended, which makes every figure it prints an UPPER
-  BOUND. When an intervention event kind exists it will truncate the span, and
-  the numbers printed before that will read high in hindsight. Said here rather
-  than discovered later.
+- **Human interventions, unless capture was on.** A person acting on a run is
+  recorded as an `operator.intervened` journal event, written through the one
+  append only journal writer (`python3 scripts/safe_unwatched_time.py <run>
+  --record ACTOR ACTION EFFECT`). Its payload is a closed vocabulary of three
+  fields (actor class, action kind, effect) and nothing else, so a prompt body,
+  a path or a secret cannot be stored; time and run id are the journal's own.
+  An event whose effect is `changed_run` is a fifth break, "a person changed
+  the run", and closes the span at its timestamp; a status read whose effect is
+  `none` is counted and does not break; an operator event that does not
+  validate also breaks, because nobody can tell whether it changed anything.
+  The older free text `human.intervention` event breaks the same way. The
+  figure is strict only when the run also carries an
+  `intervention.capture_on` marker (`--mark-capture`, at run start), the
+  statement that a human change to this run would have been journaled. A run
+  without the marker, which is every run recorded before this change, reads
+  `upper_bound` true and its line ends in `(upper bound)`: the instrument could
+  not see a person, so it treats the run as unattended. One ceiling stays: a
+  person who acted on a captured run without recording it cannot be detected
+  from the record, and a marker written late in a run vouches for the whole
+  span, so the launcher must write it at the start.
 - **Anything about a run that left no journal.** See NO-DATA above.
 
 ## Reading a figure honestly

@@ -4,6 +4,41 @@ Apply through the existing start, status, next, review and deliver routes.
 Keep one outcome and one receipt. Native implementation uses the engine's
 isolated units and real done checks, as the parent skill requires.
 
+## Check a change on a simulator
+
+Say what to check ("check my change on iPhone 16") and follow this sequence. It
+runs the project's own tests, builds, installs and launches on the simulator
+you name, and ends in one receipt. Evidence goes outside the repository.
+
+```sh
+python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" doctor --repo /path/to/app --out /path/to/evidence/doctor.json
+python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" profile-init --repo /path/to/app --out /path/to/evidence/profile.json --simulator-name "iPhone 16" --xcresult /path/to/evidence/first-tests.xcresult
+python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" reference-init --repo /path/to/app --profile /path/to/evidence/profile.json --out /path/to/evidence/reference.json
+python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" run --repo /path/to/app --profile /path/to/evidence/profile.json --reference /path/to/evidence/reference.json --out /path/to/evidence/run-1
+```
+
+Order matters. Run `reference-init` at the last good commit with a clean tree:
+it records that build as the working reference. Then make the change, commit
+it, and run. A project that has never run its tests through Brother needs one
+result bundle first: run its tests once with `xcodebuild test -resultBundlePath`
+and pass that bundle as `--xcresult`, or pass each exact test as
+`--expected-test test://...`; `profile-init` never runs your tests and never
+guesses a test. When it cannot choose (two schemes, two simulators, no
+simulator for the installed runtime) it stops with NO-DATA and names the
+candidates. The last line `run` prints is the receipt path
+(the file receipt/receipt.json under the run folder); it records the simulator runtime
+(`simulator.runtime`) and the screenshot hash (`screenshot.sha256`). Exit 0 is
+PASS, 1 FAIL, 2 NO-DATA. A technical PASS is not visual or human acceptance.
+Use simulated devices, never an account holding real data.
+
+Other asks answered from the same section. "Can I build iOS here?" is the first
+command alone: PASS or NO-DATA per tool, never a guess. "Does it fit the SE and
+the iPad?" is one run per named simulator, each with its own receipt naming its
+device; a one command device matrix is planned work. The receipt names the
+simulator (`simulator.name`), its runtime (`simulator.runtime`), the screenshot
+hash (`screenshot.sha256`), and says human acceptance is NO-DATA
+(`observations.human_acceptance`) until a person looks.
+
 ## Working order
 
 1. Establish the working app reference first. Read the installed version and
@@ -52,7 +87,7 @@ isolated units and real done checks, as the parent skill requires.
 In an installed bundle, resolve the plugin root from `${BROTHER_PLUGIN_ROOT}`
 or `${CLAUDE_PLUGIN_ROOT}` and use the scripts under `runtime/`. In a checkout,
 run the corresponding files under `scripts/` from the repository root.
-These are internal support tools for existing verbs and done checks.
+The run section above is the shipped way to check a change on a simulator; these two helpers are what it calls.
 
 ```sh
 python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" --help

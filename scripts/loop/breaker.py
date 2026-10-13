@@ -53,9 +53,47 @@ CONFIG_PATTERN = (r"unrecognized_model|model_not_found|not_found_error[^\n]{0,20
 CONFIG_RE = re.compile(CONFIG_PATTERN, re.I)
 
 
+# SEAT: THE SEAT ITSELF IS DEAD (SEAT1, 2026-10-11 15:45 ruling: a codex seat out of credits was refused as "upgrade
+# that program"). Like CONFIG, no retry changes the answer, so it is a configuration fault, matched only on a FAILED
+# call's structured channels. Every alternative is a text measured on disk: "workspace is out of credits" is
+# ~/.claude/evidence/ps-copy2-codex-20260928T215628.log lines 15 and 16; "credit balance" is native_worker.py
+# HOST_FAULT_RE; the 401 and token texts are native_worker.py's measured login notes (2026-10-03, 2026-10-05).
+# NOT covered: an OpenRouter credits failure (no saved text exists) and a 401 seen only in a Claude result text.
+SEAT_PATTERN = (r"(?P<credits>workspace is out of credits|credit balance)"
+                r"|(?P<login>Failed to authenticate\. API Error: 401|OAuth access token (?:is invalid|has expired))")
+SEAT_RE = re.compile(SEAT_PATTERN, re.I)
+SEAT_WORDS = {"credits": "the workspace is out of credits", "login": "the login is rejected (401)"}
+
+def seat_cause(text):
+    """"credits", "login" or "": which dead seat this failure text names. A non string is ""."""
+    if not isinstance(text, str):
+        return ""
+    m = SEAT_RE.search(text)
+    if m:
+        return m.lastgroup
+    # a cause_text sentence names its kind even when its last line does not carry the measured text
+    return next((k for k, words in sorted(SEAT_WORDS.items()) if words in text), "")
+
+def last_line(text):
+    """The LAST non empty line, stripped, cut to 200 characters: the error, never a banner printed before it."""
+    if not isinstance(text, str):
+        return ""
+    for line in reversed(text.splitlines()):
+        if line.strip():
+            return line.strip()[:200]
+    return ""
+
+def cause_text(stderr, stdout=""):
+    """The one cause sentence: the seat word plus the last line when the seat is dead, else the last line. stdout (the
+    answer) is read only when stderr says nothing, so an answer that quotes the words never names a dead seat."""
+    text = stderr if last_line(stderr) else stdout
+    kind, line = seat_cause(text), last_line(text)
+    return "%s: %s" % (SEAT_WORDS[kind], line) if kind else line
+
 def is_config(text):
-    """True when this failure text says the program or endpoint does not know the requested model."""
-    return isinstance(text, str) and bool(CONFIG_RE.search(text))
+    """True when this failure text says the program or endpoint does not know the requested model, or the seat is
+    dead (out of credits, login rejected)."""
+    return isinstance(text, str) and bool(CONFIG_RE.search(text) or SEAT_RE.search(text))
 
 
 def _without(text, *echoes):

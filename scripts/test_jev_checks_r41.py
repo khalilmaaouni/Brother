@@ -90,10 +90,17 @@ class R4PreambleIsolationProof(unittest.TestCase):
             self.assertTrue(os.path.isabs(mod._TEMP_STATE_DIR))
             self.assertTrue(mod._TEMP_STATE_DIR.startswith(tempfile.gettempdir()))
             live = mod._LIVE_HOME_SNAPSHOT
-            if live:
+            # a HOME inside the temp root or an ancestor of it (HOME=/ under the hermetic gate) is not a real home to
+            # isolate from: every temp path starts with it, so the check would prove nothing either way
+            rl, rt = os.path.realpath(live) if live else "", os.path.realpath(tempfile.gettempdir())
+            if live and not rl.startswith(rt) and not (rt + os.sep).startswith(rl.rstrip(os.sep) + os.sep):
                 self.assertFalse(mod._TEMP_STATE_DIR.startswith(live))
 
     def test_fail_closed_raises_skip(self):
         for mod in (checks_mod, seam_mod):
             with self.assertRaises(unittest.SkipTest):
                 mod._fail_closed("hostile test")
+
+
+if __name__ == "__main__":
+    unittest.main()

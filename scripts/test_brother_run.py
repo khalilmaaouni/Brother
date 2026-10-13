@@ -6662,6 +6662,29 @@ class _SlowWorker(object):
         return {"status": "ok"}
 
 
+class _TickingWorker(object):
+    """A worker whose wait is narrated by `ticks` beat.tick() calls made from inside its own run, so the beats come at a
+    known moment (after run_node registered the unit) and nothing sleeps or schedules. The lines land in `sink`."""
+
+    name = "the-slow-stub"
+
+    def __init__(self, beat, ticks, sink):
+        self.beat, self.ticks, self.sink = beat, ticks, sink
+
+    def run(self, unit, cwd=None):
+        for _ in range(self.ticks):
+            self.sink.extend(self.beat.tick())
+        return {"status": "ok"}
+
+
+class _NoThreadHeartbeat(run_heartbeat.Heartbeat):
+    """A Heartbeat whose timer loop returns at once: start() still makes it the active heartbeat run_node narrates
+    through, but no beat ever fires on its own, so every beat in a test is a tick() the test made."""
+
+    def _loop(self):
+        return
+
+
 class _AlwaysGreen(object):
     def verify(self, unit, cwd=None):
         return {"verdict": "PASS", "reason": "the stub says so"}
@@ -6689,10 +6712,16 @@ class TheWaitIsNarrated(unittest.TestCase):
     def _parts(self):
         return {"verify": _AlwaysGreen(), "repair": _NeverRepairs()}
 
-    def test_a_three_second_worker_at_one_second_beats_names_its_unit(self):
-        """The row's own done check: a stub run with a slow worker prints at
-        least one progress line. Two are demanded, not one, because a single
-        line is what the silent engine already produced."""
+    def _quiet_beat(self, interval=1.0):
+        """The no thread heartbeat at a frozen clock: every elapsed figure reads 0s, and no beat fires by itself."""
+        return _NoThreadHeartbeat(interval=interval, stream=io.StringIO(), bound_seconds=900,
+                                  clock=lambda: 100.0).start()
+
+    def test_a_real_timer_thread_fires_at_least_once(self):
+        """The one real thread test left (TH1.c, 1.1.3): a 3 second worker at a 1.0 second interval prints at least
+        one beat of any text, which the silent engine never did. Everything about WHAT a beat says is asserted below,
+        on tick() lines, because a count of real timer beats is what failed the 1.1.2 release check on a starved
+        runner (GitHub run 38146264768)."""
         out = io.StringIO()
         beat = run_heartbeat.Heartbeat(interval=1.0, stream=out,
                                        bound_seconds=900).start()
@@ -6702,31 +6731,54 @@ class TheWaitIsNarrated(unittest.TestCase):
         finally:
             beat.stop()
         self.assertEqual(record["verdict"], "PASS")
-        self._assert_narrated(out.getvalue())
+        self.assertIn("brother_run: still working:", out.getvalue())
+
+    def test_the_beats_name_the_unit_worker_bound_and_phase(self):
+        """The row's own done check without a scheduler: two beats made from inside the worker's run each name the
+        unit, the worker, the bound and the phase run_node registered. Two are demanded, not one, because a single
+        line is what the silent engine could also have printed through the pre-start beat."""
+        sink = []
+        beat = self._quiet_beat()
+        try:
+            record = loop_bridge.run_node({"id": "u1", "name": "the slow one"},
+                                          self._parts(), _TickingWorker(beat, 2, sink))
+        finally:
+            beat.stop()
+        self.assertEqual(record["verdict"], "PASS")
+        self.assertEqual(len(sink), 2, sink)
+        for line in sink:
+            for part in ("u1", "worker the-slow-stub", "0s of at most 900s", "the worker is running"):
+                self.assertIn(part, line, sink)
+        self._assert_narrated("\n".join(sink))
 
     def test_a_beat_before_the_unit_starts_is_honest_not_a_failure(self):
         """1.1.2 cut, GitHub run 38146264768: on a slow runner the first beat
         fired before run_node registered u1 and said "no piece of work has
         started yet", which is true, and the old rule (every beat names u1)
-        failed the release check. tick() puts that pre-start beat in the
-        stream deterministically; the narration that follows must still name
-        the unit at least twice."""
-        out = io.StringIO()
-        beat = run_heartbeat.Heartbeat(interval=1.0, stream=out,
-                                       bound_seconds=900).start()
+        failed the release check. Here every beat is a tick(): the pre-start
+        one first, then two from inside the worker that must name the unit,
+        and no pre-start line after them."""
+        sink = []
+        beat = self._quiet_beat()
         try:
-            out.write("\n".join(beat.tick()) + "\n")
+            sink.extend(beat.tick())
             record = loop_bridge.run_node({"id": "u1", "name": "the slow one"},
-                                          self._parts(), _SlowWorker(3.0))
+                                          self._parts(), _TickingWorker(beat, 2, sink))
         finally:
             beat.stop()
         self.assertEqual(record["verdict"], "PASS")
-        self._assert_narrated(out.getvalue())
+        self.assertEqual(len(sink), 3, sink)
+        self.assertIn("no piece of work has started yet", sink[0])
+        for line in sink[1:]:
+            self.assertIn("u1", line, sink)
+            self.assertNotIn("no piece of work has started yet", line, sink)
+        self._assert_narrated("\n".join(sink))
 
     def _assert_narrated(self, text):
         """At least two beats name u1, each with its worker and bound; the only
         other beat allowed is the pre-start one, and only before the first
-        beat that names the unit."""
+        beat that names the unit. Fed only tick() lines (TH1.c), so the count
+        rests on calls the test made, never on a timer."""
         beats = [line for line in text.splitlines()
                  if line.startswith("brother_run: still working:")]
         named = [line for line in beats if "u1" in line]
@@ -6743,15 +6795,15 @@ class TheWaitIsNarrated(unittest.TestCase):
 
     def test_each_state_change_says_so_once(self):
         out = io.StringIO()
-        beat = run_heartbeat.Heartbeat(interval=30.0, stream=out).start()
+        beat = _NoThreadHeartbeat(interval=30.0, stream=out, clock=lambda: 100.0).start()
         try:
-            loop_bridge.run_node({"id": "u2"}, self._parts(), _SlowWorker(0.0))
+            loop_bridge.run_node({"id": "u2"}, self._parts(), _TickingWorker(beat, 0, []))
         finally:
             beat.stop()
         lines = [line for line in out.getvalue().splitlines()
                  if line.startswith("brother_run: now u2")]
         # worker, scope read, done check, finished: four transitions, and no
-        # beat could have fired inside them at a 30 second interval.
+        # beat can fire inside them: this heartbeat has no timer at all.
         self.assertEqual(len(lines), 4, out.getvalue())
         self.assertIn("done, its check passed", lines[-1])
 

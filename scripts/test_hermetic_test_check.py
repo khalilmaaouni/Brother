@@ -868,6 +868,307 @@ class ImpactSelectedTests(unittest.TestCase):
         self.assertIn("NO-DATA", out.getvalue())
 
 
+BEAT = ("import unittest\n"
+        "class W(unittest.TestCase):\n"
+        "    def test_beats(self):\n"
+        "        beat = run_heartbeat.Heartbeat(interval=1.0, stream=out).start()\n"
+        "        run(_SlowWorker(3.0))\n"
+        "        self.assertGreaterEqual(len(named), 2)\n")
+BEAT_ID = "scripts/test_beat.py::W.test_beats"
+
+
+class TheTimingPushCheck(Base):
+    """TH1.b: a NEW uncovered timing test in a changed file is refused; the baseline names the old ones and may only
+    shrink. The export run is stubbed here (check has its own cases above); only the timing rows are under test."""
+
+    def put(self, rel, text):
+        with open(os.path.join(self.root, rel), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return rel
+
+    def baseline(self, ids):
+        import json
+        import timing_hunt
+        return self.put(timing_hunt.BASELINE, json.dumps({"schema": timing_hunt.SCHEMA, "tests": ids}))
+
+    def main(self, *argv):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest import mock
+        out = StringIO()
+        with mock.patch.object(H, "ROOT", self.root), mock.patch.object(H, "check", lambda *a, **k: [(H.OK, "stub", "stub")]), \
+                redirect_stdout(out):
+            code = H.main(list(argv))
+        return code, out.getvalue()
+
+    def test_a_new_uncovered_timing_test_in_a_changed_file_is_refused(self):
+        self.put("scripts/test_beat.py", BEAT)
+        self.baseline([])
+        code, out = self.main("scripts/test_beat.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("REFUSED", out)
+        self.assertIn("NEW uncovered timing test: " + BEAT_ID, out)
+        self.assertIn("# timing: deterministic because <seam>", out)
+
+    def test_a_baselined_or_covered_test_is_not_refused(self):
+        self.put("scripts/test_beat.py", BEAT)
+        self.baseline([BEAT_ID])
+        rows = H.timing_results(["scripts/test_beat.py"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.OK], rows)
+        self.assertIn("1 already in the baseline", rows[0][2])
+        self.put("scripts/test_beat.py", BEAT.replace("run(_SlowWorker(3.0))", "beat.tick()"))
+        self.baseline([])
+        rows = H.timing_results(["scripts/test_beat.py"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.OK], rows)
+
+    def test_a_growing_baseline_is_refused(self):
+        self.baseline(["scripts/test_old.py::C.test_a"])
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "baseline")
+        self.baseline(["scripts/test_old.py::C.test_a", BEAT_ID])
+        rows = H.timing_results(["scripts/timing_hunt_baseline.json"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.REFUSED], rows)
+        self.assertIn("the timing baseline may only shrink", rows[0][2])
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "grown")
+        rows = H.timing_results(["scripts/timing_hunt_baseline.json"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.REFUSED], "a committed growth is refused too: %s" % rows)
+        self.baseline([BEAT_ID])
+        rows = H.timing_results(["scripts/timing_hunt_baseline.json"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.OK], "a shrink is allowed: %s" % rows)
+
+    def test_a_first_baseline_is_not_growth(self):
+        self.baseline([BEAT_ID])
+        rows = H.timing_results(["scripts/timing_hunt_baseline.json"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.OK], rows)
+
+    def test_unreadable_inputs_are_no_data(self):
+        self.put("scripts/test_beat.py", "def test_x(:\n")
+        rows = H.timing_results(["scripts/test_beat.py"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.NODATA], rows)
+        self.put("scripts/test_beat.py", BEAT)
+        rows = H.timing_results(["scripts/test_beat.py"], self.root)   # no baseline at all
+        self.assertEqual([r[0] for r in rows], [H.NODATA], rows)
+        self.put("scripts/timing_hunt_baseline.json", "{not json")
+        rows = H.timing_results(["scripts/test_beat.py"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.NODATA], rows)
+        rows = H.timing_results(["scripts/timing_hunt_baseline.json"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.NODATA], "a changed baseline that cannot be read: %s" % rows)
+
+    def test_an_unreadable_baseline_that_does_not_matter_is_ok(self):
+        self.put("scripts/test_door.py", "def test_plain():\n    assert 1\n")
+        rows = H.timing_results(["scripts/test_door.py", "scripts/door.py", "README.md"], self.root)
+        self.assertEqual([r[0] for r in rows], [H.OK], rows)
+        self.assertEqual([r[0] for r in H.timing_results([], self.root)], [H.OK])
+
+
+class FakeHog(object):
+    def __init__(self, sticky=False):
+        self.alive, self.sticky = True, sticky
+
+    def poll(self):
+        return None if self.alive else -9
+
+    def kill(self):
+        if not self.sticky:
+            self.alive = False
+
+    def wait(self, timeout=None):
+        return self.poll()
+
+
+class FakeStarter(object):
+    """n fake hogs per call; `batches` keeps each call's hogs so a test can read what was alive when."""
+
+    def __init__(self, sticky=False):
+        self.batches, self.sticky = [], sticky
+
+    def __call__(self, n):
+        hogs = [FakeHog(self.sticky) for _ in range(n)]
+        self.batches.append(hogs)
+        return hogs
+
+    def alive(self):
+        return sum(1 for b in self.batches for h in b if h.alive)
+
+
+class LoadRunner(object):
+    """The run of a test file: red while any hog of `starter` is alive (or on the call numbers in `red_on`)."""
+
+    def __init__(self, starter, red_on=None, under_load=False, timeout=False):
+        self.starter, self.red_on, self.under_load, self.timeout = starter, red_on or (), under_load, timeout
+        self.calls, self.alive_at_call = 0, []
+
+    def __call__(self, cmd, **kw):
+        self.calls += 1
+        alive = self.starter.alive()
+        self.alive_at_call.append(alive)
+        if self.timeout:
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        if (self.under_load and alive) or self.calls in self.red_on:
+            return subprocess.CompletedProcess(cmd, 1, "FAIL: test_beats (m.C)\n", "FAILED (failures=1)\n")
+        return subprocess.CompletedProcess(cmd, 0, "OK\n", "")
+
+
+class TheSlowHost(Base):
+    """TH1.b, the dynamic hunt: each flagged file runs up to three times under n busy loops, inside held slots."""
+
+    def setUp(self):
+        super(TheSlowHost, self).setUp()
+        from unittest import mock
+        patcher = mock.patch.dict(os.environ, {"LOCAL_SLOTS": "2"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def slow(self, files, runner, starter, held="0,1", **kw):
+        return H.slow_host(self.root, files, 2, runner=runner, build=self.ships("test_beat.py", "test_two.py"),
+                           held=held, hog_starter=starter, **kw)
+
+    def test_a_test_that_fails_only_under_load_is_refused(self):
+        starter = FakeStarter()
+        rows = self.slow(["scripts/test_beat.py"], LoadRunner(starter, under_load=True), starter)
+        self.assertEqual([r[:2] for r in rows], [(H.REFUSED, "scripts/test_beat.py")], rows)
+        self.assertIn("repeat 1 of 3 failed under 2 busy loops", rows[0][2])
+        self.assertIn("test_beats", rows[0][2])
+
+    def test_hogs_are_started_and_reaped_around_every_repeat(self):
+        starter = FakeStarter()
+        runner = LoadRunner(starter)
+        rows = self.slow(["scripts/test_beat.py"], runner, starter)
+        self.assertEqual([r[0] for r in rows], [H.OK], rows)
+        self.assertIn("3 of 3 repeats", rows[0][2])
+        self.assertEqual(runner.alive_at_call, [2, 2, 2], "n busy loops alive during each repeat")
+        self.assertEqual(len(starter.batches), 3)
+        self.assertEqual(starter.alive(), 0, "every busy loop reaped")
+
+    def test_a_red_second_repeat_is_named(self):
+        starter = FakeStarter()
+        rows = self.slow(["scripts/test_beat.py"], LoadRunner(starter, red_on=(2,)), starter)
+        self.assertEqual(rows[0][0], H.REFUSED, rows)
+        self.assertIn("repeat 2 of 3", rows[0][2])
+
+    def test_a_timeout_under_load_is_refused(self):
+        starter = FakeStarter()
+        rows = self.slow(["scripts/test_beat.py"], LoadRunner(starter, timeout=True), starter)
+        self.assertEqual(rows[0][0], H.REFUSED, rows)
+        self.assertIn("timed out under load", rows[0][2])
+        self.assertEqual(starter.alive(), 0)
+
+    def test_a_busy_loop_that_survives_the_reap_is_no_data(self):
+        starter = FakeStarter(sticky=True)
+        rows = self.slow(["scripts/test_beat.py"], LoadRunner(starter), starter)
+        self.assertEqual(rows[0][0], H.NODATA, rows)
+        self.assertIn("left loaded", rows[0][2])
+
+    def test_without_the_slots_nothing_runs(self):
+        for held in (None, "", "unqueued", "0"):
+            with self.subTest(held=held):
+                starter = FakeStarter()
+                runner = LoadRunner(starter)
+                built = []
+                rows = H.slow_host(self.root, ["scripts/test_beat.py"], 2, runner=runner, build=built.append, held=held,
+                                   hog_starter=starter)
+                self.assertEqual([r[0] for r in rows], [H.NODATA], rows)
+                self.assertIn("could not take the slots; nothing was run", rows[0][2])
+                self.assertEqual((runner.calls, starter.batches, built), (0, [], []))
+
+    def test_a_hog_that_cannot_start_is_no_data_and_nothing_leaks(self):
+        started = []
+
+        def popen(argv, **kw):
+            if started:
+                raise OSError("no more processes")
+            hog = FakeHog()
+            started.append(hog)
+            return hog
+        with self.assertRaises(OSError):
+            H.start_hogs(2, popen=popen)
+        self.assertFalse(started[0].alive, "the one already started was reaped")
+        started[:] = []
+        runner = LoadRunner(FakeStarter())
+        rows = self.slow(["scripts/test_beat.py"], runner, lambda n: H.start_hogs(n, popen=popen))
+        self.assertEqual(rows[0][0], H.NODATA, rows)
+        self.assertIn("could not start", rows[0][2])
+        self.assertEqual(runner.calls, 0)
+        self.assertFalse(started[0].alive)
+
+    def test_the_time_cap_leaves_the_rest_no_data(self):
+        starter = FakeStarter()
+        ticks = iter([0.0, 0.0, 10.0])
+        rows = self.slow(["scripts/test_beat.py", "scripts/test_two.py"], LoadRunner(starter), starter,
+                         clock=lambda: next(ticks), cap=5)
+        self.assertEqual([r[:2] for r in rows], [(H.OK, "scripts/test_beat.py"), (H.NODATA, "scripts/test_two.py")], rows)
+        self.assertIn("not run: the time cap", rows[1][2])
+
+    def test_the_inventory_is_every_file_with_a_flagged_test_covered_or_not(self):
+        import timing_hunt
+        for name, text in (("test_beat.py", BEAT), ("test_two.py", BEAT.replace("run(_SlowWorker(3.0))", "beat.tick()")),
+                           ("test_plain.py", "def test_x():\n    assert 1\n"), ("test_bad.py", "def test_x(:\n")):
+            with open(os.path.join(self.root, "scripts", name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        self.assertEqual(timing_hunt.inventory_files(self.root),
+                         ["scripts/test_bad.py", "scripts/test_beat.py", "scripts/test_two.py"])
+
+    def test_an_empty_inventory_is_ok_and_says_so(self):
+        rows = self.slow([], LoadRunner(FakeStarter()), FakeStarter())
+        self.assertEqual([r[0] for r in rows], [H.OK], rows)
+        self.assertIn("no flagged test", rows[0][2])
+
+    def test_real_busy_loops_start_and_are_reaped(self):
+        hogs = H.start_hogs(1)
+        # a broken reap_hogs must fail this case, never leave a busy loop running after it (measured under M-TH1B-REAP)
+        self.addCleanup(lambda: (hogs[0].poll() is None and hogs[0].kill(), hogs[0].wait(timeout=5)))
+        try:
+            self.assertIsNone(hogs[0].poll(), "the busy loop is running")
+        finally:
+            left = H.reap_hogs(hogs)
+        self.assertEqual(left, 0)
+        self.assertIsNotNone(hogs[0].poll())
+
+    def test_slow_host_arguments_are_checked(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        for bad in (["--slow-host", "abc"],):
+            err = StringIO()
+            with redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+                H.main(bad)
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("NO-DATA", err.getvalue())
+        from contextlib import redirect_stdout
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(H.main(["--slow-host", "0"]), 2)
+        self.assertIn("NO-DATA", out.getvalue())
+
+    def test_without_held_slots_main_goes_through_heavy_slot_with_every_slot(self):
+        from unittest import mock
+        seen = []
+        env = {k: v for k, v in os.environ.items() if k not in ("BROTHER_HEAVY_SLOT_HELD", H.SLOW_REEXEC_ENV)}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(H.subprocess, "call", lambda argv, env=None: seen.append((argv, env)) or 7):
+            self.assertEqual(H.main(["--slow-host", "3"]), 7)
+        argv, child_env = seen[0]
+        self.assertTrue(argv[1].endswith("heavy_slot.py"), argv)
+        self.assertEqual(argv[-2:], ["--slow-host", "3"])
+        self.assertEqual(child_env["BROTHER_HEAVY_SLOT_WEIGHT"], "2")
+        self.assertEqual(child_env[H.SLOW_REEXEC_ENV], "1")
+
+    def test_a_reexec_that_still_holds_no_slot_runs_nothing(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest import mock
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_HEAVY_SLOT_HELD"}
+        env[H.SLOW_REEXEC_ENV] = "1"
+        out = StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(H, "ROOT", self.root), \
+                mock.patch.object(H.subprocess, "call", lambda *a, **k: self.fail("re-executed twice")), \
+                mock.patch.object(H, "start_hogs", lambda *a, **k: self.fail("a busy loop started without slots")), \
+                redirect_stdout(out):
+            code = H.main(["--slow-host", "2"])
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn("could not take the slots", out.getvalue())
+
+
 class _R14DeadRunner(object):
     """A runner whose call returns None, the shape P._run gives when it has
     no result at all. changed_paths must turn that into a problem, never an
