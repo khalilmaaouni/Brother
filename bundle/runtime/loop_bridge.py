@@ -899,7 +899,8 @@ def _jev_scope_audit(unit, changed_paths, registry, seams_config):
             continue
         if result.mode != "off":
             out.append({"path": path, "mode": result.mode, "reason": result.reason,
-                        "jev_answer": result.jev.get("answer") if result.jev else None})
+                        "jev_answer": result.jev.get("answer") if result.jev else None,
+                        "attempt_id": getattr(result, "attempt_id", None)})
     return out
 
 
@@ -972,7 +973,8 @@ def _jev_completion_second_opinions(worker_result, changed_paths, registry, seam
             ledger_dir=jev_checks.DEFAULT_LEDGER_DIR)
         if r063.mode != "off":
             out["j063"] = {"mode": r063.mode, "reason": r063.reason,
-                           "jev_answer": r063.jev.get("answer") if r063.jev else None}
+                           "jev_answer": r063.jev.get("answer") if r063.jev else None,
+                           "attempt_id": getattr(r063, "attempt_id", None)}
     except Exception:  # noqa: BLE001  # sbe: allow-silent a check that could not run contributes no second opinion, never blocks run_node()
         pass
     try:
@@ -982,10 +984,152 @@ def _jev_completion_second_opinions(worker_result, changed_paths, registry, seam
             ledger_dir=jev_checks.DEFAULT_LEDGER_DIR)
         if r102.mode != "off":
             out["j102"] = {"mode": r102.mode, "reason": r102.reason,
-                           "jev_answer": r102.jev.get("answer") if r102.jev else None}
+                           "jev_answer": r102.jev.get("answer") if r102.jev else None,
+                           "attempt_id": getattr(r102, "attempt_id", None)}
     except Exception:  # noqa: BLE001  # sbe: allow-silent a check that could not run contributes no second opinion, never blocks run_node()
         pass
     return out
+
+
+# JW3.a2: JEV'S SHADOW CHECKS LEARN WHETHER THEY WERE RIGHT. A shadow call
+# returns only an attempt id (the worker writes the terminal row later), so
+# each run_node() queues (attempt id, the loop's own deterministic answer)
+# and a later flush labels whichever attempts have landed, through
+# jev_outcome.label_attempt(). The label measures agreement with Brother's
+# own rule, the promotion test docs/how-to/use-calibrated-decisions.md
+# defines, never independent truth. Nothing here reads Jev's answer into
+# the loop: no verdict, integrable flag or repair decision depends on it,
+# and a failed label is a counted refusal, never a failed unit.
+# ponytail: the queue lives in process memory; a crash or restart loses it,
+# which costs labels and never writes a wrong one.
+_JEV_PENDING = []
+_JEV_PENDING_LOCK = threading.Lock()
+_JEV_FLUSH_LOCK = threading.Lock()
+_JEV_PENDING_MAX_AGE_S = 3600.0
+#: A flush reads the whole attempts ledger (tens of MB on a busy machine),
+#: and so does the binder for each label, so run_node() never flushes in
+#: its own lane: it starts at most one background flush a minute.
+_JEV_FLUSH_MIN_INTERVAL_S = 60.0
+_JEV_FLUSH_STATE = {"thread": None, "started": float("-inf")}
+
+
+def queue_jev_labels(scope_jev, completion_jev, scope, verdict, worker_result):
+    """Queues one label item per shadow call that carries an attempt id:
+    J117 per path against the declared scope audit, J063 against the first
+    verification verdict, J102 against the absence of a verification quote
+    in the bounded note. A NO-DATA or unrecognised verdict or scope queues
+    nothing for that check. Returns the number queued. Never raises."""
+    try:
+        items = []
+        now = time.time()
+
+        def add(entry, attempt_id, rule_says):
+            if isinstance(attempt_id, str) and attempt_id:
+                items.append({"attempt_id": attempt_id, "entry": entry,
+                              "rule_says": rule_says, "queued_at": now})
+
+        if scope_audit is not None and isinstance(scope, dict):
+            sv = scope.get("verdict")
+            undeclared = scope.get("undeclared", [])
+            if sv in (scope_audit.CLEAN, scope_audit.QUARANTINE) and isinstance(undeclared, list):
+                for e in scope_jev or []:
+                    if isinstance(e, dict):
+                        add("J117", e.get("attempt_id"), e.get("path") not in undeclared)
+        completion_jev = completion_jev if isinstance(completion_jev, dict) else {}
+        v = verdict.get("verdict") if isinstance(verdict, dict) else None
+        j063 = completion_jev.get("j063")
+        if isinstance(j063, dict) and v in ("PASS", "FAIL"):
+            add("J063", j063.get("attempt_id"), v == "PASS")
+        j102 = completion_jev.get("j102")
+        if isinstance(j102, dict) and isinstance(worker_result, dict):
+            note = _bounded_note(worker_result.get("note") or "")
+            add("J102", j102.get("attempt_id"), not bool(_VERIFICATION_QUOTE_RE.search(note)))
+        if items:
+            with _JEV_PENDING_LOCK:
+                _JEV_PENDING.extend(items)
+        return len(items)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a label that cannot be queued is a lost label, never a failed unit
+        return 0
+
+
+def flush_jev_labels(ledger_dir=None, final=False):
+    """Labels every queued item whose terminal row has landed, reading the
+    attempts ledger once. LABELLED, SKIPPED and REFUSED items leave the
+    queue; a PENDING item stays unless it is older than an hour or `final`
+    is true, when it is dropped and counted as expired. Prints one stderr
+    line only when something was refused. Never raises, never waits on a
+    Jev worker."""
+    counts = {"LABELLED": 0, "SKIPPED": 0, "REFUSED": 0, "PENDING": 0, "expired": 0}
+    try:
+        if jev_outcome is None:
+            return counts
+        if ledger_dir is None:
+            if jev_checks is None:
+                return counts
+            ledger_dir = jev_checks.DEFAULT_LEDGER_DIR
+        with _JEV_FLUSH_LOCK:
+            with _JEV_PENDING_LOCK:
+                snapshot = list(_JEV_PENDING)
+            if not snapshot:
+                return counts
+            path = jev_outcome.attempts_path(ledger_dir)
+            unreadable = os.path.lexists(path) and not os.path.isfile(path)
+            rows = {} if unreadable else jev_outcome.terminal_rows(
+                path, {item["attempt_id"] for item in snapshot})
+            now = time.time()
+            done = set()
+            first_refusal = None
+            for item in snapshot:
+                try:
+                    row = rows.get(item["attempt_id"])
+                    if unreadable:
+                        state, reason = "REFUSED", "attempts ledger %s is not a file" % path
+                    elif row is None:
+                        state, reason = "PENDING", "no single terminal row yet"
+                    else:
+                        state, reason = jev_outcome.label_attempt(
+                            ledger_dir, item["attempt_id"], item["rule_says"], row=row)
+                except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a raising label is a counted refusal
+                    state, reason = "REFUSED", "%s: %s" % (type(exc).__name__, exc)
+                if state == "PENDING":
+                    if not final and now - item.get("queued_at", now) <= _JEV_PENDING_MAX_AGE_S:
+                        counts["PENDING"] += 1
+                        continue
+                    state = "expired"
+                if state not in counts:
+                    state, reason = "REFUSED", "unknown label state %r" % (state,)
+                counts[state] += 1
+                if state == "REFUSED" and first_refusal is None:
+                    first_refusal = reason
+                done.add(id(item))
+            if done:
+                with _JEV_PENDING_LOCK:
+                    _JEV_PENDING[:] = [i for i in _JEV_PENDING if id(i) not in done]
+        if counts["REFUSED"]:
+            print("jev labels: %d refused, first: %s" % (counts["REFUSED"], first_refusal),
+                  file=sys.stderr)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a flush that cannot run labels nothing and changes no unit
+        pass
+    return counts
+
+
+def _flush_jev_labels_soon():
+    """Starts one background flush when something is queued, none is
+    running and the last began at least _JEV_FLUSH_MIN_INTERVAL_S ago.
+    Returns the started thread or None. Never raises, never waits."""
+    try:
+        with _JEV_PENDING_LOCK:
+            running = _JEV_FLUSH_STATE["thread"]
+            now = time.monotonic()
+            if (not _JEV_PENDING or (running is not None and running.is_alive())
+                    or now - _JEV_FLUSH_STATE["started"] < _JEV_FLUSH_MIN_INTERVAL_S):
+                return None
+            thread = threading.Thread(target=flush_jev_labels, name="jev-label-flush", daemon=True)
+            _JEV_FLUSH_STATE.update(thread=thread, started=now)
+        thread.start()
+        return thread
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a flush that cannot start labels later, never fails the unit
+        return None
 
 
 #: The usage fields accumulate_usage reports totals for. A field nobody
@@ -1540,6 +1684,11 @@ def _run_node_impl(node, parts, worker, cwd=None, max_attempts=3):
     # a vote in it. See _jev_completion_second_opinions()'s own docstring.
     completion_jev = _jev_completion_second_opinions(
         worker_result, jev_changed, jev_registry_, jev_seams_cfg)
+    # JW3.a2: queue labels against this FIRST verdict (the one the note was
+    # written against), then label earlier attempts that have landed, in
+    # the background. Both never raise and return nothing this reads.
+    queue_jev_labels(scope_jev, completion_jev, scope, verdict, worker_result)
+    _flush_jev_labels_soon()
     # SR-4: the breaker reads ONLY this token, from the worker's own failure
     # text, never from status or verdict. See failure_class_of() below.
     record = {"id": node["id"], "worker_status": worker_result.get("status"),
@@ -1833,6 +1982,12 @@ try:
     import jev_seam
 except Exception:  # noqa: BLE001
     jev_seam = None
+
+# JW3.a2: labels shadow attempts; optional exactly like jev_seam above.
+try:
+    import jev_outcome
+except Exception:  # noqa: BLE001
+    jev_outcome = None
 
 try:
     import worktree_lane
@@ -3726,6 +3881,10 @@ def main(argv=None):
     # already doing that bookkeeping itself.
     if jev_seam is not None:
         jev_seam.drain()
+    # JW3.a2: the final flush, after the drain gave the last workers the
+    # most time to land; anything still pending is dropped and counted.
+    # The flush lock queues it behind any background flush still running.
+    flush_jev_labels(final=True)
 
     return 1 if failed else 0
 

@@ -28,7 +28,7 @@ answer can never close a newer fault (breaker.close_config).
 usage:  model_reachability.py prove <model> [<model> ...]    one proof each, printed; exit 0 only when every one is OK
         model_reachability.py --selftest
 """
-import fcntl, hashlib, json, os, re, subprocess, sys, time
+import fcntl, hashlib, json, os, re, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -40,7 +40,10 @@ import model_router as R  # noqa: E402
 TTL_S = 900.0
 VERSION_TIMEOUT_S = 5.0
 TOTAL_S = 600.0
-LOCK_WAIT_S = TOTAL_S
+#: LA2.b: the cache file lock covers the cache read and the cache write only, never a live call, so it is waited for
+#: briefly; a lock held longer is NO-DATA ('the proof cache could not be used'). Was LOCK_WAIT_S = TOTAL_S (600 s).
+CACHE_LOCK_WAIT_S = 10.0
+PROOF_WORKERS = 4   # the admission pool's slot count: at most this many proofs at once
 ALLOWANCE_USD = 1.00
 #: A conservative ceiling per proof call, never the expected cost: the trimmed Claude child answered 7+5 for 0.0086 USD
 #: on 2026-09-23; an Opus or Codex answer is bounded well under these.
@@ -79,6 +82,7 @@ class Budget(object):
         self.usd, self.left_usd, self.clock = float(usd), float(usd), clock
         self.deadline = clock() + float(seconds)
         self.calls = 0
+        self._lock = threading.Lock()   # LA2.b: proofs run in threads; the test and the decrement are one step
 
     def remaining_s(self):
         return max(0.0, self.deadline - self.clock())
@@ -88,6 +92,10 @@ class Budget(object):
         bound = PER_CALL_USD.get(transport)
         if bound is None:
             return "no cost bound is known for transport %r" % transport
+        with self._lock:
+            return self._reserve(transport, bound)
+
+    def _reserve(self, transport, bound):
         if bound > self.left_usd + 1e-9:
             return "the intake's proof allowance is spent (%.2f of %.2f USD reserved over %d probe(s))" % (
                 self.usd - self.left_usd, self.usd, self.calls)
@@ -178,7 +186,7 @@ class _Locked(object):
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        deadline = time.time() + LOCK_WAIT_S
+        deadline = time.time() + CACHE_LOCK_WAIT_S
         while True:
             try:
                 fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -235,7 +243,39 @@ def cache_put(b, proved_at, path=None):
     _write_json(path, data)
 
 
+#: A proof that found no admission slot in MC.PROOF_SLOT_WAIT_S: the pool is held by a loop or a runner, not the seat.
+PROOF_SLOT_BUSY = "proof slot busy, a loop or runner holds all %s; stop it or wait"
+
+
+def real_cause(attempt):
+    """The cause of a failed proof, from the finished result itself (attempt.raw): "exit N: " plus the seat word and
+    the LAST non empty line (breaker.cause_text), never a banner printed first. An exit 1 Claude result document with
+    is_error true gives its result text. With no program result (a refusal before anything ran), or a result this
+    cannot read, the attempt's own detail, as before."""
+    raw = attempt.raw
+    detail = (attempt.detail or "")[:240]
+    if not isinstance(raw, dict):
+        return detail
+    rc, out, err = raw.get("returncode"), raw.get("stdout") or "", raw.get("stderr") or ""
+    if not isinstance(rc, int) or isinstance(rc, bool) or not isinstance(out, str) or not isinstance(err, str):
+        return detail
+    doc = MC._claude_doc(out)
+    failed_doc = isinstance(doc, dict) and bool(doc.get("is_error"))
+    if rc == 0 and not failed_doc:
+        return detail   # an exit 0 rejection (an empty body, a shape) is named best by the adapter's own detail
+    text = err
+    if failed_doc and isinstance(doc.get("result"), str) and doc["result"].strip():
+        text = doc["result"]
+    return ("exit %d: %s" % (rc, BR.cause_text(text, out) or "no output"))[:240]
+
+
 def remedy(transport, program, cause, pinned=False):
+    seat = BR.seat_cause(cause)   # the remedy follows the cause (SEAT1.d): a dead seat is never fixed by an upgrade
+    if seat == "credits":
+        return ("the workspace behind this program is out of credits: that is the owner's action (add credits, or choose "
+                "a model on another transport); updating the program will not help")
+    if seat == "login":
+        return "sign in again (the seat's login is rejected), then prepare again"
     if pinned:
         return ("the owner pin names a program that does not answer this model: upgrade that program, or unset the pin "
                 "so the newest proven one is chosen, then prepare again")
@@ -272,9 +312,11 @@ def _proof(status, inv, version, cause="", role="", cached=False, proved_at=None
             "cached": cached, "proved_at": proved_at, "binding": binding, "pinned": pinned}
 
 
-def prove(name, reg=None, program=None, budget=None, runner=None, role="", now=time.time, version_run=None, pinned=False):
+def prove(name, reg=None, program=None, budget=None, runner=None, role="", now=time.time, version_run=None, pinned=False,
+          fresh=False):
     """One reachability proof of `name` through `program` (None: the program production resolves). Never raises for
-    a failed call: the proof says FAIL or NO-DATA with its cause."""
+    a failed call: the proof says FAIL or NO-DATA with its cause. fresh=True never answers from the cache (SEAT1.c: a
+    relaunch after a seat failure proves that seat live); the live answer is cached as usual."""
     reg = reg or R.registry()
     budget = budget or Budget()
     m = reg.get(name)
@@ -297,36 +339,59 @@ def prove(name, reg=None, program=None, budget=None, runner=None, role="", now=t
         return _proof("NO-DATA", inv, None, "the version of %s could not be read in %.0f s" % (inv.program, VERSION_TIMEOUT_S),
                       role, pinned=pinned)
     b = _binding(inv, version, m)
-    t0 = now()
+    with _flight(cache_key(b)):   # LA2.b: one proof per key at a time; a waiter then finds the first one's cache entry
+        return _prove_bound(name, question, kind, reg, program, budget, runner, role, now, pinned, fresh, jev, inv, version, b)
+
+
+#: LA2.b: one in-process lock per cache key. ponytail: the dict grows by one lock per distinct key proved in this
+#: process (a handful per intake); prune it if a long lived process ever proves unbounded keys.
+_FLIGHTS = {}
+_FLIGHTS_LOCK = threading.Lock()
+
+
+def _flight(key):
+    """The one lock object for this cache key, in this process."""
+    with _FLIGHTS_LOCK:
+        return _FLIGHTS.setdefault(key, threading.Lock())
+
+
+def _prove_bound(name, question, kind, reg, program, budget, runner, role, now, pinned, fresh, jev, inv, version, b):
+    """The proof of one bound key, under its flight. The cache file lock is held for the cache read (with the breaker
+    check) and, separately, for the cache write; the live call runs with NO file lock (LA2.b)."""
+    t0 = now()   # read after the flight wait: a proof the previous holder just cached is younger than t0, never newer
     try:
         with _Locked(cache_path()):
-            hit = cache_get(b, t0)
+            hit = None if fresh else cache_get(b, t0)
             # A CACHED PROOF NEVER ANSWERS WHILE THE CONFIGURATION BREAKER IS OPEN (attack R1 F1): a production call
             # tripped it after the cached proof, so the cache is stale evidence. Only a FRESH proof can close it.
             if hit and not BR.config_open(BR.config_key(inv.transport, inv.model_id)):
                 return _proof("OK", inv, version, "cached proof from %s" % time.strftime("%H:%M:%S", time.localtime(hit["proved_at"])),
                               role, cached=True, proved_at=hit["proved_at"], binding=b, pinned=pinned)
-            why = budget.reserve(inv.transport)
-            if why:
-                return _proof("NO-DATA", inv, version, why, role, pinned=pinned)
-            timeout = min(PROBE_TIMEOUT_S.get(inv.transport, 120.0), budget.remaining_s())
-            a = MC.call_one(name, question, kind, R.PUBLIC, timeout=int(max(1, timeout)), reg=reg, runner=runner,
-                            program=program, proof=True)
-            proved_at = now()
-            if a.failure == "CONFIG":
-                return _proof("FAIL", inv, version, a.detail[:240], role, pinned=pinned)
-            if not a.ok:
-                state = "NO-DATA" if ("timed out" in a.detail or "admission refused" in a.detail) else "FAIL"
-                return _proof(state, inv, version, a.detail[:240], role, pinned=pinned)
-            if jev:
-                good = '"ok"' in a.answer or "ok=" in a.answer
-            else:
-                good = bool(ANSWER_RE.fullmatch(a.answer or ""))
-            if not good:
-                return _proof("FAIL", inv, version, "answered, but not the proof's answer: %r" % (a.answer or "")[:80], role, pinned=pinned)
-            sub = _substituted(inv, a)
-            if sub:
-                return _proof("FAIL", inv, version, "another model answered: %s" % sub, role, pinned=pinned)
+        why = budget.reserve(inv.transport)
+        if why:
+            return _proof("NO-DATA", inv, version, why, role, pinned=pinned)
+        timeout = min(PROBE_TIMEOUT_S.get(inv.transport, 120.0), budget.remaining_s())
+        a = MC.call_one(name, question, kind, R.PUBLIC, timeout=int(max(1, timeout)), reg=reg, runner=runner,
+                        program=program, proof=True)
+        proved_at = now()
+        if a.failure == "CONFIG":
+            return _proof("FAIL", inv, version, real_cause(a), role, pinned=pinned)
+        if getattr(a, "slot_busy", False):
+            n = re.search(r"no slot free among (\d+)", a.detail or "")
+            return _proof("NO-DATA", inv, version, PROOF_SLOT_BUSY % (n.group(1) if n else "of them"), role, pinned=pinned)
+        if not a.ok:
+            state = "NO-DATA" if ("timed out" in a.detail or "admission refused" in a.detail) else "FAIL"
+            return _proof(state, inv, version, real_cause(a), role, pinned=pinned)
+        if jev:
+            good = '"ok"' in a.answer or "ok=" in a.answer
+        else:
+            good = bool(ANSWER_RE.fullmatch(a.answer or ""))
+        if not good:
+            return _proof("FAIL", inv, version, "answered, but not the proof's answer: %r" % (a.answer or "")[:80], role, pinned=pinned)
+        sub = _substituted(inv, a)
+        if sub:
+            return _proof("FAIL", inv, version, "another model answered: %s" % sub, role, pinned=pinned)
+        with _Locked(cache_path()):
             cache_put(b, proved_at)
     except OSError as exc:
         return _proof("NO-DATA", inv, version, "the proof cache could not be used: %s" % exc, role, pinned=pinned)
@@ -351,6 +416,23 @@ def line(p):
     return "%-8s NO START role=%s model=%s program=%s version=%s cause=%s  HINT: %s" % (
         "REFUSED" if p["status"] == "FAIL" else "NO-DATA", p["role"] or "-", p["model"], p["program"], p["version"] or "unknown",
         p["cause"], p["remedy"])
+
+
+
+def _parallel(calls, workers=PROOF_WORKERS):
+    """[call() for call in calls], run at most `workers` at once, in CALL order (never completion order). A call that
+    raises is a NO-DATA proof naming the exception, never a traceback out of the intake (LA2.b)."""
+    def one(call):
+        try:
+            return call()
+        except Exception as exc:   # sbe: allow-silent a raising proof is a NO-DATA proof, the intake reads it as NOT READY
+            return _proof("NO-DATA", None, None, "the proof raised %s: %s" % (type(exc).__name__, str(exc)[:200]))
+    if len(calls) <= 1:
+        return [one(c) for c in calls]
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(max_workers=max(1, min(int(workers), len(calls)))) as pool:
+        futs = [pool.submit(one, c) for c in calls]
+    return [f.result() for f in futs]
 
 
 def require_proof(plan, reg=None, budget=None, runner=None, version_run=None, programs=None, pins=None):
@@ -382,7 +464,8 @@ def candidates_of(transport, env=None):
     return paths.claude_candidates(env) if transport == "claude" else paths.codex_candidates(env)
 
 
-def resolve_program(transport, names, reg=None, budget=None, runner=None, version_run=None, candidates=None, env=None):
+def resolve_program(transport, names, reg=None, budget=None, runner=None, version_run=None, candidates=None, env=None,
+                    fresh=False):
     """(selected program or None, [proof per name], [(candidate, version, why rejected)]) for one transport.
 
     THE OWNER PIN FIRST, AND ONLY IT: a pinned program is the one proved; if it fails, the answer is None and NO START
@@ -395,7 +478,8 @@ def resolve_program(transport, names, reg=None, budget=None, runner=None, versio
     budget = budget or Budget()
     pin = e.get(PIN_OF.get(transport, ""), "") if transport in PIN_OF else ""
     if pin:
-        proofs = [prove(n, reg, program=pin, budget=budget, runner=runner, version_run=version_run, pinned=True) for n in names]
+        proofs = _parallel([lambda n=n: prove(n, reg, program=pin, budget=budget, runner=runner, version_run=version_run,
+                                              pinned=True, fresh=fresh) for n in names])
         if all(p["status"] == "OK" for p in proofs):
             return pin, proofs, []
         bad = next(p for p in proofs if p["status"] != "OK")
@@ -411,7 +495,8 @@ def resolve_program(transport, names, reg=None, budget=None, runner=None, versio
     readable = sorted([cv for cv in versions if cv[1]], key=lambda cv: version_key(cv[1]), reverse=True)
     last = None
     for c, v in readable:
-        proofs = [prove(n, reg, program=c, budget=budget, runner=runner, version_run=version_run) for n in names]
+        proofs = _parallel([lambda n=n, c=c: prove(n, reg, program=c, budget=budget, runner=runner, version_run=version_run,
+                                                   fresh=fresh) for n in names])
         if all(p["status"] == "OK" for p in proofs):
             for p in proofs:
                 p["selected_by"] = "newest proven"
@@ -427,9 +512,11 @@ def resolve_program(transport, names, reg=None, budget=None, runner=None, versio
     return None, last, rejected
 
 
-def resolve_and_prove(plan, reg=None, budget=None, runner=None, version_run=None, candidates=None, env=None):
+def resolve_and_prove(plan, reg=None, budget=None, runner=None, version_run=None, candidates=None, env=None, fresh=()):
     """[proof per (role, model) in plan]: Claude and Codex models through the resolved program of their transport
-    (resolve_program), bridge models directly. Each Claude or Codex proof carries its transport's rejected candidates."""
+    (resolve_program), bridge models directly. Each Claude or Codex proof carries its transport's rejected candidates.
+    fresh names the transports whose cached proofs are not trusted at this launch (loop_intake.fresh_transports)."""
+    fresh = set(fresh or ())
     reg = reg or R.registry()
     budget = budget or Budget()
     by_t = {}
@@ -437,21 +524,24 @@ def resolve_and_prove(plan, reg=None, budget=None, runner=None, version_run=None
         t = (reg.get(name) or {}).get("transport")
         if t in PIN_OF and name not in by_t.setdefault(t, []):
             by_t[t].append(name)
+    first_role = {}   # each distinct bridge name, proved once under the role that first names it
+    for role, name in plan:
+        if (reg.get(name) or {}).get("transport") not in PIN_OF:
+            first_role.setdefault(name, role)
+    groups = list(by_t.items())
+    calls = [lambda t=t, names=names: resolve_program(t, names, reg, budget, runner, version_run,
+                                                      (candidates or {}).get(t) if candidates else None, env, fresh=t in fresh)
+             for t, names in groups]
+    calls += [lambda n=n, r=r: prove(n, reg, budget=budget, runner=runner, role=r, version_run=version_run,
+                                     fresh=(reg.get(n) or {}).get("transport") in fresh) for n, r in first_role.items()]
+    answers = _parallel(calls)   # LA2.b: the transports and the bridge names together; assembled in plan order below
     resolved = {}
-    for t, names in by_t.items():
-        sel, proofs, rejected = resolve_program(t, names, reg, budget, runner, version_run,
-                                                (candidates or {}).get(t) if candidates else None, env)
+    for (t, names), ans in zip(groups, answers[:len(groups)]):
+        sel, proofs, rejected = ans if isinstance(ans, tuple) else (None, [ans] * len(names), [])   # a raise: NO-DATA each
         for n, p in zip(names, proofs):
             resolved[n] = dict(p, rejected=[list(r) for r in rejected], selected=sel)
-    out, bridge = [], {}
-    for role, name in plan:
-        if name in resolved:
-            out.append(dict(resolved[name], role=role))
-        else:
-            if name not in bridge:
-                bridge[name] = prove(name, reg, budget=budget, runner=runner, role=role, version_run=version_run)
-            out.append(dict(bridge[name], role=role))
-    return out
+    bridge = dict(zip(first_role, answers[len(groups):]))
+    return [dict(resolved[name] if name in resolved else bridge[name], role=role) for role, name in plan]
 
 
 def write_record(selected, path=None, proven=None):

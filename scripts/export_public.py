@@ -1514,6 +1514,40 @@ def check_secrets(export_dir, baseline_dir=None):
     return True, ["secrets: 0 hit(s) over %d file(s)" % count]
 
 
+EXPORT_TREE_PREFIX = "EXPORT-TREE: "
+
+
+def candidate_tree_id(export_dir):
+    """(tree id, '') of the candidate export commit in `export_dir`, or
+    ('', reason). The tree id names the bytes only, so two builds of the
+    same allowlisted content agree (RC1.c)."""
+    proc = _run(["git", "rev-parse", "HEAD^{tree}"], export_dir, timeout=120)
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", out):
+        return "", ("git rev-parse HEAD^{tree} exited %s in the candidate "
+                    "export tree" % proc.returncode)
+    return out, ""
+
+
+def reused_required_fast(record_path, tree_id, now=None):
+    """(True, the REUSED line) only when the rehearsal record at
+    `record_path` carries an export-real-home row that measured exactly
+    `tree_id` (cut_rehearsal.reusable_row: PASS, READY record, under 24 h,
+    log on disk at its sha256); (False, the reason) otherwise, and the
+    caller runs required_fast.sh as it always did (RC1.c)."""
+    import cut_rehearsal  # noqa: E402  beside this file; lazy: cut imports this module's neighbours
+    if not tree_id:
+        return False, "the candidate export tree id could not be read"
+    record, why = cut_rehearsal.load_record(record_path)
+    if record is None:
+        return False, why
+    row, why = cut_rehearsal.reusable_row(record, "export-real-home",
+                                          tree_id, "real", now=now)
+    if row is None:
+        return False, "%s (record %s)" % (why, record_path)
+    return True, "REUSED export-real-home %s %s" % (tree_id[:12], record_path)
+
+
 def wants_required_fast(args):
     """required_fast.sh runs inside the candidate export tree on an explicit
     --prove-required-fast, and on every --push unless --skip-required-fast:
@@ -1744,8 +1778,140 @@ def _required_fast_check(pr_ref, repo, cwd, run):
                 REQUIRED_CHECK_NAME, pr_ref))
 
 
+#: FP1.a: the failing check named in a `gh run view --log-failed` log.
+FAILING_CHECK_RE = re.compile(r"\b(?:FAILED|FAIL):\s*(\S[^\r\n]*)")
+FAILING_CHECK_ABSENT = "(failing check not named in the log)"
+FAILING_CHECK_UNREAD = "(failing check not read)"
+
+
+def run_id_from_link(link):
+    """FP1.a: the workflow run id in a check's html url, the digits after
+    /actions/runs/ (never the job id after /job/); '' for anything else."""
+    if not isinstance(link, str):
+        return ""
+    match = re.search(r"/actions/runs/(\d+)", link)
+    return match.group(1) if match else ""
+
+
+def failing_check(log_text):
+    """FP1.a: the first FAILED:/FAIL: name in a gh failed-job log, else a
+    stated absence. Never raises."""
+    if not isinstance(log_text, str):
+        return FAILING_CHECK_ABSENT
+    match = FAILING_CHECK_RE.search(log_text)
+    return match.group(1).strip()[:200] if match else FAILING_CHECK_ABSENT
+
+
+def rerun_justification(record_path, tree, now=None):
+    """FP1.a: '' when no rerun of a failed public check is allowed, else the
+    sentence naming why. Allowed only when the Linux canary record at
+    `record_path` is a PASS for exactly `tree` (the export tree this exporter
+    built), within its 24 hours, judged by linux_canary.record_covers, the
+    one record reader. Every doubt (no path, an import failure, an
+    unreadable, foreign, failed or stale record) is ''."""
+    if not record_path or not isinstance(record_path, str) or not tree:
+        return ""
+    try:
+        import linux_canary  # noqa: E402  beside this file; lazy, only a push with a record needs it
+        ok, _why = linux_canary.record_covers(record_path, tree, now)
+    except Exception:  # noqa: BLE001  # sbe: allow-silent any doubt is no rerun, and the stop is today's
+        return ""
+    if ok is not True:
+        return ""
+    return "justified by %s PASS on tree %s" % (record_path, tree[:12])
+
+
+def _run_attempt(run_id, repo, cwd, run):
+    """(attempt, status, conclusion, detail) of one `gh run view --json`
+    read; attempt is None when the answer cannot be read."""
+    proc = run([GH_BIN, "run", "view", run_id, "-R", repo, "--json",
+                "attempt,status,conclusion"], cwd)
+    try:
+        data = json.loads(proc.stdout or "")
+    except ValueError:
+        data = None
+    attempt = data.get("attempt") if isinstance(data, dict) else None
+    if proc.returncode != 0 or isinstance(attempt, bool) \
+            or not isinstance(attempt, int):
+        text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        return None, None, None, ("gh run view %s: not readable (exit %s, %s)"
+                                  % (run_id, proc.returncode,
+                                     text.splitlines()[-1] if text
+                                     else "(no output)"))
+    status = data.get("status")
+    conclusion = data.get("conclusion")
+    return attempt, status, conclusion, (
+        "run %s attempt %s status %s conclusion %s"
+        % (run_id, attempt, status, conclusion))
+
+
+def attempt_two_result(run_id, repo, cwd, run, sleep, clock,
+                       timeout_s=REQUIRED_CHECK_TIMEOUT_SECONDS):
+    """FP1.a: ("success" | "failure" | "timeout", detail) of attempt 2 of
+    run `run_id`, polled until the run reads attempt >= 2 and completed,
+    for at most `timeout_s`. An unreadable answer is polled again, never
+    read as a result; a completed attempt 2 that is not success is a
+    failure."""
+    start = clock()
+    while True:
+        attempt, status, conclusion, detail = _run_attempt(
+            run_id, repo, cwd, run)
+        if attempt is not None and attempt >= 2 and status == "completed":
+            return ("success" if conclusion == "success" else "failure"), detail
+        if clock() - start >= timeout_s:
+            return "timeout", detail
+        sleep(REQUIRED_CHECK_POLL_SECONDS)
+
+
+def _rerun_failed_once(pr_number, link, fail_line, rerun_ok, repo, cwd, run,
+                       sleep, clock, lines):
+    """FP1.a: the one rerun of a failed required-fast run. Returns (exit code,
+    None) when the wait ends here, or (None, (run id, first link, failing
+    check)) when attempt 2 succeeded and the wait goes on. Lines are appended
+    to `lines`. A rerun is made only when the run reads attempt 1: a run
+    already on attempt 2 (a restarted exporter) is never rerun again."""
+    run_id = run_id_from_link(link)
+    if not run_id:
+        lines.append(fail_line)
+        lines.append("no rerun: the check url carries no run id")
+        return EXIT_REFUSED, None
+    attempt, _status, _conclusion, detail = _run_attempt(
+        run_id, repo, cwd, run)
+    if attempt != 1:
+        lines.append(fail_line)
+        lines.append("no rerun: only attempt 1 is ever rerun (%s)" % detail)
+        return EXIT_REFUSED, None
+    log = run([GH_BIN, "run", "view", run_id, "--log-failed", "-R", repo], cwd)
+    check = (failing_check(log.stdout) if log.returncode == 0
+             else FAILING_CHECK_UNREAD)
+    proc = run([GH_BIN, "run", "rerun", run_id, "--failed", "-R", repo], cwd)
+    if proc.returncode != 0:
+        text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        lines.append(fail_line)
+        lines.append("rerun refused: %s" % (text.splitlines()[-1] if text
+                                            else "(no output)"))
+        return EXIT_REFUSED, None
+    lines.append("RERUN: attempt 2 of run %s, first failure %s (%s), %s"
+                 % (run_id, link, check, rerun_ok))
+    result, detail = attempt_two_result(run_id, repo, cwd, run, sleep, clock)
+    attempt_url = link[:link.index("/actions/runs/") + len("/actions/runs/")
+                       + len(run_id)] + "/attempts/2"
+    if result == "failure":
+        lines.append("FAIL: required-fast failed again on attempt 2 of 2 on "
+                     "pull request %s: %s; first failure: %s (%s)"
+                     % (pr_number, attempt_url, link, check))
+        return EXIT_REFUSED, None
+    if result != "success":
+        lines.append("NO-DATA: attempt 2 of run %s did not conclude within 25 "
+                     "minutes on pull request %s (%s); first failure: %s (%s)"
+                     % (run_id, pr_number, detail, link, check))
+        return EXIT_NODATA, None
+    lines.append("attempt 2: %s" % detail)
+    return None, (run_id, link, check)
+
+
 def wait_for_required_fast(pr_ref, repo=REQUIRED_CHECK_REPO, cwd=None,
-                            run=None, sleep=None, clock=None):
+                            run=None, sleep=None, clock=None, rerun_ok=""):
     """Wait for the required-fast check to CONCLUDE on the release pull
     request `pr_ref`, and act on its result honestly rather than merging
     blind: ruleset 22191180 on the public repository requires a passing
@@ -1778,7 +1944,13 @@ def wait_for_required_fast(pr_ref, repo=REQUIRED_CHECK_REPO, cwd=None,
     module's `_run`, `time.sleep` and `time.monotonic`, so a test can drive
     the whole 25 minute budget against a fake gh in well under a second.
     Returns (exit_code, [lines]): exit_code is EXIT_OK when required-fast
-    passed and the caller should proceed to merge."""
+    passed and the caller should proceed to merge.
+
+    `rerun_ok` (FP1.a): '' (the default) keeps every outcome above exactly
+    as it is. Non empty (rerun_justification's sentence: a Linux canary PASS
+    on this very export tree), a failed check's run is rerun once
+    (_rerun_failed_once), both attempts are recorded in the lines, and a
+    second failure is final."""
     run = run or _run
     sleep = sleep or time.sleep
     clock = clock or time.monotonic
@@ -1786,6 +1958,7 @@ def wait_for_required_fast(pr_ref, repo=REQUIRED_CHECK_REPO, cwd=None,
     lines = []
     start = clock()
     appeared = False
+    rerun = None  # FP1.a: (run id, first link, failing check) once the one rerun was made
     while True:
         found, bucket, link, verdict = _required_fast_check(
             pr_ref, repo, cwd, run)
@@ -1795,12 +1968,34 @@ def wait_for_required_fast(pr_ref, repo=REQUIRED_CHECK_REPO, cwd=None,
             if bucket == "pass":
                 lines.append("required-fast: PASS on pull request %s"
                               % pr_number)
+                if rerun:
+                    lines.append("public check: attempt 2 of 2, first "
+                                  "failure %s %s" % (rerun[2], rerun[1]))
                 return EXIT_OK, lines
-            if bucket not in (None, "pending"):
-                lines.append("FAIL: required-fast failed on the release "
-                              "pull request %s: %s"
-                              % (pr_number, link or "(no check url)"))
-                return EXIT_REFUSED, lines
+            if bucket not in (None, "pending") and rerun:
+                if link != rerun[1]:
+                    lines.append("FAIL: required-fast failed again on attempt "
+                                  "2 of 2 on pull request %s: %s; first "
+                                  "failure: %s (%s)"
+                                  % (pr_number, link or "(no check url)",
+                                     rerun[1], rerun[2]))
+                    return EXIT_REFUSED, lines
+                # the first attempt's own check still listed after attempt 2
+                # succeeded: a lagging bucket, polled again within the budget
+            elif bucket not in (None, "pending"):
+                fail_line = ("FAIL: required-fast failed on the release "
+                             "pull request %s: %s"
+                             % (pr_number, link or "(no check url)"))
+                if not rerun_ok:
+                    lines.append(fail_line)
+                    return EXIT_REFUSED, lines
+                code, rerun = _rerun_failed_once(
+                    pr_number, link, fail_line, rerun_ok, repo, cwd, run,
+                    sleep, clock, lines)
+                if code is not None:
+                    return code, lines
+                start = clock()
+                continue
         elapsed = clock() - start
         if not appeared and elapsed >= REQUIRED_CHECK_APPEAR_GRACE_SECONDS:
             lines.append("NO-DATA: no required-fast check appeared on "
@@ -1892,7 +2087,8 @@ def merge_commit_refusal(cwd, run, oid, expected_tree, branch):
 
 def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                    bootstrap=False, run=None, require_signed=False,
-                   wait_sleep=None, wait_clock=None, write_state=None):
+                   wait_sleep=None, wait_clock=None, write_state=None,
+                   reused_tree="", canary_record=""):
     """The real push path, kept separate from gating (see module docstring:
     ORPHAN ON PURPOSE). Fetches `remote`'s current tip, rebuilds the same
     allowlisted content as a new commit ON TOP of it (an honest append),
@@ -1935,7 +2131,16 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     wait_for_required_fast as its own `sleep` and `clock` seams (default
     time.sleep and time.monotonic); named separately from `run` here
     because a test that wants to fast-forward the 25 minute wait without
-    also replacing every git/gh subprocess call needs the two seams apart."""
+    also replacing every git/gh subprocess call needs the two seams apart.
+
+    `reused_tree` (RC1.c): the export tree id whose required_fast proof was
+    reused from a rehearsal record. When set, the tree about to be pushed
+    must be exactly it, or this refuses before any remote write.
+
+    `canary_record` (FP1.a): a Linux canary record path. When it is a PASS
+    for exactly the tree built here (expected_tree, never the tree the record
+    names for itself), a failed required-fast is rerun once; otherwise the
+    wait is today's."""
     run = run or _run
     lines = []
     # FX4.a: one announcement per run, before whichever write comes first
@@ -2087,6 +2292,15 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
         head_tree = run(["git", "rev-parse", "HEAD^{tree}"], d)
         expected_tree = ((head_tree.stdout or "").strip()
                          if head_tree.returncode == 0 else "")
+        if reused_tree and expected_tree != reused_tree:
+            lines.append("REFUSED: the tree about to be pushed (%s) is not "
+                          "the tree whose required-fast proof was reused "
+                          "(%s); nothing was pushed"
+                          % (expected_tree[:12] or "unreadable",
+                             reused_tree[:12]))
+            return EXIT_REFUSED, lines
+        rerun_ok = (rerun_justification(canary_record, expected_tree)
+                    if canary_record else "")
         pr_ref = None
 
         env = dict(os.environ)
@@ -2153,7 +2367,8 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                 # refuse without merging and without closing the pull request:
                 # the evidence stays open for a human to read.
                 wait_code, wait_lines = wait_for_required_fast(
-                    pr_ref, cwd=d, run=run, sleep=wait_sleep, clock=wait_clock)
+                    pr_ref, cwd=d, run=run, sleep=wait_sleep, clock=wait_clock,
+                    rerun_ok=rerun_ok)
                 lines.extend(wait_lines)
                 if wait_code != EXIT_OK:
                     return wait_code, lines
@@ -2719,7 +2934,17 @@ def check_export_manifest(export_dir, version, built_text=None):
                   % (rel, len(actual), RE.MANIFEST_EXCLUDED_PREFIX)]
 
 
-def tag_time_checks(export_dir, version):
+def staged_snapshot(export_dir):
+    """The export tree's manifest text as staged, or None when it cannot be
+    hashed (check_export_manifest then hashes at check time)."""
+    try:
+        import reproduce_export as RE
+        return RE.manifest_from_dir(export_dir)
+    except (OSError, ImportError):
+        return None
+
+
+def tag_time_checks(export_dir, version, built_text=None):
     """What stands between a built export tree and a public TAG (never a
     plain export). (1) docs/releases/<version>.md in the export tree must
     not still carry the placeholder Source revision block that
@@ -2741,11 +2966,13 @@ def tag_time_checks(export_dir, version):
     # Hash the staged tree BEFORE any proof suite runs in it, so the
     # manifest check below compares what the tag ships, not the residue
     # the proofs leave (see check_export_manifest).
-    try:
-        import reproduce_export as RE
-        built_text = RE.manifest_from_dir(export_dir)
-    except (OSError, ImportError):
-        built_text = None
+    # A caller that already ran a proof suite in this tree (the dry run's
+    # --prove-required-fast, below in main) hands in the snapshot it took
+    # BEFORE that suite; 2026-10-12, rehearsal 6faaf4f69: required_fast.sh
+    # left .brothermode/recurrence.sqlite3 behind and this hash, taken
+    # after it, refused the cut on that residue.
+    if built_text is None:
+        built_text = staged_snapshot(export_dir)
     ok = True
     notes_rel = "docs/releases/%s.md" % version
     notes_path = os.path.join(export_dir, "docs", "releases",
@@ -2876,6 +3103,18 @@ def _main(argv, state):
                           "public repository's own required check cannot "
                           "regress unnoticed. Works with or without --push; "
                           "--push implies it unless --skip-required-fast.")
+    ap.add_argument("--rehearsal-record", default="",
+                     help="a cut rehearsal record (cut_rehearsal.py): when "
+                          "its export-real-home row measured exactly the "
+                          "export tree built here, required_fast.sh is not "
+                          "run again. A request, never a grant: any doubt "
+                          "runs it. The gates and tag-time checks always run.")
+    ap.add_argument("--canary-record", default="",
+                     help="a Linux canary record (linux_canary.py): when it "
+                          "is a PASS for exactly the export tree pushed here, "
+                          "a failed required-fast on the release pull "
+                          "request is rerun once and both attempts are "
+                          "printed. Any doubt: no rerun.")
     ap.add_argument("--skip-required-fast", action="store_true",
                      help="with --push, do NOT run required_fast.sh inside "
                           "the candidate export tree. Every tree-shape check "
@@ -2959,6 +3198,9 @@ def _main(argv, state):
             print("NO-DATA: the allowlist named no path that exists under "
                   "%s, so there is nothing to gate or export" % args.root)
             return EXIT_NODATA
+        tree_id, why = candidate_tree_id(export_dir)
+        print(EXPORT_TREE_PREFIX + tree_id if tree_id else "NO-DATA: " + why)
+        reused_tree = ""
 
         build_identity_check_dir(identity_dir, allowlist, args.remote,
                                   args.branch, args.root)
@@ -2991,6 +3233,9 @@ def _main(argv, state):
             print("WARNING: --skip-required-fast: this push does not run "
                   "required_fast.sh on the export tree; a tree-shape break "
                   "will first show in public CI")
+        # Hash the staged tree before any proof suite below writes residue
+        # into it; tag_time_checks compares the manifest against THIS.
+        staged_text = staged_snapshot(export_dir)
         if wants_required_fast(args):
             # required_fast.sh expects a real git tree under it (several of
             # its own checks shell out to git); the orphan candidate above
@@ -3002,7 +3247,16 @@ def _main(argv, state):
                 print(line)
             if not git_ok:
                 return EXIT_REFUSED
-            rf_ok, rf_lines = check_required_fast(export_dir)
+            reused = False
+            if args.rehearsal_record:
+                reused, why = reused_required_fast(args.rehearsal_record,
+                                                   tree_id)
+                print(why if reused else "required-fast not reused: " + why)
+            if reused:
+                reused_tree = tree_id
+                rf_ok, rf_lines = True, []
+            else:
+                rf_ok, rf_lines = check_required_fast(export_dir)
             for line in rf_lines:
                 print(line)
             if not rf_ok:
@@ -3030,7 +3284,8 @@ def _main(argv, state):
                       "--tag-time-checks has nothing to check against"
                       % VS.MARKETPLACE_REL)
                 return EXIT_NODATA
-            checks_ok, check_lines = tag_time_checks(export_dir, version)
+            checks_ok, check_lines = tag_time_checks(export_dir, version,
+                                                     built_text=staged_text)
             for line in check_lines:
                 print(line)
             if not checks_ok:
@@ -3066,7 +3321,8 @@ def _main(argv, state):
                                 args.root, tag=args.tag,
                                 bootstrap=args.bootstrap,
                                 require_signed=args.require_signed,
-                                write_state=state)
+                                write_state=state, reused_tree=reused_tree,
+                                canary_record=args.canary_record)
     for line in lines:
         print(line)
     return code

@@ -6,6 +6,7 @@
 #                [--lift-hold "<the owner's words>"] [--dry]
 #   --plan docs/plan/X.json names the plan the run reads: plan_path.py validates it here, the intake exports it as BROTHER_WBS.
 #   A value that is empty, only whitespace, or starts with -- is refused ("<option> needs a value"), for every option.
+#   0 POWER    power_rule.py, the driver's own rule: without AC, a deadline beyond BROTHER_POWER_WINDOW_S refuses.
 #   1 TREE     this directory is a git worktree on a branch with an upstream, clean and equal to it. An upstream-less
 #              branch read NO-DATA at intake, and a dirty or unpushed tree is refused by the driver's first pass.
 #   2 PINS     BROTHER_CLAUDE_BIN and BROTHER_CODEX_BIN from model_router unless already set; each an executable file.
@@ -25,7 +26,20 @@
 #              refusal it printed instead.
 # The run's money is its own: the driver writes <run dir>/money/run-budget.json from the intake's budget and deadline,
 # and nothing carries over from another run. Seams for tests: START_RUN_INTAKE, START_RUN_DRIVER, START_RUN_EVIDENCE.
+# TIMING (LA1.a, reporting only): one `TIME <step> <seconds>` line per step, then, after STARTED, the wait for the
+# first claimed unit (START_RUN_TIMING_WAIT_S, default 90) and `LAUNCH command to first claimed unit <s> s`, SLOW
+# past START_RUN_SLOW_S (default 180), with $STARTS/timing-<stamp>.json. A timer or writer failure prints a
+# `TIME NO-DATA` line and never changes a verdict or an exit code; no timing line starts with REFUSED or NO-DATA.
 set -u
+clock_now() { local n; n=$(date +%s 2>/dev/null) || n=""; case "$n" in ''|*[!0-9]*) n="";; esac; echo "$n"; }
+T0=$(clock_now); TPREV=$T0; TSTEPS=""
+tmark() {
+  local n; n=$(clock_now)
+  if [ -n "$n" ] && [ -n "$TPREV" ]; then echo "TIME $1 $((n - TPREV))"; TSTEPS="$TSTEPS $1=$((n - TPREV))"
+  else echo "TIME NO-DATA $1: the clock could not be read"; fi
+  TPREV=$n
+  return 0
+}
 # SAVED is set by step 3c once the hold and pause are moved aside; from then on every refusal moves them back first.
 SAVED=""
 restore_controls() {
@@ -47,7 +61,7 @@ restore_controls() {
   [ -n "$kept$stuck" ] || echo "OK   controls restored exactly as found"
   SAVED=""
 }
-refuse() { restore_controls; echo "START REFUSED [$1]: $2"; exit 2; }
+refuse() { restore_controls; echo "START REFUSED [$1]: $2"; python3 -B "$(dirname "$0")/../jev_start_refusal.py" "$1" "$2" 2>/dev/null || true; exit 2; }
 # 2026-10-11 round 3: INT, TERM, HUP, ALRM (the estate's `perl -e 'alarm N'`) and QUIT stop the intake's whole process
 # group and put the hold and pause back as found. A closed stdout (`start_run.sh | head`) only silences the launcher:
 # the PIPE handler sends later output to /dev/null instead of letting the first write kill it mid way (a handler, not
@@ -103,6 +117,21 @@ if [ -n "$PLAN" ]; then   # the one selector's own verdict, before anything star
   PERR=$(BROTHER_WBS="$PLAN" python3 -B "$(dirname "$0")/plan_path.py" 2>&1 >/dev/null) || refuse args "--plan: ${PERR#PLAN REFUSED: }"
   echo "OK   plan $PLAN"
 fi
+tmark args 2>/dev/null || true
+
+# 0 POWER (LA3.a, 2026-10-12): the driver's power rule, asked BEFORE the tree and the intake. On 2026-10-11 a battery
+# start ran the whole two minute intake and was refused by the driver four seconds after it. The same module answers
+# for the driver (loop_until.sh), so the two never disagree; the driver keeps its own reading for a charger pulled in
+# between. Refuses in --dry too. A rule that cannot run refuses: only its own 0 (start) and 2 (refuse) are answers.
+PRULE="$(dirname "$0")/power_rule.py"
+[ -f "$PRULE" ] || refuse power "the power rule could not run (no $PRULE)"
+PWHY=$(python3 -B "$PRULE" check --deadline "$DEADLINE" 2>&1); PRC=$?
+case "$PRC" in
+  0) echo "OK   power  ${PWHY:-on AC}";;
+  2) refuse power "${PWHY:-the power rule refused without a reason}";;
+  *) refuse power "the power rule could not run (exit $PRC): $(printf '%s' "$PWHY" | tr '\n' ' ' | cut -c1-160)";;
+esac
+tmark power 2>/dev/null || true
 
 # 1 TREE
 REPO=$(git rev-parse --show-toplevel 2>/dev/null) || refuse tree "not inside a git checkout; cd into the launch worktree"
@@ -111,12 +140,16 @@ BRANCH=$(git branch --show-current)
 [ -n "$BRANCH" ] || refuse tree "detached HEAD; check out a named branch"
 UP=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null) || refuse tree "branch $BRANCH has no upstream: git push -u <remote> $BRANCH:$BRANCH"
 git fetch -q "${UP%%/*}" 2>/dev/null || refuse tree "cannot fetch ${UP%%/*}"
+# LA3.b: the sha this fetch left and when, passed to the intake so it does not fetch a second time (it fetches anyway
+# when the upstream has moved since, or the reading is older than its bound).
+UPSHA=$(git rev-parse "$UP" 2>/dev/null); FETCHED_AT=$(clock_now)
 DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 [ "$DIRTY" = 0 ] || refuse tree "$DIRTY changed path(s); commit and push them, or move them out of the launch worktree"
 AHEAD=$(git rev-list --count "$UP..HEAD"); BEHIND=$(git rev-list --count "HEAD..$UP")
 [ "$AHEAD" = 0 ] || refuse tree "$AHEAD unpushed commit(s): git push"
 [ "$BEHIND" = 0 ] || refuse tree "$BEHIND commit(s) behind $UP: git merge --ff-only $UP"
 echo "OK   tree   $BRANCH clean and equal to $UP"
+tmark tree 2>/dev/null || true
 
 # 2 PINS
 for WHICH in claude codex; do
@@ -129,6 +162,7 @@ for WHICH in claude codex; do
   export "$VAR=$CUR"
   echo "OK   pins   $VAR=$CUR"
 done
+tmark pins 2>/dev/null || true
 
 # 3 CONTROLS
 EVD=${START_RUN_EVIDENCE:-$HOME/.claude/evidence}
@@ -177,14 +211,16 @@ fi
 # 3b LIVE (2026-10-10): nothing in the driver refuses a second instance, and two drivers over one plan double the spend
 # and race the landing. Which processes are the loop's is decided in ONE place (loop_procs.py, through stop_loop.sh
 # --dry: 0 nothing alive, 1 something alive, 2 unreadable). Only 0 starts; an answer that could not be read refuses.
+tmark controls 2>/dev/null || true
 LIVE=${START_RUN_LIVE_CHECK:-$REPO/scripts/loop/stop_loop.sh}
 LOUT=$(bash "$LIVE" --dry 2>&1)
-LRC=$?
+LRC=$?; LIVE_AT=$(clock_now)
 case "$LRC" in
   0) echo "OK   live   no loop is running";;
   1) refuse live "a loop is already running; stop it first with scripts/loop/stop_loop.sh --reason: $(printf '%s' "$LOUT" | tr '\n' ' ' | cut -c1-200)";;
   *) refuse live "the live check could not answer (exit $LRC): $(printf '%s' "$LOUT" | tr '\n' ' ' | cut -c1-200)";;
 esac
+tmark live 2>/dev/null || true
 if [ "$DRY" = 1 ]; then echo "DRY  would prepare the intake and start: loop_until.sh $DEADLINE $GAP"; exit 0; fi
 
 # 3c LIFT, the last step before the intake (which reads a hold as HELD); every later refusal moves both back.
@@ -200,6 +236,7 @@ if [ "$LIFT" = 1 ]; then
   done
   echo "OK   controls lifted on the owner's words, kept in $LIFTREC"
 fi
+tmark lift 2>/dev/null || true
 
 # 4 INTAKE, from this checkout's copy
 INTAKE=${START_RUN_INTAKE:-$REPO/scripts/loop/loop_intake.py}
@@ -209,17 +246,83 @@ ILOG="$STARTS/intake-$STAMP.log"
 # 18 fully specified units; the default is the whole plan.
 # The intake runs in the background in its own process group (the launcher waits on it, because bash defers a trap
 # until a foreground child ends), so a signal stops the intake and everything it started (round 3 N1).
-perl -e 'setpgrp(0, 0); exec @ARGV or die "exec $ARGV[0]: $!\n"' python3 -B "$INTAKE" prepare finisher="$FIN" documenter="$DOC" checker="$CHK" worker="$WRK" adversary="$ADV" --deadline "$DEADLINE" --budget-usd "$BUDGET" --scope "$SCOPE" ${PLAN:+--plan "$PLAN"} \
+# LA3.b: the launcher's fetch and live readings ride along; the intake ignores any it cannot read and checks again.
+START_RUN_UPSTREAM_SHA="$UPSHA" START_RUN_FETCHED_AT="$FETCHED_AT" START_RUN_LIVE_RC="$LRC" START_RUN_LIVE_AT="$LIVE_AT" \
+  perl -e 'setpgrp(0, 0); exec @ARGV or die "exec $ARGV[0]: $!\n"' python3 -B "$INTAKE" prepare finisher="$FIN" documenter="$DOC" checker="$CHK" worker="$WRK" adversary="$ADV" --deadline "$DEADLINE" --budget-usd "$BUDGET" --scope "$SCOPE" ${PLAN:+--plan "$PLAN"} \
   --words "start_run.sh: deadline $DEADLINE, budget $BUDGET USD${WORDS:+; owner: $WORDS}" > "$ILOG" 2>&1 &
 IPID=$!
 wait "$IPID"
 IRC=$?
 IPID=""
+tmark intake 2>/dev/null || true
 # READY is printed before the record is written and can still be overturned (loop_intake.py appends INTAKE NOT READY
 # or INTAKE NO-DATA after it), so the verdict is the exit code AND the last INTAKE line, never the first READY.
 ILAST=$(grep '^INTAKE ' "$ILOG" | tail -1)
 [ "$IRC" = 0 ] && [ "$ILAST" = "INTAKE READY" ] || refuse intake "not READY (exit $IRC, last verdict: ${ILAST:-none}); the refusing rows: $(grep -E '^(REFUSED|NO-DATA)' "$ILOG" | head -3 | cut -c1-160 | tr '\n' ' ') (full: $ILOG)"
 echo "OK   intake READY ($ILOG)"
+
+# THE FIRST CLAIMED UNIT AND THE TIMING RECORD (LA1.a). The loop log's name carries only %Y%m%d-%H%M, so a relaunch in
+# the same minute appends to an older run's log: only a START row after the LAST `RUN START` line is this launch's.
+# Exits non zero when the record could not be written; the caller ignores it (`|| true`): reporting only.
+launch_timing() {
+  python3 -B - "$1" "${START_RUN_TIMING_WAIT_S:-90}" "${START_RUN_SLOW_S:-180}" "$T0" "$STAMP" "$TSTEPS" "$ILOG" "$STARTS/timing-$STAMP.json" <<'PY'
+import json, os, re, sys, time
+log, wait_s, slow_s, t0, stamp, steps, ilog, out = sys.argv[1:9]
+whole = lambda v, d: int(v) if re.fullmatch(r"[0-9]+", v or "") else d
+wait_s, slow_s, t0 = whole(wait_s, 90), whole(slow_s, 180), whole(t0, None)
+ROW = re.compile(rb"^[A-Za-z0-9_.-]+ +[A-Za-z0-9_.-]+ +START *$")
+def seen():
+    try:
+        with open(log, "rb") as f:
+            rows = f.read().splitlines()
+    except OSError:
+        return False
+    starts = [i for i, l in enumerate(rows) if l.startswith(b"RUN START")]
+    return bool(starts) and any(ROW.match(l) for l in rows[starts[-1] + 1:])
+try:
+    end = time.monotonic() + wait_s
+    found = seen()
+    while not found and time.monotonic() < end:
+        time.sleep(1)
+        found = seen()
+    total = int(time.time()) - t0 if found and t0 is not None else None
+    slow = total is not None and total > slow_s
+    if total is not None:
+        print("LAUNCH command to first claimed unit %d s%s" % (total, " SLOW (over %d s)" % slow_s if slow else ""))
+    elif found:
+        print("TIME NO-DATA: a START row was seen but the launch clock could not be read")
+    else:
+        print("TIME NO-DATA: no START row within %d s (log %s)" % (wait_s, log))
+    launcher = {}
+    for pair in steps.split():
+        k, _, v = pair.partition("=")
+        launcher[k] = int(v) if re.fullmatch(r"-?[0-9]+", v) else None
+    intake = {}
+    try:
+        with open(ilog, encoding="utf-8", errors="replace") as f:
+            for l in f:
+                m = re.match(r"^TIME ([A-Za-z0-9_]+) ([0-9]+(?:\.[0-9]+)?)$", l.rstrip("\n"))
+                n = re.match(r"^TIME NO-DATA ([A-Za-z0-9_]+):", l)
+                if m: intake[m.group(1)] = float(m.group(2))
+                elif n: intake[n.group(1)] = None
+    except OSError:
+        pass   # sbe: allow-silent an unreadable intake log leaves the intake steps empty; the record still says what it saw
+    rec = {"schema": "launch-timing-v1", "stamp": stamp, "launcher": launcher, "intake": intake, "total_s": total, "slow": slow}
+    tmp = "%s.tmp-%d" % (out, os.getpid())
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rec, f, indent=1)
+        os.replace(tmp, out)
+    except OSError:
+        try: os.unlink(tmp)
+        except OSError: pass   # sbe: allow-silent the temp file may never have been made
+        print("TIME NO-DATA: the timing record could not be written")
+        sys.exit(3)
+except Exception as exc:   # sbe: allow-silent reporting only: a timer that breaks says so and the launch stands
+    print("TIME NO-DATA: the launch timing could not be computed (%s)" % type(exc).__name__)
+    sys.exit(3)
+PY
+}
 
 # 5 DRIVER, detached, with the intake's launch settings
 DRIVER=${START_RUN_DRIVER:-$HOME/.claude/bin/loop_until.sh}
@@ -238,6 +341,7 @@ PY
 ) || refuse driver "the driver could not be spawned"
 for _ in $(seq 1 120); do
   if grep -q '^LOOP UNTIL' "$DLOG" 2>/dev/null; then
+    tmark driver 2>/dev/null || true
     echo "OK   driver pid $PID: $(grep -m1 '^LOOP UNTIL' "$DLOG")"
     echo "STARTED: watch with: tail -f $(grep -m1 '^LOOP UNTIL' "$DLOG" | sed -n 's/.*| log //p')"
     trap - INT TERM HUP ALRM QUIT
@@ -245,6 +349,7 @@ for _ in $(seq 1 120); do
     if [ -n "$SAVED" ]; then
       { : > "$SAVED/.started"; } 2>/dev/null || echo "WARN controls: could not mark $SAVED as a successful start; the next start refuses on it until $SAVED/.started exists"
     fi
+    launch_timing "$(grep -m1 '^LOOP UNTIL' "$DLOG" | sed -n 's/.*| log //p')" || true
     exit 0
   fi
   if ! kill -0 "$PID" 2>/dev/null; then refuse driver "the driver exited before it started: $(tail -3 "$DLOG" | tr '\n' ' ' | cut -c1-240)"; fi

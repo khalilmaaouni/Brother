@@ -43,6 +43,8 @@ floor: a decayed note is reordered, never removed, and nothing here ever writes 
            --project <name> boosts notes carrying that project: (recall takes it too);
            absent, it is the project: line declared in the git root's PROJECT.md above --context, else that root's basename, else no boost at all
   status   what is indexed, how fresh, and what is missing
+  resolve  which vault root is in force, as JSON: BROTHERMODE_VAULT_ROOT, then the aliases
+           BM_VAULT_ROOT and BROTHERMODE_VAULT, then the config; two names on two folders FAIL
 
 STAGED RETRIEVAL (2026-08-28). Loading the dense embedder cost 30-75 SECONDS wall clock on this
 machine, measured, because it starts a subprocess that imports torch and transformers and loads
@@ -146,19 +148,89 @@ def _config():
         return {}
 
 
+#: VR1 (1.1.3): one resolver for the vault root. Capture (scripts/brother_run.py) reads the
+#: canonical name; recall read only the aliases, so a user who set the two to different
+#: folders wrote lessons to one vault and recalled from another, silently.
+ENV_CANONICAL = "BROTHERMODE_VAULT_ROOT"
+ENV_ALIASES = ("BM_VAULT_ROOT", "BROTHERMODE_VAULT")
+
+_RESOLVE_WARNED = False  # the FAIL diagnostic is printed once per process, not per caller
+
+#: VR1.b: written to stderr after the hits whenever recall showed at least one note; never to
+#: stdout (the recall hook parses stdout) and never on a NO-DATA or all-withheld answer.
+RECALL_ADVISORY = "ADVISORY: a current test or constraint outranks every note above."
+
+
+def _same_folder(a, b):
+    return os.path.realpath(a) == os.path.realpath(b)
+
+
+def resolve_vault_root(explicit=None, env=None, config=None):
+    """The one answer to "which vault?": {"verdict", "root", "source", "detail", "set"}.
+
+    Precedence, highest first: an explicit --vault, BROTHERMODE_VAULT_ROOT, BM_VAULT_ROOT,
+    BROTHERMODE_VAULT, then the installer config's "vault" key. PASS when a root is chosen
+    and no two set environment names disagree. NO-DATA (root None) when nothing is
+    configured: never a guessed path (D01). FAIL (root None) when two environment names name
+    different folders: the vault is NOT chosen for the user. An explicit value always wins;
+    an environment value beats the config, and a differing config is only mentioned."""
+    env = {} if env is None else env
+    pairs = [(n, env.get(n)) for n in (ENV_CANONICAL,) + ENV_ALIASES]
+    pairs = [(n, v) for n, v in pairs if isinstance(v, str) and v]  # "" is unset
+    # A config value of the wrong shape ({"vault": 5}, or a non-object file) degrades to
+    # unconfigured, never a non-string propagated into a path join at the caller.
+    cfg = config.get("vault") if isinstance(config, dict) else None
+    cfg = cfg if isinstance(cfg, str) and cfg else None
+    out = {"verdict": "PASS", "root": None, "source": None, "detail": "",
+           "set": [[n, v] for n, v in pairs]}
+    candidates = ([("--vault", explicit)] if explicit else []) + pairs \
+        + ([("config", cfg)] if cfg else [])
+    for name, value in candidates:
+        if "\0" in value:
+            out.update(verdict="FAIL", detail="%s holds a NUL byte, which no folder name "
+                       "can; fix or unset it. The vault was not chosen for you." % name)
+            return out
+    notes = []
+    disagree = [p for p in pairs[1:] if not _same_folder(p[1], pairs[0][1])]
+    if disagree:
+        (n1, v1), (n2, v2) = pairs[0], disagree[0]
+        msg = "%s=%s and %s=%s name different folders" % (n1, v1, n2, v2)
+        if not explicit:
+            out.update(verdict="FAIL", detail=msg + "; set both to the same folder, or unset "
+                       "one; the vault was not chosen for you.")
+            return out
+        notes.append(msg + " (the explicit --vault wins)")
+    if not candidates:
+        out.update(verdict="NO-DATA", detail="no vault root configured. Set %s to your vault "
+                   "folder (or pass --vault); no path is guessed." % ENV_CANONICAL)
+        return out
+    source, root = candidates[0]
+    if cfg and source != "config" and not _same_folder(cfg, root):
+        notes.append("the config file names %s; %s wins" % (cfg, source))
+    out.update(root=root, source=source, detail="; ".join(notes))
+    return out
+
+
+def cmd_resolve(args):
+    """`bm_vault.py resolve [--vault V]`: the resolver's answer as JSON; 0 on PASS, 2 otherwise."""
+    explicit = args.get("vault")
+    res = resolve_vault_root(explicit if isinstance(explicit, str) else None,
+                             os.environ, _config())
+    print(json.dumps(res, sort_keys=True))
+    return 0 if res["verdict"] == "PASS" else 2
+
+
 def _default_vault():
-    """Precedence, highest first: an explicit --vault (checked at the one call
-    site, cmd_index), then BM_VAULT_ROOT, then BROTHERMODE_VAULT, then the
-    config file. None when nothing is configured: the caller refuses audibly
-    rather than indexing a guessed path (D01)."""
-    env_vault = os.environ.get("BM_VAULT_ROOT") or os.environ.get("BROTHERMODE_VAULT")
-    if env_vault:
-        return env_vault
-    # A config value of the wrong shape ({"vault": 5}) must degrade to
-    # unconfigured (None), never propagate a non-string into a path join at
-    # the caller and crash there instead of reporting NO-DATA.
-    cfg_vault = _config().get("vault")
-    return cfg_vault if isinstance(cfg_vault, str) and cfg_vault else None
+    """The resolver's root, or None. The contract every caller and stub relies on is kept:
+    no argument, a path or None, and None means refuse audibly. On a FAIL (two names on two
+    folders) the diagnostic goes to stderr once per process and None is returned, so no
+    caller ever falls through to a vault the user did not choose."""
+    global _RESOLVE_WARNED
+    res = resolve_vault_root(None, os.environ, _config())
+    if res["verdict"] == "FAIL" and not _RESOLVE_WARNED:
+        _RESOLVE_WARNED = True
+        sys.stderr.write("bm_vault: FAIL vault root: %s\n" % res["detail"])
+    return res["root"] if res["verdict"] == "PASS" else None
 
 
 # ---------------------------------------------------------------------------
@@ -1125,7 +1197,8 @@ def cmd_refresh(args):
     if not vault:
         if not verbose:  # QS1: a person without a vault is not told so at every start
             return 0
-        say("vault-index: NO-DATA: no vault root configured. Set BM_VAULT_ROOT or write "
+        say("vault-index: NO-DATA: no vault root configured. Set BROTHERMODE_VAULT_ROOT "
+              "(aliases BM_VAULT_ROOT, BROTHERMODE_VAULT) or write "
               "{\"vault\": \"...\"} to %s; point-of-need recall stays empty until then."
               % CONFIG_PATH)
         return 0
@@ -1177,8 +1250,9 @@ def cmd_refresh(args):
 def cmd_index(args):
     vault = args.get("vault") or _default_vault()
     if not vault:
-        say("NO-DATA vault root: nothing configured. Pass --vault, set BM_VAULT_ROOT or "
-              "BROTHERMODE_VAULT, or write {\"vault\": \"...\"} to %s. Refusing to index a "
+        say("NO-DATA vault root: nothing configured or the names disagree. Pass --vault, set "
+              "BROTHERMODE_VAULT_ROOT (aliases BM_VAULT_ROOT, BROTHERMODE_VAULT), or write "
+              "{\"vault\": \"...\"} to %s. Refusing to index a "
               "guessed path (D01)." % CONFIG_PATH)
         return 2
     roots = _index_roots(vault)
@@ -3302,6 +3376,8 @@ def cmd_recall(args):
                      "What this estate has already written about that:",
                      roots=_freshness_roots(args), ledger_hits=ledger_hits,
                      withheld_out=withheld_out)
+    if ledger_hits:  # at least one note was SHOWN (withheld notes never enter ledger_hits)
+        sys.stderr.write(RECALL_ADVISORY + "\n")
     # V5: one hash-chained read-audit row per note actually shown above, regardless of
     # the answer-ledger's own retry/collision dedup below -- that dedup governs whether
     # THIS answer gets a second ledger/audit row, not whether the notes were shown to
@@ -3957,7 +4033,8 @@ def main(argv=None):
         print(__doc__)
         return 0
     fns = {"index": cmd_index, "refresh": cmd_refresh, "status-line": cmd_status_line,
-           "recall": cmd_recall, "check": cmd_check, "status": cmd_status}
+           "recall": cmd_recall, "check": cmd_check, "status": cmd_status,
+           "resolve": cmd_resolve}
     if argv[0] not in fns:
         sys.stderr.write("bm_vault: unknown command %r; known: %s\n"
                          % (argv[0], ", ".join(sorted(fns))))

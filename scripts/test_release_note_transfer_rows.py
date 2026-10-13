@@ -64,7 +64,7 @@ def stubbed_build(transfer_rows_result=None, transfer_rows_raises=False):
     def fake_confirm(rel_path, names):
         return list(names)
 
-    def fake_table(claim_suites, perturb=None):
+    def fake_table(claim_suites, perturb=None, version=None):
         return list(TABLE), None
 
     def fake_transfer_rows(path):

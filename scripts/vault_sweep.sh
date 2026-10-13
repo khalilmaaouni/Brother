@@ -63,7 +63,7 @@ run_check() {
   return "$code"
 }
 
-TMP="$(mktemp)"
+TMP="$(mktemp "${TMPDIR:-/tmp}/vault-sweep.XXXXXX")"
 OVERALL=0
 NODATA=0
 

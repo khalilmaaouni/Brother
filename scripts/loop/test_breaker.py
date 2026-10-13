@@ -735,5 +735,54 @@ class TheAlarmScanNeverReadsQuietlyAsNoAlarm(_Rooted):
         self.assertTrue(any(l.startswith("BREAKER NO-DATA") and "could not list" in l for l in lines), lines)
 
 
+class SeatCauseTest(unittest.TestCase):
+    """SEAT1.a: a dead seat (credits, login) is CONFIG, and its cause is the last line, never the banner."""
+    CREDITS = ("Reading additional input from stdin...\n"
+               "ERROR: Your workspace is out of credits. Add credits to continue.\n")
+    LOGIN = "Failed to authenticate. API Error: 401 OAuth access token is invalid\n"
+
+    def test_codex_credits_failure_is_config(self):
+        self.assertEqual(breaker.classify_cli("codex", 1, "", self.CREDITS, None), "CONFIG")
+        self.assertEqual(breaker.seat_cause(self.CREDITS), "credits")
+        self.assertEqual(breaker.seat_cause("insufficient credit balance"), "credits")
+
+    def test_claude_401_failure_is_config(self):
+        self.assertEqual(breaker.classify_cli("claude", 1, "", self.LOGIN, None), "CONFIG")
+        self.assertEqual(breaker.seat_cause(self.LOGIN), "login")
+        self.assertEqual(breaker.classify_cli("claude", 1, "", "OAuth access token has expired", None), "CONFIG")
+        self.assertEqual(breaker.seat_cause("OAuth access token has expired"), "login")
+
+    def test_a_quote_in_a_successful_answer_is_not_config(self):
+        self.assertEqual(breaker.classify_cli("codex", 0, "fine", self.CREDITS, None), "ANSWERED")
+        self.assertEqual(breaker.classify_cli("claude", 0, "fine", self.LOGIN, None), "ANSWERED")
+
+    def test_cause_text_names_credits_and_the_last_line(self):
+        c = breaker.cause_text(self.CREDITS)
+        self.assertEqual(c, "the workspace is out of credits: ERROR: Your workspace is out of credits. "
+                            "Add credits to continue.")
+        self.assertNotIn("Reading additional input", c)
+        self.assertEqual(breaker.cause_text(self.LOGIN), "the login is rejected (401): " + self.LOGIN.strip())
+        self.assertEqual(breaker.cause_text("banner\nboom\n\n"), "boom")
+        self.assertEqual(breaker.cause_text("", "only stdout\n"), "only stdout")
+        self.assertEqual(breaker.cause_text("ERROR: boom\n", "the answer says out of credits, workspace is out of credits"),
+                         "ERROR: boom")   # the answer's words never name the seat while stderr speaks
+
+    def test_edges_never_raise(self):
+        for v in ("", None, b"out of credits", 7):
+            self.assertEqual(breaker.seat_cause(v), "")
+            self.assertEqual(breaker.last_line(v), "")
+            self.assertFalse(breaker.is_config(v))
+        self.assertEqual(breaker.last_line("one"), "one")
+        self.assertEqual(len(breaker.last_line("x" * 500)), 200)
+        self.assertEqual(breaker.seat_cause("Your workspace is out"), "")   # a cut line is not a match
+        self.assertEqual(breaker.classify_cli("codex", 1, "", "Your workspace is out", None), "MALFORMED")
+        self.assertEqual(breaker.classify_cli("codex", 1, "", "", None), "MALFORMED")
+        self.assertTrue(breaker.is_config("unknown model and out of credits"))
+        # a cause sentence whose last line lost the measured text still names its kind
+        c = breaker.cause_text("Failed to authenticate. API Error: 401 OAuth access token is invalid\nexiting\n")
+        self.assertEqual(c, "the login is rejected (401): exiting")
+        self.assertEqual(breaker.seat_cause(c), "login")
+
+
 if __name__ == "__main__":
     unittest.main()

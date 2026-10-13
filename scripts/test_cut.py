@@ -16,6 +16,7 @@ Python 3, stdlib only. No network. No em or en dashes anywhere in this file.
 """
 import builtins
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -217,6 +218,15 @@ GREEN = {
     "bm_store checkpoint": (0, "checkpoint 1 recorded for %s (version 2)\n"
                                % UUID),
 }
+
+
+#: RC1.b1: the export rows build a real export tree, which a fake root
+#: cannot, so setUpModule answers them for every scripted chain in this
+#: module (twelve call paths reach chain: _main, _main_true_default_terms,
+#: seven direct C.main calls and three C.cut_mode calls);
+#: TheExportRowsRunOnce drives the real function, kept here.
+STUB_EXPORT_ROWS = (True, ["export rows: stubbed"])
+REAL_EXPORT_ROWS = C.export_rows
 
 
 def _main(argv, runner, answer="y", root="/fake/root", terms_file=None,
@@ -871,8 +881,13 @@ class TheGreenPathRunsTheChainInOrderAndCompletes(unittest.TestCase):
         r = Runner(GREEN)
         _main(["--yes"], r)
         push = [c for c in r.cmds if _key(c) == "export_public.py"][0]
+        # RC1.b2: the covering rehearsal record rides along, for the
+        # exporter to check again against the tree it builds; FP1.b: so
+        # does the Linux canary record the question was asked on
         self.assertEqual(push[2:], ["--push", "--tag", "v%s" % VERSION,
-                                    "--prove-required-fast"])
+                                    "--prove-required-fast",
+                                    "--rehearsal-record", FAKE_REHEARSAL,
+                                    "--canary-record", "/fixture/canary.json"])
         self.assertNotIn("--require-signed", push)
 
     def test_the_locally_tagged_commit_is_threaded_into_reproduce_export(self):
@@ -2777,6 +2792,536 @@ class J064GateLineShadowNeverChangesRequiredFast(unittest.TestCase):
             self.assertEqual(ok, baseline_ok)
             self.assertEqual(lines, baseline_lines)
 
+ROW_KEY = "a" * 40
+HUB_TREE = "b" * 40
+
+
+def _fake_export_build(dest):
+    """An export shaped tree for cut_preflight.check_virgin_gate (its marker file only)."""
+    os.makedirs(os.path.join(dest, "scripts"), exist_ok=True)
+    with open(os.path.join(dest, "scripts", "required_fast.sh"), "w", encoding="utf-8") as fh:
+        fh.write("echo pass 1 fail 0 no-data 0\n")
+
+
+class TheExportRowsRunOnce(unittest.TestCase):
+    """RC1.b1 (docs/plan/specs/RC1.md): the chain runs the two export rows once, after cut_v1.0.0.sh and the hub
+    required_fast on the tree that ships, side by side on the real path, and records each row (key, home, verdict,
+    a readable log) as a CUTROW line; step 4 of cut_v1.0.0.sh no longer runs a second export dry run."""
+
+    def setUp(self):
+        import cut_preflight as P
+        self.P = P
+
+    def capture(self, fn, *a, **k):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got = fn(*a, **k)
+        return got, out.getvalue()
+
+    def fake(self, verdict, name, text="fake check output\n", barrier=None):
+        def check(keep):
+            if barrier is not None:
+                try:
+                    barrier.wait()
+                except Exception as exc:  # noqa: BLE001  a broken barrier is the series run this test refuses
+                    verdict_now = self.P.REFUSED
+                    detail = "ran alone: %s" % type(exc).__name__
+                else:
+                    verdict_now, detail = verdict, "fake"
+            else:
+                verdict_now, detail = verdict, "fake"
+            with open(keep, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            return verdict_now, name, detail
+        return check
+
+    def rows(self, checks, tree=(ROW_KEY, ""), runner=None):
+        with mock.patch.object(C, "export_tree", return_value=tree):
+            (ok, lines), out = self.capture(REAL_EXPORT_ROWS, "/fake/root", VERSION, runner=runner, checks=checks)
+        rows, problems = C.CR.parse_rows(out)
+        self.assertEqual(problems, [], out)
+        return ok, lines, rows, out
+
+    # REQ-RC1-07
+    def test_emit_row_prints_the_cutrow_line_and_writes_its_log(self):
+        row, out = self.capture(C.emit_row, "virgin-gate", ["sh", "scripts/required_fast.sh"], ROW_KEY, "empty",
+                                "PASS", 2.5, "pass 1 fail 0 no-data 0\n")
+        rows, problems = C.CR.parse_rows(out)
+        self.assertEqual((rows, problems), ([row], []))
+        self.assertEqual(C.CR.validate_row(row), "")
+        self.assertTrue(row["log_path"].startswith(EVIDENCE_TMP), row["log_path"])
+        self.assertIn("row-virgin-gate-%s-empty-" % ROW_KEY[:12], row["log_path"])
+        with open(row["log_path"], encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "pass 1 fail 0 no-data 0\n")
+        self.assertEqual(hashlib.sha256(open(row["log_path"], "rb").read()).hexdigest(), row["log_sha256"])
+
+    def test_emit_row_refuses_a_row_it_could_not_reuse(self):
+        for key, verdict in (("", "PASS"), (ROW_KEY[:39], "PASS"), (ROW_KEY, "OK")):
+            with self.subTest(key=key, verdict=verdict):
+                with self.assertRaises(ValueError):
+                    self.capture(C.emit_row, "virgin-gate", ["sh"], key, "empty", verdict, 1.0, "x")
+
+    # REQ-RC1-06
+    def test_the_two_rows_run_side_by_side_on_the_real_path(self):
+        import threading
+        barrier = threading.Barrier(2, timeout=10)
+        ok, lines, rows, out = self.rows({"export-real-home": self.fake(self.P.OK, "export-real-home",
+                                                                        "EXPORT-TREE: %s\n" % ROW_KEY, barrier),
+                                          "virgin-gate": self.fake(self.P.OK, "virgin-gate", barrier=barrier)})
+        self.assertTrue(ok, out)
+        self.assertEqual(sorted((r["row"], r["home"], r["verdict"], r["key"]) for r in rows),
+                         [("export-real-home", "real", "PASS", ROW_KEY), ("virgin-gate", "empty", "PASS", ROW_KEY)])
+
+    # REQ-RC1-08
+    def test_one_failing_row_fails_and_both_rows_are_still_emitted(self):
+        for bad, verdict in ((self.P.REFUSED, "FAIL"), (self.P.NODATA, "NO-DATA")):
+            with self.subTest(verdict=verdict):
+                ok, lines, rows, out = self.rows({
+                    "export-real-home": self.fake(self.P.OK, "export-real-home", "EXPORT-TREE: %s\n" % ROW_KEY),
+                    "virgin-gate": self.fake(bad, "virgin-gate")}, runner=Runner({}))
+                self.assertFalse(ok, out)
+                self.assertEqual([(r["row"], r["verdict"]) for r in rows],
+                                 [("export-real-home", "PASS"), ("virgin-gate", verdict)])
+
+    def test_an_unreadable_tree_id_is_no_data_and_runs_no_check(self):
+        ran = []
+        checks = {"export-real-home": lambda keep: ran.append(1), "virgin-gate": lambda keep: ran.append(2)}
+        ok, lines, rows, out = self.rows(checks, tree=("", "the tree id could not be read"))
+        self.assertFalse(ok)
+        self.assertEqual((ran, rows), ([], []))
+        self.assertTrue(any("NO-DATA" in l for l in lines), lines)
+
+    def test_an_export_row_that_measured_another_tree_or_names_none_is_no_data(self):
+        for text in ("EXPORT-TREE: %s\n" % ("c" * 40), "CLEAR with no tree line\n"):
+            with self.subTest(text=text):
+                ok, lines, rows, out = self.rows({
+                    "export-real-home": self.fake(self.P.OK, "export-real-home", text),
+                    "virgin-gate": self.fake(self.P.OK, "virgin-gate")}, runner=Runner({}))
+                self.assertFalse(ok, out)
+                self.assertEqual(rows[0]["verdict"], "NO-DATA")
+
+    def test_export_tree_reads_the_one_line_through_the_runner(self):
+        for answer, want in (((0, "EXPORT-TREE: %s\n" % ROW_KEY), ROW_KEY), ((2, "NO-DATA: no build\n"), ""),
+                             ((0, "garbage\n"), ""), ((0, "EXPORT-TREE: %s\nEXPORT-TREE: %s\n" % (ROW_KEY, HUB_TREE)), "")):
+            with self.subTest(answer=answer):
+                r = Runner({"cut_preflight.py": answer})
+                tree, why = C.export_tree("/fake/root", VERSION, runner=r)
+                self.assertEqual(tree, want)
+                self.assertEqual(bool(why), not want)
+                cmd = r.cmds[0]
+                self.assertEqual(cmd[-1], "--export-tree-id")
+                self.assertEqual(cmd[cmd.index("--version") + 1], VERSION)
+
+    # REQ-RC1-05, the chain
+    def chain(self, answers):
+        r = Runner(dict(GREEN, **dict({"git rev-parse HEAD^{tree}": (0, HUB_TREE + "\n"),
+                                       "cut_preflight.py": (0, "EXPORT-TREE: %s\n" % ROW_KEY),
+                                       "export_public.py": (0, "EXPORT-TREE: %s\nCLEAR\n" % ROW_KEY)}, **answers)))
+        with mock.patch.object(self.P, "export_tree_builder", return_value=_fake_export_build), \
+                mock.patch.object(self.P, "real_home_refusal", return_value=""), \
+                mock.patch.object(C, "export_rows", REAL_EXPORT_ROWS):
+            (passed, failed), out = self.capture(C.chain, "/fake/root", VERSION, runner=r)
+        rows, problems = C.CR.parse_rows(out)
+        return passed, failed, r, rows, out
+
+    def test_the_chain_runs_the_export_rows_once_after_the_cut_script_and_the_hub_gate(self):
+        passed, failed, r, rows, out = self.chain({})
+        self.assertEqual(failed, [], out)
+        self.assertIn("export rows", passed)
+        exports = [i for i, c in enumerate(r.calls) if c == "export_public.py"]
+        self.assertEqual(len(exports), 1, r.calls)
+        cmd = r.cmds[exports[0]]
+        for flag in ("--dry-run", "--prove-required-fast", "--tag-time-checks", "--remote"):
+            self.assertIn(flag, cmd)
+        self.assertNotIn("--push", cmd)
+        fasts = [i for i, c in enumerate(r.calls) if c == "required_fast.sh"]
+        self.assertEqual(len(fasts), 2, "the hub gate and the virgin gate, once each: %s" % r.calls)
+        self.assertLess(r.calls.index("cut_v1.0.0.sh"), fasts[0])
+        self.assertLess(fasts[0], exports[0])
+        self.assertLess(exports[0], r.calls.index("refresh_cut.py"))
+        self.assertEqual([(x["row"], x["key"], x["home"], x["verdict"]) for x in rows],
+                         [("required-fast-hub", HUB_TREE, "real", "PASS"),
+                          ("export-real-home", ROW_KEY, "real", "PASS"),
+                          ("virgin-gate", ROW_KEY, "empty", "PASS")])
+
+    def test_the_chain_fails_when_an_export_row_fails(self):
+        for answers in ({"export_public.py": (1, "EXPORT-TREE: %s\nREFUSED: no\n" % ROW_KEY)},
+                        {"cut_preflight.py": (2, "NO-DATA: no build\n")}):
+            with self.subTest(answers=answers):
+                passed, failed, r, rows, out = self.chain(answers)
+                self.assertIn("export rows", failed, out)
+                self.assertNotIn("refresh_cut.py", r.calls, "stop_early ran on past a failed export row")
+
+    def test_a_failed_hub_gate_runs_no_export_row(self):
+        passed, failed, r, rows, out = self.chain({"required_fast.sh": (1, "FAILED: x\n")})
+        self.assertNotIn("export_public.py", r.calls)
+        self.assertEqual([x["row"] for x in rows], ["required-fast-hub"])
+        self.assertEqual(rows[0]["verdict"], "FAIL")
+
+    def test_check_export_real_home_passes_the_flag_and_keeps_where_asked(self):
+        import tempfile as T
+        keep = os.path.join(T.mkdtemp(prefix="test-cut-keep-"), "export.txt")
+        self.addCleanup(shutil.rmtree, os.path.dirname(keep), True)
+        r = Runner({"export_public.py": (0, "EXPORT-TREE: %s\n" % ROW_KEY)})
+        home = os.path.dirname(keep)
+        os.makedirs(os.path.join(home, ".claude"))
+        got = self.P.check_export_real_home("/fake/root", "origin", r, home=home, tag_time_checks=True, keep=keep)
+        self.assertEqual(got[0], self.P.OK)
+        self.assertIn("--tag-time-checks", r.cmds[0])
+        with open(keep, encoding="utf-8") as fh:
+            self.assertIn("EXPORT-TREE", fh.read())
+        r = Runner({})
+        self.P.check_export_real_home("/fake/root", "origin", r, home=home)
+        self.assertNotIn("--tag-time-checks", r.cmds[0])
+        vkeep = os.path.join(home, "virgin.txt")
+        got = self.P.check_virgin_gate("/fake/root", Runner({"required_fast.sh": (0, "pass 3 fail 0 no-data 0\n")}),
+                                       build=_fake_export_build, keep=vkeep)
+        self.assertEqual(got[0], self.P.OK, got)
+        with open(vkeep, encoding="utf-8") as fh:
+            self.assertIn("pass 3", fh.read())
+
+    def test_export_tree_id_names_the_bytes_and_refuses_what_it_cannot_read(self):
+        import tempfile as T
+        counter = []
+
+        def build(dest):
+            counter.append(1)
+            with open(os.path.join(dest, "a.txt"), "w", encoding="utf-8") as fh:
+                fh.write("same bytes\n")
+            env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.test", GIT_COMMITTER_NAME="t",
+                       GIT_COMMITTER_EMAIL="t@example.test", GIT_COMMITTER_DATE="@%d +0000" % (1000000000 + len(counter)),
+                       GIT_AUTHOR_DATE="@%d +0000" % (1000000000 + len(counter)))
+            for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "build %d" % len(counter)]):
+                subprocess.run(["git", "-c", "commit.gpgsign=false"] + args, cwd=dest, env=env, check=True,
+                               capture_output=True)
+
+        one, why = self.P.export_tree_id("/fake/root", build=build)
+        two, why2 = self.P.export_tree_id("/fake/root", build=build)
+        self.assertEqual((why, why2), ("", ""))
+        self.assertRegex(one, r"^[0-9a-f]{40}$")
+        self.assertEqual(one, two, "two builds of the same bytes named two trees")
+
+        def boom(dest):
+            raise RuntimeError("no export")
+        for bad in (boom, lambda dest: None):
+            with self.subTest(build=bad):
+                tree, why = self.P.export_tree_id("/fake/root", build=bad)
+                self.assertEqual(tree, "")
+                self.assertTrue(why)
+
+    def test_the_export_tree_id_mode_prints_one_line(self):
+        import contextlib
+        import io
+        for answer, code, want in (((ROW_KEY, ""), 0, "EXPORT-TREE: %s\n" % ROW_KEY),
+                                   (("", "no build"), 2, "NO-DATA: no build\n")):
+            with self.subTest(answer=answer):
+                out = io.StringIO()
+                with mock.patch.object(self.P, "export_tree_id", return_value=answer), \
+                        mock.patch.object(self.P, "run_all", side_effect=AssertionError("ran the rows")), \
+                        contextlib.redirect_stdout(out):
+                    got = self.P.main(["--version", VERSION, "--export-tree-id"])
+                self.assertEqual((got, out.getvalue()), (code, want))
+
+    # M-RC1-STEP4
+    def test_step_4_runs_only_the_invariant_and_the_chain_runs_the_dry_run(self):
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cut_v1.0.0.sh"), encoding="utf-8") as fh:
+            text = fh.read()
+        body = text[text.index("== 4."):text.index("STOP. Review")]
+        self.assertIn("python3 scripts/release_invariant.py", body)
+        code = [l for l in body.splitlines() if l.strip() and not l.lstrip().startswith(("#", "echo"))]
+        self.assertFalse([l for l in code if "export_public.py" in l], body)
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cut.py"), encoding="utf-8") as fh:
+            self.assertIn("export_rows(", fh.read())
+
+
+#: LX1.b1: setUpModule stubs the canary for every scripted chain in this
+#: module (no chain here may run linux_canary.py through its runner); the
+#: classes below drive the real functions, kept here.
+REAL_START_CANARY = C.start_canary
+REAL_AWAIT_CANARY = C.await_canary
+CANARY_PASS_OUT = "REUSED linux-canary aaaaaaaaaaaa /r.json\nCANARY PASS /r.json reused\n"
+
+
+class TheChainDispatchesTheCanary(unittest.TestCase):
+    """REQ-LX1-13 to 16: the chain starts the canary after cut_v1.0.0.sh,
+    before required_fast, awaits it after the last local row, never on a
+    resume, and terminates it on an early stop."""
+
+    def chain(self, answers=None, resume=False, start=None, await_=None):
+        r = Runner(dict(GREEN, **(answers or {})))
+        seen = {}
+
+        def awaiting(handle, version):
+            seen["calls_at_await"] = list(r.calls)
+            return (await_ or REAL_AWAIT_CANARY)(handle, version)
+        with mock.patch.object(C, "start_canary", start or REAL_START_CANARY), \
+                mock.patch.object(C, "await_canary", awaiting), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            passed, failed = C.chain("/fake/root", VERSION, runner=r, resume=resume)
+        return passed, failed, r, seen
+
+    def test_the_canary_starts_after_the_cut_script_and_before_required_fast(self):
+        passed, failed, r, seen = self.chain({"linux_canary.py": (0, CANARY_PASS_OUT)})
+        self.assertEqual(failed, [], r.calls)
+        self.assertEqual(r.calls.count("linux_canary.py"), 1, r.calls)
+        i = r.calls.index("linux_canary.py")
+        self.assertLess(r.calls.index("cut_v1.0.0.sh"), i)
+        self.assertLess(i, r.calls.index("plugin_bump_gate.py"))
+        self.assertLess(i, r.calls.index("required_fast.sh"))
+        cmd = r.cmds[i]
+        self.assertEqual(cmd[2:], ["--version", VERSION, "--root", "/fake/root"])
+        # awaited after the last local row
+        self.assertEqual(seen["calls_at_await"][-1], "retire_catalogs.py")
+        self.assertEqual(passed[-1], "linux canary")
+
+    def test_a_failed_or_no_data_canary_fails_the_chain(self):
+        for out, code in (("CANARY FAIL /r.json required-fast-canary concluded failure\n", 1),
+                          ("CANARY NO-DATA - nothing recorded, nothing pushed\n", 2),
+                          ("no verdict line at all\n", 0)):
+            passed, failed, r, _ = self.chain({"linux_canary.py": (code, out)})
+            self.assertIn("linux canary", failed, out)
+            self.assertNotIn("linux canary", passed)
+
+    def test_await_reads_the_last_canary_line(self):
+        def handle(code, out):
+            return C.CanaryHandle(result=subprocess.CompletedProcess(["x"], code, out, ""))
+        ok, lines = REAL_AWAIT_CANARY(handle(0, CANARY_PASS_OUT), VERSION)
+        self.assertTrue(ok)
+        self.assertIn("CANARY PASS /r.json reused", lines)
+        for code, out in ((1, "CANARY FAIL /r.json x\n"), (2, "CANARY NO-DATA - x\n"),
+                          (1, "CANARY PASS /r.json x\n"), (0, "CANARY PASS /r.json x\nCANARY NO-DATA - y\n"),
+                          (0, ""), (0, "CANARYPASS\n")):
+            ok, lines = REAL_AWAIT_CANARY(handle(code, out), VERSION)
+            self.assertFalse(ok, (code, out))
+            self.assertTrue(lines)
+        ok, lines = REAL_AWAIT_CANARY(None, VERSION)
+        self.assertFalse(ok)
+        self.assertIn("did not start", " ".join(lines))
+
+    def test_a_canary_that_never_started_is_a_failed_row(self):
+        passed, failed, r, _ = self.chain(start=lambda root, version, runner=None: None)
+        self.assertIn("linux canary", failed)
+
+    def test_no_canary_starts_on_a_resume(self):
+        passed, failed, r, seen = self.chain({"linux_canary.py": (0, CANARY_PASS_OUT)}, resume=True)
+        self.assertNotIn("linux_canary.py", r.calls)
+        self.assertNotIn("linux canary", passed + failed)
+        self.assertEqual(seen, {})
+
+    def test_an_early_stop_terminates_the_child(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        self.addCleanup(lambda: child.poll() is None and (child.kill(), child.wait()))
+        handle = C.CanaryHandle(proc=child, log="")
+        passed, failed, r, seen = self.chain({"plugin_bump_gate.py": (1, "bump refused\n")},
+                                             start=lambda root, version, runner=None: handle)
+        self.assertEqual(failed, ["plugin_bump_gate"])
+        self.assertIsNotNone(child.poll(), "the canary outlived the chain")
+        self.assertEqual(seen, {})
+
+    def test_the_real_start_runs_the_child_and_reads_its_log(self):
+        root = tempfile.mkdtemp(prefix="lx1-root-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "scripts"))
+        with open(os.path.join(root, "scripts", "linux_canary.py"), "w") as fh:
+            fh.write("import sys\nprint('working')\nprint('CANARY PASS /r.json ' + ' '.join(sys.argv[1:]))\n")
+        with mock.patch.dict(os.environ, {"BROTHER_SCRATCH": os.path.join(root, "scratch")}), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            handle = REAL_START_CANARY(root, VERSION)
+            ok, lines = REAL_AWAIT_CANARY(handle, VERSION)
+        self.assertTrue(ok, lines)
+        self.assertIn("CANARY PASS /r.json --version %s --root %s" % (VERSION, root), lines)
+        self.assertTrue(handle.log.startswith(os.path.join(root, "scratch")))
+
+
+REAL_CANARY_CHECK = C.canary_check
+TREE_A, TREE_B = "a" * 40, "b" * 40
+
+
+class CanaryRunner(Runner):
+    """GREEN, plus the export tree id from `trees` (one per call, the last
+    repeating) and linux_canary.py --covering answered from `covering`
+    (tree -> (code, stdout))."""
+
+    def __init__(self, trees, covering, answers=None):
+        Runner.__init__(self, dict(GREEN, **(answers or {})))
+        self.trees, self.covering = list(trees), dict(covering)
+
+    def __call__(self, cmd, **kw):
+        if "--export-tree-id" in cmd:
+            Runner.__call__(self, cmd, **kw)
+            tree = self.trees.pop(0) if len(self.trees) > 1 else self.trees[0]
+            if isinstance(tree, tuple):
+                return subprocess.CompletedProcess(cmd, tree[0], tree[1], "")
+            return subprocess.CompletedProcess(cmd, 0, "EXPORT-TREE: %s\n" % tree, "")
+        if "--covering" in cmd:
+            Runner.__call__(self, cmd, **kw)
+            code, out = self.covering.get(cmd[cmd.index("--covering") + 1], (1, "NOT COVERED: no canary record\n"))
+            return subprocess.CompletedProcess(cmd, code, out, "")
+        return Runner.__call__(self, cmd, **kw)
+
+
+class TheQuestionNeedsTheCanary(unittest.TestCase):
+    """REQ-LX1-17 to 20: no PASS record for HEAD's export tree, no question;
+    asked again after the answer, on the tree at that moment."""
+
+    def setUp(self):
+        p = mock.patch.object(C, "canary_check", REAL_CANARY_CHECK)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_no_covering_record_means_no_question(self):
+        r = CanaryRunner([TREE_A], {})
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code, asked = _main([], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        self.assertEqual(asked, [], "the question was asked with no Linux verdict")
+        self.assertIn("no Linux canary PASS for the export tree %s" % TREE_A[:12], out.getvalue())
+        self.assertNotIn("export_public.py", r.calls)
+
+    def test_a_covering_record_lets_the_question_through(self):
+        r = CanaryRunner([TREE_A], {TREE_A: (0, "/ev/linux-canary-x.json\n")})
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            code, asked = _main([], r, answer="n")
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(code, C.EXIT_OK)
+
+    def test_every_covering_reason_refuses(self):
+        for reason in ("NOT COVERED: the canary record x is for tree bbbbbbbbbbbb, not aaaaaaaaaaaa",
+                       "NOT COVERED: the canary record x is stale: finished 2026-10-01T00:00:00Z",
+                       "NOT COVERED: the canary record x says FAIL, not PASS",
+                       "NOT COVERED: the canary record x says NO-DATA, not PASS",
+                       "NOT COVERED: the newest canary record for tree aaaaaaaaaaaa may be x, which is corrupt"):
+            r = CanaryRunner([TREE_A], {TREE_A: (1, reason + "\n")})
+            why = C.canary_refusal("/fake/root", VERSION, r)
+            self.assertTrue(why.startswith("no Linux canary PASS for the export tree %s: " % TREE_A[:12]), why)
+            self.assertIn(reason, why)
+            self.assertEqual(C.canary_check("/fake/root", VERSION, r)[0], "")
+        cmd = [c for c in r.cmds if "--covering" in c][0]
+        self.assertEqual(cmd[2:], ["--covering", TREE_A, "--version", VERSION])
+
+    def test_a_covering_record_is_returned(self):
+        r = CanaryRunner([TREE_A], {TREE_A: (0, "/ev/linux-canary-x.json\n")})
+        self.assertEqual(C.canary_check("/fake/root", VERSION, r), ("/ev/linux-canary-x.json", ""))
+        self.assertEqual(C.canary_refusal("/fake/root", VERSION, r), "")
+
+    def test_missing_tool_or_empty_output_refuses(self):
+        for answer in ((127, ""), (0, ""), (0, "\n")):
+            r = CanaryRunner([TREE_A], {TREE_A: answer})
+            self.assertTrue(C.canary_refusal("/fake/root", VERSION, r), answer)
+
+    def test_an_unreadable_tree_id_refuses(self):
+        for tree in ((1, "cut-preflight: the export tree could not be built\n"), (0, "no id\n")):
+            r = CanaryRunner([tree], {TREE_A: (0, "/ev/x.json\n")})
+            why = C.canary_refusal("/fake/root", VERSION, r)
+            self.assertIn("no Linux canary PASS for the export tree", why)
+            self.assertFalse([c for c in r.cmds if "--covering" in c], "covering asked with no tree id")
+
+    def test_the_recheck_reads_the_tree_again_after_the_answer(self):
+        r = CanaryRunner([TREE_A, TREE_B], {TREE_A: (0, "/ev/a.json\n")})
+        self.assertEqual(C.canary_refusal("/fake/root", VERSION, r), "")
+        with mock.patch.object(C, "_covering_record", return_value=(FAKE_REHEARSAL, "")):
+            why = C.pre_push_recheck("/fake/root", VERSION, GREEN_HEAD, FAKE_REHEARSAL, runner=r)
+        self.assertTrue(why.startswith("REFUSED: no Linux canary PASS for the export tree %s" % TREE_B[:12]), why)
+        r = CanaryRunner([TREE_A], {TREE_A: (0, "/ev/a.json\n")})
+        with mock.patch.object(C, "_covering_record", return_value=(FAKE_REHEARSAL, "")):
+            self.assertEqual(C.pre_push_recheck("/fake/root", VERSION, GREEN_HEAD, FAKE_REHEARSAL, runner=r), "")
+
+
+_FP1_FAIL = ("FAIL: required-fast failed again on attempt 2 of 2 on pull request 7: "
+             "https://github.com/o/r/actions/runs/5/attempts/2; first failure: "
+             "https://github.com/o/r/actions/runs/5/job/1 (test_timing (t.C))")
+_FP1_RERUN = ("RERUN: attempt 2 of run 5, first failure https://github.com/o/r/actions/runs/5/job/1 "
+              "(test_timing (t.C)), justified by /fixture/canary.json PASS on tree aaaaaaaaaaaa")
+_FP1_PUBLIC = "public check: attempt 2 of 2, first failure test_timing (t.C) https://github.com/o/r/actions/runs/5/job/1"
+
+
+class TheStopRecordNamesTheFailure(unittest.TestCase):
+    """FP1.b (docs/plan/specs/FP1.md): the stop record's kept characters
+    begin with the failure and both attempts; a green push after a rerun
+    says attempt 2 of 2 in its DONE evidence; the exporter is handed the
+    canary record the question was asked on."""
+
+    PREAMBLE = ["preamble line %02d of the exporter, before any failure" % i for i in range(30)]
+
+    def stop_record(self):
+        path = os.path.join(EVIDENCE_TMP, "stop-%s-%s.json" % (VERSION, GREEN_HEAD[:12]))
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_the_kept_characters_begin_with_the_failure(self):
+        """REQ-FP1-07, M-FP1-ORDER."""
+        out = "\n".join(self.PREAMBLE + [_FP1_RERUN, _FP1_FAIL]) + "\n"
+        r = Runner(dict(GREEN, **{"export_public.py": (1, out)}))
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            code, _asked = _main(["--yes"], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        rec = self.stop_record()
+        self.assertTrue(rec["detail"].startswith(_FP1_RERUN + "\n" + _FP1_FAIL[:100]), rec["detail"])
+        self.assertEqual(rec["kind"], C.STOP_HOST_REFUSED)
+
+    def test_stop_detail_orders_without_dropping(self):
+        lines = ["export_public --push: exit 1", "a", "NO-DATA: x", "b", "FAIL: y", "public check: z"]
+        self.assertEqual(C.stop_detail(lines).splitlines(),
+                         ["NO-DATA: x", "FAIL: y", "public check: z", "export_public --push: exit 1", "a", "b"])
+        plain = ["export_public --push: exit 1", "a", "b"]
+        self.assertEqual(C.stop_detail(plain), "\n".join(plain))
+        self.assertEqual(C.stop_detail([]), "")
+
+    def test_the_classification_still_reads_the_whole_output(self):
+        """REQ-FP1-09: the exporter's armed first line still decides the kind
+        although the stop record's detail puts its REFUSED: line first."""
+        token = "0123456789abcdef"
+        out = "\n".join(["%s %s" % (C.EP.REMOTE_WRITE_ARMED, token)] + self.PREAMBLE[:3]
+                        + ["REFUSED: the tag-time checks found 1 problem",
+                           "%s %s" % (C.EP.REMOTE_WRITE_NONE, token)]) + "\n"
+        self.assertEqual(C.classify_push_failure(out), C.STOP_LOCAL_REFUSED)
+        r = Runner(dict(GREEN, **{"export_public.py": (1, out)}))
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            code, _asked = _main(["--yes"], r)
+        self.assertEqual(code, C.EXIT_REFUSED)
+        rec = self.stop_record()
+        self.assertTrue(rec["detail"].startswith("REFUSED: the tag-time checks"), rec["detail"])
+        self.assertEqual(rec["kind"], C.STOP_LOCAL_REFUSED)
+
+    def test_a_green_push_after_a_rerun_says_attempt_two_of_two(self):
+        """REQ-FP1-08, M-FP1-SILENT."""
+        out = _FP1_RERUN + "\nrequired-fast: PASS on pull request 7\n" + _FP1_PUBLIC + "\n" + GREEN_EXPORT_PUBLIC_OUT
+        r = Runner(dict(GREEN, **{"export_public.py": (0, out)}))
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as printed:
+            code, _asked = _main(["--yes"], r)
+        self.assertEqual(code, C.EXIT_OK, printed.getvalue())
+        done = [l for l in printed.getvalue().splitlines() if l.startswith("DONE:")]
+        self.assertEqual(len(done), 1, printed.getvalue())
+        self.assertIn(_FP1_PUBLIC, done[0])
+        self.assertIn(_FP1_RERUN, done[0])
+
+    def test_a_clean_first_pass_says_nothing_of_attempts(self):
+        r = Runner(GREEN)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as printed:
+            code, _asked = _main(["--yes"], r)
+        self.assertEqual(code, C.EXIT_OK)
+        self.assertNotIn("attempt", [l for l in printed.getvalue().splitlines() if l.startswith("DONE:")][0])
+
+    def test_the_canary_record_reaches_the_exporter_only_when_given(self):
+        """REQ-FP1-10, M-FP1-FLAG."""
+        for given, want in (("/r/linux-canary.json", ["--canary-record", "/r/linux-canary.json"]), ("", None)):
+            r = Runner(GREEN)
+            C.export_public_push("/fake/root", VERSION, r, canary_record=given)
+            cmd = [c for c in r.cmds if _key(c) == "export_public.py"][0]
+            if want:
+                self.assertEqual(cmd[cmd.index("--canary-record"):cmd.index("--canary-record") + 2], want)
+            else:
+                self.assertNotIn("--canary-record", cmd)
+        r = Runner(GREEN)
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            _main(["--yes"], r)
+        cmd = [c for c in r.cmds if _key(c) == "export_public.py"][0]
+        self.assertIn("/fixture/canary.json", cmd, "the covering record was not handed to the exporter")
+
+
 def setUpModule():
     # Finding 31 (loop audit 2026-09-26), same fixture as test_board_status.py:
     # unmocked production calls read the tracked data/jev-seams.json, where
@@ -2842,7 +3387,14 @@ def setUpModule():
                     mock.patch.object(C.CR, "covering_record",
                                       return_value=(FAKE_REHEARSAL, "")),
                     mock.patch.object(C.CR, "evidence_dir",
-                                      return_value=EVIDENCE_TMP)):
+                                      return_value=EVIDENCE_TMP),
+                    mock.patch.object(C, "export_rows",
+                                      return_value=STUB_EXPORT_ROWS),
+                    mock.patch.object(C, "start_canary", return_value=None),
+                    mock.patch.object(C, "canary_check",
+                                      return_value=("/fixture/canary.json", "")),
+                    mock.patch.object(C, "await_canary",
+                                      return_value=(True, ["linux canary: stubbed"]))):
         patcher.start()
         unittest.addModuleCleanup(patcher.stop)
 

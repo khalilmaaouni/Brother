@@ -103,7 +103,8 @@ def _target_cwd_from_file(run_dir):
     except (OSError, ValueError) as exc:
         sys.stderr.write("continuity: could not read %s (%s)\n" % (path, exc))
         return None
-    return data.get("cwd")
+    cwd = data.get("cwd") if isinstance(data, dict) else None
+    return cwd if isinstance(cwd, str) and cwd else None
 
 
 def _target_cwd_from_journal(events):
@@ -251,6 +252,38 @@ def _canonical_revision(cwd):
                          % (cwd, exc))
         return None
     return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def current_branch(cwd):
+    """The branch checked out in `cwd` (`git symbolic-ref --short -q HEAD`),
+    or None for a detached HEAD, a non-repository or any git error. Reads
+    only: never touches the index or the working tree (RS1.b)."""
+    if not cwd:
+        return None
+    try:
+        proc = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"],
+                              cwd=cwd, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    name = proc.stdout.strip() if proc.returncode == 0 else ""
+    return name or None
+
+
+def branch_drift(recorded, live):
+    """"" when both branches are known and equal; the warning naming both
+    when they differ; a NO-DATA line naming the unreadable side otherwise.
+    An unreadable side is never treated as equal to anything."""
+    unknown = (None, NODATA)
+    if recorded in unknown or live in unknown:
+        sides = [what for what, value in (("the checkpoint's", recorded),
+                                          ("the live checkout's", live))
+                 if value in unknown]
+        return "branch %s: %s branch could not be read" % (NODATA, " and ".join(sides))
+    if recorded == live:
+        return ""
+    return ("BRANCH CHANGED since this checkpoint: it was %s, it is %s; "
+            "integration lands on the current branch, so check it before "
+            "resuming" % (recorded, live))
 
 
 def _dispatch_env(events):
@@ -696,6 +729,7 @@ def capsule(run_dir, clock=None):
         "run_dir": run_dir,
         "objective": objective,
         "canonical_revision": canonical_revision_field,
+        "branch": current_branch(target_cwd) or NODATA,
         "environment": environment,
         "units": units,
         "buckets": buckets,
@@ -760,9 +794,86 @@ def write_capsule(run_dir, clock=None):
     return True, ""
 
 
-def _print_screen(cap):
+#: The two integration subjects a merge commit carries: the engine's own
+#: (integrate.py, "Brother integrated <id> from lane/<id>") and git's default.
+#: A deliberate copy of product_acceptance._merge_ids's two regexes: this
+#: module ships, that one is a harness and is never imported from here. A
+#: hand merge with any other subject is invisible to both (documented limit).
+_MERGE_SUBJECTS = (re.compile(r"Brother integrated \S+ from lane/(\S+)"),
+                   re.compile(r"Merge branch 'lane/([^']+)'"))
+
+
+def merged_unit_ids(repo):
+    """Every unit id git history says was integrated, one entry per merge
+    commit, duplicates KEPT (a doubled merge shows twice), sorted. None when
+    git history cannot be read."""
+    try:
+        proc = subprocess.run(["git", "log", "--format=%s"], cwd=repo,
+                              capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    ids = []
+    for subject in proc.stdout.splitlines():
+        for pattern in _MERGE_SUBJECTS:
+            m = pattern.search(subject)
+            if m:
+                ids.append(m.group(1))
+                break
+    return sorted(ids)
+
+
+def ledger_vs_history(run_dir, repo):
+    """{"lost", "doubled", "phantom"}: the run's own ledger (its Work
+    document and claims) against git history. lost: a DONE row with no
+    merge; doubled: a unit merged twice or more; phantom: a merge whose row
+    is not DONE and whose claim is not live. All three empty means they
+    agree. An unreadable Work document or history is a NO-DATA entry in
+    lost, never a clean answer."""
+    out = {"lost": [], "doubled": [], "phantom": []}
+    doc_path = _work_doc_path(run_dir)
+    record = _read_json(doc_path)[0] if doc_path else None
+    rows = None
+    if isinstance(record, dict):
+        rows = record.get("rows") if "rows" in record else record.get("units")
+    if not isinstance(rows, list):
+        out["lost"].append("%s: work document unreadable" % NODATA)
+        return out
+    merged = merged_unit_ids(repo)
+    if merged is None:
+        out["lost"].append("%s: git history of %s unreadable" % (NODATA, repo))
+        return out
+    counts = {}
+    for uid in merged:
+        counts[uid] = counts.get(uid, 0) + 1
+    status = {str(r.get("id")): r.get("status") for r in rows if isinstance(r, dict)}
+    claims = _read_json(os.path.join(run_dir, brother_run.CLAIMS_FILENAME))[0]
+    claims = claims if isinstance(claims, dict) else {}
+    now = time.time()
+    out["lost"] = sorted(u for u, st in status.items() if st == "DONE" and not counts.get(u))
+    out["doubled"] = sorted(u for u, n in counts.items() if n >= 2)
+    out["phantom"] = sorted(
+        u for u in counts if status.get(u) != "DONE"
+        and not (isinstance(claims.get(u), dict) and claim_store.live(claims[u], now)))
+    return out
+
+
+def _print_screen(cap, checkpoint=None):
+    """The resume screen. `checkpoint` is the stored capsule.json (main()
+    passes it), whose branch is the RECORDED side of the drift line; with
+    none, `cap` itself is the recorded side (a stored capsule printed
+    as it is)."""
     print("objective: %s" % cap["objective"])
     print("canonical revision: %s" % cap["canonical_revision"])
+    recorded = cap if checkpoint is None else checkpoint
+    if not isinstance(recorded, dict) or "branch" not in recorded:
+        print("branch %s: this checkpoint predates the field" % NODATA)
+    else:
+        drift = branch_drift(recorded["branch"],
+                             current_branch(cap["environment"]["target_cwd"]))
+        if drift:
+            print(drift)
     env = cap["environment"]
     print("environment:")
     print("  runs root:     %s" % env["runs_root"])
@@ -805,7 +916,8 @@ def main(argv=None):
     if args.json:
         print(json.dumps(cap, indent=1, sort_keys=True))
     else:
-        _print_screen(cap)
+        stored, _ = _read_json(os.path.join(cap["run_dir"], CAPSULE_FILENAME))
+        _print_screen(cap, stored)
     return 0
 
 

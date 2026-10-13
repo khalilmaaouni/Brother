@@ -15,7 +15,7 @@ No real program answers a model here: calls go to a fake runner, and the only re
 scripts written into a temp directory.
 Run from the repository root: python3 -B scripts/loop/test_model_reachability.py
 """
-import json, os, shutil, subprocess, sys, tempfile, time, unittest
+import fcntl, json, os, shutil, subprocess, sys, tempfile, threading, time, unittest
 
 LOOP = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [LOOP, os.path.dirname(os.path.dirname(LOOP))]
@@ -196,6 +196,108 @@ class TheCacheAndTheBudget(Reach):
     def test_one_proof_per_distinct_model(self):
         MR.require_proof([("worker", "opus55"), ("adversary", "opus55")], REG, runner=self.runner(), programs={"claude": self.new})
         self.assertEqual(len(self.calls), 1)
+
+
+
+class TheProofsRunTogether(Reach):
+    """LA2.b: the proof lock covers the cache only, one flight per key. Mutations, each against its own case:
+    M-LA2-SINGLE (no _flight), M-LA2-LOCKSPAN (file lock back around call_one), M-LA2-BUDGET (no reserve lock),
+    M-LA2-ORDER (results in completion order)."""
+
+    def answering(self, before=None):
+        base = self.runner()
+        def run(argv, stdin, timeout):
+            if before:
+                before(argv)
+            if any(str(x).endswith("or_ask.py") for x in argv):   # the bridge (jev)
+                self.calls.append(list(argv))
+                return {"returncode": 0, "stdout": '{"ok": true}', "stderr": "[usage] prompt=3 completion=2 model=typesafe/jev-1.13"}
+            return base(argv, stdin, timeout)
+        return run
+
+    def test_two_distinct_proofs_overlap(self):
+        barrier = threading.Barrier(2, timeout=5)
+        proofs = MR.resolve_and_prove([("worker", "opus55"), ("checker", "sonnet")], REG,
+                                      runner=self.answering(lambda argv: barrier.wait()), candidates={"claude": [self.new]})
+        self.assertEqual([p["status"] for p in proofs], ["OK", "OK"], "M-LA2-LOCKSPAN: two distinct proofs were serialised\n%s" % proofs)
+
+    def test_one_key_two_threads_one_call(self):
+        start, out = threading.Barrier(2, timeout=5), []
+        runner = self.answering(lambda argv: time.sleep(0.3))
+        def one():
+            start.wait()
+            out.append(MR.prove("opus55", REG, program=self.new, runner=runner))
+        threads = [threading.Thread(target=one) for _ in range(2)]
+        [t.start() for t in threads]; [t.join(10) for t in threads]
+        self.assertEqual(len(self.calls), 1, "M-LA2-SINGLE: one key proved twice by two threads")
+        self.assertEqual(sorted(p["status"] for p in out), ["OK", "OK"])
+        self.assertEqual(sorted(p["cached"] for p in out), [False, True])
+
+    def test_the_cache_lock_is_free_while_a_proof_is_in_flight(self):
+        free = []
+        def probe(argv):
+            fd = os.open(MR.cache_path() + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                free.append(True)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                free.append(False)
+            finally:
+                os.close(fd)
+        p = MR.prove("opus55", REG, program=self.new, runner=self.answering(probe))
+        self.assertEqual(p["status"], "OK", p)
+        self.assertEqual(free, [True], "M-LA2-LOCKSPAN: the cache file lock was held across the live call")
+
+    def test_the_budget_never_over_reserves_under_threads(self):
+        def slow_clock():
+            time.sleep(0.001)   # releases the GIL between the test and the decrement, where a race would live
+            return time.time()
+        for _ in range(50):
+            b = MR.Budget(usd=0.25, clock=slow_clock)
+            go, got = threading.Barrier(6, timeout=5), []
+            def take():
+                go.wait()
+                got.append(b.reserve("claude"))
+            threads = [threading.Thread(target=take) for _ in range(6)]
+            [t.start() for t in threads]; [t.join(10) for t in threads]
+            self.assertEqual(got.count(""), 2, "M-LA2-BUDGET: %d of 6 reserved against 0.25 USD" % got.count(""))
+            self.assertEqual(b.calls, 2)
+
+    def test_results_keep_plan_order_and_a_raise_is_no_data(self):
+        real = MR.prove
+        def prove(name, *a, **k):
+            if name == "haiku":
+                raise RuntimeError("kaput")
+            if name == "opus55":
+                time.sleep(0.4)   # the first in the plan finishes last
+            return real(name, *a, **k)
+        MR.prove = prove
+        self.addCleanup(setattr, MR, "prove", real)
+        plan = [("a", "opus55"), ("b", "sonnet"), ("c", "haiku"), ("d", "jev"), ("e", "sonnet")]
+        proofs = MR.resolve_and_prove(plan, REG, runner=self.answering(), candidates={"claude": [self.new]})
+        self.assertEqual([(p["role"], p["model"]) for p in proofs],
+                         [("a", "opus55"), ("b", "sonnet"), ("c", None), ("d", "jev"), ("e", "sonnet")],
+                         "M-LA2-ORDER: results left plan order\n%s" % proofs)
+        self.assertEqual([p["status"] for p in proofs], ["OK", "OK", "NO-DATA", "OK", "OK"], proofs)
+        self.assertIn("the proof raised RuntimeError: kaput", proofs[2]["cause"])
+        self.assertEqual(MR._parallel([lambda: 1, lambda: 1 / 0, lambda: 3])[::2], [1, 3])
+        self.assertEqual(MR._parallel([lambda: 1 / 0])[0]["status"], "NO-DATA")
+        self.assertEqual(MR.resolve_and_prove([], REG, runner=self.answering()), [])
+
+    def test_a_held_cache_lock_is_no_data(self):
+        self.assertEqual(MR.CACHE_LOCK_WAIT_S, 10.0)
+        saved = MR.CACHE_LOCK_WAIT_S
+        MR.CACHE_LOCK_WAIT_S = 0.3
+        self.addCleanup(setattr, MR, "CACHE_LOCK_WAIT_S", saved)
+        os.makedirs(os.path.dirname(MR.cache_path()), exist_ok=True)
+        fd = os.open(MR.cache_path() + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        p = MR.prove("opus55", REG, program=self.new, runner=self.answering())
+        self.assertEqual(p["status"], "NO-DATA", p)
+        self.assertIn("the proof cache could not be used", p["cause"])
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == "__main__":

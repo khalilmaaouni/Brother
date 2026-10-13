@@ -564,7 +564,7 @@ class AChangedTestIsRunWhereThePublicRunnerRunsIt(unittest.TestCase):
         head = sh(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
         return "refs/heads/main %s refs/heads/main %s\n" % (head, self.base)
 
-    def run_check(self, verdicts):
+    def run_check(self, verdicts, timing=None):
         import hermetic_test_check as hermetic
         from unittest import mock
         seen = []
@@ -573,9 +573,32 @@ class AChangedTestIsRunWhereThePublicRunnerRunsIt(unittest.TestCase):
             seen.append(list(tests))
             return [(verdicts.get(t, hermetic.OK), t, "detail") for t in tests] or \
                 [(hermetic.OK, "hermetic-tests", "nothing touched")]
-        with mock.patch.object(hermetic, "check", fake):
+        timing = timing if timing is not None else (lambda paths, root: [])
+        with mock.patch.object(hermetic, "check", fake), mock.patch.object(hermetic, "timing_results", timing):
             found = G.check_hermetic_tests(cwd=self.repo, stdin_text=self.push_lines())
         return found, seen
+
+    def test_the_real_push_runs_the_timing_hunt_and_a_new_timing_test_blocks(self):   # TH1 at the gate's entry
+        import hermetic_test_check as hermetic
+        self.write("scripts/test_door.py", "pass  # touched\n")
+        sh(["git", "commit", "-qam", "change"], self.repo)
+        asked = []
+
+        def timing(paths, root):
+            asked.append(list(paths))
+            return [(hermetic.REFUSED, "scripts/test_door.py", "UNCOVERED thread test")]
+        found, _ = self.run_check({}, timing=timing)
+        self.assertEqual(asked, [["scripts/test_door.py"]])
+        self.assertIn((G.BLOCK, "timing"), [(f[0], f[1]) for f in found])
+
+    def test_a_timing_hunt_that_cannot_run_is_no_data_never_ok(self):
+        self.write("scripts/test_door.py", "pass  # touched\n")
+        sh(["git", "commit", "-qam", "change"], self.repo)
+
+        def broken(paths, root):
+            raise OSError("baseline unreadable")
+        found, _ = self.run_check({}, timing=broken)
+        self.assertIn((G.NODATA, "timing"), [(f[0], f[1]) for f in found])
 
     def test_a_changed_script_runs_its_test_and_only_its_test(self):
         self.write("scripts/door.py", "A = 2\n")

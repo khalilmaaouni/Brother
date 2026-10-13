@@ -318,6 +318,16 @@ def check_scope_audit(objective, changed_path, current_answer, *, seams_config,
     return _consult("J117", state, current_answer, seams_config=seams_config,
                      registry=registry, ledger_dir=ledger_dir, runner=runner, rng=rng)
 
+def check_gate_failure_flake(log_text, rerun_history, current_answer, *, seams_config,
+                              registry, ledger_dir, runner=None, rng=None):
+    """J065 (noul): does the failing `log_text`, with its `rerun_history`,
+    read as an infra flake? Beside, never instead of, the check's own exit
+    code and a rerun on a clean tree. `current_answer` is the caller's
+    stance (jev_door passes False: the failure is real)."""
+    state = {"log": log_text, "rerun_history": rerun_history}
+    return _consult("J065", state, current_answer, seams_config=seams_config,
+                     registry=registry, ledger_dir=ledger_dir, runner=runner, rng=rng)
+
 
 def check_founder_decision_risk(decision_text, current_answer, *, seams_config,
                                  registry, ledger_dir, runner=None, rng=None):
@@ -608,17 +618,21 @@ def check_receipt_risk_trigger(unit_text, current_answer, *, seams_config,
 
 
 def _load_registry(path):
-    """REUSED from jev_seam.load_registry() when available (its own
-    docstring: raises jev_registry.RegistryError unchanged, this CLI's own
-    main() is the guarded call site that turns that into an exit). Falls
+    """(registry, "") or (None, a NO-DATA sentence), REUSED from
+    jev_seam.registry_or_nodata() when available (JWP.b: never raises;
+    main() prints the sentence once and exits 0). Falls
     back to a direct jev_registry.load() only in the defensive case
     _consult() already handles (jev_seam did not import): the CLI cannot
     do anything useful then either way, so this just avoids a second
     ImportError obscuring the real one."""
     if _seam is not None:
-        return _seam.load_registry(path)
+        return _seam.registry_or_nodata(path)
     import jev_registry
-    return jev_registry.load(path)
+    try:
+        return jev_registry.load(path), ""
+    except (jev_registry.RegistryError, OSError, ValueError, TypeError) as exc:
+        return None, ("Jev is not installed here: %s could not be read (%s); "
+                      "every Jev check reads NO-DATA" % (path, type(exc).__name__))
 
 
 def _load_seams_config(path):
@@ -786,7 +800,11 @@ def main(argv=None):
     live = _seam is not None and _seam.resolve_mode(seams_config, entry_id) != _seam.OFF
     if live:
         os.makedirs(args.ledger_dir, exist_ok=True)
-        registry = _load_registry(args.registry)
+        registry, nodata = _load_registry(args.registry)
+        if registry is None:
+            # JWP.b: one NO-DATA line, exit 0 (this CLI's own contract).
+            print("NO-DATA: " + nodata)
+            return 0
     else:
         registry = []
 

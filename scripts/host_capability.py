@@ -358,6 +358,45 @@ def _live_evidence(host, host_version, repo=None):
             % (count, host, version, run_id, stamp, EVIDENCE_REL))
 
 
+#: The three answers the public truth table gives per host (HG1). The states
+#: come from scripts/host_live_verify.py truth_states; this file only prints.
+HOST_STATES = ("certified", "advisory", NODATA)
+TRUTH_CLOSING = (
+    "certified means a denial of an out of scope write is on record for this "
+    "exact build and host; advisory means hooks are bound and no denial is "
+    "on record; NO-DATA means nothing was shown. Brother is not an operating "
+    "system sandbox.")
+#: Words that would claim more than an advisory or NO-DATA host has shown.
+_OVERCLAIM = re.compile(r"enforced|sandbox\s+secure", re.IGNORECASE)
+
+
+def render_truth_table(states, evidence=""):
+    """The truth table text for {host: (state, reason)}: a header naming the
+    evidence, one line per host (reason flattened to one line, cut to 100
+    characters, "no reason recorded" when blank), and TRUTH_CLOSING. Pure. A
+    state outside HOST_STATES, or a malformed mapping, raises ValueError:
+    a caller bug, never printed. A host that is not certified never carries
+    the word enforced: an overclaiming reason word is withheld."""
+    if not isinstance(states, dict):
+        raise ValueError("states must be a dict of host: (state, reason)")
+    where = " ".join(evidence.split()) if isinstance(evidence, str) else ""
+    lines = ["host truth table for %s: host, state, reason"
+             % (_OVERCLAIM.sub("[withheld]", where) or NODATA)]
+    for host, pair in states.items():
+        if not isinstance(host, str) or host.split() != [host] \
+                or not isinstance(pair, tuple) \
+                or len(pair) != 2 or pair[0] not in HOST_STATES:
+            raise ValueError("unrecognized host state %r: %r" % (host, pair))
+        state, reason = pair
+        reason = " ".join(reason.split()) if isinstance(reason, str) else ""
+        if state != "certified":
+            reason = _OVERCLAIM.sub("[withheld]", reason)
+        lines.append("%-12s %-10s %s" % (
+            host, state, reason[:100] or "no reason recorded"))
+    lines.append(TRUTH_CLOSING)
+    return "\n".join(lines) + "\n"
+
+
 def host_capability_receipt(run_dir=None, receipt_path=None, env=None,
                             repo=None):
     """The Host Capability Receipt: a dict carrying exactly

@@ -243,6 +243,24 @@ GENERATED_NOTE_MARKS = (CUT_COMMIT_MARK.lower(), "## source revision",
 DECLARED_VERSION_REL = os.path.join(".claude-plugin", "marketplace.json")
 
 
+def generator_mark(note_text):
+    """The first of GENERATED_NOTE_MARKS found in `note_text`, folded to lower
+    case and single spaces (so a wrapped or re-cased mark still counts), or
+    '' when there is none or the note is not text."""
+    if not isinstance(note_text, str):
+        return ""
+    flat = " ".join(note_text.split()).lower()
+    return next((mark for mark in GENERATED_NOTE_MARKS if mark in flat), "")
+
+
+def is_generated_note(note_text):
+    """True when the note carries any mark of the generator: it came out of a
+    cut, damaged or not. No syntax is read, so a mark quoted in a code block
+    of a hand draft counts too (a false refusal costs a re-read of one note,
+    a false pass costs a rehearsal)."""
+    return bool(generator_mark(note_text))
+
+
 def is_uncut_draft(root, version, note_text):
     """True only when `note_text`, the text of docs/releases/<version>.md, is
     the uncut draft of the version being cut: `version` is the release the
@@ -283,8 +301,7 @@ def is_uncut_draft(root, version, note_text):
         return False
     if not isinstance(note_text, str):
         return False
-    flat = " ".join(note_text.split()).lower()
-    if not flat or any(mark in flat for mark in GENERATED_NOTE_MARKS):
+    if not note_text.split() or is_generated_note(note_text):
         return False
     try:
         with open(os.path.join(root, DECLARED_VERSION_REL), encoding="utf-8") as fh:
@@ -371,6 +388,31 @@ def export_tree_builder(root):
     return build
 
 
+def export_tree_id(root, build=None):
+    """(tree id, '') of the export tree built from `root` (the exporter's own builder), or ('', reason). RC1.b1: the
+    git tree id names the bytes only, never the commit, so two builds of the same bytes agree; it is the key a cut
+    rehearsal row is recorded under and reused on. A build that raises, a folder with no commit, or a value that is
+    not 40 hex is the reason, never an id."""
+    _require_text(root, "root")
+    if build is not None and not callable(build):
+        raise ValueError("build must be callable or None, got %r" % (build,))
+    build = build or export_tree_builder(root)
+    tree = tempfile.mkdtemp(prefix="cut-preflight-tree-id-")
+    try:
+        try:
+            build(tree)
+        except Exception as exc:  # sbe: allow-silent returned as the reason, never swallowed
+            return "", "the export tree could not be built: %s" % exc
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        proc = _run(["git", "rev-parse", "HEAD^{tree}"], tree, env=env, timeout=120)
+        out = (proc.stdout or "").strip()
+        if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", out):
+            return "", "the built export tree has no readable commit (git rev-parse exit %d)" % proc.returncode
+        return out, ""
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+
+
 def runner_env(home):
     """The public runner's conditions: HOME empty and no git identity. An
     exported GIT_AUTHOR_NAME outranks the identity a test gives its own
@@ -406,8 +448,9 @@ def runner_env(home):
     return env
 
 
-def check_virgin_gate(root, runner=None, build=None):
-    """P5: required_fast.sh on an export shaped tree, HOME empty."""
+def check_virgin_gate(root, runner=None, build=None, keep=None):
+    """P5: required_fast.sh on an export shaped tree, HOME empty. `keep` (RC1.b1): where the full output is written,
+    instead of the temp folder default."""
     # R1.3: hostile API input is refused before a temp tree or a temp HOME is
     # made, so the refusal is this module's own and never a TypeError from
     # inside the run.
@@ -429,8 +472,8 @@ def check_virgin_gate(root, runner=None, build=None):
                     tree, runner, env=env)
         out = (proc.stdout or "") + (proc.stderr or "")
         # The tree is deleted below, so the whole output is kept beside it.
-        keep = os.path.join(tempfile.gettempdir(),
-                            "cut-preflight-virgin-gate-%d.txt" % os.getpid())
+        keep = keep or os.path.join(tempfile.gettempdir(),
+                                    "cut-preflight-virgin-gate-%d.txt" % os.getpid())
         try:
             with open(keep, "w", encoding="utf-8") as fh:
                 fh.write(out)
@@ -486,9 +529,11 @@ def real_home_env(home, environ=None):
     return env
 
 
-def check_export_real_home(root, remote, runner=None, home=None):
+def check_export_real_home(root, remote, runner=None, home=None, tag_time_checks=False, keep=None):
     """FX2.a: export_public.py --dry-run --prove-required-fast from the checkout root under the real HOME, never
-    --push. 0 is OK, 1 is REFUSED, every other exit (2, a timeout 124, a missing binary 127) is NO-DATA."""
+    --push. 0 is OK, 1 is REFUSED, every other exit (2, a timeout 124, a missing binary 127) is NO-DATA.
+    RC1.b1: `tag_time_checks` adds --tag-time-checks (the cut's one dry run on the tree that ships); `keep` is where
+    the full output is written, instead of the temp folder default."""
     _require_text(root, "root")
     _require_text(remote, "remote")
     home = os.path.expanduser("~") if home is None else home
@@ -496,10 +541,11 @@ def check_export_real_home(root, remote, runner=None, home=None):
     if why:
         return NODATA, EXPORT_ROW_NAME, "not run: %s" % why
     proc = _run([sys.executable, os.path.join(root, "scripts", "export_public.py"), "--dry-run",
-                 "--prove-required-fast", "--remote", remote], root, runner, env=real_home_env(home),
+                 "--prove-required-fast"] + (["--tag-time-checks"] if tag_time_checks else [])
+                + ["--remote", remote], root, runner, env=real_home_env(home),
                 timeout=EXPORT_ROW_TIMEOUT_S)
     out = (proc.stdout or "") + (proc.stderr or "")
-    keep = os.path.join(tempfile.gettempdir(), "cut-preflight-export-real-home-%d.txt" % os.getpid())
+    keep = keep or os.path.join(tempfile.gettempdir(), "cut-preflight-export-real-home-%d.txt" % os.getpid())
     try:
         with open(keep, "w", encoding="utf-8") as fh:
             fh.write(out)
@@ -773,9 +819,53 @@ def check_version_after_bump(root, version, runner=None):
     return NODATA, VERSION_ROW, "the version rule exited %d: %s" % (proc.returncode, _last(proc))
 
 
+NO_CUT_COMMIT_NAME = "no-cut-commit"
+
+
+def check_no_cut_commit(root, version, resume_sha="", runner=None):
+    """CR1.a: (verdict, 'no-cut-commit', detail). A candidate whose tree
+    already carries the generator's note for `version` holds a cut commit:
+    the 1.1.2 cut stopped at the push with the release branch moved onto its
+    own two commits, the fix landed on top, and the next rehearsal refused
+    the stale note after 3,162 s. REFUSED unless `resume_sha` is exactly
+    HEAD (the cut's own commit, adopted on purpose). OK for no note, the
+    version's uncut draft, or any readable text with no generator mark.
+    NO-DATA for a note that cannot be read or a HEAD that cannot be read:
+    unknown is never looked past. One file read and at most one git call."""
+    _require_text(root, "root")
+    _require_text(version, "version")
+    rel = "docs/releases/%s.md" % version
+    path = os.path.join(root, "docs", "releases", "%s.md" % version)
+    if not os.path.lexists(path):
+        return OK, NO_CUT_COMMIT_NAME, "no release note for %s in this tree" % version
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return NODATA, NO_CUT_COMMIT_NAME, "%s cannot be read (%s)" % (rel, type(exc).__name__)
+    if is_uncut_draft(root, version, text):
+        return OK, NO_CUT_COMMIT_NAME, "%s is an uncut draft" % rel
+    mark = generator_mark(text)
+    if not mark:
+        return OK, NO_CUT_COMMIT_NAME, "%s carries no mark of the generator" % rel
+    proc = _run(["git", "rev-parse", "HEAD"], root, runner)
+    head = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not head:
+        return NODATA, NO_CUT_COMMIT_NAME, ("%s is a generated note and HEAD cannot be read (git rev-parse "
+                                            "exit %d)" % (rel, proc.returncode))
+    if resume_sha and resume_sha == head:
+        return OK, NO_CUT_COMMIT_NAME, "%s is the cut's own commit %s, named by --resume" % (rel, head[:12])
+    return REFUSED, NO_CUT_COMMIT_NAME, (
+        "%s is a generated note (mark %r): HEAD %s already carries a cut commit; rehearse the candidate "
+        "from before the cut commits, or name this commit with --resume if this is the adopt"
+        % (rel, mark, head[:12]))
+
+
 def run_all(root, version, horizon_hours=DEFAULT_HORIZON_HOURS, remote=None,
-            runner=None, now=None, virgin=True, build=None, progress=None, home=None):
-    """Every check, cheapest first; plugin-bumps, the export row and the virgin
+            runner=None, now=None, virgin=True, build=None, progress=None, home=None,
+            resume_sha=""):
+    """Every check, cheapest first (CR1.a: no-cut-commit, one file read,
+    before all, and a refusal there ends the run); plugin-bumps, the export row and the virgin
     gate (minutes) each run only when every cheaper row is OK, so a one second
     red or NO-DATA costs one second."""
     if remote is None:
@@ -792,11 +882,15 @@ def run_all(root, version, horizon_hours=DEFAULT_HORIZON_HOURS, remote=None,
         raise ValueError("now must be a datetime or None, got %r" % (now,))
     now = now or datetime.datetime.now()
     at = now + datetime.timedelta(hours=horizon_hours)
+    first = check_no_cut_commit(root, version, resume_sha or "", runner)
+    if first[0] != OK:
+        return [first]
     # R1.2 cheapest first: the local commit text read runs before the network
     # read of the public remote, so a fraction of a second red costs that, and
     # the minutes long export tree gate below still runs only when nothing
     # cheaper refused.
     results = [
+        first,
         check_exceptions(root, at, runner),
         check_pack_clock(root, horizon_hours, runner),
         check_readiness_rows(root, at, runner),
@@ -850,18 +944,31 @@ def main(argv=None):
                          "now plus this (default %d)" % DEFAULT_HORIZON_HOURS)
     ap.add_argument("--remote", default=None, help="the public remote (default: "
                     "export_public.DEFAULT_REMOTE)")
-    ap.add_argument("--no-virgin-gate", action="store_true",
-                    help="skip the minutes long export tree fast gate; the cheap "
-                         "checks only. cut.py never passes this")
+    ap.add_argument("--no-virgin-gate", "--cheap-only", dest="no_virgin_gate", action="store_true",
+                    help="skip the minutes long export rows (export-real-home and virgin-gate); the cheap "
+                         "checks only. cut.py passes --cheap-only only on --resume with a covering "
+                         "rehearsal record, whose rows the chain then reuses or runs")
+    ap.add_argument("--resume", default="", metavar="SHA",
+                    help="the cut's own commit, when this is the adopt: a generated release note of the "
+                         "version is allowed only when HEAD is exactly this commit")
+    ap.add_argument("--export-tree-id", action="store_true",
+                    help="only build the export tree and print EXPORT-TREE: <git tree id> (NO-DATA and exit 2 when "
+                         "it cannot be read); --version is required and ignored")
     args = ap.parse_args(argv)
+    if args.export_tree_id:
+        tree, why = export_tree_id(ROOT)
+        print("EXPORT-TREE: %s" % tree if tree else "NO-DATA: %s" % why)
+        return EXIT_OK if tree else EXIT_NODATA
     results = run_all(ROOT, args.version, args.horizon_hours, args.remote,
                       virgin=not args.no_virgin_gate,
-                      progress=lambda line: print(line, flush=True))
+                      progress=lambda line: print(line, flush=True), resume_sha=args.resume)
     for verdict, name, detail in results:
         print("%-8s %-16s %s" % (verdict, name, detail))
     code = exit_code(results)
-    print("cut-preflight: %s" % {EXIT_OK: "CLEAR", EXIT_REFUSED: "REFUSED",
-                                 EXIT_NODATA: "NO-DATA"}[code])
+    said = {EXIT_OK: "CLEAR", EXIT_REFUSED: "REFUSED", EXIT_NODATA: "NO-DATA"}[code]
+    if code == EXIT_OK and args.no_virgin_gate:
+        said += " (cheap rows only; export-real-home and virgin-gate were not asked)"
+    print("cut-preflight: %s" % said)
     return code
 
 

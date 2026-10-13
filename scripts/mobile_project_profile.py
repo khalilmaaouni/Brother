@@ -10,6 +10,14 @@ Detection is intentionally minimal tonight (M1.02's own words: "Do not
 require all adapters to be full implementation adapters yet; detection
 comes first"): Xcode/Swift and Gradle/Android indicators only. Anything
 else is honest NO-DATA (empty list), never a guess.
+
+Two schemas, one conversion. This module's record, mobile-project-profile-v1,
+says what a project IS (platforms, build systems, evidence). The run
+configuration mobile_workflow.py consumes, brother-mobile-profile-v1, says how
+to RUN it (scheme, simulator, bundle id, expected tests). They are different
+records for different jobs and are never merged: to_run_profile_seed is the
+only conversion between them, and it copies only the schema and the project,
+because detection has no scheme, simulator or version to give.
 """
 import argparse
 import json
@@ -133,6 +141,30 @@ def detect(project_dir, project_id="unknown"):
         "confidence": confidence,
         "evidence_refs": evidence,
     }
+
+
+RUN_PROFILE_SCHEMA = "brother-mobile-profile-v1"
+
+
+def to_run_profile_seed(detected, project):
+    """The one declared converter from a mobile-project-profile-v1 record to
+    the seed of a brother-mobile-profile-v1 run profile. Raises ValueError
+    naming every missing fact; an unrecognized record never reads as iOS."""
+    if not isinstance(detected, dict) or detected.get("schema_version") != "mobile-project-profile-v1":
+        raise ValueError("detection record is not a mobile-project-profile-v1 record")
+    missing = []
+    def listed(key):
+        value = detected.get(key)
+        return value if isinstance(value, list) else []
+    if "ios" not in listed("platforms"):
+        missing.append("platforms holds no ios")
+    if "xcodebuild" not in listed("build_systems"):
+        missing.append("build_systems holds no xcodebuild")
+    if detected.get("confidence") not in ("low", "high"):
+        missing.append("confidence is %r, not low or high" % (detected.get("confidence"),))
+    if missing:
+        raise ValueError("detection does not show an Xcode iOS project: " + "; ".join(missing))
+    return {"schema": RUN_PROFILE_SCHEMA, "project": project}
 
 
 def hand_rules(profile):

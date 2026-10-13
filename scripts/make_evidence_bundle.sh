@@ -31,7 +31,7 @@ SHA=$(git rev-parse HEAD)
 SHA8=$(printf '%s' "$SHA" | cut -c1-8)
 TREE_SCRIPTS=$(git rev-parse "HEAD:scripts")
 
-STAGE=$(mktemp -d)
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/evidence-bundle-stage.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 
 # Only the evidence-relevant subtree, straight from the commit (no working-tree

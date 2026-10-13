@@ -21,13 +21,50 @@
 
 cd "$(dirname "$0")/.." || exit 1
 
+# CA1: --shard k/n runs only the rows whose call order i has (i - 1) % n ==
+# k - 1 (disjoint and complete by construction; scripts/check_all_merge.py
+# merges the n outputs), --reach RANGE runs only the rows a git range reaches
+# (any doubt runs every row), --dry lists the rows this process would run and
+# runs none. Read without shifting, so the re-entry below still passes every
+# argument on; anything unknown or malformed exits 2 before any check.
+SHARD_K=""; SHARD_N=""; REACH_RANGE=""; DRY=""; _ca1_want=""
+_ca1_usage() {
+  echo "usage: sh scripts/check_all.sh [--shard k/n] [--reach RANGE] [--dry]  ($1)" >&2
+  exit 2
+}
+for _ca1_a in "$@"; do
+  case "$_ca1_want" in
+    shard) _ca1_want=""
+           case "$_ca1_a" in
+             [1-9]/[1-9]|[1-9]/[1-9][0-9]|[1-9][0-9]/[1-9][0-9]) ;;
+             *) _ca1_usage "shard must be k/n with 1 <= k <= n <= 16, got $_ca1_a" ;;
+           esac
+           SHARD_K="${_ca1_a%/*}"; SHARD_N="${_ca1_a#*/}"
+           { [ "$SHARD_N" -le 16 ] && [ "$SHARD_K" -le "$SHARD_N" ]; } \
+             || _ca1_usage "shard must be k/n with 1 <= k <= n <= 16, got $_ca1_a"
+           continue ;;
+    reach) _ca1_want=""
+           case "$_ca1_a" in
+             ""|-*|*[[:space:]]*) _ca1_usage "reach must be one git range such as abc123..HEAD" ;;
+           esac
+           REACH_RANGE="$_ca1_a"; continue ;;
+  esac
+  case "$_ca1_a" in
+    --shard) _ca1_want=shard ;;
+    --reach) _ca1_want=reach ;;
+    --dry) DRY=1 ;;
+    *) _ca1_usage "unknown argument: $_ca1_a" ;;
+  esac
+done
+[ -z "$_ca1_want" ] || _ca1_usage "--$_ca1_want needs a value"
+
 # Heavy work waits its turn (scripts/heavy_slot.py): on 2026-09-26 every
 # session's gates ran on top of each other and every check here was 3 to 9
 # times slower than alone. Re-enter this gate holding one shared machine slot.
 # A fixture copy without heavy_slot.py beside it, a nested run, or
 # BROTHER_HEAVY_SLOT=off runs straight through.
 if [ -z "${BROTHER_HEAVY_SLOT_HELD:-}" ] && [ "${BROTHER_HEAVY_SLOT:-on}" != "off" ] \
-   && [ -f scripts/heavy_slot.py ]; then
+   && [ -f scripts/heavy_slot.py ] && [ -z "$DRY" ]; then
   exec python3 scripts/heavy_slot.py sh "scripts/check_all.sh" "$@"
 fi
 # ROOT, captured once, right after the one cd this script performs on its own
@@ -48,7 +85,7 @@ ROOT="$(pwd)"
 # an hour, naming every path it removes. Not a run_check: it is a reading
 # about the harness, not a verdict about the product, and it must never be
 # able to turn the battery red.
-python3 scripts/temp_residue.py --label start --prune --hours 1
+[ -n "$DRY" ] || python3 scripts/temp_residue.py --label start --prune --hours 1
 
 # M3 (2026-09-07 reflection): hook test suites (PR 458's new tests, main's own
 # older suite) reached the founder's actual ~/.claude/hook-outcomes.jsonl
@@ -58,8 +95,10 @@ python3 scripts/temp_residue.py --label start --prune --hours 1
 # the very first thing this battery does, and compared as the LAST run_check
 # below (real-logs-unchanged), the same start/end shape as E100's own
 # temp-residue reading above.
-REAL_LOGS_SNAPSHOT="$(mktemp)"
+if [ -z "$DRY" ]; then
+REAL_LOGS_SNAPSHOT="$(mktemp "${TMPDIR:-/tmp}/real-logs-snapshot.XXXXXX")"
 python3 scripts/real_logs.py snapshot > "$REAL_LOGS_SNAPSHOT"
+fi
 
 pass=0; fail=0; nodata=0
 failed_names=""
@@ -80,10 +119,47 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 # launched process can read them. The `|| exit 2` suffix is required: this
 # shell runs without errexit, so without it a nonzero guard result would be
 # ignored and the gate would proceed against a hostile location variable.
-python3 scripts/git_location_guard.py --assert-clean --where check_all || exit 2
+[ -n "$DRY" ] || python3 scripts/git_location_guard.py --assert-clean --where check_all || exit 2
+
+# CA1: shard_take NAME answers whether this process runs the row. SEQ is the
+# row's call order, OWNED counts the rows this shard owns (before any reach
+# filter); run_check asks it first, and only when it is defined, so a test
+# that lifts run_check out alone still runs every check.
+SEQ=0; OWNED=0; REACH_FILE=""
+shard_take() {
+  SEQ=$((SEQ+1))
+  if [ -n "$SHARD_N" ] && [ $(( (SEQ - 1) % SHARD_N )) -ne $((SHARD_K - 1)) ]; then
+    return 1
+  fi
+  OWNED=$((OWNED+1))
+  if [ -n "$REACH_FILE" ] && ! grep -qxF -- "$1" "$REACH_FILE"; then
+    return 1
+  fi
+  if [ -n "$DRY" ]; then
+    printf 'DRY     %s\n' "$1"
+    return 1
+  fi
+  return 0
+}
+# CA1: --reach RANGE asks check_all_merge.py which rows the range reaches and
+# keeps the names in a private temp file, removed on exit. A reach that cannot
+# be computed (any nonzero answer) runs EVERY row, never fewer.
+if [ -n "$REACH_RANGE" ]; then
+  REACH_FILE="$(mktemp "${TMPDIR:-/tmp}/check-all-reach.XXXXXX")" || REACH_FILE=""
+  trap 'rm -f "$REACH_FILE"' EXIT
+  if [ -n "$REACH_FILE" ] \
+     && python3 scripts/check_all_merge.py reach --range "$REACH_RANGE" > "$REACH_FILE" 2>&1; then
+    tail -1 "$REACH_FILE"
+  else
+    { [ -n "$REACH_FILE" ] && grep 'REACH NO-DATA' "$REACH_FILE"; } \
+      || echo "REACH NO-DATA: the reach of $REACH_RANGE could not be computed; running every row"
+    rm -f "$REACH_FILE"; REACH_FILE=""
+  fi
+fi
 
 run_check() {
   name="$1"; shift
+  command -v shard_take >/dev/null 2>&1 && { shard_take "$name" || return 0; }
   # THE PINNED INTERPRETER, kept: PROJECT.md and docs/CHARTER.md name
   # /usr/bin/python3 for the checks that start with it, so it is used
   # wherever it exists. Only a machine without it (Windows has none) runs
@@ -236,6 +312,9 @@ run_check "doc-assurance" python3 scripts/doc_assurance.py
 run_check "doc-assurance-self" python3 scripts/doc_assurance.py --selftest
 run_check "key-components" python3 scripts/key_components.py
 run_check "hermetic-test-check-self" python3 scripts/test_hermetic_test_check.py -v
+run_check "timing-hunt" python3 -B scripts/test_timing_hunt.py
+run_check "timing-hunt-py39" /usr/bin/python3 -B scripts/test_timing_hunt.py
+run_check "timing-hunt-inventory" python3 scripts/timing_hunt.py --all
 run_check "key-components-self" python3 scripts/key_components.py --selftest
 run_check "perturb-pool-self" python3 scripts/test_perturb_pool.py -v
 run_check "shared-config-check-self" python3 scripts/test_shared_config_check.py -v
@@ -382,6 +461,11 @@ run_check "fence-expiry-self"     python3 scripts/test_fence_expiry.py -v
 # committed run directory, so a record shape this estate actually writes
 # and this reader cannot parse turns red here.
 run_check "safe-unwatched-time-self" python3 scripts/test_safe_unwatched_time.py -v
+# SUT1.a: the operator intervention event and its capture marker, a closed
+# vocabulary written through journal.append, so no prompt body or secret can
+# be stored. Both interpreters, the 3.9 floor included.
+run_check "sut-interventions-self" python3 scripts/test_sut_interventions.py -v
+run_check "sut-interventions-self-py39" /usr/bin/python3 -B scripts/test_sut_interventions.py
 # S10: the per-workload-family harness over that instrument. Its suite proves
 # the critical property (a real family with an unmeasured preservation check
 # is refused a duration) and, on a labeled synthetic fixture, that the
@@ -557,6 +641,9 @@ run_check "parity-gate-self"       python3 scripts/test_parity_gate.py -v
 # because a timing test passes on a fast machine that ran everything serially.
 run_check "worktree-lane-self"     python3 scripts/test_worktree_lane.py -v
 run_check "worktree-lane-linked"   python3 scripts/test_worktree_lane_linked.py -v
+# RS1.a: a packed-refs.lock past the retry window is diagnosed (path, age, git holders) and refused with the human remedy; nothing removes it.
+run_check "stale-lock-refusal-self" python3 -B scripts/test_stale_lock_refusal.py
+run_check "stale-lock-refusal-self-py39" /usr/bin/python3 -B scripts/test_stale_lock_refusal.py
 
 # The durable exclusive claim, parity blocker P0.1. Its exclusion test spawns
 # SIX REAL PROCESSES racing for one unit and asserts exactly one wins, because a
@@ -611,6 +698,9 @@ run_check "integrate-self"         python3 scripts/test_integrate.py -v
 # reconcile reports the dead owner's units, the rightful owner resumes at
 # attempt 2, and a takeover after expiry names whose work it inherits.
 run_check "crash-resume-proof"     python3 scripts/test_crash_resume.py -v
+# RS1.c: SIGKILL a three unit run at three boundaries (B1 before any integration, B2 after the first, B3 between the second and last); the ledger agrees with git before and after resume, each unit merged once. About three minutes.
+run_check "kill-boundaries-self" python3 -B scripts/test_kill_boundaries.py
+run_check "kill-boundaries-self-py39" /usr/bin/python3 -B scripts/test_kill_boundaries.py
 
 # The orphan worktree clause: crash reconcile above reports an abandoned
 # CLAIM, and until now nothing paired that claim back to the LANE a SIGKILLed
@@ -709,6 +799,7 @@ run_check "daybook"        python3 scripts/daybook.py
 # which is correct: nothing has been proven broken yet, only unmeasured.
 run_check "acceptance-self" python3 scripts/test_acceptance.py -v
 run_check "acceptance"      python3 scripts/acceptance.py
+run_check "acceptance-11-disk-reading" python3 -B scripts/test_acceptance_11.py
 
 # P0.1/P0.2, the composition wave (docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md):
 # one door, an outcome in and a verified delivery report out, driving the
@@ -791,6 +882,18 @@ run_check "journal-self" python3 scripts/test_journal.py -v
 # noise" cannot be satisfied by deleting the record.
 run_check "receipt-door-self" python3 scripts/test_receipt_door.py -v
 
+# TV1.a (1.1.3): one reader of the canonical receipt. read_receipt_verdict is
+# brother_run.delivery_conclusion over the receipt's own entries, never a
+# second copy of the state rules; an unreadable receipt is NOT DONE, exit 1.
+run_check "verdict-parity-self" python3 -B scripts/test_verdict_parity.py
+run_check "verdict-parity-self-py39" /usr/bin/python3 -B scripts/test_verdict_parity.py
+# TV1.b (1.1.3): receipt_door.py --verdict, the one command the status and
+# deliver skills call; its exit code is the engine's, anything else exits 2.
+run_check "verdict-surfaces-self" python3 -B scripts/test_verdict_surfaces.py
+run_check "verdict-surfaces-self-py39" /usr/bin/python3 -B scripts/test_verdict_surfaces.py
+run_check "assurance-matrix-self" python3 -B scripts/test_assurance_matrix.py
+run_check "assurance-matrix-self-py39" /usr/bin/python3 -B scripts/test_assurance_matrix.py
+
 # U4, the outcome contract schema: one project record for the door,
 # Intake V2 (U5) and Daybook (U9), decided in the 2026-09-08 debate
 # judgment. The checker reads the schema keywords generically and
@@ -846,7 +949,26 @@ run_check "footprint-budget" python3 -B scripts/test_footprint_budget.py
 run_check "one-plugin-self" python3 -B scripts/test_one_plugin.py -v
 run_check "native-evidence-self" python3 scripts/test_native_evidence.py -v
 run_check "mobile-workflow" python3 scripts/test_mobile_workflow.py -v
+# MB2.a (1.1.3): profile-init writes the run profile from the tools' own answers and refuses by name.
+run_check "mobile-profile-init-self" python3 -B scripts/test_mobile_profile_init.py
+run_check "mobile-profile-init-py39" /usr/bin/python3 -B scripts/test_mobile_profile_init.py
+# MB2.b (1.1.3): reference-init records the current clean checkout, built and installed, as the working reference.
+run_check "mobile-reference-init-self" python3 -B scripts/test_mobile_reference_init.py
+run_check "mobile-reference-init-py39" /usr/bin/python3 -B scripts/test_mobile_reference_init.py
 run_check "mobile-design" python3 scripts/test_mobile_design.py -v
+# MB3.a: every mobile module is classified SHIP, INTERNAL or DELETE in
+# docs/architecture/MOBILE-CAPABILITY-MAP.json, matching the runtime closure.
+run_check "mobile-ship-map-self" python3 -B scripts/test_mobile_ship_map.py
+run_check "mobile-ship-map-py39" /usr/bin/python3 -B scripts/test_mobile_ship_map.py
+# MB3.b: a mobile run holds the named simulator's device lease.
+run_check "mobile-lease-wiring-self" python3 -B scripts/test_mobile_lease_wiring.py
+run_check "mobile-lease-wiring-py39" /usr/bin/python3 -B scripts/test_mobile_lease_wiring.py
+# MB1.a (1.1.3): the door routes mobile words to doctor, profile-init, reference-init, run.
+run_check "mobile-door-self" python3 -B scripts/test_mobile_door.py
+run_check "mobile-door-py39" /usr/bin/python3 -B scripts/test_mobile_door.py
+# MB1.b (1.1.3): the README and the how-to show the full run, every mobile command parses.
+run_check "mobile-door-docs-self" python3 -B scripts/test_mobile_door_docs.py
+run_check "mobile-door-docs-py39" /usr/bin/python3 -B scripts/test_mobile_door_docs.py
 # M0.03 (mobile spine gate wiring, docs/plan/MOBILE-SPINE-INVENTORY.json):
 # these eight release-critical mobile modules already had a real self-test
 # each, but none of them ran in this battery, so a break in any of them
@@ -876,10 +998,12 @@ run_check "mobile-project-profile-self" python3 scripts/test_mobile_project_prof
 # fixtures only (docs/plan/MOBILE-SPINE-INVENTORY.json named this the one
 # remaining step for gate parity with mobile_project_profile).
 run_check "mobile-toolchain-probe-self" python3 scripts/test_mobile_toolchain_probe.py -v
-# M0.04: the Xcode canary orchestration guards, deterministic tool fixtures
-# only. The real xcodebuild/simctl/xcresulttool run against the checked-in
-# fixture app is scripts/mobile_xcode_canary_local.py run by hand; it is not
-# CI-safe and is not wired into any battery.
+# M0.04, MB4: the Xcode canary guards, deterministic tool fixtures only. The
+# canary runs the door's own sequence (doctor, profile-init, reference-init,
+# run) in process. The real run against the checked-in fixture app is
+# scripts/mobile_xcode_canary_local.py --out <a new folder outside the repo>,
+# by hand; it prints NO-DATA naming the missing piece and exits 2 without a
+# simulator. It is not CI-safe and is not wired into any battery.
 run_check "mobile-xcode-canary-local-self" python3 scripts/test_mobile_xcode_canary_local.py -v
 # EPIC M1.05 (adversarial hardening review, 2026-09-15, MAJOR M2): this
 # module's own test suite never ran in this battery until now, confirmed
@@ -995,6 +1119,9 @@ run_check "filtering-spec-self" python3 scripts/test_check_filtering_spec.py -v
 # estate's own recorded lesson that an unregistered tool is invisible to
 # every check the project owns.
 run_check "accept-delivery-self" python3 scripts/test_accept_delivery.py -v
+# AC1 (1.1.3): an acceptance binds to the exact receipt it accepts.
+run_check "acceptance-binding-self" python3 -B scripts/test_acceptance_binding.py
+run_check "acceptance-binding-self-py39" /usr/bin/python3 -B scripts/test_acceptance_binding.py
 
 # BO2, 2026-09-04: the README's own executable claims, driven backwards
 # against the shape the public tag v1.0.1 shipped (a receipt sample no
@@ -1004,6 +1131,13 @@ run_check "accept-delivery-self" python3 scripts/test_accept_delivery.py -v
 # that lands it, per this estate's own recorded lesson that an unregistered
 # tool is invisible to every check the project owns.
 run_check "readme-honesty" python3 scripts/test_readme_honesty.py -v
+
+# DOC3.a, 1.1.3: every fenced command in README.md and docs/pain-points/
+# names a script that exists, with flags its own argparse defines (read with
+# ast, nothing executed); ThePages holds the seven pain point pages to their
+# contract, the README links and the export allowlist line.
+run_check "readme-commands-self" python3 scripts/test_readme_commands.py
+run_check "readme-commands-self-py39" /usr/bin/python3 -B scripts/test_readme_commands.py
 
 # S23: docs/how-to/install-claude-code.md's real done_check, the guide's
 # commands run verbatim on a throwaway home against the published plugin,
@@ -1284,7 +1418,7 @@ run_check "c01-k-guard-self" python3 -B -m unittest scripts.test_c01_k_guard.Tes
 if [ "${BROTHER_LONG_CHECKS:-0}" = "1" ]; then
   printf 'RUNNING release-note-perturb: expected about %s minute(s) on this tree\n' 90
 run_check "release-note-perturb"      python3 scripts/release_note_perturb.py
-else
+elif shard_take release-note-perturb; then
   nodata=$((nodata+1)); nodata_names="$nodata_names release-note-perturb"
   printf '%-7s exit %-3s %-34s %s\n' "NO-DATA" "-" "release-note-perturb" \
     "long check (about 90 min) not run: set BROTHER_LONG_CHECKS=1"
@@ -1328,6 +1462,8 @@ run_check "battery-verdict-self" python3 scripts/test_battery_verdict.py -v
 # check the project owns. It lifts run_check out of this file and drives it
 # against fake checks, so the rule is proven by running it.
 run_check "check-all-summary-self" python3 scripts/test_check_all_summary.py
+run_check "check-all-merge" python3 -B scripts/test_check_all_merge.py
+run_check "check-all-merge-py39" /usr/bin/python3 -B scripts/test_check_all_merge.py
 
 # The closing ceremony law (founder order 2026-08-30): a session close on
 # this estate is FINISHED only when the newest handover pack carries the
@@ -1388,7 +1524,7 @@ run_check "product-brothersbe-tests" sh -c 'cd products/brothersbe && python3 to
 # one of the 94 steps failed. This wrapper reads the summary the same way a
 # person would: any step whose recorded exit is not 0 fails this line, and a
 # missing summary.txt (the script did not reach its own end) fails it too.
-run_check "product-brothersbe-battery" sh -c 'cd products/brothersbe && d=$(mktemp -d) && sh release-control/baseline/run-battery.sh "$d" >/dev/null 2>&1; if [ ! -f "$d/summary.txt" ]; then echo "no summary.txt at $d, battery did not run to completion"; exit 1; fi; bad=$(grep -E "exit=[1-9][0-9]*$" "$d/summary.txt"); if [ -n "$bad" ]; then printf "%s\n" "$bad"; echo "battery output: $d"; exit 1; fi; echo "battery clean: $d"'
+run_check "product-brothersbe-battery" sh -c 'cd products/brothersbe && d=$(mktemp -d "${TMPDIR:-/tmp}/brothersbe-battery.XXXXXX") && sh release-control/baseline/run-battery.sh "$d" >/dev/null 2>&1; if [ ! -f "$d/summary.txt" ]; then echo "no summary.txt at $d, battery did not run to completion"; exit 1; fi; bad=$(grep -E "exit=[1-9][0-9]*$" "$d/summary.txt"); if [ -n "$bad" ]; then printf "%s\n" "$bad"; echo "battery output: $d"; exit 1; fi; echo "battery clean: $d"'
 
 # One-repo transition M4: BrotherModeUp's OWN battery, delegated, run from
 # its subtree path with its own exit code, exactly as the line above does
@@ -1640,6 +1776,11 @@ run_check "or-ask-effort" python3 scripts/loop/test_or_ask_effort.py
 run_check "or-ask-billing" python3 -B scripts/loop/test_or_ask_billing.py
 run_check "loop-plan-selection" python3 -B scripts/loop/test_loop_plan_selection.py
 run_check "loop-start-run" python3 -B scripts/loop/test_start_run.py
+run_check "loop-start-run-py39" /usr/bin/python3 -B scripts/loop/test_start_run.py
+run_check "intake-parallel" python3 -B scripts/loop/test_intake_parallel.py
+run_check "intake-parallel-py39" /usr/bin/python3 -B scripts/loop/test_intake_parallel.py
+run_check "loop-gate-cache" python3 -B scripts/loop/test_loop_gate_cache.py
+run_check "loop-gate-cache-py39" /usr/bin/python3 -B scripts/loop/test_loop_gate_cache.py
 run_check "landing-standard" python3 -B scripts/loop/test_landing_standard.py
 run_check "spec-score-standard" python3 -B scripts/loop/test_spec_score_standard.py
 run_check "runner-pool-shared-files" python3 -B scripts/loop/test_runner_pool_shared_files.py
@@ -1649,6 +1790,13 @@ run_check "loop-door-skill-self" python3 -B scripts/test_loop_door_skill.py
 run_check "loop-door-verbs-self" python3 -B scripts/test_loop_door_verbs.py
 run_check "cut-rehearsal-self" python3 -B scripts/test_cut_rehearsal.py
 run_check "cut-rehearsal-awake-self" python3 -B scripts/test_cut_rehearsal_awake.py
+run_check "cut-driver-self" python3 -B scripts/test_cut_driver.py
+run_check "cut-driver-self-py39" /usr/bin/python3 -B scripts/test_cut_driver.py
+# RC0.a: the release candidate handover may say less than its evidence, never more.
+run_check "rc-handover-self" python3 -B scripts/test_rc_handover.py
+run_check "rc-handover-self-py39" /usr/bin/python3 -B scripts/test_rc_handover.py
+run_check "cut-receipts-self" python3 -B scripts/test_cut_receipts.py
+run_check "cut-receipts-self-py39" /usr/bin/python3 -B scripts/test_cut_receipts.py
 run_check "cut-step-clock-self" python3 -B scripts/test_cut_step_clock.py
 run_check "workflow-canary-self" python3 -B scripts/test_required_fast_workflow.py
 run_check "no-promise" python3 -B scripts/test_no_promise_to_cut_version.py
@@ -1658,6 +1806,9 @@ run_check "brother-run-truth-render" python3 scripts/test_brother_run_truth_rend
 run_check "brother-run-resume-doc" python3 scripts/test_brother_run_resume_doc.py -v
 run_check "brother-run-resume-pointer" python3 scripts/test_brother_run_resume_pointer.py -v
 run_check "continuity-work-doc" python3 scripts/test_continuity_work_doc.py -v
+# RS1.b: the resume screen names a branch changed since the checkpoint (NO-DATA when unreadable), and a torn journal still yields a capsule.
+run_check "resume-edges-self" python3 -B scripts/test_resume_edges.py
+run_check "resume-edges-self-py39" /usr/bin/python3 -B scripts/test_resume_edges.py
 run_check "acceptance-4-disk-reading" python3 -B scripts/test_acceptance_4.py
 run_check "model-call-no-plugin" python3 scripts/test_model_call_no_plugin.py
 run_check "model-call-ledger-rows" python3 -B scripts/test_model_call_ledger_rows.py
@@ -1985,9 +2136,10 @@ run_check "virgin-unit-proof-self" python3 scripts/test_virgin_unit_proof.py -v
 # stranger's directory, and reports NO-DATA rather than a pass when the temp
 # root cannot be read.
 run_check "temp-residue-self" python3 scripts/test_temp_residue.py -v
+run_check "no-bare-mktemp" python3 -B scripts/test_no_bare_mktemp.py
 
 echo
-python3 scripts/temp_residue.py --label end --prune --hours 1
+[ -n "$DRY" ] || python3 scripts/temp_residue.py --label end --prune --hours 1
 
 # The post-cut closeout matrix's own table logic and NO-DATA paths (board rows
 # X1 to X8), driven with a fake binary and a throwaway checkout, so this needs
@@ -2301,6 +2453,33 @@ run_check "probe-round-self" python3 scripts/test_probe_round.py
 run_check "close-unit-self" python3 scripts/test_close_unit.py
 run_check "donecheck-recon-self" python3 scripts/test_donecheck_recon.py
 run_check "jev-checks-r41-self" python3 scripts/test_jev_checks_r41.py
+run_check "jev-seam-wiring-self" python3 scripts/test_jev_seam_wiring.py
+run_check "jev-seam-wiring-py39" /usr/bin/python3 -B scripts/test_jev_seam_wiring.py
+run_check "baseline-113-self" python3 scripts/test_baseline_113.py
+run_check "baseline-113-py39" /usr/bin/python3 -B scripts/test_baseline_113.py
+run_check "runbook-wait-shape" python3 -B scripts/test_runbook_wait_shape.py
+run_check "runbook-wait-shape-py39" /usr/bin/python3 -B scripts/test_runbook_wait_shape.py
+run_check "jev-outcome-self" python3 -B scripts/test_jev_outcome.py
+run_check "jev-outcome-py39" /usr/bin/python3 -B scripts/test_jev_outcome.py
+run_check "jev-loop-outcomes-self" python3 -B scripts/test_jev_loop_outcomes.py
+run_check "jev-loop-outcomes-py39" /usr/bin/python3 -B scripts/test_jev_loop_outcomes.py
+run_check "jev-status-self" python3 -B scripts/test_jev_status.py
+run_check "jev-status-py39" /usr/bin/python3 -B scripts/test_jev_status.py
+run_check "jev-status-doctor-self" python3 -B scripts/test_jev_status_doctor.py
+run_check "jev-status-doctor-py39" /usr/bin/python3 -B scripts/test_jev_status_doctor.py
+run_check "jev-public-install-self" python3 -B scripts/test_jev_public_install.py
+run_check "jev-public-install-py39" /usr/bin/python3 -B scripts/test_jev_public_install.py
+run_check "jev-registry-nodata-self" python3 -B scripts/test_jev_registry_nodata.py
+run_check "jev-registry-nodata-py39" /usr/bin/python3 -B scripts/test_jev_registry_nodata.py
+run_check "jev-door-self" python3 -B scripts/test_jev_door.py
+run_check "jev-door-py39" /usr/bin/python3 -B scripts/test_jev_door.py
+run_check "jev-door-verbs-self" python3 -B scripts/test_jev_door_verbs.py
+run_check "jev-door-verbs-py39" /usr/bin/python3 -B scripts/test_jev_door_verbs.py
+run_check "jev-start-refusal-self" python3 -B scripts/test_jev_start_refusal.py
+run_check "jev-start-refusal-py39" /usr/bin/python3 -B scripts/test_jev_start_refusal.py
+# VR1 (1.1.3): one vault resolver; capture and recall read the same vault or FAIL saying why.
+run_check "vault-resolver-self" python3 -B products/brothermode/tools/test_vault_resolver.py
+run_check "vault-resolver-py39" /usr/bin/python3 -B products/brothermode/tools/test_vault_resolver.py
 run_check "diag-round-self" python3 scripts/test_diag_round.py
 run_check "burn-guard-self" python3 scripts/test_burn_guard.py
 run_check "dream-world-d65-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_world_d65
@@ -2315,7 +2494,7 @@ run_check "repair-trajectory-d141-self" python3 -B -m unittest plugin.runtime.br
 run_check "l1-spec-self" python3 scripts/test_l1_spec.py
 run_check "vault-ui-census-self" python3 products/brothermode/vault_ui/test_census.py
 run_check "l1b2-self" python3 -B -m unittest tests.e2e.antigravity.test_l1b2
-run_check "dream-bridge-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_bridge
+run_check "dream-bridge-core-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_bridge
 run_check "dream-policy-d15a-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_policy_d15a
 run_check "dream-grade-d9d-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_grade_d9d
 run_check "dream-bridge-d7d-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_bridge_d7d
@@ -2420,6 +2599,7 @@ run_check "registry-self" python3 -B -m unittest plugin.runtime.brother.core.tes
 run_check "run-self" python3 -B -m unittest plugin.runtime.brother.core.test_run
 run_check "state-product-self" python3 -B -m unittest plugin.runtime.brother.core.test_state_product
 run_check "plugin-runtime-fast-discover" python3 scripts/plugin_runtime_fast_discover.py
+run_check "plugin-runtime-fast-discover-self" python3 scripts/test_plugin_runtime_fast_discover.py -v
 run_check "land-batch-h6c-self" python3 scripts/loop/test_land_batch_h6c.py
 run_check "close-reason-captured" python3 scripts/loop/test_close_reason_captured.py
 run_check "unit-ledger-grade-of" python3 scripts/test_unit_ledger_grade_of.py
@@ -2458,7 +2638,7 @@ run_check "grade-build-main-guard-self" python3 scripts/loop/test_grade_build_ma
 run_check "grade-f4-submitted-bytes" python3 scripts/loop/test_grade_f4.py
 run_check "grade-f4-wrappers-exit" python3 scripts/loop/test_grade_wrappers_f4.py
 run_check "loop-timeouts-self" python3 scripts/test_loop_timeouts.py
-run_check "pass-digest-self" python3 scripts/test_pass_digest.py
+run_check "pass-digest-tests-self" python3 scripts/test_pass_digest.py
 run_check "one-landed-test" python3 -B scripts/test_one_landed_test.py
 run_check "grade-ledger-and-probe-readers" python3 -B scripts/test_grade_ledger_and_probe_readers.py
 run_check "dispatch-canary-router" python3 -B scripts/test_dispatch_canary_router.py
@@ -2475,7 +2655,7 @@ run_check "land-build-m22-self" python3 scripts/test_land_build_m22.py
 run_check "release-note-transfer-rows-self" python3 scripts/test_release_note_transfer_rows.py
 run_check "openrouter-ledger-m42-self" python3 -B -m unittest plugin.runtime.brother.core.test_openrouter_ledger_m42
 run_check "l4b-rf-pass-keep-self" python3 scripts/test_l4b_rf_pass_keep.py
-run_check "probe-build-self" python3 scripts/test_probe_build.py
+run_check "probe-build-tests-self" python3 scripts/test_probe_build.py
 run_check "land-build-m23-self" python3 scripts/test_land_build_m23.py
 run_check "dream-repair-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_repair
 run_check "probe-wave-self" python3 scripts/test_probe_wave.py
@@ -2579,10 +2759,18 @@ run_check "config-recovery-py39" /usr/bin/python3 -B scripts/loop/test_config_re
 run_check "model-reachability" python3 -B scripts/loop/test_model_reachability.py
 run_check "model-reachability-py39" /usr/bin/python3 -B scripts/loop/test_model_reachability.py
 run_check "model-reachability-self" python3 -B scripts/loop/model_reachability.py --selftest
+run_check "seat-dead-cache" python3 -B scripts/loop/test_seat_dead_cache.py
+run_check "seat-dead-cache-py39" /usr/bin/python3 -B scripts/loop/test_seat_dead_cache.py
+run_check "seat-fresh-proof" python3 -B scripts/loop/test_seat_fresh_proof.py
+run_check "seat-fresh-proof-py39" /usr/bin/python3 -B scripts/loop/test_seat_fresh_proof.py
+run_check "seat-refusal-line" python3 -B scripts/loop/test_seat_refusal_line.py
+run_check "seat-refusal-line-py39" /usr/bin/python3 -B scripts/loop/test_seat_refusal_line.py
 run_check "program-resolution" python3 -B scripts/loop/test_program_resolution.py
 run_check "program-resolution-py39" /usr/bin/python3 -B scripts/loop/test_program_resolution.py
 run_check "reach-attack-r1" python3 -B scripts/loop/test_reach_attack_r1.py
 run_check "reach-attack-r1-py39" /usr/bin/python3 -B scripts/loop/test_reach_attack_r1.py
+run_check "ready-contract" python3 -B scripts/loop/test_ready_contract.py
+run_check "ready-contract-py39" /usr/bin/python3 -B scripts/loop/test_ready_contract.py
 run_check "adapter-contract-self" python3 scripts/loop/test_adapter_contract.py
 run_check "acc6-release-source-self" python3 scripts/test_acc6_release_source.py
 run_check "gate-order-l5dc-self" python3 scripts/test_gate_order_l5dc.py
@@ -2618,6 +2806,8 @@ run_check "donecheck-acc2-modes" python3 scripts/test_donecheck_acc2.py
 run_check "acc8-retention-self" python3 scripts/test_acc8_retention.py
 run_check "rulebook-inventory-self" python3 scripts/test_rulebook_inventory.py
 run_check "host-live-verify-self" python3 scripts/test_host_live_verify.py
+run_check "host-evidence-binding-self" python3 -B scripts/test_host_evidence_binding.py
+run_check "host-evidence-binding-py39" /usr/bin/python3 -B scripts/test_host_evidence_binding.py
 run_check "host-doc-check-self" python3 scripts/test_host_doc_check.py
 run_check "precut-review-self" python3 scripts/test_precut_review.py
 run_check "merge-gate-self" python3 scripts/test_merge_gate.py
@@ -2627,14 +2817,22 @@ run_check "host-live-collect-self" python3 scripts/test_host_live_collect.py
 # HP1's own acceptance on the REAL evidence file (written only by the owner run of HP1.d): exit 2, NO-DATA, until that
 # run has recorded it, never a pass; 1 (FAIL) when the recorded evidence is RED. Under 1.1.0 only Claude Code and Codex decide.
 run_check "hp1-acceptance" python3 scripts/test_hp1_acceptance.py
-run_check "adapter-conformance-self" python3 scripts/loop/test_adapter_conformance.py
+run_check "loop-adapter-conformance-self" python3 scripts/loop/test_adapter_conformance.py
 run_check "merge-reach-self" python3 scripts/test_merge_reach.py
+run_check "linux-canary-self" python3 scripts/test_linux_canary.py
+run_check "linux-canary-self-py39" /usr/bin/python3 -B scripts/test_linux_canary.py
+run_check "escape-measure-self" python3 scripts/test_escape_measure.py
+run_check "bench-controls-self" python3 scripts/test_bench_controls.py
+run_check "door-overhead-self" python3 scripts/test_door_overhead.py
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook
 # suites) is caught. See the snapshot comment above.
 run_check "real-logs-unchanged" python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"
 
 echo
+if [ -n "$SHARD_N" ]; then
+  echo "SHARD $SHARD_K/$SHARD_N: owned $OWNED of $SEQ rows, ran $((pass+fail+nodata))${REACH_FILE:+ (reach)}"
+fi
 echo "pass $pass   fail $fail   no-data $nodata"
 [ -n "$failed_names" ] && echo "FAILED:$failed_names"
 [ -n "$nodata_names" ] && echo "NO-DATA:$nodata_names  (not a pass, and not a failure)"

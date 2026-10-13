@@ -231,6 +231,33 @@ class MainRunsDirtyCheckThenRegenerateThenStageThenCheck(unittest.TestCase):
         self.assertEqual(regenerate_called, [])
         self.assertEqual(check_called, [])
 
+    def test_allow_dirty_reaches_the_generator_only_for_regenerate(self):
+        """PP1.b: the generator's own clean-tree check honours --allow-dirty
+        through RN.ALLOW_DIRTY_ENV, set for regenerate() and removed after."""
+        with open(os.path.join(self.tmp, "scratch.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("uncommitted\n")
+        real_refuse = RC.refuse_if_dirty
+        seen = []
+
+        def fake_regenerate(version):
+            seen.append(os.environ.get(RC.RN.ALLOW_DIRTY_ENV))
+            return True, []
+
+        with mock.patch.object(RC, "refuse_if_dirty",
+                               self._bind(real_refuse)), \
+             mock.patch.object(RC, "regenerate", fake_regenerate), \
+             mock.patch.object(RC, "refuse_if_note_moved",
+                               lambda version: (None, [])), \
+             mock.patch.object(RC, "stage_release_files", lambda version: []), \
+             mock.patch.object(RC, "check",
+                               lambda version: (RC.EXIT_CLEAR, [])), \
+             mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(RC.RN.ALLOW_DIRTY_ENV, None)
+            RC.main(["--version", VERSION, "--allow-dirty", "merged main"])
+            self.assertEqual(seen, ["merged main"])
+            self.assertNotIn(RC.RN.ALLOW_DIRTY_ENV, os.environ)
+
 
 def _note_text(version, rev, digest, pr_lines):
     """A release note text carrying the two self-naming fields

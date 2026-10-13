@@ -1454,6 +1454,63 @@ def verify(path: str, root: str, now: int, required=DECIDING_HOSTS_1_1_0) -> Tup
     return code, line
 
 
+# -- the per host truth state (HG1): a mapping over the verdicts above, never a second protocol -------------------------
+
+TRUTH_HOSTS = ("claude", "codex", "antigravity", "cursor")
+CURSOR_REASON = ("Cursor hook denial is advisory until a live signed in canary demonstrates a deny (CURSOR-COMPAT.md); "
+                 "no evidence row is judged for Cursor")
+
+
+def host_state(path: str, root: str, now: int, host: str) -> Tuple[str, str]:
+    """(state, reason) for one host: certified, advisory or NO-DATA. Cursor is advisory by rule, never judged from rows.
+    Claude Code and Codex are judged by _judge, as verify judges each deciding host: anything not GREEN is NO-DATA with
+    the verifier's own line (a RED line says RED); GREEN is certified only when EXPECTED_GUARDED_WRITE says deny and
+    every guarded_write row of the newest run is a deny effect_matches accepts; any other GREEN is advisory. A known host
+    outside DECIDING_HOSTS_1_1_0 reads NO-DATA by ASIDE_NOTE; an unrecognized host reads NO-DATA naming it."""
+    _need_text(path, "path")
+    _need_text(root, "root")
+    _need_now(now)
+    if host == "cursor":
+        return "advisory", CURSOR_REASON
+    if not isinstance(host, str) or host not in REQUIRED_HOSTS:
+        return "NO-DATA", "unrecognized host %s: a state is read for %s" % (_show(host), ", ".join(TRUTH_HOSTS))
+    rows, problem = load_rows(path)
+    if problem:
+        return "NO-DATA", problem
+    if host not in DECIDING_HOSTS_1_1_0:
+        return "NO-DATA", ASIDE_NOTE % (host, sum(1 for r in rows if r.get("host") == host))
+    code, line = _judge(path, os.path.abspath(root), now, (host,), DECIDING_HOSTS_1_1_0)
+    if code != GREEN:
+        return "NO-DATA", line
+    if EXPECTED_GUARDED_WRITE.get(host) != "deny":
+        return "advisory", "hooks fire and are bound to the candidate; no denial is on record (EXPECTED_GUARDED_WRITE " \
+                           "%s: %s): %s" % (host, EXPECTED_GUARDED_WRITE.get(host), line)
+    runs = _newest_runs([r for r in rows if r.get("host") == host])[0]
+    writes = [r for r in runs.get(host, []) if r.get("probe") == "guarded_write"]
+    if not writes or not all(r.get("verdict") == "deny" and effect_matches(r) for r in writes):
+        return "NO-DATA", "%s: GREEN but no guarded_write deny with its effect re-derived is on record" % host
+    return "certified", "a denial of an out of scope write is on record for this build: %s" % line
+
+
+def truth_states(path: str, root: str, now: int, hosts: Tuple[str, ...] = TRUTH_HOSTS) -> Dict[str, Tuple[str, str]]:
+    """{host: (state, reason)} in the order of hosts. An unreadable or malformed evidence file is one reason for every
+    evidence host (read once here); Cursor stays advisory by rule."""
+    _need_text(path, "path")
+    _need_text(root, "root")
+    _need_now(now)
+    if isinstance(hosts, (str, bytes)) or not isinstance(hosts, (tuple, list)) \
+            or not all(isinstance(h, str) for h in hosts):
+        raise VerifyRefused("hosts must be a tuple of host names, got %s" % _show(hosts))
+    problem = load_rows(path)[1]
+    out = {}
+    for host in hosts:
+        if problem and host in REQUIRED_HOSTS:
+            out[host] = ("NO-DATA", problem)
+        else:
+            out[host] = host_state(path, root, now, host)
+    return out
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -1463,9 +1520,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                                      "3 NO-DATA, one line naming the host and the condition.")
     parser.add_argument("evidence", help="the evidence file, docs/plan/evidence/HP1-host-live.jsonl")
     parser.add_argument("--root", default=os.path.dirname(HERE), help="the candidate checkout (default: this one)")
+    parser.add_argument("--truth", action="store_true", help="after the verify line, print the per host truth table "
+                        "(certified, advisory or NO-DATA); the exit code stays the verify code")
     args = parser.parse_args(argv)
     try:
-        return verify(args.evidence, args.root, int(time.time()))[0]
+        now = int(time.time())
+        code = verify(args.evidence, args.root, now)[0]
+        if args.truth:
+            import host_capability   # the one renderer; imported here so the cut gate's path loads nothing new
+            sys.stdout.write(host_capability.render_truth_table(truth_states(args.evidence, args.root, now),
+                                                                args.evidence))
+        return code
     except VerifyRefused as exc:
         print("REFUSED: %s" % exc, file=sys.stderr)
         return 2

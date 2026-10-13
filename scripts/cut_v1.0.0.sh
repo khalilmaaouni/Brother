@@ -212,7 +212,10 @@ step_clock "2d"
 # battery. Not tolerated with an "expected pre-tag" note like the invariant
 # below: a table naming a check that cannot fail is a defect at any point in
 # the release, so this one stops the cut.
-python3 scripts/release_note_perturb.py --version "$VERSION"
+# RC1.d2: --receipts auto accepts a row on step 2b's red receipt when its
+# file, its suite and the script trees are byte for byte the ones 2b
+# measured; every other row is driven here as before.
+python3 scripts/release_note_perturb.py --version "$VERSION" --receipts auto
 
 echo "== 2t. commit the note and the manifest that describes it (the second, self-naming commit) =="
 step_clock "2t"
@@ -237,7 +240,7 @@ step_clock "3"
 claude plugin validate bundle
 claude plugin validate .
 
-echo "== 4. release invariant and export dry run (must read CLEAR) =="
+echo "== 4. release invariant (the export dry run runs once, in cut.py's chain, on the bytes that ship) =="
 step_clock "4"
 # No `|| echo NOTE` swallow here: `set -e` (line 15) is what must stop this
 # script on a real FAIL, and a command joined with `||` always exits 0 on
@@ -247,15 +250,20 @@ step_clock "4"
 # reads NO-DATA, never a FAIL, between a cut and its tag). CDX-4,
 # scripts/test_cut_invariant_step.py drives both cases.
 python3 scripts/release_invariant.py
-# --tag-time-checks here too (row DEL-15): by now the note and manifest for
-# $VERSION exist (steps 2b/2t), so this CLEAR means the same thing the
-# real --push --tag will check, not just the ordinary export gates step 1c
-# already covers.
-python3 scripts/export_public.py --dry-run --tag-time-checks
+# RC1.b1: the export dry run with --tag-time-checks (row DEL-15) no longer
+# runs here. cut.py's chain runs it once, after this script and the hub
+# required_fast.sh, on the tree that ships, with its required_fast proof,
+# and records it as a rehearsal row; a second run here measured the same
+# bytes again. A person running this script by hand runs it themselves
+# (the STOP text below says how).
 
 echo
-echo "== STOP. Review the output above. The dry run must read CLEAR. =="
+echo "== STOP. Review the output above. =="
 step_clock "STOP"
+echo "This script no longer runs the export dry run (cut.py's chain runs it on"
+echo "these bytes). Running this script by hand, run it now and read CLEAR:"
+echo "  python3 scripts/export_public.py --dry-run --prove-required-fast --tag-time-checks"
+echo
 echo "Both commits above are already made (the bump plus regeneration, then the"
 echo "note plus manifest); nothing here is left to commit. Push the branch through"
 echo "the four gates, then run the one irreversible line below by hand (it pushes"

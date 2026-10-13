@@ -273,7 +273,7 @@ def subject_files(rel_path):
     return sorted(found)
 
 
-def measured_file_rows(claim_suites, perturb=None):
+def measured_file_rows(claim_suites, perturb=None, pool=None, version=None):
     """([(claim, source_file, suite_or_None)], problem_or_None), one row per
     file, with the suite column MEASURED rather than inferred.
 
@@ -300,10 +300,22 @@ def measured_file_rows(claim_suites, perturb=None):
     measurement instead of a paraphrase of the import graph. `perturb` is the
     seam the self test injects through (resolved here, never as a default
     argument, so nothing binds at import time); left None it is the real
-    scripts/release_note_perturb.py."""
+    scripts/release_note_perturb.py.
+
+    PP1.b: left None, the rows are measured by pooled_rows in throwaway
+    clones through perturb_pool (`pool`, default perturb_pool.run_rows),
+    never by breaking files in the live tree. An injected `perturb` keeps
+    the serial path below, unchanged. `version` names the two release files
+    refresh_cut.py itself writes, the only dirt the clean-tree check
+    tolerates; ALLOW_DIRTY_ENV carries refresh_cut's --allow-dirty reason."""
     if perturb is None:
         sys.path.insert(0, HERE)
-        import release_note_perturb as perturb  # noqa: E402
+        import release_note_perturb as real  # noqa: E402
+        if pool is None:
+            import perturb_pool  # noqa: E402
+            pool = perturb_pool.run_rows
+        return pooled_rows(claim_suites, real, pool, version=version,
+                           allow_dirty=os.environ.get(ALLOW_DIRTY_ENV))
     PERTURB = perturb
 
     baselines = {}
@@ -344,6 +356,99 @@ def measured_file_rows(claim_suites, perturb=None):
                     "suite" % NODATA)
     return rows, None
 
+
+
+#: refresh_cut.py sets this to its --allow-dirty reason for the one
+#: generator run it starts, so step 2b honours the override the same way.
+ALLOW_DIRTY_ENV = "BROTHER_REFRESH_ALLOW_DIRTY"
+
+
+def pooled_rows(claim_suites, perturb, pool, workers=4, version=None,
+                allow_dirty=None):
+    """measured_file_rows' rows, measured by `pool` (perturb_pool.run_rows'
+    signature) in clones at HEAD: one quiet live baseline per suite, then
+    the claims' own suites in one batch and the convention siblings of what
+    they missed in a second. Row assembly is the serial rule (suite, else
+    sibling, else NO-DATA). A dirty tree, a pool that raises, a missing
+    answer, or any None whose detail is one of perturb_pool.INFRA_PREFIXES
+    refuses the whole table: the clones would have measured other bytes, or
+    nothing at all, and a row must never read NO-DATA for that."""
+    sys.path.insert(0, HERE)
+    import perturb_pool  # noqa: E402
+    PERTURB = perturb
+    candidates = [(label, rel, suite) for label, suite in claim_suites
+                  for rel in subject_files(suite)]
+    if not candidates:
+        return [], ("%s: no source file could be measured behind any cited "
+                    "suite" % NODATA)
+    # refresh_cut.py's own rule: only the two release files it writes for
+    # `version` may be dirty, unless its --allow-dirty reason was given.
+    import refresh_cut  # noqa: E402  (imported here: it imports this module)
+    try:
+        paths, why = refresh_cut.dirty_paths(ROOT)
+    except OSError as exc:
+        paths, why = None, "%s: git status could not run in %s: %s" % (NODATA, ROOT, exc)
+    if paths is None:
+        return [], why
+    allowed = refresh_cut.release_paths(version) if version else set()
+    unexpected = sorted(p for p in paths if p not in allowed)
+    if unexpected and not (allow_dirty and allow_dirty.strip()):
+        return [], ("%s: the tree is dirty (%s); work copies stand at HEAD and "
+                    "would measure other bytes" % (NODATA, ", ".join(unexpected[:3])))
+
+    baselines = {}
+
+    def green(suite):
+        if suite not in baselines:
+            baselines[suite] = PERTURB.run_suite(suite)[0]
+        return baselines[suite] == 0
+
+    answers = {}
+
+    def ask(pairs):
+        pairs = list(dict.fromkeys(pairs))
+        if not pairs:
+            return None
+        # W3: the wall comes from the quiet live runs just made.
+        wall = max(PERTURB.wall_for(s) for _, s in pairs)
+        try:
+            got = pool(pairs, ROOT, wall, workers)
+            got = {(r[0], r[1]): (r[2], r[3]) for r in got}
+        except Exception as exc:  # every pool doubt is a refusal
+            return ("%s: the pool failed: %s: %s"
+                    % (NODATA, type(exc).__name__, exc))
+        bad = []
+        for key in pairs:
+            verdict, detail = got.get(key, (None, "no work copy answered this row"))
+            if verdict is None and str(detail).startswith(perturb_pool.INFRA_PREFIXES):
+                bad.append(detail)
+            answers[key] = verdict
+        if bad:
+            return ("%s: %d row(s) could not be measured by the pool: %s"
+                    % (NODATA, len(bad), bad[0]))
+        return None
+
+    problem = ask([(rel, suite) for _, rel, suite in candidates if green(suite)])
+    if problem:
+        return [], problem
+
+    def sibling_of(rel, suite):
+        sib = PERTURB.sibling_suite(rel)
+        return sib if sib and sib != suite and green(sib) else None
+
+    problem = ask([(rel, sibling_of(rel, suite)) for _, rel, suite in candidates
+                   if answers.get((rel, suite)) is not True and sibling_of(rel, suite)])
+    if problem:
+        return [], problem
+
+    rows = []
+    for label, rel, suite in candidates:
+        if answers.get((rel, suite)) is True:
+            rows.append((label, rel, suite))
+            continue
+        sib = sibling_of(rel, suite)
+        rows.append((label, rel, sib if sib and answers.get((rel, sib)) is True else None))
+    return rows, None
 
 FILES_TABLE_HEADING = "## Files behind these claims"
 
@@ -834,7 +939,7 @@ def build(version=None):
     # Measured LAST, and only once every cheaper claim has held: this is the
     # expensive step (one full suite run per candidate file), so a note that
     # was going to be refused anyway is refused before it is paid for.
-    file_rows, table_problem = measured_file_rows(SUITES)
+    file_rows, table_problem = measured_file_rows(SUITES, version=version)
     if table_problem:
         return None, [table_problem]
 
@@ -955,6 +1060,26 @@ def build(version=None):
     return "\n".join(L), []
 
 
+def write_receipts_for_note(body, version, root=ROOT):
+    """(path, '') after writing step 2b's red receipts for every row of the
+    finished note's files table that names a suite (RC1.d2); ('', reason)
+    otherwise, printed as `receipts: not written: <reason>`. Never fails the
+    note: no receipts only means step 2d drives every row, as before."""
+    sys.path.insert(0, HERE)
+    import release_note_perturb as perturb  # noqa: E402
+    rows = perturb.parse_table(body if isinstance(body, str) else "")
+    if not [r for r in rows if r[2] is not None]:
+        path, why = "", "the files table names no suite"
+    else:
+        try:
+            path, why = perturb.write_receipts(rows, version, root)
+        except Exception as exc:  # sbe: allow-silent printed below; a receipt never fails the note
+            path, why = "", "%s: %s" % (type(exc).__name__, exc)
+    print("receipts: wrote %s" % path if path else
+          "receipts: not written: %s" % why)
+    return path, why
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--write", action="store_true",
@@ -984,7 +1109,7 @@ def main(argv=None):
             print("%s: %s unreadable: %s" % (NODATA, path, exc),
                   file=sys.stderr)
             return 2
-        file_rows, problem = measured_file_rows(SUITES)
+        file_rows, problem = measured_file_rows(SUITES, version=version)
         if problem:
             print(problem, file=sys.stderr)
             return 2
@@ -998,6 +1123,7 @@ def main(argv=None):
             fh.write(new_text)
         print("rewrote the files table in %s (%d row(s))"
               % (path, len(file_rows)))
+        write_receipts_for_note(new_text, version)
         return 0
 
     body, problems = build_for_release(version)
@@ -1027,6 +1153,7 @@ def main(argv=None):
             fh.write(body)
         print("wrote %s" % manifest_path)
         print("wrote %s" % notes_path)
+        write_receipts_for_note(body, version)
         return 0
 
     print(body, end="")

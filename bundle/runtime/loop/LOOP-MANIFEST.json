@@ -10,7 +10,7 @@
   },
   {
    "name": "breaker.py",
-   "sha256": "a7ec12df388c6fb76795e8749563a51d46fb6b96610f5dc456640e3045f525bc"
+   "sha256": "878116c3dc9f81d1b717ad35c581b7b0a8051817c84384e9698beaa674331c90"
   },
   {
    "name": "brief_check.py",
@@ -114,7 +114,7 @@
   },
   {
    "name": "grade_build.py",
-   "sha256": "0c10e02b4cd1422dc83508833e0588af4325e171405f997b1f72ebdf1503aa23"
+   "sha256": "381c24c5a4a8a2eb411001aae65351f0ecc8e41546f52b37dc76eb43111e1884"
   },
   {
    "name": "grade_lane.sh",
@@ -146,7 +146,7 @@
   },
   {
    "name": "land_batch.py",
-   "sha256": "bdabf35c856e032ef45deca587262193bf45c6df90eb23640b4ccfa3e0027949"
+   "sha256": "bc041d91c69c29117ea8896a8b5521b0ec4cece0692c92504c332846dd29f9c1"
   },
   {
    "name": "landing_standard.py",
@@ -154,7 +154,7 @@
   },
   {
    "name": "loop_canary.py",
-   "sha256": "fa363eff254ff338b6f0e61dc98189b481ce0dc501be8bdcb2c75fbde1d1ee6f"
+   "sha256": "7f802a135069a59a81fbbc2cb1770299ee0665cedd3f77204fa07e84b4f4017e"
   },
   {
    "name": "loop_done.py",
@@ -174,11 +174,11 @@
   },
   {
    "name": "loop_intake.py",
-   "sha256": "101ba6c7c03402e1de395f0f37fa6add40309e31c4c5202b6f57d8e71ac790e9"
+   "sha256": "8ee49fc72a6ad0a2f23de01b29e988ba6c382f9db22fb48f0b4ec0d6e79b9858"
   },
   {
    "name": "loop_pass.sh",
-   "sha256": "ec3535280afb6263c9162b1866fb2b8c3d7ec41251423716ca70b518d45d0c14"
+   "sha256": "7a132ee37cbbeb73c22656481749b6cf2b03212cd7e4ad1e683f5fdb94d13529"
   },
   {
    "name": "loop_procs.py",
@@ -206,7 +206,7 @@
   },
   {
    "name": "loop_until.sh",
-   "sha256": "ee5c14073ebcb3f74496ac17cc64136b5364419f02dc4aabd46276b014f29b00"
+   "sha256": "25cb572c189f1ab04008f91eaa7d99fbe9faa86096dafe111e2e6b76ca0ea634"
   },
   {
    "name": "loop_watch.py",
@@ -222,11 +222,11 @@
   },
   {
    "name": "model_call.py",
-   "sha256": "4ccc2d30bc40c6b94609f2ac3f10ac175b0a0ccae6c8ad8bd5fedd767fb521c6"
+   "sha256": "c160d881538a7299a15a96aefe4b89c4798c25d30408ae329f3df37d0a38d02b"
   },
   {
    "name": "model_reachability.py",
-   "sha256": "4e5dbcdc93283c55ebf803dd046630cf7a2dc426bde2832d800168b953951b08"
+   "sha256": "f8e1095cc90ae93f4c4fa6e7ab787a7f0e1c638ae00d1d1f22fb079f17307e5a"
   },
   {
    "name": "model_router.py",
@@ -250,7 +250,7 @@
   },
   {
    "name": "pass_digest.py",
-   "sha256": "243ba7dcad0d2905ed3f66cf032532c9abd86d3e8e8ca2ab971d70cd535221bd"
+   "sha256": "3991057a2af801dcffc904a88fae85100b8efe7183496a1709363427686b1309"
   },
   {
    "name": "pass_pulse.py",
@@ -267,6 +267,10 @@
   {
    "name": "plan_store.py",
    "sha256": "2a88b86c94a1242bfa407a3afb838a61afe5684503e787fd11adfdf14c5105b5"
+  },
+  {
+   "name": "power_rule.py",
+   "sha256": "e71a265974d3954e00e8451ccdafbfeebef2abd3cf02594ae1b4c2b7366e2135"
   },
   {
    "name": "probe_brief.py",
@@ -378,7 +382,7 @@
   },
   {
    "name": "start_run.sh",
-   "sha256": "ecf17573be1b29ed2cd29d6aa560f6148d0ede6ad8771bc4a4ecdd335c41b015"
+   "sha256": "65d943490637d7c89241f454d08b8b6b303836ba2ed3c8b20f46bf024e2b0c0d"
   },
   {
    "name": "stop_loop.sh",
@@ -402,7 +406,7 @@
   },
   {
    "name": "test_breaker.py",
-   "sha256": "b4f0bd3dbd63ec3de6bc9a43b78603c119087ca2136548de88eaa61d8f5bcff9"
+   "sha256": "32c4ffb652bbeb8d6092d1b94000a10997128e41384f9431fef11f4bc1ff23b0"
   },
   {
    "name": "test_brother_login.py",
@@ -477,6 +481,10 @@
    "sha256": "46adc33ba5162ebf7ce9b38a2f803ca4ba5491ccd433ae1843a338fa51f465d0"
   },
   {
+   "name": "test_intake_parallel.py",
+   "sha256": "7e540e0fb0d3879d6c056fef167710adf90956de4002f6859d04b15d85faa373"
+  },
+  {
    "name": "test_land_apply.py",
    "sha256": "90c0faac3b96108c392890157496ba5d30ed6d95471d1db81f877903016ec967"
   },
@@ -499,6 +507,10 @@
   {
    "name": "test_landing_standard.py",
    "sha256": "0de178132a4b2ba11577b8a44fcf4c7e9ca43dd1d4cc2a02b10fc7daa5749f36"
+  },
+  {
+   "name": "test_loop_gate_cache.py",
+   "sha256": "89b450d0c4944df941bcbc61d62529ce1135fa19d50f0d1560e273755c8ff08c"
   },
   {
    "name": "test_loop_plan_selection.py",
@@ -526,7 +538,7 @@
   },
   {
    "name": "test_model_reachability.py",
-   "sha256": "7aded528f8b1479d9a153f21382b232646fb3d29d4c814446b100b405c911e30"
+   "sha256": "41a45e16595a85a09ef52665fb63c134353439fe1e2a2daea6d1c58bb2afa2dd"
   },
   {
    "name": "test_native_adapter.py",
@@ -562,7 +574,7 @@
   },
   {
    "name": "test_plan_lint.py",
-   "sha256": "1c2bd2d935f42cf6ce8caa330cc1adc0e3f3a85e112e86be6ff2d72deb06bb19"
+   "sha256": "d14eba90453e2a4d9348034f32e26938bde54b84252cbfb47d4102eb5787850f"
   },
   {
    "name": "test_plan_lint_fx132.py",
@@ -593,6 +605,10 @@
    "sha256": "03344d232e97ad54a25154a915754fa4405e78716353b3fde9c15a8c4597c695"
   },
   {
+   "name": "test_ready_contract.py",
+   "sha256": "650e8f0299744025634b0641a2e8a1090fe1a1a85af5ba9e3bc6f0d323759257"
+  },
+  {
    "name": "test_registry_is_the_source.py",
    "sha256": "45bcbb93148035c07cd5bd1b67524c208c4f086347298a9b5a1910372d6598f6"
   },
@@ -621,12 +637,24 @@
    "sha256": "a40eae9d10ffdb5770fd03eeac4a2661b0fef0cf1c37e8e46fa538e8e675536c"
   },
   {
+   "name": "test_seat_dead_cache.py",
+   "sha256": "dd7d1f50f538cd8d5a642f7999d6361c6da23a824ab080cf85bfe074bdf46a11"
+  },
+  {
+   "name": "test_seat_fresh_proof.py",
+   "sha256": "70fe55b007d8e56c9d1da0a68d5eaf9f5d75429f0e946aa5038d85338c840676"
+  },
+  {
    "name": "test_seat_fuzz.py",
    "sha256": "e99189d3efa0c9eacfc8e3aa7956d293ce0b1227c2de7e0a2d1e109abc01eab6"
   },
   {
    "name": "test_seat_login_refresh.py",
    "sha256": "aa5b6349c23ab44c0ff59f65583ad8596d3d9a38ab4d67448d0edb2d83d257e6"
+  },
+  {
+   "name": "test_seat_refusal_line.py",
+   "sha256": "f865cfa7d054606d7b40b462f243b5e14945289fb76aaf8720a717f883348bc1"
   },
   {
    "name": "test_secret_scan.py",
@@ -642,7 +670,7 @@
   },
   {
    "name": "test_start_run.py",
-   "sha256": "04d5ae65b3080e0cff151870d2552a9e29b952ac791d379b81e5e7809fb5cc4c"
+   "sha256": "01b7174d90299fdbb046ae9df8ac1919874d2f9bc551f6783ffbfb26531fc525"
   },
   {
    "name": "test_stop_drain.py",

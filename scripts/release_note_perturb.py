@@ -792,6 +792,137 @@ def parse_table(text):
     return rows
 
 
+#: RC1.d1: step 2b's receipts, read by step 2d. One receipt per table row with a suite: the row was measured red on
+#: exactly these bytes, so 2d accepts it without breaking the file again. Keyed by the file's and the suite's sha256 and
+#: by the git tree id of every script folder the rehearsal record pins (cut_rehearsal.SCRIPT_DIRS); a dirty script
+#: folder writes and reads none, because a working copy change is invisible to a tree id.
+RECEIPT_SCHEMA = "cv1.perturb.1"
+RECEIPT_MAX_AGE_S = 24 * 3600
+RECEIPT_FUTURE_SLACK_S = 300
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def receipt_path(version, directory=""):
+    """<evidence dir>/perturb-<version>.json; the evidence dir is the cut's own (cut_rehearsal.evidence_dir)."""
+    if not directory:
+        import cut_rehearsal
+        directory = cut_rehearsal.evidence_dir()
+    return os.path.join(directory, "perturb-%s.json" % version)
+
+
+def _git_out(root, args):
+    env = dict((k, v) for k, v in os.environ.items() if not k.startswith("GIT_"))
+    try:
+        proc = subprocess.run(["git"] + list(args), cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, "git %s could not run: %s" % (args[0], exc)
+    if proc.returncode != 0:
+        return None, "git %s exited %d: %s" % (" ".join(args[:2]), proc.returncode, (proc.stderr or "").strip()[:200])
+    return proc.stdout, ""
+
+
+def script_tree_key(root=ROOT):
+    """({dir: git tree id at HEAD}, '') for every cut_rehearsal.SCRIPT_DIRS entry, or ({}, reason): a folder whose tree
+    cannot be read, or any uncommitted change under those folders."""
+    import cut_rehearsal
+    dirs = list(cut_rehearsal.SCRIPT_DIRS)
+    status, why = _git_out(root, ["status", "--porcelain", "--"] + dirs)
+    if status is None:
+        return {}, why
+    if status.strip():
+        return {}, "the script folders carry uncommitted changes, which no tree id can see"
+    trees = {}
+    for rel in dirs:
+        out, why = _git_out(root, ["rev-parse", "HEAD:%s" % rel])
+        tree = (out or "").strip()
+        if out is None or not re.fullmatch(r"[0-9a-f]{40}", tree):
+            return {}, "the tree of %s cannot be read%s" % (rel, (": " + why) if why else "")
+        trees[rel] = tree
+    return trees, ""
+
+
+def _file_sha(root, rel):
+    with open(os.path.join(root, rel), "rb") as fh:
+        return sha256_bytes(fh.read())
+
+
+def write_receipts(rows, version, root=ROOT, directory="", now=None):
+    """(path, '') after writing one red receipt per (claim, source, suite) row with a suite, atomically; ('', reason)
+    and nothing written on a dirty or unreadable script tree or an unreadable file."""
+    trees, why = script_tree_key(root)
+    if why:
+        return "", why
+    receipts = []
+    for claim, source, suite in rows:
+        if suite is None:
+            continue
+        try:
+            receipts.append({"claim": claim, "source": source, "suite": suite, "verdict": "red",
+                             "file_sha256": _file_sha(root, source), "suite_sha256": _file_sha(root, suite)})
+        except OSError as exc:
+            return "", "%s or %s cannot be read: %s" % (source, suite, exc)
+    stamp = time.time() if now is None else float(now)
+    path = receipt_path(version, directory)
+    data = {"schema": RECEIPT_SCHEMA, "version": version, "trees": trees, "written_at": stamp,
+            "receipts": receipts}
+    tmp = "%s.tmp-%d" % (path, os.getpid())
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except OSError as exc:
+        return "", "the receipts file %s cannot be written: %s" % (path, exc)
+    return path, ""
+
+
+def load_receipts(path, root=ROOT, now=None):
+    """({(source, suite): receipt}, '') when the file at `path` has this schema, is younger than 24 hours and was
+    written for exactly today's clean script trees; ({}, reason) otherwise. Each receipt is checked again per row at use
+    (drive): a red verdict and today's file and suite digests."""
+    if not isinstance(path, str) or not path:
+        return {}, "no receipts path"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return {}, "the receipts file %s is missing, corrupt or unreadable: %s" % (path, exc)
+    if not isinstance(data, dict) or data.get("schema") != RECEIPT_SCHEMA:
+        return {}, "the receipts file %s does not carry schema %s" % (path, RECEIPT_SCHEMA)
+    stamp = data.get("written_at")
+    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or stamp != stamp:
+        return {}, "the receipts file %s has no readable written_at" % path
+    age = (time.time() if now is None else float(now)) - stamp
+    if age > RECEIPT_MAX_AGE_S or age < -RECEIPT_FUTURE_SLACK_S:
+        return {}, "the receipts file %s is stale or stamped from the future" % path
+    trees, why = script_tree_key(root)
+    if why:
+        return {}, why
+    if data.get("trees") != trees:
+        return {}, "the script tree changed since the receipts were written"
+    items = data.get("receipts")
+    if not isinstance(items, list):
+        return {}, "the receipts file %s carries no receipt list" % path
+    out = {}
+    for item in items:
+        if (isinstance(item, dict) and isinstance(item.get("source"), str) and isinstance(item.get("suite"), str)
+                and isinstance(item.get("file_sha256"), str) and isinstance(item.get("suite_sha256"), str)):
+            out[(item["source"], item["suite"])] = dict(item, _path=path)
+    return out, ""
+
+
+def _receipt_holds(receipt, source, suite, root):
+    """True only for a red receipt whose file and suite digests equal today's bytes."""
+    if not isinstance(receipt, dict) or receipt.get("verdict") != "red":
+        return False
+    try:
+        return (_file_sha(root, source) == receipt.get("file_sha256")
+                and _file_sha(root, suite) == receipt.get("suite_sha256"))
+    except OSError:
+        return False
+
+
 def default_version(root=ROOT):
     path = os.path.join(root, ".claude-plugin", "marketplace.json")
     try:
@@ -808,9 +939,12 @@ def note_path_for(version, root=ROOT):
     return os.path.join(root, RELEASES, "%s.md" % version)
 
 
-def drive(path, root=ROOT):
+def drive(path, root=ROOT, receipts=None):
     """(exit_code, lines). The whole verdict for one note file, so the self
-    test can drive every verdict class against a fixture tree in process."""
+    test can drive every verdict class against a fixture tree in process.
+    `receipts` (RC1.d1, from load_receipts): a row whose receipt still holds
+    (_receipt_holds) is accepted as red without being driven again; every
+    other row is driven exactly as before."""
     out = []
     reset_ledger()
     try:
@@ -832,6 +966,12 @@ def drive(path, root=ROOT):
         if suite is None:
             nodata.append("%s: the %s claim names no suite in the note"
                           % (source, claim))
+            continue
+        receipt = (receipts or {}).get((source, suite))
+        if receipt is not None and _receipt_holds(receipt, source, suite, root):
+            passed.append((source, suite))
+            out.append("REUSED: %s goes red under %s (receipt %s)"
+                       % (source, suite, receipt.get("_path", "?")))
             continue
         if suite not in baselines:
             rc, tail = run_suite(suite, root=root)
@@ -902,8 +1042,12 @@ def main(argv=None):
     ap.add_argument("--note", default=None,
                     help="drive this note file instead of resolving one from "
                          "a version")
+    ap.add_argument("--receipts", default=None, metavar="PATH|auto",
+                    help="accept a row on step 2b's red receipt when its file, suite and script trees are unchanged "
+                         "(auto: the receipts file for --version); any doubt drives the row")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
+    version = args.version
     if args.note:
         path = args.note
     else:
@@ -912,7 +1056,16 @@ def main(argv=None):
             print("%s: no version to resolve a release note from" % NODATA)
             return 2
         path = note_path_for(version)
-    code, lines = drive(path)
+    receipts = None
+    if args.receipts:
+        where = args.receipts
+        if where == "auto":
+            version = version or default_version()
+            where = receipt_path(version) if version else ""
+        receipts, why = load_receipts(where)
+        if why:
+            print("receipts: not used: %s" % why)
+    code, lines = drive(path, receipts=receipts) if receipts is not None else drive(path)
     for line in lines:
         print(line)
     return code

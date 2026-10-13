@@ -1,3 +1,4 @@
+# hermetic-budget-seconds: 2400 (the whole suite runs about 13 minutes in a checkout, over 900 s on the export tree)
 """Driven-backwards tests for the allowlist exporter, docs/plan/HUB-
 MIGRATION-PLAN-2026-08-30.md step 4.
 
@@ -17,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -3485,6 +3487,321 @@ class TheReleasePullRequestWaitsForRequiredFast(unittest.TestCase):
                              "appeared: %r" % lines)
 
 
+_FP1_LINK = "https://github.com/o/r/actions/runs/38146264768/job/111"
+_FP1_LINK2 = "https://github.com/o/r/actions/runs/38146264768/job/222"
+_FP1_LOG = ("required-fast\tunit\t2026-10-10T00:00:00Z ok\n"
+            "required-fast\tunit\t2026-10-10T00:00:01Z FAIL: test_timing (test_x.Clock)\n"
+            "required-fast\tunit\t2026-10-10T00:00:02Z FAILED: test_other\n")
+_FP1_OK = "justified by /r/linux-canary.json PASS on tree aaaaaaaaaaaa"
+
+
+def _fp1_view(attempt, status="completed", conclusion="failure"):
+    return (0, json.dumps({"attempt": attempt, "status": status,
+                           "conclusion": conclusion}))
+
+
+class _ScriptedGh(object):
+    """The gh calls wait_for_required_fast makes, answered from scripts:
+    `checks` (bucket, link) per `gh pr checks` read and `views` per `gh run
+    view --json` read (the last entry repeats), `log` for --log-failed and
+    `rerun` for `gh run rerun`. Every call is recorded."""
+
+    def __init__(self, checks, views=(), log=(0, _FP1_LOG), rerun=(0, "")):
+        self.checks = list(checks)
+        self.views = list(views) or [_fp1_view(1)]
+        self.log = log
+        self.rerun = rerun
+        self.calls = []
+
+    @staticmethod
+    def _next(seq):
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    def __call__(self, cmd, cwd, env=None, timeout=120):
+        self.calls.append(list(cmd))
+        if cmd[1:3] == ["pr", "checks"]:
+            bucket, link = self._next(self.checks)
+            code, out = 0, json.dumps([{"name": "required-fast", "bucket": bucket,
+                                        "link": link, "state": "COMPLETED"}])
+        elif cmd[1:3] == ["run", "view"] and "--log-failed" in cmd:
+            code, out = self.log
+        elif cmd[1:3] == ["run", "view"]:
+            code, out = self._next(self.views)
+        elif cmd[1:3] == ["run", "rerun"]:
+            code, out = self.rerun
+        else:
+            return None
+        return subprocess.CompletedProcess(cmd, code, out if code == 0 else "",
+                                           "" if code == 0 else out)
+
+    def reruns(self):
+        return [c for c in self.calls if c[1:3] == ["run", "rerun"]]
+
+    def run_calls(self):
+        return [c for c in self.calls if c[1:2] == ["run"]]
+
+
+class TheRerunIsOnceAndOnlyWithACanaryPass(unittest.TestCase):
+    """FP1.a (docs/plan/specs/FP1.md): a failed public required-fast is rerun
+    exactly once, and only when a Linux canary record is a PASS for exactly
+    the export tree the exporter built. Both attempts are recorded; a second
+    failure is final; every doubt is no rerun and the stop is today's."""
+
+    def wait(self, gh, rerun_ok=_FP1_OK, clock=None):
+        clock = clock or _FakeWaitClock()
+        code, lines = EP.wait_for_required_fast(
+            "https://example.invalid/pull/1", run=gh, sleep=clock.sleep,
+            clock=clock.now, rerun_ok=rerun_ok)
+        return code, lines
+
+    def test_a_no_record_never_reruns(self):
+        """REQ-FP1-01, M-FP1-NORECORD."""
+        gh = _ScriptedGh([("fail", _FP1_LINK)])
+        code, lines = self.wait(gh, rerun_ok="")
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(gh.run_calls(), [], "a run command without a record")
+        self.assertEqual(lines[-1], "FAIL: required-fast failed on the release "
+                                    "pull request 1: " + _FP1_LINK)
+        self.assertEqual(len(lines), 2, lines)
+
+    def test_b_a_matching_pass_reruns_once_and_records_both(self):
+        """REQ-FP1-03, M-FP1-LINE."""
+        gh = _ScriptedGh([("fail", _FP1_LINK), ("pass", _FP1_LINK2)],
+                         views=[_fp1_view(1), _fp1_view(2, "in_progress", ""),
+                                _fp1_view(2, "completed", "success")])
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_OK, lines)
+        self.assertEqual(len(gh.reruns()), 1, gh.calls)
+        self.assertEqual(gh.reruns()[0], ["gh", "run", "rerun", "38146264768",
+                                          "--failed", "-R", EP.REQUIRED_CHECK_REPO])
+        self.assertIn("RERUN: attempt 2 of run 38146264768, first failure %s "
+                      "(test_timing (test_x.Clock)), %s" % (_FP1_LINK, _FP1_OK), lines)
+        self.assertIn("required-fast: PASS on pull request 1", lines)
+        self.assertEqual(lines[-1], "public check: attempt 2 of 2, first failure "
+                                    "test_timing (test_x.Clock) " + _FP1_LINK)
+        self.assertFalse(any(l.startswith("FAIL:") for l in lines), lines)
+
+    def test_c_a_second_failure_is_final_and_names_both(self):
+        """REQ-FP1-04."""
+        gh = _ScriptedGh([("fail", _FP1_LINK)],
+                         views=[_fp1_view(1), _fp1_view(2, "completed", "failure")])
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(len(gh.reruns()), 1, gh.calls)
+        self.assertEqual(lines[-1], "FAIL: required-fast failed again on attempt 2 "
+                         "of 2 on pull request 1: https://github.com/o/r/actions/"
+                         "runs/38146264768/attempts/2; first failure: %s "
+                         "(test_timing (test_x.Clock))" % _FP1_LINK)
+        self.assertTrue(any(l.startswith("RERUN:") for l in lines), lines)
+
+    def test_d_a_run_already_on_attempt_two_is_never_rerun(self):
+        """M-FP1-TWICE: a restarted exporter meets a failed attempt 2."""
+        gh = _ScriptedGh([("fail", _FP1_LINK)],
+                         views=[_fp1_view(2, "completed", "failure")])
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(gh.reruns(), [], gh.calls)
+        self.assertIn("FAIL: required-fast failed on the release pull request 1: "
+                      + _FP1_LINK, lines)
+        self.assertTrue(lines[-1].startswith("no rerun: only attempt 1"), lines)
+
+    def test_e_after_a_rerun_a_new_failure_is_final_even_if_gh_lags(self):
+        """M-FP1-TWICE, the flag alone: attempt 2 succeeded, the check then
+        fails under a new link, and the attempt read lags at 1."""
+        gh = _ScriptedGh([("fail", _FP1_LINK), ("fail", _FP1_LINK2)],
+                         views=[_fp1_view(1), _fp1_view(2, "completed", "success"),
+                                _fp1_view(1)])
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(len(gh.reruns()), 1, gh.calls)
+        self.assertTrue(lines[-1].startswith(
+            "FAIL: required-fast failed again on attempt 2 of 2 on pull request "
+            "1: " + _FP1_LINK2 + "; first failure: " + _FP1_LINK), lines)
+
+    def test_f_a_stale_first_bucket_is_not_the_second_result(self):
+        """M-FP1-ATTEMPT: the first attempt's fail is still listed right
+        after attempt 2 succeeded; the poll goes on and reads pass."""
+        gh = _ScriptedGh([("fail", _FP1_LINK), ("fail", _FP1_LINK),
+                          ("pass", _FP1_LINK2)],
+                         views=[_fp1_view(1), _fp1_view(2, "completed", "success")])
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_OK, lines)
+        self.assertEqual(len(gh.reruns()), 1, gh.calls)
+
+    def test_g_a_rerun_that_cannot_start_refuses(self):
+        """REQ-FP1-05."""
+        gh = _ScriptedGh([("fail", _FP1_LINK)],
+                         rerun=(1, "run 38146264768 cannot be rerun; it is already running"))
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(lines[-2:], [
+            "FAIL: required-fast failed on the release pull request 1: " + _FP1_LINK,
+            "rerun refused: run 38146264768 cannot be rerun; it is already running"])
+
+    def test_h_a_link_without_a_run_id_never_reruns(self):
+        """REQ-FP1-05."""
+        link = "https://example.invalid/pull/1/checks/9"
+        gh = _ScriptedGh([("fail", link)])
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(gh.run_calls(), [])
+        self.assertIn("FAIL: required-fast failed on the release pull request 1: "
+                      + link, lines)
+
+    def test_i_an_attempt_two_that_never_registers_is_no_data(self):
+        """REQ-FP1-05."""
+        clock = _FakeWaitClock()
+        gh = _ScriptedGh([("fail", _FP1_LINK)], views=[_fp1_view(1, "completed")])
+        code, lines = self.wait(gh, clock=clock)
+        self.assertEqual(code, EP.EXIT_NODATA, lines)
+        self.assertEqual(len(gh.reruns()), 1)
+        self.assertTrue(lines[-1].startswith("NO-DATA: attempt 2 of run 38146264768 "
+                                             "did not conclude"), lines)
+        self.assertGreaterEqual(clock.now(), EP.REQUIRED_CHECK_TIMEOUT_SECONDS)
+
+    def test_j_an_unreadable_log_does_not_stop_the_rerun(self):
+        gh = _ScriptedGh([("fail", _FP1_LINK), ("pass", _FP1_LINK2)],
+                         views=[_fp1_view(1), _fp1_view(2, "completed", "success")],
+                         log=(1, "HTTP 403"))
+        code, lines = self.wait(gh)
+        self.assertEqual(code, EP.EXIT_OK, lines)
+        self.assertTrue(any(l.startswith("RERUN:") and "(failing check not read)" in l
+                            for l in lines), lines)
+
+    def test_k_the_run_id_and_the_failing_check(self):
+        self.assertEqual(EP.run_id_from_link(_FP1_LINK), "38146264768")
+        for bad in (None, "", "https://example.invalid/pull/1/checks/9", 7):
+            self.assertEqual(EP.run_id_from_link(bad), "")
+        self.assertEqual(EP.failing_check(_FP1_LOG), "test_timing (test_x.Clock)")
+        for bad in (None, "", "all ok\nFAILED (failures=1)\n"):
+            self.assertEqual(EP.failing_check(bad), EP.FAILING_CHECK_ABSENT)
+
+
+class TheRerunNeedsACanaryPassForThisTree(unittest.TestCase):
+    """FP1.a REQ-FP1-02 and REQ-FP1-06: real record files, read by the one
+    reader, linux_canary.record_covers."""
+
+    TREE = "a" * 40
+    NOW = 1760000000.0
+
+    def setUp(self):
+        import linux_canary
+        self.L = linux_canary
+        self.tmp = tempfile.mkdtemp(prefix="test-export-fp1-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def record(self, name, tree=None, verdict="PASS", jobs=None, finished=None):
+        L = self.L
+        tree = tree or self.TREE
+        finished = self.NOW - 600 if finished is None else finished
+        rec = {"schema": L.SCHEMA, "version": "9.9.9", "tree": tree, "pushed_sha": "c" * 40,
+               "branch": "canary/x", "run_id": 123, "run_url": "https://example.invalid/run/123",
+               "jobs": dict(L.EXPECTED_JOBS) if jobs is None else jobs, "verdict": verdict,
+               "detail": "", "minutes_before": 10.0, "started_at": L._iso(finished - 530),
+               "finished_at": L._iso(finished), "seconds": 530.0}
+        path = os.path.join(self.tmp, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+        return path
+
+    def test_only_a_fresh_pass_for_this_tree_justifies(self):
+        good = self.record("good.json")
+        self.assertEqual(EP.rerun_justification(good, self.TREE, self.NOW),
+                         "justified by %s PASS on tree %s" % (good, "a" * 12))
+        corrupt = os.path.join(self.tmp, "corrupt.json")
+        with open(corrupt, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        cases = (
+            ("another tree", self.record("other.json", tree="b" * 40), "is for tree"),
+            ("FAIL", self.record("fail.json", verdict="FAIL",
+                                 jobs={"required-fast-canary": "failure",
+                                       "required-fast": "skipped"}), "not PASS"),
+            ("NO-DATA", self.record("nodata.json", verdict="NO-DATA", jobs={}), "not PASS"),
+            ("stale", self.record("stale.json", finished=self.NOW - 25 * 3600), "stale"),
+            ("corrupt", corrupt, "corrupt"),
+            ("absent", os.path.join(self.tmp, "absent.json"), "unreadable"))
+        for name, path, why in cases:
+            with self.subTest(case=name):
+                ok, reason = self.L.record_covers(path, self.TREE, self.NOW)
+                self.assertFalse(ok)
+                self.assertIn(why, reason, "the fixture does not isolate %s" % name)
+                self.assertEqual(EP.rerun_justification(path, self.TREE, self.NOW), "")
+        self.assertEqual(EP.rerun_justification("", self.TREE, self.NOW), "")
+        self.assertEqual(EP.rerun_justification(good, "", self.NOW), "")
+
+    def push(self, record_tree):
+        """push_appended with a failing check: the record is written, for
+        `record_tree` or (None) for the tree the exporter itself built, the
+        moment that tree is read."""
+        remote = os.path.join(self.tmp, "remote")
+        root = os.path.join(self.tmp, "root")
+        os.makedirs(remote)
+        os.makedirs(root)
+        _seed_bare_remote(remote)
+        _make_fake_root(root, {"hello.md": "an ordinary allowlisted file\n"})
+        record = os.path.join(self.tmp, "linux-canary.json")
+        gh = _ScriptedGh([("fail", _FP1_LINK), ("pass", _FP1_LINK2)],
+                         views=[_fp1_view(1), _fp1_view(2, "completed", "success")])
+
+        def run(cmd, cwd, env=None, timeout=120):
+            got = gh(cmd, cwd)
+            if got is not None:
+                return got
+            proc = EP._run(cmd, cwd, env=env, timeout=timeout)
+            if cmd == ["git", "rev-parse", "HEAD^{tree}"] and not os.path.exists(record):
+                tree = record_tree or proc.stdout.strip()
+                os.replace(self.record("tmp.json", tree=tree, finished=time.time() - 600), record)
+            return proc
+
+        clock = _FakeWaitClock()
+        with _fake_gh():
+            code, lines = EP.push_appended(["scripts", "hello.md"], remote, "main", root=root,
+                                           run=run, wait_sleep=clock.sleep, wait_clock=clock.now,
+                                           canary_record=record)
+        return code, lines, gh
+
+    def test_the_built_tree_decides_never_the_records_own(self):
+        """REQ-FP1-06, M-FP1-TREE."""
+        code, lines, gh = self.push(None)
+        self.assertEqual(code, EP.EXIT_OK, lines)
+        self.assertEqual(len(gh.reruns()), 1, lines)
+        self.assertTrue(any(l.startswith("public check: attempt 2 of 2") for l in lines), lines)
+
+    def test_a_record_for_another_tree_gives_no_rerun(self):
+        code, lines, gh = self.push("b" * 40)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(gh.reruns(), [], lines)
+        self.assertFalse(any(l.startswith("RERUN:") for l in lines), lines)
+
+
+class TheCanaryRecordFlagReachesThePush(unittest.TestCase):
+    """FP1.a: --canary-record is handed to push_appended as given."""
+
+    def test_the_flag_is_passed_through(self):
+        tmp = tempfile.mkdtemp(prefix="test-export-fp1-flag-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        remote = os.path.join(tmp, "remote")
+        root = os.path.join(tmp, "root")
+        os.makedirs(remote)
+        os.makedirs(root)
+        _seed_bare_remote(remote)
+        _make_fake_root(root, {"clean.md": "nothing private here\n"})
+        allowlist = _write_lines(os.path.join(root, "ALLOWLIST.txt"), ["scripts", "clean.md"])
+        terms = _write_lines(os.path.join(tmp, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+        for extra, want in ((["--canary-record", "/r/rec.json"], "/r/rec.json"), ([], "")):
+            with self.subTest(extra=extra):
+                push = mock.Mock(return_value=(EP.EXIT_OK, ["pushed: stubbed"]))
+                rf = mock.Mock(return_value=(True, ["required-fast: stubbed"]))
+                with mock.patch.dict(os.environ, {"BROTHER_PRIVATE_TERMS": terms}), \
+                        mock.patch.object(EP, "check_required_fast", rf), \
+                        mock.patch.object(EP, "push_appended", push), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    code = EP.main(["--allowlist", allowlist, "--root", root, "--remote", remote,
+                                    "--branch", "main", "--push"] + extra)
+                self.assertEqual(code, EP.EXIT_OK)
+                self.assertEqual(push.call_args.kwargs.get("canary_record"), want)
+
+
 class TheReleaseRecordShipsItsOwnSourceRevision(unittest.TestCase):
     """E6.1a: an external release-integrity reviewer confirmed
     reproduce_export.py rebuilds the export byte for byte from a hub
@@ -3934,6 +4251,28 @@ class ProofResidueIsNotShippedContent(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(lines and all(isinstance(l, str) for l in lines))
 
+    def test_the_dry_run_hashes_before_required_fast_writes_residue(self):
+        # 2026-10-12, rehearsal 6faaf4f69: --prove-required-fast ran
+        # required_fast.sh in the export tree, which left
+        # .brothermode/recurrence.sqlite3 behind, and --tag-time-checks then
+        # hashed the tree and refused on it as EXTRA. main must snapshot
+        # BEFORE required-fast and hand that snapshot to tag_time_checks.
+        import inspect
+        src = inspect.getsource(EP._main)
+        snap = src.index("staged_text = staged_snapshot(export_dir)")
+        self.assertLess(snap, src.index("if wants_required_fast(args):"))
+        self.assertIn("built_text=staged_text", src)
+        d = tempfile.mkdtemp(prefix="brother-export-ttc-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "a.txt"), "w") as fh:
+            fh.write("staged\n")
+        before = EP.staged_snapshot(d)
+        os.makedirs(os.path.join(d, ".brothermode"))
+        with open(os.path.join(d, ".brothermode", "recurrence.sqlite3"), "wb") as fh:
+            fh.write(b"\x00")
+        self.assertNotIn("recurrence.sqlite3", before)
+        self.assertIn("recurrence.sqlite3", EP.staged_snapshot(d))
+
 
 
 class TheManifestDescribesTheTaggedTree(unittest.TestCase):
@@ -4169,6 +4508,158 @@ class ThePreflightTagTimeChecksFlagOnADryRun(unittest.TestCase):
                              proc.stdout)
             self.assertNotIn("tag-time checks", proc.stdout)
 
+
+
+class TheRehearsalRecordFlag(unittest.TestCase):
+    """RC1.c (docs/plan/specs/RC1.md): with --rehearsal-record the exporter
+    skips its own required_fast.sh only when the rehearsal's export-real-home
+    row measured exactly the export tree it just built (a PASS row, a READY
+    record younger than 24 h, its log on disk at its sha256). The gates and
+    the tag-time checks always run, and push_appended refuses before any
+    remote write when the tree it is about to push is not the reused one."""
+
+    ALLOWLIST = ["scripts", "clean.md"]
+
+    def setUp(self):
+        import cut_rehearsal as CR
+        self.CR = CR
+        self.tmp = tempfile.mkdtemp(prefix="test-export-rehearsal-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.remote = os.path.join(self.tmp, "remote")
+        self.root = os.path.join(self.tmp, "root")
+        os.makedirs(self.remote)
+        os.makedirs(self.root)
+        _seed_bare_remote(self.remote)
+        _make_fake_root(self.root, {"clean.md": "nothing private here\n"})
+        self.allowlist = _write_lines(os.path.join(self.root, "ALLOWLIST.txt"), self.ALLOWLIST)
+        terms = _write_lines(os.path.join(self.tmp, "terms.txt"), ["FAKETERM-NEVER-PRESENT"])
+        patcher = mock.patch.dict(os.environ, {"BROTHER_PRIVATE_TERMS": terms})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def main(self, extra, rf_ok=True):
+        """(code, stdout, required_fast calls, run_gates calls, push kwargs) of an in-process exporter run."""
+        rf = mock.Mock(return_value=(rf_ok, ["required-fast: stubbed"]))
+        gates = mock.Mock(side_effect=EP.run_gates)
+        push = mock.Mock(return_value=(EP.EXIT_OK, ["pushed: stubbed"]))
+        out = io.StringIO()
+        with mock.patch.object(EP, "check_required_fast", rf), mock.patch.object(EP, "run_gates", gates), \
+                mock.patch.object(EP, "push_appended", push), contextlib.redirect_stdout(out):
+            code = EP.main(["--allowlist", self.allowlist, "--root", self.root, "--remote", self.remote,
+                            "--branch", "main"] + list(extra))
+        return code, out.getvalue(), rf.call_count, gates.call_count, push.call_args
+
+    def tree_id(self):
+        code, out, _rf, _g, _p = self.main(["--dry-run"])
+        self.assertEqual(code, EP.EXIT_OK, out)
+        found = self.CR.EXPORT_TREE_RE.findall(out)
+        self.assertEqual(len(found), 1, out)
+        return found[0]
+
+    def record(self, key, verdict="PASS", home="real", record_verdict="READY", age_h=1.0):
+        log = os.path.join(self.tmp, "row-%s-%s.log" % (verdict, home))
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("required-fast: fail 0\n")
+        row = {"row": "export-real-home", "argv": ["python3", "scripts/export_public.py", "--dry-run"],
+               "key": key, "home": home, "verdict": verdict, "seconds": 3.0, "log_path": log,
+               "log_sha256": self.CR._sha256_file(log)}
+        rlog = os.path.join(self.tmp, "rehearsal.log")
+        with open(rlog, "w", encoding="utf-8") as fh:
+            fh.write("READY for 9.9.9\n")
+        evidence = os.path.join(self.tmp, "evidence")
+        return self.CR.record_rehearsal(
+            "9.9.9", "e" * 40, "c" * 40, 0 if record_verdict == "READY" else 1, record_verdict, rlog, 1.0,
+            "d" * 64, directory=evidence, now=time.time() - age_h * 3600,
+            script_trees=dict((d, "b" * 40) for d in self.CR.SCRIPT_DIRS), rows=[row])
+
+    def test_the_export_tree_line_is_printed_and_stable(self):
+        first = self.tree_id()
+        self.assertEqual(self.tree_id(), first, "two builds of the same bytes named two trees")
+
+    def test_an_exact_match_reuses_and_the_gates_still_run(self):
+        tree = self.tree_id()
+        path = self.record(tree)
+        code, out, rf, gates, _p = self.main(["--dry-run", "--prove-required-fast", "--rehearsal-record", path])
+        self.assertEqual(code, EP.EXIT_OK, out)
+        self.assertIn("REUSED export-real-home %s %s" % (tree[:12], path), out)
+        self.assertEqual(rf, 0, "required_fast ran although the row covered this tree")
+        self.assertEqual(gates, 1, "the gates were skipped on a reuse")
+        self.assertIn("CLEAR: every gate passed", out)
+
+    def test_every_doubt_runs_required_fast(self):
+        tree = self.tree_id()
+        cases = (("one byte off", self.record(tree[:-1] + ("0" if tree[-1] != "0" else "1"))),
+                 ("absent", os.path.join(self.tmp, "no-such-record.json")),
+                 ("row FAIL", self.record(tree, verdict="FAIL")),
+                 ("row of the empty home", self.record(tree, home="empty")),
+                 ("NOT-READY record", self.record(tree, record_verdict="NOT-READY")),
+                 ("stale record", self.record(tree, age_h=25.0)))
+        for name, path in cases:
+            with self.subTest(case=name):
+                code, out, rf, gates, _p = self.main(["--dry-run", "--prove-required-fast",
+                                                      "--rehearsal-record", path])
+                self.assertEqual(code, EP.EXIT_OK, out)
+                self.assertNotIn("REUSED", out)
+                self.assertIn("required-fast not reused:", out)
+                self.assertEqual(rf, 1)
+                self.assertEqual(gates, 1)
+        code, out, rf, _g, _p = self.main(["--dry-run", "--prove-required-fast", "--rehearsal-record",
+                                           os.path.join(self.tmp, "no-such-record.json")])
+        self.assertIn("no-such-record.json", out, "the miss does not name the path it read")
+
+    def test_a_red_required_fast_after_a_miss_still_refuses(self):
+        code, out, rf, _g, _p = self.main(["--dry-run", "--prove-required-fast", "--rehearsal-record",
+                                           self.record("0" * 40)], rf_ok=False)
+        self.assertEqual(code, EP.EXIT_REFUSED, out)
+        self.assertEqual(rf, 1)
+
+    def test_without_the_flag_or_without_required_fast_nothing_changes(self):
+        tree = self.tree_id()
+        code, out, rf, _g, _p = self.main(["--dry-run", "--prove-required-fast"])
+        self.assertEqual((code, rf), (EP.EXIT_OK, 1), out)
+        self.assertNotIn("not reused", out)
+        code, out, rf, _g, _p = self.main(["--dry-run", "--rehearsal-record", self.record(tree)])
+        self.assertEqual((code, rf), (EP.EXIT_OK, 0), out)
+        self.assertNotIn("REUSED", out)
+
+    def test_the_push_carries_the_tree_only_when_it_reused(self):
+        tree = self.tree_id()
+        code, out, rf, _g, push = self.main(["--push", "--rehearsal-record", self.record(tree)])
+        self.assertEqual((code, rf), (EP.EXIT_OK, 0), out)
+        self.assertEqual(push.kwargs.get("reused_tree"), tree)
+        code, out, rf, _g, push = self.main(["--push", "--rehearsal-record", self.record("0" * 40)])
+        self.assertEqual((code, rf), (EP.EXIT_OK, 1), out)
+        self.assertEqual(push.kwargs.get("reused_tree", ""), "")
+        code, out, rf, _g, push = self.main(["--push", "--skip-required-fast", "--rehearsal-record",
+                                             self.record(tree)])
+        self.assertEqual((code, rf), (EP.EXIT_OK, 0), out)
+        self.assertNotIn("REUSED", out, "a skipped required fast was reported as a reuse")
+        self.assertEqual(push.kwargs.get("reused_tree", ""), "")
+
+    def push(self, reused_tree):
+        calls = []
+
+        def run(cmd, cwd, env=None, timeout=120):
+            calls.append(list(cmd))
+            if cmd[:2] == ["git", "push"]:
+                return subprocess.CompletedProcess(cmd, 1, "", "push intercepted by the test")
+            return EP._run(cmd, cwd, env=env, timeout=timeout)
+
+        allowlist = EP.load_allowlist(self.allowlist)
+        code, lines = EP.push_appended(allowlist, self.remote, "main", self.root, run=run,
+                                       reused_tree=reused_tree)
+        return code, lines, [c for c in calls if c[:2] == ["git", "push"]]
+
+    def test_a_tree_that_moved_before_the_push_refuses_before_any_write(self):
+        code, lines, pushes = self.push("0" * 40)
+        self.assertEqual(code, EP.EXIT_REFUSED, lines)
+        self.assertEqual(pushes, [])
+        self.assertTrue(any(l.startswith("REFUSED") and "0" * 12 in l for l in lines), lines)
+        tree = self.tree_id()
+        for reused in (tree, ""):
+            with self.subTest(reused=reused):
+                code, lines, pushes = self.push(reused)
+                self.assertEqual(len(pushes), 1, "the matching tree never reached the push: %s" % lines)
 
 
 class TheRequiredFastGateGetsMoreTimeThanItNeeds(unittest.TestCase):
@@ -4521,6 +5012,24 @@ class JevSeamJ094SecondOpinion(unittest.TestCase):
                           "genuinely found clean", text)
 
 
+def _hold_monotonic(test, module):
+    """Holds `module`'s time.monotonic() at one instant until `test` ends
+    and returns the list every read appends to, so the test can prove the
+    held clock was actually consulted."""
+    reads = []
+    instant = module.time.monotonic()
+
+    def monotonic():
+        reads.append(instant)
+        return instant
+
+    patcher = mock.patch.object(module, "time",
+                                mock.NonCallableMock(spec_set=["monotonic"], monotonic=monotonic))
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return reads
+
+
 class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
     """Coordinator directive (measured regression in another wave-1
     group: a seam in OFF mode made a hot call site 52x slower by
@@ -4547,6 +5056,17 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
         # "fresh" here, so reset before every test rather than rely on
         # the freshness window happening to have elapsed.
         jev_g1_seam_cache.reset()
+        # Neither the clock nor another test's thread is the code under
+        # test, and on a loaded runner both put touches inside the count
+        # (test_board_status.py's twin failed canary run 38156683022 with
+        # {'stat': 5, 'exists': 1, 'open': 1}). A seam worker an earlier
+        # test started may still be writing its ledger row, so let it
+        # finish first; then hold the clock jev_seam's config cache reads
+        # at one instant, so its one second window cannot lapse mid-loop
+        # however slow the machine is.
+        self.assertEqual(jev_seam.drain(30.0), 0, "an earlier test's seam worker never finished")
+        self.clock_reads = _hold_monotonic(self, jev_seam)
+
     def test_1000_config_loads_after_warmup_touch_no_filesystem(self):
         first = jev_seam.load_seams_config()  # warms the in-process cache
         self.assertIsInstance(first, dict)
@@ -4577,6 +5097,8 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
                          "a cached config load must never touch the "
                          "filesystem within the cache interval")
         self.assertTrue(all(o == first for o in outputs))
+        self.assertGreaterEqual(len(self.clock_reads), 1000,
+                                "the loop never asked jev_seam's config cache, so zero touches proves nothing")
 
     def test_repeated_mismatch_rewrite_still_returns_the_same_answer(self):
         """rewrite_lint_figure()'s own output stability, without patching

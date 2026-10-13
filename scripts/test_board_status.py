@@ -853,6 +853,24 @@ class J030ConsultIsMemoizedPerRenderNotPerRow(unittest.TestCase):
         self.assertLessEqual(len(calls), 3)
 
 
+def _hold_monotonic(test, module):
+    """Holds `module`'s time.monotonic() at one instant until `test` ends
+    and returns the list every read appends to, so the test can prove the
+    held clock was actually consulted."""
+    reads = []
+    instant = module.time.monotonic()
+
+    def monotonic():
+        reads.append(instant)
+        return instant
+
+    patcher = mock.patch.object(module, "time",
+                                mock.NonCallableMock(spec_set=["monotonic"], monotonic=monotonic))
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return reads
+
+
 class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
     """Coordinator directive (measured regression in another wave-1
     group: a seam in OFF mode made a hot call site 52x slower by
@@ -871,6 +889,16 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
         # A4 per-render consult memo, for the same reason.
         jev_g1_seam_cache.reset()
         B.reset_j025_consult_memo()
+        # Neither the clock nor another test's thread is the code under
+        # test, and on a loaded runner both put touches inside the count
+        # (canary run 38156683022: {'stat': 5, 'exists': 1, 'open': 1}).
+        # A seam worker an earlier test started may still be writing its
+        # ledger row, so let it finish first; then hold the clock the
+        # cache reads at one instant, so its one second window cannot
+        # lapse mid-loop however slow the machine is.
+        self.assertEqual(jev_seam.drain(30.0), 0, "an earlier test's seam worker never finished")
+        self.clock_reads = _hold_monotonic(self, jev_g1_seam_cache)
+
     def test_1000_off_mode_calls_after_warmup_touch_no_filesystem(self):
         it = item("DONE", "x")
         first = B.classify(it)  # warms jev_seam's config cache
@@ -902,6 +930,8 @@ class JevSeamPerfCacheNeverHitsDiskAfterWarmup(unittest.TestCase):
                          "an off-mode call must never touch the filesystem "
                          "once jev_seam's config cache is warm")
         self.assertEqual(outputs, {"done"})
+        self.assertGreaterEqual(len(self.clock_reads), 1000,
+                                "the loop never asked the seam cache, so zero touches proves nothing")
 
 
 def _pid_alive(pid):

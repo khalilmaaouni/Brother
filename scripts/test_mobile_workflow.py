@@ -95,7 +95,8 @@ class MobileWorkflowTests(unittest.TestCase):
         self.bin = self.root / "bin"; self.bin.mkdir()
         for name in ("xcodebuild", "xcrun"):
             path = self.bin / name; path.write_text(TOOL); path.chmod(0o755)
-        self.environment = patch.dict(os.environ, {"PATH":str(self.bin)+os.pathsep+os.environ["PATH"], "FIXTURE_ROOT":str(self.root)})
+        self.environment = patch.dict(os.environ, {"PATH":str(self.bin)+os.pathsep+os.environ["PATH"], "FIXTURE_ROOT":str(self.root),
+            "BM_DEVICE_LEASE_DB":str(self.root/"leases.sqlite3")})  # never the machine lease store
         self.environment.start(); self.addCleanup(self.environment.stop)
         self.profile = {"schema":M.PROFILE_SCHEMA,"project":"Sample.xcodeproj","scheme":"Sample","target":"Sample",
                         "configuration":"Debug","simulator_id":SIM,"bundle_id":"example.Sample","version":"1.0","build":"1",

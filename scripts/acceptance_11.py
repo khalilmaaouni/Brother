@@ -71,7 +71,10 @@ Exit contract, matching the estate's other acceptance scripts:
   1  FAIL      run_node's record said something the disk does not back up
   2  NO-DATA   loop_bridge.py, or the sibling tools directory it loads
                (bm_worker_spawn, bm_verify, bm_repair), is not present in
-               this checkout
+               this checkout; this run could not hold its own machine
+               reservation; or run_node returned before its done check
+               decided anything (a worker held by the disk admission under
+               the refuse floor), so clause A had nothing to read
 
 Usage: python3 scripts/acceptance_11.py [--explain] [--calibrate]
 --calibrate forces this test red by patching bm_verify.is_pass so every
@@ -81,7 +84,10 @@ observable behavior" -- which short-circuits run_node before it ever
 attempts repair. Passes only if this test correctly reads the resulting
 no-repair-attempted record as failed (verified by hand first: the
 unpatched run shows record["repair"]={"outcome": "EXHAUSTED", ...}; the
-patched run shows record["repair"]=None).
+patched run shows record["repair"]=None). The lie's consultations are
+counted: a record it never touched (run_node returned before its done
+check) is NO-DATA, so --calibrate reads FAIL "could not run at all" rather
+than PASS on a machine where nothing was forced.
 """
 import argparse
 import json
@@ -165,14 +171,37 @@ def _run(explain, force_status_lie):
         node = {"id": "OP1", "name": "a unit whose worker genuinely fails",
                "done_check": "test -f %s" % artifact_name,
                "owns": [artifact_name]}
-        worker = loop_bridge.LaneWorker(parts["spawn"], ["sh", worker_script])
+        # THIS RUN'S OWN RESERVATION, held and handed down exactly as a real
+        # run does: brother_run acquires one per drain and loop_bridge.main
+        # resolves it for LaneWorker (LOAD-02, release 1.0.20). Without it
+        # LaneWorker's disk admission held the worker on any machine under
+        # the 15 GiB cleanup band, run_node returned before its done check,
+        # and this test measured free disk instead of status truthfulness.
+        # The store is this run's own, inside tmp; under the refuse floor
+        # the admission still refuses, which reads NO-DATA below.
+        try:
+            import machine_reservation
+        except ImportError as exc:
+            return 2, "NO-DATA: could not import the machine reservation: %s" % exc
+        store, holder = os.path.join(tmp, "MACHINE-RESERVATION.json"), "acceptance-11-%d" % os.getpid()
+        _held, problem = machine_reservation.acquire(store, holder, 600)
+        reservation = loop_bridge.resolve_own_reservation(store, holder)
+        if reservation is None:
+            return 2, "NO-DATA: this run could not hold its own machine reservation: %s" % problem
+        worker = loop_bridge.LaneWorker(parts["spawn"], ["sh", worker_script], reservation=reservation)
 
+        lies = []
         if force_status_lie:
             # THE FORCED BAD STATE (--calibrate only): every verdict reads
             # as a pass, so run_node returns before it ever attempts
             # repair -- the mechanical shape of "a status message
-            # contradicts the tool's actual observable behavior".
-            with mock.patch.object(parts["verify"], "is_pass", lambda result: True):
+            # contradicts the tool's actual observable behavior". Each
+            # consultation is counted, so a record the lie never touched
+            # cannot stand in for the red it was meant to force.
+            def lie(result):
+                lies.append(result)
+                return True
+            with mock.patch.object(parts["verify"], "is_pass", lie):
                 record = loop_bridge.run_node(node, parts, worker, cwd=repo,
                                               max_attempts=1)
         else:
@@ -203,9 +232,31 @@ def _run(explain, force_status_lie):
             "script's own exit code (see module docstring)"
             % (MARKER, record_text[:200]))
 
+        # A CALIBRATION WHOSE LIE WAS NEVER CONSULTED forced nothing: run_node
+        # returned before its done check (a held worker, a refused dispatch),
+        # so a no-repair record here is this machine's answer, not the red
+        # the lie exists to force. Reading it as calibrated would let
+        # --calibrate PASS on a machine where this test can prove nothing.
+        if force_status_lie and not lies:
+            return 2, ("NO-DATA: calibration's forced lie (bm_verify.is_pass) "
+                       "was never consulted, so the record says nothing "
+                       "about this test's ability to fail: worker_status=%r, "
+                       "%s" % (record.get("worker_status"),
+                               record.get("reason", "no reason recorded")))
+
         # CLAUSE A, graded: a genuinely failing unit must show a real
         # repair attempt, never read as though nothing needed fixing.
         if record.get("repair") is None:
+            # A record whose done check never decided (a worker held before
+            # it ran, a refused dispatch) has no repair because there was
+            # nothing to repair FROM: that is this machine's answer, never a
+            # status lie, so it is NO-DATA, not a FAIL of clause A.
+            if record.get("verdict") == loop_bridge.NODATA:
+                return 2, ("NO-DATA: run_node returned before its done check "
+                           "decided anything, so clause A had nothing to "
+                           "read: worker_status=%r, %s"
+                           % (record.get("worker_status"),
+                              record.get("reason", "no reason recorded")))
             return 1, ("FAIL: run_node's own record shows no repair was "
                        "attempted (repair=%r) even though %s never landed "
                        "on disk: the tool's own record contradicts the "

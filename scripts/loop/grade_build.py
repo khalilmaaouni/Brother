@@ -763,6 +763,13 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # imported by retire_catalogs.py since OP1.e (6c02d3cc6, 2026-10-06) without its protection; found red
                    # on main by scripts/test_grade_build_guard.py on 2026-10-10 (unit U0c)
                    "scripts/donecheck_u8.py",
+                   # imported by hermetic_test_check.py since TH1.b (1.1.3): the push check's timing scan and its ratchet, and
+                   # the slow host's slot reader with its own import
+                   "scripts/timing_hunt.py", "scripts/timing_hunt_baseline.json", "scripts/heavy_slot.py",
+                   # 1.1.3 RC1.c: export_public reads the rehearsal record (lazily), so the cut modules are in the frozen
+                   # checks' import closure: a loop build never edits them
+                   "scripts/cut.py", "scripts/cut_rehearsal.py", "scripts/next_cut.py", "scripts/outgoing_scan.py", "scripts/linux_canary.py",
+                   "scripts/resource_gate.py",
                    # what the frozen builder exports is the landing tree's own allowlist (cut_preflight.export_tree_builder)
                    "docs/plan/export-allowlist.txt",
                    # EVERY MODULE THE LANDER ITSELF RUNS OR IMPORTS FROM THE FROZEN COPY OUTSIDE boxed() (review 16, 2026-10-03):

@@ -847,7 +847,15 @@ def check_hermetic_tests(cwd=ROOT, runner=None, stdin_text=None):
                                          "That is not a pass")]
         paths.update(l.strip() for l in (proc.stdout or "").splitlines())
     level = {hermetic.OK: OK, hermetic.REFUSED: BLOCK, hermetic.NODATA: NODATA}
-    return [(level[v], "hermetic", "%s: %s" % (name, detail))
+    # 1.1.3 TH1: the timing hunt runs on the same changed paths, here where the real push goes, not only through
+    # hermetic_test_check's command line. A hunt that cannot run is NO-DATA, never a quiet OK.
+    try:
+        timing = [(level[v], "timing", "%s: %s" % (name, detail))
+                  for v, name, detail in hermetic.timing_results(sorted(paths), cwd)]
+    except Exception as exc:  # noqa: BLE001  the gate never crashes on a check it carries
+        timing = [(NODATA, "timing", "the timing hunt could not run (%s: %s), so no changed test was judged for "
+                                     "timing. That is not a pass" % (type(exc).__name__, exc))]
+    return timing + [(level[v], "hermetic", "%s: %s" % (name, detail))
             # sorted: a list in a stable order (2026-09-28: R1.4's tests_for accepts only a list or tuple, so the set
             # this built crashed the gate and refused a whole landing batch, innocent builds included)
             for v, name, detail in hermetic.check(cwd, hermetic.tests_for(sorted(paths), cwd))]

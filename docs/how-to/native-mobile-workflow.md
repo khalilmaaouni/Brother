@@ -8,7 +8,23 @@ its media probe additionally needs an available ffprobe.
 
 ## Reference and simulator run
 
-First collect a device application observation JSON and a release record that
+The short route writes the two input files from your project. Run `reference-init`
+at the last good commit with a clean tree, then change, commit and run.
+
+```sh
+python3 scripts/mobile_workflow.py profile-init --repo /path/to/app --out /path/to/evidence/profile.json --simulator-name "iPhone 16" --xcresult /path/to/evidence/first-tests.xcresult
+python3 scripts/mobile_workflow.py reference-init --repo /path/to/app --profile /path/to/evidence/profile.json --out /path/to/evidence/reference.json
+python3 scripts/mobile_workflow.py run --repo /path/to/app --profile /path/to/evidence/profile.json --reference /path/to/evidence/reference.json --out /path/to/evidence/fresh-run
+```
+
+`profile-init` reads the project, the scheme, the simulator list and the build
+settings; it stops with NO-DATA and names the candidates when it cannot choose
+(two schemes, two simulators, no simulator for the installed runtime, no test
+list), and it never runs your tests or guesses a test identity. `reference-init`
+records the current clean checkout, built and installed on that simulator, as
+the working reference; it is the checkout itself, not a store release.
+
+To write the files by hand instead: first collect a device application observation JSON and a release record that
 associates its version/build with source. Use the retained archive app, not a
 random product found in DerivedData. The clean reference checkout must equal
 the full source revision supplied below. Evidence goes outside the repository.

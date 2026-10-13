@@ -2,20 +2,36 @@
   "spec_version": "2026-09-06",
   "source": {
     "document": "docs/plan/FIX-DIRECTIVE-2026-09-06.md",
-    "sections": [26, 27, 28, 29, 30]
+    "sections": [
+      26,
+      27,
+      28,
+      29,
+      30
+    ]
   },
   "gate_before_use": "Directive section 31: no new benchmark work, and per section 26 this round itself, until the P0 rows on docs/plan/READINESS-ROADMAP-2026-08-29.json close. Row P1-4's status stays PARTIAL until then.",
   "model_id": "NO-DATA: named once, identical across every competitor arm, by whoever runs the round; write the exact id here before the round starts (directive section 26, control 'same model').",
+  "model_exception": "NO-DATA: a disclosed comparability exception to 'same model', written here by the owner only when one exists (for example an arm that cannot run the named model); one of model_id and model_exception must be set before a composite is allowed.",
   "start_commit": "NO-DATA: produced by the Setup section of TASK.md, which was run and verified during harness preparation (commit ce3f05034d593e784fdaf75e07200024c375f13c on this machine, on 2026-09-06, from this fixture's current tree with a fixed author/committer identity and date). A later session must re-run Setup itself and record the hash it prints here rather than reuse this one blindly, in case the fixture tree has since changed.",
   "token_budget": "NO-DATA: named once, identical across every arm, before the round starts (directive section 26, control 'same token budget'). No default is assumed here.",
   "intervention_budget": "NO-DATA: the maximum number of human interventions allowed per arm, named once before the round starts, identical across every arm (directive section 26, control 'same intervention budget').",
   "machine": {
-    "descriptor_fields": ["hostname", "os", "os_version", "cpu_model", "cpu_count", "memory_gb", "measured_at"],
+    "descriptor_fields": [
+      "hostname",
+      "os",
+      "os_version",
+      "cpu_model",
+      "cpu_count",
+      "memory_gb",
+      "measured_at"
+    ],
     "how_to_capture": "uname -a; on macOS also sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; on Linux also lscpu and free -h. Record the actual command output beside the run record, never assumed from a prior round.",
     "example_capture_2026-09-06": {
       "note": "Captured on THIS machine while preparing the harness, for illustration only. Not a claim that any competitor arm ran here; re-capture per round.",
       "uname_a": "NO-DATA: not captured for this prep session; run `uname -a` at round time"
-    }
+    },
+    "captured": null
   },
   "competitors": {
     "gsd": {
@@ -53,5 +69,43 @@
     "convention": "One run directory per competitor arm, contract documented in RUBRIC.md and read by scripts/competitive_score.py: diff.patch, meta.json (declared_files, tokens_used, interventions), optionally receipt.json and transcript.txt.",
     "root": "NO-DATA: named per round; a dated directory under benchmarks/results/ following the existing benchmarks/results/long-horizon-recovery/ convention is the closest sibling on this estate."
   },
-  "publish_rule": "Directive section 26: publish raw artifacts, never only a composite score. scripts/competitive_score.py enforces this mechanically by refusing to print a composite unless every dimension in RUBRIC.md is measured."
+  "publish_rule": "Directive section 26: publish raw artifacts, never only a composite score. scripts/competitive_score.py enforces this mechanically by refusing to print a composite unless every dimension in RUBRIC.md is measured.",
+  "scoring": {
+    "script": "benchmarks/competitive/scripts/competitive_score.py",
+    "sha256": "NO-DATA: written only by `python3 scripts/bench_controls.py --freeze-digest`, before the first arm result is recorded; the script is never allowed to move under a result."
+  },
+  "arms": {
+    "brother_1_1_1": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "brother_1_1_2": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "brother_1_1_3": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "gsd": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "superpowers": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "compound": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "bmad": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    },
+    "vanilla_claude_code": {
+      "installed_ref": "NO-DATA: the exact installed version, tag or commit of this arm, read on the round machine before the arm starts.",
+      "result": null
+    }
+  }
 }

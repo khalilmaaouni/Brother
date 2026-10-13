@@ -28,7 +28,9 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-SCHEMA = "cv1.rehearsal.1"
+SCHEMA = "cv1.rehearsal.2"
+# RC1.a: a .1 record (no rows) still reads, as rows == []; writing is always SCHEMA
+SCHEMAS_READ = ("cv1.rehearsal.1", "cv1.rehearsal.2")
 MAX_AGE_HOURS = 24.0
 FUTURE_SLACK_S = 300
 DEFAULT_TIMEOUT_S = 10800
@@ -44,6 +46,16 @@ VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 RECORD_FIELDS = ("schema", "version", "candidate_sha", "candidate_tree", "exit_code", "verdict", "log_path",
                  "log_sha256", "cut_py_sha256", "script_trees", "seconds", "finished_at")
+
+# RC1.a: one row is one expensive check the rehearsed chain ran, keyed by the git tree id of the bytes it measured.
+# The child prints each as ROW_PREFIX + JSON; the parent keeps a row only while its log hashes to log_sha256.
+ROW_PREFIX = "CUTROW "
+ROW_NAMES = ("required-fast-hub", "export-real-home", "virgin-gate")
+ROW_HOMES = ("real", "empty")
+ROW_VERDICTS = ("PASS", "FAIL", "NO-DATA")
+ROW_FIELDS = ("row", "argv", "key", "home", "verdict", "seconds", "log_path", "log_sha256")
+HEX64_RE = re.compile(r"[0-9a-f]{64}")
+EXPORT_TREE_RE = re.compile(r"^EXPORT-TREE: ([0-9a-f]{40})$", re.M)   # the one line cut_preflight and export_public print
 
 
 class RehearsalRefused(RuntimeError):
@@ -214,11 +226,68 @@ def _script_trees(root, ref, runner=None):
     return trees, ""
 
 
+def validate_row(row):
+    """'' when `row` is a whole row (exactly ROW_FIELDS, each of its type), else the first broken rule. Never raises."""
+    if not isinstance(row, dict):
+        return "a row is not an object"
+    if set(row) != set(ROW_FIELDS):
+        return "a row has the fields %s, not %s" % (", ".join(sorted(str(k) for k in row)), ", ".join(ROW_FIELDS))
+    if not _is_str(row["row"]) or row["row"] not in ROW_NAMES:
+        return "row %r is not one of %s" % (row["row"], ", ".join(ROW_NAMES))
+    if not isinstance(row["argv"], list) or not row["argv"] or not all(_is_str(a) for a in row["argv"]):
+        return "the argv of row %s is not a list of strings" % row["row"]
+    if not _is_str(row["key"]) or not SHA_RE.fullmatch(row["key"]):
+        return "the key of row %s is not a 40 hex tree id" % row["row"]
+    if not _is_str(row["home"]) or row["home"] not in ROW_HOMES:
+        return "the home of row %s is not one of %s" % (row["row"], ", ".join(ROW_HOMES))
+    if not _is_str(row["verdict"]) or row["verdict"] not in ROW_VERDICTS:
+        return "the verdict of row %s is not one of %s" % (row["row"], ", ".join(ROW_VERDICTS))
+    if not _is_num(row["seconds"]) or row["seconds"] < 0:
+        return "the seconds of row %s are not a finite number at least 0" % row["row"]
+    if not _is_str(row["log_path"]) or not row["log_path"]:
+        return "the log path of row %s is not a path" % row["row"]
+    if not _is_str(row["log_sha256"]) or not HEX64_RE.fullmatch(row["log_sha256"]):
+        return "the log sha256 of row %s is not 64 hex" % row["row"]
+    return ""
+
+
+def row_line(row):
+    """The one stdout line a rehearsed chain prints for a row."""
+    return ROW_PREFIX + json.dumps(row, sort_keys=True)
+
+
+def parse_rows(output):
+    """([valid rows in order], [problems]) from every line starting with ROW_PREFIX. Never raises."""
+    if not _is_str(output):
+        return [], ["the output is not text"]
+    rows, problems = [], []
+    for line in output.splitlines():
+        if not line.startswith(ROW_PREFIX):
+            continue
+        try:
+            row = json.loads(line[len(ROW_PREFIX):])
+        except ValueError as exc:
+            problems.append("a CUTROW line is not JSON (%s)" % exc)
+            continue
+        why = validate_row(row)
+        if why:
+            problems.append("a CUTROW line was refused: %s" % why)
+        else:
+            rows.append(row)
+    return rows, problems
+
+
 def record_rehearsal(version, candidate, tree, exit_code, verdict, log_path, seconds, cut_py_sha256, directory="",
-                     now=None, script_trees=None, note=""):
+                     now=None, script_trees=None, note="", rows=()):
     """Write the record atomically (temp file then os.replace) and return its path. Raises ValueError on a
-    candidate that is not 40 hex or a verdict outside READY, NOT-READY, NO-DATA, and on any other malformed field.
-    A READY record needs a readable log and a tree hash for every SCRIPT_DIRS entry."""
+    candidate that is not 40 hex or a verdict outside READY, NOT-READY, NO-DATA, and on any other malformed field,
+    a malformed row included. A READY record needs a readable log and a tree hash for every SCRIPT_DIRS entry."""
+    if isinstance(rows, (str, bytes, dict)) or not isinstance(rows, (list, tuple)):
+        raise ValueError("rows must be a list of rows")
+    for row in rows:
+        why = validate_row(row)
+        if why:
+            raise ValueError(why)
     if not _is_str(version) or not VERSION_RE.fullmatch(version):
         raise ValueError("version %r is not X.Y.Z" % (version,))
     if not _is_str(candidate) or not SHA_RE.fullmatch(candidate):
@@ -258,7 +327,7 @@ def record_rehearsal(version, candidate, tree, exit_code, verdict, log_path, sec
     record = {"schema": SCHEMA, "version": version, "candidate_sha": candidate, "candidate_tree": tree,
               "exit_code": exit_code, "verdict": verdict, "log_path": log_path, "log_sha256": log_sha,
               "cut_py_sha256": cut_py_sha256, "script_trees": trees, "seconds": float(seconds),
-              "finished_at": _iso(stamp)}
+              "finished_at": _iso(stamp), "rows": [dict(r) for r in rows]}
     if note:
         record["note"] = note
     path = os.path.join(directory, "rehearsal-%s-%s-%d.json" % (version, candidate[:12], int(stamp)))
@@ -483,6 +552,19 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
     except OSError as exc:
         verdict, log_path = "NO-DATA", ""
         note = (note + "; " if note else "") + "the log could not be written: %s" % exc
+    rows = []
+    kept, problems = parse_rows(output)
+    for row in kept:
+        try:
+            ok = _sha256_file(row["log_path"]) == row["log_sha256"]
+        except OSError:
+            ok = False
+        if ok:
+            rows.append(row)
+        else:
+            problems.append("row %s was dropped: its log %s does not hash to its log_sha256" % (row["row"], row["log_path"]))
+    if problems:
+        note = (note + "; " if note else "") + "; ".join(problems)
     trees, why = _script_trees(root, sha, runner)
     cut_sha = ""
     shown = _sh(["git", "show", "%s:scripts/cut.py" % sha], root, runner)
@@ -497,7 +579,7 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
         cut_sha = cut_sha or "0" * 64
     try:
         path = record_rehearsal(version, sha, tree, code, verdict, log_path, max(finished - started, 0.0), cut_sha,
-                                directory, now=finished, script_trees=trees, note=note)
+                                directory, now=finished, script_trees=trees, note=note, rows=rows)
     except (OSError, ValueError) as exc:
         raise RehearsalRefused("the record could not be written: %s" % exc)
     return verdict, code, path
@@ -670,22 +752,105 @@ def _load_records(directory, version):
                 data = json.load(fh)
         except (OSError, ValueError) as exc:
             return [], "the rehearsal record %s is corrupt or unreadable (%s); remove it and rehearse again" % (name, exc)
-        if not isinstance(data, dict) or data.get("schema") != SCHEMA:
-            seen = data.get("schema") if isinstance(data, dict) else None
-            return [], "the rehearsal record %s has schema %r, not %s" % (name, seen, SCHEMA)
-        bad = [f for f in RECORD_FIELDS if f not in data]
-        stamp = _parse_iso(data.get("finished_at"))
-        if (bad or data["version"] != version or not _is_str(data["candidate_sha"])
-                or not SHA_RE.fullmatch(data["candidate_sha"]) or data["verdict"] not in VERDICTS
-                or not _is_str(data["verdict"]) or stamp is None or not isinstance(data["script_trees"], dict)
-                or not _is_str(data["log_path"]) or not _is_str(data["log_sha256"])
-                or not _is_str(data["cut_py_sha256"])):
-            return [], "the rehearsal record %s is malformed (%s)" % (name, ("missing " + ", ".join(bad)) if bad
-                                                                       else "a field has the wrong type or value")
-        data["_epoch"] = stamp
+        why = _record_problem(data, name)
+        if not why and data["version"] != version:
+            why = "the rehearsal record %s is malformed (it names version %r)" % (name, data["version"])
+        if why:
+            return [], why
         data["_name"] = name
         records.append(data)
     return records, ""
+
+
+def _record_problem(data, name):
+    """'' when `data` is a whole record of a schema in SCHEMAS_READ, else the reason. A whole record gains `_epoch`,
+    and a .1 record gains rows == []."""
+    if not isinstance(data, dict) or not _is_str(data.get("schema")) or data.get("schema") not in SCHEMAS_READ:
+        seen = data.get("schema") if isinstance(data, dict) else None
+        return "the rehearsal record %s has schema %r, not one of %s" % (name, seen, ", ".join(SCHEMAS_READ))
+    bad = [f for f in RECORD_FIELDS if f not in data]
+    stamp = _parse_iso(data.get("finished_at"))
+    if (bad or not _is_str(data["version"]) or not _is_str(data["candidate_sha"])
+            or not SHA_RE.fullmatch(data["candidate_sha"]) or data["verdict"] not in VERDICTS
+            or not _is_str(data["verdict"]) or stamp is None or not isinstance(data["script_trees"], dict)
+            or not _is_str(data["log_path"]) or not _is_str(data["log_sha256"])
+            or not _is_str(data["cut_py_sha256"])):
+        return "the rehearsal record %s is malformed (%s)" % (name, ("missing " + ", ".join(bad)) if bad
+                                                               else "a field has the wrong type or value")
+    if data["schema"] == "cv1.rehearsal.1":
+        data["rows"] = []
+    else:
+        rows = data.get("rows")
+        if not isinstance(rows, list):
+            return "the rehearsal record %s is malformed (its rows are not a list)" % name
+        for row in rows:
+            why = validate_row(row)
+            if why:
+                return "the rehearsal record %s is malformed (%s)" % (name, why)
+    data["_epoch"] = stamp
+    return ""
+
+
+def load_record(path):
+    """(record, '') for the rehearsal record at `path`, rows defaulted to [] for a .1 record; (None, reason) for a
+    missing, corrupt, truncated or malformed one. The one reader other modules use."""
+    if not _is_str(path) or not path:
+        return None, "the rehearsal record path %r is not a path" % (path,)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "the rehearsal record %s is corrupt or unreadable (%s)" % (path, exc)
+    why = _record_problem(data, path)
+    if why:
+        return None, why
+    return data, ""
+
+
+def reusable_row(record, row, key, home, now=None):
+    """(row, '') only when `record` is a READY record, not from the future and not older than MAX_AGE_HOURS, whose
+    LAST row named `row` with home `home` carries exactly `key`, verdict PASS and a log still hashing to its
+    log_sha256. (None, reason) in every other case, so the caller runs the row."""
+    if not isinstance(record, dict):
+        return None, "no rehearsal record"
+    if not _is_str(row) or row not in ROW_NAMES or not _is_str(home) or home not in ROW_HOMES:
+        return None, "row %r with home %r is not a known row" % (row, home)
+    if not _is_str(key) or not SHA_RE.fullmatch(key):
+        return None, "the key %r is not a 40 hex tree id" % (key,)
+    if now is not None and not _is_num(now):
+        return None, "the clock %r is not a finite number" % (now,)
+    if record.get("verdict") != "READY":
+        return None, "the record says %s, not READY" % (record.get("verdict"),)
+    stamp = _parse_iso(record.get("finished_at"))
+    if stamp is None:
+        return None, "the record has no readable finished_at"
+    age = (time.time() if now is None else float(now)) - stamp
+    if age < -FUTURE_SLACK_S:
+        return None, "the record is stamped from the future (%s)" % record.get("finished_at")
+    if age > MAX_AGE_HOURS * 3600:
+        return None, "the record is stale: finished %s, older than %g hours" % (record.get("finished_at"), MAX_AGE_HOURS)
+    rows = record.get("rows")
+    if not isinstance(rows, list):
+        return None, "the record carries no rows"
+    last = None
+    for r in rows:
+        if validate_row(r):
+            return None, "the record carries a malformed row: %s" % validate_row(r)
+        if r["row"] == row and r["home"] == home:
+            last = r
+    if last is None:
+        return None, "the record has no %s row for home %s" % (row, home)
+    if last["key"] != key:
+        return None, "the %s row measured key %s, not %s" % (row, last["key"][:12], key[:12])
+    if last["verdict"] != "PASS":
+        return None, "the %s row said %s, not PASS" % (row, last["verdict"])
+    try:
+        log_sha = _sha256_file(last["log_path"])
+    except OSError as exc:
+        return None, "the log of the %s row is missing or unreadable: %s" % (row, exc)
+    if log_sha != last["log_sha256"]:
+        return None, "the log of the %s row was altered after it was recorded" % row
+    return last, ""
 
 
 def covering_record(root, version, resume_sha="", directory="", runner=None, now=None, allowed_paths=()):

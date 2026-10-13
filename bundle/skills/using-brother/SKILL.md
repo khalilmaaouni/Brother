@@ -1,6 +1,6 @@
 ---
 name: using-brother
-description: "Use whenever someone starts real work another person will later have to trust: adding or changing a database column or table without breaking a report or export, reviewing a migration or pull request before merging, explaining why a number or weekly report looks wrong, pulling a list of customers or records that feeds a decision, or touching money, customer data, logins, or a live production path. Reads what the work is and applies the right amount of checking, never a menu. Also the route for any 1.1.0 skill name (brotherme-, brothermode-, brothersbe-). Routes only: it owns no verdicts, no task registry and no release decision. Invoke as /brother:using-brother."
+description: "Use whenever someone starts real work another person will later have to trust: adding or changing a database column or table without breaking a report or export, reviewing a migration or pull request before merging, explaining why a number or weekly report looks wrong, pulling a list of customers or records that feeds a decision, or touching money, customer data, logins, or a live production path, or building or checking an iPhone, iPad, SwiftUI or simulator change. Reads what the work is and applies the right amount of checking, never a menu. Also the route for any 1.1.0 skill name (brotherme-, brothermode-, brothersbe-). Routes only: it owns no verdicts, no task registry and no release decision. Invoke as /brother:using-brother."
 ---
 
 # Using Brother
@@ -136,8 +136,10 @@ reaching a decision. Absent evidence is NO-DATA, never a pass.
 
 ## Native mobile and creative work
 
-For an iPhone, iPad or SwiftUI outcome, load references/native-mobile.md.
-It supplies reference, research, design, motion, build and handoff steps
+For an iPhone, iPad, SwiftUI or simulator outcome, such as "check my change
+on iPhone 16", load references/native-mobile.md. Its first section is the run:
+doctor, profile-init, reference-init, run, ending in one receipt that names
+the simulator runtime and the screenshot hash. It supplies reference, research, design, motion, build and handoff steps
 within the existing execution route and product verdicts.
 
 ## Cursor-native agents

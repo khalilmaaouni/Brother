@@ -497,7 +497,7 @@ class TheMachineRowsAreAskedOnThisMachine(unittest.TestCase):
     def test_the_names_are_in_order_each_once(self):
         res, _built = self._all({})
         self.assertEqual([n for _v, n, _d in res],
-                         ["exceptions", "pack-clock", "readiness-rows", "release-plan", "no-promise", "version-after-bump",
+                         ["no-cut-commit", "exceptions", "pack-clock", "readiness-rows", "release-plan", "no-promise", "version-after-bump",
                           "changelog-text", "public-remote"] + list(MACHINE_NAMES) + ["plugin-bumps", "export-real-home",
                                                                     "virgin-gate"])
 
@@ -539,8 +539,16 @@ class TheUncutDraftOfTheVersionBeingCut(unittest.TestCase):
         return root
 
     def changelog_row(self, root):
-        res, _ = CheapestFirst._all(self, {}, root=root, version=self.CUTTING)
-        return [(v, d) for v, n, d in res if n == "changelog-text"][0], P.exit_code(res)
+        # CR1.a: --resume names the fake HEAD ("abc"), so a generated note of
+        # the version clears the no-cut-commit row and only the changelog
+        # guard each case names answers. A note no row can read stops at
+        # no-cut-commit (NO-DATA), the first guard that reads it.
+        res, _ = CheapestFirst._all(self, {}, root=root, version=self.CUTTING, resume_sha="abc")
+        named = [(v, d) for v, n, d in res if n == "changelog-text"]
+        if not named:
+            self.assertEqual([n for _v, n, _d in res], [P.NO_CUT_COMMIT_NAME], res)
+            named = [(res[0][0], res[0][2])]
+        return named[0], P.exit_code(res)
 
     # The defect, at the seam main() calls.
     def test_the_draft_is_looked_past_and_the_preflight_clears(self):
@@ -1078,6 +1086,164 @@ class VersionAfterBump(unittest.TestCase):
         self.assertEqual(built, [])
         self.assertEqual(rows["virgin-gate"][0], P.NODATA)
         self.assertIn("not run", rows["virgin-gate"][1])
+
+
+class TheNoCutCommitRow(unittest.TestCase):
+    """CR1.a (measured on the 1.1.2 real cut): the release branch kept the
+    cut's own two commits after a stopped push, the fix landed on top, and the
+    next rehearsal refused the stale generated note after 3,162 s. A candidate
+    whose tree already carries the generator's note for the version is
+    refused in one file read, unless --resume names that very commit."""
+
+    VERSION = "1.0.21"
+    HEAD = "a" * 40
+    MARKED = ("# Brother 1.0.21\n\nCut from hub commit `9674ed8955ad` (hub, private).\n",
+              "# Brother 1.0.21\n\n## Source revision\n\nsomething\n",
+              "# Brother 1.0.21\n\nExport manifest digest: 0123\n")
+
+    def tree(self, note=None, name=None, manifest=None):
+        root = tempfile.mkdtemp(prefix="test-cut-preflight-cr1-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "docs", "releases"))
+        os.makedirs(os.path.join(root, ".claude-plugin"))
+        with open(os.path.join(root, ".claude-plugin", "marketplace.json"), "w") as fh:
+            fh.write(declares(manifest or self.VERSION))
+        if note is not None:
+            path = os.path.join(root, "docs", "releases", name or "%s.md" % self.VERSION)
+            with open(path, "wb") as fh:
+                fh.write(note if isinstance(note, bytes) else note.encode("utf-8"))
+        return root
+
+    def check(self, root, resume="", head=(0, HEAD + "\n")):
+        r = Runner({"git rev-parse": head})
+        got = P.check_no_cut_commit(root, self.VERSION, resume, runner=r)
+        self.assertEqual(got[1], P.NO_CUT_COMMIT_NAME)
+        return got, r
+
+    # REQ-CR1-01
+    def test_a_generated_note_of_the_version_is_refused_for_each_mark(self):
+        for text in self.MARKED:
+            with self.subTest(text=text):
+                (verdict, _n, detail), _r = self.check(self.tree(text))
+                self.assertEqual(verdict, P.REFUSED, detail)
+                self.assertIn("docs/releases/%s.md" % self.VERSION, detail)
+                self.assertIn("--resume", detail)
+                self.assertIn("rehearse", detail)
+
+    def test_a_wrapped_or_recased_mark_still_refuses(self):
+        for text in ("CUT FROM\nhub   COMMIT `abc1234`\n", "##   SOURCE\nRevision\n", "export\nmanifest DIGEST\n"):
+            with self.subTest(text=text):
+                (verdict, _n, detail), _r = self.check(self.tree(text))
+                self.assertEqual(verdict, P.REFUSED, detail)
+
+    def test_the_detail_names_the_mark_and_no_content(self):
+        (verdict, _n, detail), _r = self.check(self.tree(self.MARKED[0]))
+        self.assertIn("cut from hub commit", detail)
+        self.assertNotIn("9674ed8955ad", detail)
+
+    # REQ-CR1-02
+    def test_resume_naming_head_is_ok_and_another_commit_is_refused(self):
+        root = self.tree(self.MARKED[0])
+        (verdict, _n, detail), r = self.check(root, resume=self.HEAD)
+        self.assertEqual(verdict, P.OK, detail)
+        self.assertIn(["git", "rev-parse", "HEAD"], [c[1] for c in r.calls])
+        for other in ("b" * 40, "not-a-sha", self.HEAD[:12]):
+            with self.subTest(resume=other):
+                (verdict, _n, detail), _r = self.check(root, resume=other)
+                self.assertEqual(verdict, P.REFUSED, detail)
+
+    def test_an_unreadable_head_is_no_data(self):
+        for head in ((128, "fatal: not a git repository\n"), (0, "\n")):
+            with self.subTest(head=head):
+                (verdict, _n, detail), _r = self.check(self.tree(self.MARKED[1]), resume=self.HEAD, head=head)
+                self.assertEqual(verdict, P.NODATA, detail)
+
+    # REQ-CR1-03
+    def test_a_draft_no_note_another_version_and_an_empty_note_are_ok(self):
+        cases = {"draft": self.tree("# Brother 1.0.21\n\nWhat moved, drafted before the cut.\n"),
+                 "no note": self.tree(),
+                 "other version": self.tree(self.MARKED[0], name="1.0.20.md"),
+                 "empty": self.tree(""),
+                 "hand note, other manifest": self.tree("# Brother 1.0.21\n\nhand words\n", manifest="1.0.20")}
+        for label, root in sorted(cases.items()):
+            with self.subTest(case=label):
+                (verdict, _n, detail), r = self.check(root)
+                self.assertEqual(verdict, P.OK, detail)
+                self.assertEqual(r.calls, [], "an unmarked tree needs no git call")
+
+    # REQ-CR1-04
+    def test_an_unreadable_note_is_no_data(self):
+        dir_root = self.tree()
+        os.makedirs(os.path.join(dir_root, "docs", "releases", "%s.md" % self.VERSION))
+        for label, root in (("a directory", dir_root), ("bad utf-8", self.tree(b"\xff\xfe\x00 not text"))):
+            with self.subTest(case=label):
+                (verdict, _n, detail), _r = self.check(root)
+                self.assertEqual(verdict, P.NODATA, detail)
+
+    # REQ-CR1-05
+    def test_the_row_runs_first_and_a_refusal_spares_every_later_row(self):
+        root = self.tree(self.MARKED[2])
+        r = Runner({"git rev-parse": (0, self.HEAD + "\n")})
+        res = P.run_all(root, self.VERSION, remote="https://x", runner=r, now=NOW, home=root)
+        self.assertEqual(res[0][:2], (P.REFUSED, P.NO_CUT_COMMIT_NAME), res)
+        self.assertEqual(P.exit_code(res), P.EXIT_REFUSED)
+        self.assertEqual([c[0] for c in r.calls], ["git rev-parse"], "a later row ran after the refusal")
+
+    def test_run_all_hands_resume_to_the_row_and_the_rows_go_on(self):
+        tp = CheapestFirst("test_all_green_is_exit_zero_and_the_virgin_gate_ran")
+        self.addCleanup(tp.doCleanups)
+        root = tempfile.mkdtemp(prefix="test-cut-preflight-cr1-all-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "docs", "releases"))
+        with open(os.path.join(root, "docs", "releases", "1.0.20.md"), "w") as fh:
+            fh.write("Cut from hub commit `9674ed8955ad`\n")
+        with open(os.path.join(root, "docs", "releases", "1.0.21.md"), "w") as fh:
+            fh.write("Cut from hub commit `1234567`\n")
+        res, _built = tp._all({"git rev-parse": (0, "abc\n")}, root=root, resume_sha="abc")
+        self.assertEqual(res[0][:2], (P.OK, P.NO_CUT_COMMIT_NAME), res)
+        self.assertIn("changelog-text", [n for _v, n, _d in res])
+        res, _built = tp._all({}, resume_sha="")
+        self.assertEqual(res[0][:2], (P.OK, P.NO_CUT_COMMIT_NAME), res)
+
+    def test_main_passes_resume_to_run_all(self):
+        with mock.patch.object(P, "run_all", return_value=[(P.OK, "x", "")]) as ra:
+            with mock.patch("sys.stdout"):
+                P.main(["--version", self.VERSION, "--resume", self.HEAD])
+                P.main(["--version", self.VERSION])
+        self.assertEqual([c.kwargs.get("resume_sha") for c in ra.call_args_list], [self.HEAD, ""])
+
+    # REQ-CR1-06
+    def test_cut_passes_resume_to_the_preflight_only_on_a_resume(self):
+        import cut as C
+        cmds = []
+
+        def runner(cmd, **kw):
+            cmds.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "cut-preflight: CLEAR\n", "")
+        with mock.patch("sys.stdout"):
+            C.preflight("/fake/root", self.VERSION, runner=runner, resume_sha=self.HEAD)
+            C.preflight("/fake/root", self.VERSION, runner=runner)
+            C.preflight("/fake/root", self.VERSION, runner=runner, cheap_only=True, resume_sha=self.HEAD)
+        self.assertEqual(cmds[0][cmds[0].index("--resume") + 1], self.HEAD)
+        self.assertNotIn("--resume", cmds[1])
+        self.assertIn("--cheap-only", cmds[2])
+        self.assertEqual(cmds[2][cmds[2].index("--resume") + 1], self.HEAD)
+
+    def test_readiness_and_the_chain_hand_resume_down(self):
+        import cut as C
+        with mock.patch.object(C, "preflight", return_value=(True, [])) as pf, \
+                mock.patch.object(C, "declared_exceptions", return_value=(True, [])), \
+                mock.patch.object(C, "dirty_paths", return_value=([], "")), \
+                mock.patch.object(C, "tree_lines", return_value=[]), mock.patch("sys.stdout"):
+            C.readiness("/fake/root", self.VERSION, (None, None, "x"), [], None, include_fast=False,
+                        resume_sha=self.HEAD)
+            C.readiness("/fake/root", self.VERSION, (None, None, "x"), [], None, include_fast=False)
+        self.assertEqual([c.kwargs.get("resume_sha") for c in pf.call_args_list], [self.HEAD, None])
+        with mock.patch.object(C, "reuse_record", return_value=(None, "", "none")), \
+                mock.patch.object(C, "readiness", return_value=["stop"]) as rd, mock.patch("sys.stdout"):
+            C.run_chain("/fake/root", self.VERSION, (None, None, "x"), [], None, False, None,
+                        resume_sha=self.HEAD)
+        self.assertEqual(rd.call_args.kwargs.get("resume_sha"), self.HEAD)
 
 
 if __name__ == "__main__":

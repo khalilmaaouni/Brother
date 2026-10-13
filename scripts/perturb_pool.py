@@ -102,6 +102,30 @@ def capped_workers(requested, load1=None, ncpu=None):
     return max(1, min(int(requested), ncpu))
 
 
+#: W4b (2026-10-12): the live baselines that run just before the pool push the
+#: load over the core count, so one reading taken at that instant capped two
+#: rehearsals to ONE worker for all 42 rows (7,081 s and 7,248 s for step 2b).
+#: The load average decays within a minute once they end, so the count is read
+#: again for up to this many seconds before it is fixed. It only ever waits
+#: while the reading is below what an idle machine would get; it never raises
+#: the count above capped_workers' own answer.
+LOAD_WAIT_S = 120
+
+
+def settled_workers(requested, wait_s=LOAD_WAIT_S, cap=None, sleep=None, clock=None):
+    import time
+    cap = cap or capped_workers
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    want = cap(requested, load1=0.0)
+    n = cap(requested)
+    end = clock() + wait_s
+    while n < want and clock() < end:
+        sleep(5)
+        n = cap(requested)
+    return n
+
+
 def run_worker(copy, rows, baseline_wall, out_path):
     """Inside the copy: one baseline per suite, then covers() per row."""
     sys.path.insert(0, os.path.join(copy, "scripts"))
@@ -128,7 +152,7 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
     rows = [tuple(r) for r in rows]
     own_base = base is None
     base = base or tempfile.mkdtemp(prefix="perturb-pool-")
-    n = capped_workers(workers)
+    n = settled_workers(workers)
     spawn = spawn or (lambda argv, env: subprocess.Popen(argv, env=env,
                                                          stdout=subprocess.DEVNULL,
                                                          stderr=subprocess.PIPE))
@@ -177,10 +201,113 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
                 shutil.rmtree(base, ignore_errors=True)
 
 
+#: The openings of the details run_rows itself writes when a row could not be
+#: measured for an infrastructure reason (no copy, a dead worker, a copy whose
+#: baseline is red). A None with any other detail is the suite's own answer.
+INFRA_PREFIXES = ("no work copy", "the worker ended before this row",
+                  "baseline in the copy is not green")
+SOURCE_ROOT = os.path.dirname(HERE)
+USAGE = ("usage: perturb_pool.py --worker <copy> <rows.json> <baseline wall s> <out.json>\n"
+         "       perturb_pool.py --measure <note.md> --workers <n> --baseline-wall <s> [--out <path>]")
+
+
+def table_rows(note_path):
+    """[(file_rel, suite_rel)] of the note's table rows that name a suite, in
+    order, each once. A note that cannot be read or has no table gives []."""
+    sys.path.insert(0, HERE)
+    import release_note_perturb as P  # imported here: a worker imports nothing at load
+    try:
+        with open(note_path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return []
+    rows = []
+    for _claim, source, suite in P.parse_table(text):
+        if suite is not None and (source, suite) not in rows:
+            rows.append((source, suite))
+    return rows
+
+
+def measure_table(note_path, source_root, workers, baseline_wall,
+                  runner=None, clock=None, load=None):
+    """One measured pool run over the note's table: wall, workers used, load
+    before and after, verdict counts (infra Nones apart from data Nones) and
+    the commit measured. Counts and times only."""
+    import time
+    runner = runner or run_rows
+    clock = clock or time.monotonic
+    load = load or (lambda: os.getloadavg()[0])
+    rows = table_rows(note_path)
+    ncpu = os.cpu_count() or 1
+    load_before = load()
+    used = capped_workers(workers, load1=load_before, ncpu=ncpu)
+    try:
+        commit = _git(["rev-parse", "HEAD"], source_root)
+    except (CopyFailed, OSError) as exc:
+        commit = "NO-DATA: %s" % exc
+    result = {"rows": len(rows), "workers_requested": int(workers), "workers_used": used,
+              "baseline_wall": float(baseline_wall), "wall_seconds": 0, "ncpu": ncpu,
+              "load1_before": load_before, "load1_after": load_before,
+              "covered": 0, "uncovered": 0, "no_data": 0, "infra": 0, "commit": commit}
+    if not rows:
+        return result
+    started = clock()
+    # run_rows caps again on its own reading; a cap only ever lowers the count.
+    answers = runner(rows, source_root, baseline_wall, used)
+    result["wall_seconds"] = round(clock() - started, 3)
+    result["load1_after"] = load()
+    for _f, _s, verdict, detail in answers:
+        if verdict is True:
+            result["covered"] += 1
+        elif verdict is False:
+            result["uncovered"] += 1
+        elif str(detail).startswith(INFRA_PREFIXES):
+            result["infra"] += 1
+        else:
+            result["no_data"] += 1
+    return result
+
+
+def _write_atomic(path, text):
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".",
+                               dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
+def main(argv):
+    if len(argv) == 5 and argv[0] == "--worker":
+        with open(argv[2], encoding="utf-8") as fh:
+            run_worker(argv[1], [tuple(r) for r in json.load(fh)], float(argv[3]), argv[4])
+        return 0
+    if len(argv) not in (6, 8) or argv[0] != "--measure" or argv[2:6:2] != ["--workers", "--baseline-wall"] \
+            or (len(argv) == 8 and argv[6] != "--out"):
+        sys.exit(USAGE)
+    try:
+        workers, wall = int(argv[3]), float(argv[5])
+    except ValueError:
+        sys.exit(USAGE)
+    out = argv[7] if len(argv) == 8 else None
+    try:
+        result = measure_table(argv[1], SOURCE_ROOT, workers, wall, runner=run_rows)
+    except Exception as exc:  # any pool trouble: nothing is recorded
+        print("NO-DATA: the measurement failed: %s: %s" % (type(exc).__name__, exc))
+        return 2
+    if not result["rows"]:
+        print("NO-DATA: %s names no suite row to measure" % argv[1])
+        return 2
+    line = json.dumps(result, sort_keys=True)
+    if out:
+        _write_atomic(out, line + "\n")
+    print(line)
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) == 6 and sys.argv[1] == "--worker":
-        with open(sys.argv[3], encoding="utf-8") as fh:
-            run_worker(sys.argv[2], [tuple(r) for r in json.load(fh)],
-                       float(sys.argv[4]), sys.argv[5])
-    else:
-        sys.exit("usage: perturb_pool.py --worker <copy> <rows.json> <baseline wall s> <out.json>")
+    sys.exit(main(sys.argv[1:]))

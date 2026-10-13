@@ -153,6 +153,37 @@ def fixtures_of(spec):
     return out
 
 
+def canary_key(spec, repo, python_version=None):
+    """LA4.a: the content key of one canary run, None when any input cannot be read (the canary then runs and says
+    NO-DATA itself). Keyed: every fixture (canonical JSON), each base commit resolved to its full sha, each build and
+    named probe file, the bytes of docs/plan/loop-canary.json, scripts/loop, and both interpreters (the grader runs
+    both). Ambient state the grade tools read is bounded by the cache's 24 h age, not keyed here."""
+    import loop_intake as LI
+    if not isinstance(spec, dict):
+        return None
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    rows = []
+    try:
+        for fx in fixtures_of(spec):
+            r = subprocess.run(["git", "rev-parse", "--verify", "-q", fx["base_commit"] + "^{commit}"], cwd=repo,
+                               capture_output=True, text=True, timeout=30, env=env)
+            sha = r.stdout.strip()
+            if r.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", sha):
+                return None
+            probe = os.path.expanduser(fx.get("probe") or "")
+            rows.append([json.dumps(fx, sort_keys=True), sha, LI._sha_file(os.path.expanduser(fx["build"])),
+                         LI._sha_file(probe) if probe else None])
+        spec_file = os.path.join(repo, "docs", "plan", "loop-canary.json")
+        spec_bytes = LI._sha_file(spec_file) if os.path.exists(spec_file) else "missing"
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+    tools = LI.tree_digest(os.path.join(repo, "scripts", "loop"))
+    py39 = LI.stat_signature("/usr/bin/python3")
+    if tools is None or py39 is None:
+        return None
+    return LI._digest(["canary", rows, spec_bytes, tools, python_version or sys.version, py39])
+
+
 def verdict_set(results):
     """[(sub, rows)] -> (line, code): NO-DATA if any fixture is NO-DATA, REFUSED if any refused, else WOULD LAND with the
     unmeasured stages named; the worst fixture decides, never the average."""

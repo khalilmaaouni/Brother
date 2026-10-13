@@ -131,7 +131,8 @@ ENTRY = "brother_run.py"
 #: dream_bridge.py is a support root too: nothing in the runner imports it,
 #: and an installed copy without it has no way to reach the learning recorder.
 SUPPORT_ENTRIES = ("native_evidence.py", "mobile_workflow.py", "mobile_design.py",
-                   "dream_bridge.py")
+                   "dream_bridge.py", "jev_status.py", "jev_door.py",
+                   "jev_start_refusal.py")
 MANIFEST_NAME = "RUNTIME-MANIFEST.json"
 LAUNCHER_NAME = "brother-run"
 VERIFIER_NAME = "verify_runtime.py"
@@ -232,6 +233,11 @@ DATA_FILES = {
     # and the recorder's is <here>/journal.py.
     "dream_bridge.py": ("plugin/runtime/brother/core/dream_record.py",
                         "dream_record.py"),
+    # JWP.a: the Jev registry and seams config, under data/ inside the
+    # runtime, where jev_seam._data_file looks when no checkout data/ exists.
+    # A value is one (source, dest) pair or a tuple of pairs.
+    "jev_seam.py": (("data/jev-registry.json", "data/jev-registry.json"),
+                    ("data/jev-seams.json", "data/jev-seams.json")),
 }
 
 NODATA = "NO-DATA"
@@ -1086,13 +1092,29 @@ def compute_extra_files(closure, scripts_dir=SCRIPTS_DIR):
     rather than against this checkout."""
     repo_root = os.path.dirname(os.path.abspath(scripts_dir))
     out = []
-    for reader, (source, dest) in sorted(DATA_FILES.items()):
+    for reader, value in sorted(DATA_FILES.items()):
         if reader not in closure:
             continue
-        src = os.path.join(repo_root, *source.split("/"))
-        if os.path.isfile(src):
-            out.append((dest, src))
+        for source, dest in _data_pairs(reader, value):
+            src = os.path.join(repo_root, *source.split("/"))
+            if os.path.isfile(src):
+                out.append((dest, src))
     return sorted(out)
+
+
+def _data_pairs(reader, value):
+    """A DATA_FILES value as a list of (source, dest) pairs: one pair of
+    strings, or a tuple of such pairs. Anything else raises ValueError
+    naming the reader, so a malformed entry stops the generator."""
+    def is_pair(v):
+        return (isinstance(v, tuple) and len(v) == 2
+                and all(isinstance(x, str) for x in v))
+    if is_pair(value):
+        return [value]
+    if isinstance(value, tuple) and value and all(is_pair(v) for v in value):
+        return list(value)
+    raise ValueError("DATA_FILES[%r]: expected a (source, dest) pair or a "
+                     "tuple of pairs, got %r" % (reader, value))
 
 
 def _read_bytes(path):

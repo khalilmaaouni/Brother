@@ -45,15 +45,19 @@ import os
 import re
 import shlex
 import shutil
+import signal
+import subprocess
 import sys
 import sysconfig
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import cut_preflight as P  # noqa: E402
+import timing_hunt as TH  # noqa: E402
 
 
 def _loop_module(name):
@@ -593,6 +597,220 @@ def scrub_git_env(env=None):
     return env
 
 
+# -- timing sensitive tests (TH1.b) --------------------------------------------------------------------------------------
+# A test whose count or order assertion rests on a real clock passes on a fast machine and fails on a starved runner
+# (1.1.2 release check, 2026-10-11, GitHub run 38146264768). timing_hunt.py finds them statically; the push refuses a NEW
+# uncovered one, and --slow-host runs the flagged files under load to find what the static rule cannot see.
+
+TIMING_REMEDY = ('drive the time through tick(, clock=, or a fake sleep, or add the one line comment '
+                 '"# timing: deterministic because <seam>"')
+
+
+def _prior_baseline(root):
+    """(ids, problem) of the timing baseline BEFORE its latest change: HEAD's copy when the working tree changed it, else
+    the copy of the previous commit that touched it. (None, None) when there is no earlier version (a first baseline)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+    def git(*args):
+        return P._run(["git", "-C", root] + list(args), root, None, env=env, timeout=60)
+    status = git("status", "--porcelain", "--", TH.BASELINE)
+    log = git("log", "--format=%H", "-n", "2", "--", TH.BASELINE)
+    for proc in (status, log):
+        if proc.returncode != 0:
+            return None, "git could not say what the baseline was before (%s)" % P._last(proc)
+    commits = (log.stdout or "").split()
+    ref = commits[0] if (status.stdout or "").strip() and commits else commits[1] if len(commits) > 1 else None
+    if ref is None:
+        return None, None
+    shown = git("show", "%s:%s" % (ref, TH.BASELINE))
+    ids = TH.parse_baseline(shown.stdout or "") if shown.returncode == 0 else None
+    if ids is None:
+        return None, "the baseline at %s could not be read (%s)" % (ref[:12], P._last(shown))
+    return ids, None
+
+
+def _baseline_growth(root):
+    now = TH.baseline_ids(os.path.join(root, TH.BASELINE))
+    if now is None:
+        return [(NODATA, TH.BASELINE, "the changed timing baseline cannot be read")]
+    prior, problem = _prior_baseline(root)
+    if problem:
+        return [(NODATA, TH.BASELINE, problem)]
+    if prior is None:
+        return [(OK, TH.BASELINE, "a first timing baseline, %d id(s)" % len(now))]
+    grown = sorted(set(now) - set(prior))
+    if grown:
+        return [(REFUSED, TH.BASELINE, "the timing baseline may only shrink: %d id(s) added (%s); cover the test instead"
+                 % (len(grown), ", ".join(grown[:3])))]
+    return [(OK, TH.BASELINE, "the timing baseline went from %d to %d id(s)" % (len(prior), len(now)))]
+
+
+def timing_results(paths, root):
+    """[(verdict, name, detail)] in check's shape for the changed test files in `paths`: REFUSED for each flagged
+    UNCOVERED timing test whose id is not in the baseline, NODATA for a file that cannot be read or parsed (and for a
+    baseline that cannot be read when an uncovered test needs it), OK otherwise. A changed baseline that grows is REFUSED."""
+    _checked_root(root, "timing_results")
+    changed = sorted({p.strip() for p in paths if isinstance(p, str)})
+    rows = _baseline_growth(root) if TH.BASELINE in changed else []
+    tests = sorted(set(changed) & set(TH.test_files(root)))
+    found, bad = TH.scan_paths(tests, root)
+    rows += [(NODATA, rel, "could not be read or parsed, so its timing tests are unknown") for rel in bad]
+    uncovered = [f for f in found if not f.covered]
+    known = TH.baseline_ids(os.path.join(root, TH.BASELINE)) if uncovered else []
+    if known is None:
+        rows.append((NODATA, "timing-tests", "the timing baseline %s cannot be read, so whether %d uncovered timing "
+                     "test(s) are new is unknown" % (TH.BASELINE, len(uncovered))))
+        known = [f.id for f in uncovered]
+    new = [f for f in uncovered if f.id not in known]
+    rows += [(REFUSED, f.path, "NEW uncovered timing test: %s; %s" % (f.id, TIMING_REMEDY)) for f in new]
+    if (tests or not rows) and not any(r[0] != OK for r in rows):
+        rows.append((OK, "timing-tests", "%d changed test file(s) scanned: %d flagged, %d covered, %d already in the "
+                     "baseline" % (len(tests), len(found), len(found) - len(uncovered), len(uncovered))))
+    return rows
+
+
+SLOW_REPEATS = 3
+SLOW_TOTAL_CAP_S = 3600
+SLOW_REEXEC_ENV = "BROTHER_TIMING_SLOW_HOST_REEXEC"
+HOG_ARGV = [sys.executable, "-c", "while True: pass"]
+_LIVE_HOGS = []   # every busy loop not yet reaped, so a SIGTERM handler can reap them too
+
+
+def start_hogs(n, popen=None):
+    """n busy loop processes. Raises OSError after reaping any it started, so a half started set never leaks."""
+    popen = popen or subprocess.Popen
+    hogs = []
+    try:
+        for _ in range(n):
+            hogs.append(popen(HOG_ARGV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL))
+            _LIVE_HOGS.append(hogs[-1])
+    except OSError:
+        reap_hogs(hogs)
+        raise
+    return hogs
+
+
+def reap_hogs(hogs):
+    """Kill and wait each busy loop; the number still alive afterwards (0 expected)."""
+    for hog in hogs:
+        try:
+            hog.kill()
+        except OSError:
+            pass  # sbe: allow-silent already gone; poll() below is the count that matters
+        try:
+            hog.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # sbe: allow-silent counted below as a survivor
+        if hog in _LIVE_HOGS and hog.poll() is not None:
+            _LIVE_HOGS.remove(hog)
+    return sum(1 for hog in hogs if hog.poll() is None)
+
+
+def _slots_held(held):
+    import heavy_slot   # only the slow host needs it; the push check never imports it
+    want = heavy_slot.slot_count(os.environ)
+    got = [i for i in (held or "").split(",") if i.strip().isdigit()]
+    return len(got) >= want, want
+
+
+def _one_file(tree, home, test, n, repeats, runner, hog_starter):
+    """The verdict row of one inventory file run up to `repeats` times, each under n fresh busy loops."""
+    for r in range(1, repeats + 1):
+        try:
+            hogs = hog_starter(n)
+        except OSError as exc:
+            return (NODATA, test, "a busy loop could not start (%s); nothing more was run" % exc)
+        proc = problem = None
+        try:
+            alive = sum(1 for hog in hogs if hog.poll() is None)
+            if alive != n:
+                problem = "only %d of %d busy loops were running" % (alive, n)
+            else:
+                cmd, env = _confined([sys.executable, os.path.join(tree, test)], tree,
+                                     tempfile.mkdtemp(prefix="t-", dir=home))
+                proc = P._run(cmd, tree, runner, env=env, timeout=declared_budget(os.path.join(tree, test)))
+        except G.SandboxRefused as exc:
+            problem = "could not be run: %s" % exc
+        finally:
+            left = reap_hogs(hogs)
+        if left:
+            return (NODATA, test, "%d busy loop(s) survived the reap; the machine is left loaded" % left)
+        if problem:
+            return (NODATA, test, problem)
+        if proc.returncode == 124:
+            return (REFUSED, test, "repeat %d of %d timed out under load (%d busy loops)" % (r, repeats, n))
+        if proc.returncode == 127:
+            return (NODATA, test, "could not be run: %s" % P._last(proc))
+        if proc.returncode != 0:
+            return (REFUSED, test, "repeat %d of %d failed under %d busy loops: %s%s"
+                    % (r, repeats, n, P._last(proc), _failing_names(proc)))
+    return (OK, test, "passed %d of %d repeats under %d busy loops" % (repeats, repeats, n))
+
+
+def slow_host(root, files, n, repeats=SLOW_REPEATS, runner=None, build=None, held=None, hog_starter=None,
+              clock=None, cap=SLOW_TOTAL_CAP_S):
+    """[(verdict, file, detail)]: each flagged inventory file run up to `repeats` times under n busy loops, only inside
+    held machine slots (`held` is BROTHER_HEAVY_SLOT_HELD; absent, unqueued or short is NODATA and nothing runs). New
+    files stop starting after `cap` seconds; the rest read NODATA, never passed."""
+    _checked_root(root, "slow_host")
+    ok, want = _slots_held(held)
+    if not ok:
+        return [(NODATA, "timing-slow-host", "could not take the slots; nothing was run (held %r of %d)"
+                 % (held, want))]
+    if not files:
+        return [(OK, "timing-slow-host", "no flagged test in the inventory")]
+    clock = clock or time.monotonic
+    hog_starter = hog_starter or start_hogs
+    build = build or P.export_tree_builder(root)
+    tree = tempfile.mkdtemp(prefix="hermetic-slow-export-")
+    home = tempfile.mkdtemp(prefix="hermetic-slow-home-")
+    try:
+        try:
+            build(tree)
+        except Exception as exc:  # sbe: allow-silent reported as NO-DATA below, never swallowed
+            return [(NODATA, "timing-slow-host", "the export tree could not be built: %s" % exc)]
+        rows, start = [], clock()
+        for i, test in enumerate(files):
+            if clock() - start >= cap:
+                rows += [(NODATA, rest, "not run: the time cap (%ds)" % cap) for rest in files[i:]]
+                break
+            if not os.path.isfile(os.path.join(tree, test)):
+                rows.append((OK, test, "not shipped in the export tree, so the public runner never runs it"))
+                continue
+            rows.append(_one_file(tree, home, test, n, repeats, runner, hog_starter))
+        return rows
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def _through_slots(argv):
+    """Re-execute this command through scripts/heavy_slot.py taking every slot, once (the marker stops a second round)."""
+    import heavy_slot
+    env = dict(os.environ)
+    env["BROTHER_HEAVY_SLOT_WEIGHT"] = str(heavy_slot.slot_count(os.environ))
+    env[SLOW_REEXEC_ENV] = "1"
+    return subprocess.call([sys.executable, os.path.join(HERE, "heavy_slot.py"), sys.executable,
+                            os.path.abspath(__file__)] + list(argv), env=env)
+
+
+def _slow_host_main(n):
+    def on_term(signum, _frame):
+        reap_hogs(list(_LIVE_HOGS))
+        sys.exit(128 + signum)
+    signal.signal(signal.SIGTERM, on_term)
+    began = time.monotonic()
+    try:
+        rows = slow_host(ROOT, TH.inventory_files(ROOT), n, held=os.environ.get("BROTHER_HEAVY_SLOT_HELD"))
+    finally:
+        left = reap_hogs(list(_LIVE_HOGS))
+    for verdict, name, detail in rows:
+        print("%-8s %s  %s" % (verdict, name, detail))
+    print("slow host: %d busy loops, %.0f s wall, %d busy loop(s) alive after" % (n, time.monotonic() - began, left))
+    return P.exit_code(rows)
+
+
 class _InputParser(argparse.ArgumentParser):
     def error(self, message):
         self.exit(2, "NO-DATA: %s\n" % message)
@@ -607,6 +825,9 @@ def main(argv=None):
                          "choose the tests")
     ap.add_argument("--reach", action="store_true",
                     help="list impacted tests and selftest commands without running them")
+    ap.add_argument("--slow-host", nargs="?", const="cpus", default=None, type=int, metavar="N",
+                    help="run every flagged timing test file up to %d times under N busy loops (default: the core "
+                         "count), inside every machine slot" % SLOW_REPEATS)
     ap.add_argument("paths", nargs="*", help="or name the changed files directly")
     probe = sys.argv[1:] if argv is None else list(argv)
     if any(a in ("-h", "--help") for a in probe):
@@ -614,6 +835,14 @@ def main(argv=None):
         return 0
     args = ap.parse_args(argv)
     paths = list(args.paths)
+    if args.slow_host is not None:
+        n = (os.cpu_count() or 1) if args.slow_host == "cpus" else args.slow_host
+        if n < 1:
+            print("NO-DATA: --slow-host needs a positive number of busy loops")
+            return 2
+        if not os.environ.get("BROTHER_HEAVY_SLOT_HELD") and not os.environ.get(SLOW_REEXEC_ENV):
+            return _through_slots(probe)
+        return _slow_host_main(n)
     if args.reach:
         try:
             if not paths or args.range:
@@ -632,7 +861,7 @@ def main(argv=None):
             print("%-8s %-16s %s" % (NODATA, "hermetic-tests", problem))
             return P.EXIT_NODATA
         paths += found
-    results = check(ROOT, tests_for(paths, ROOT))
+    results = timing_results(paths, ROOT) + check(ROOT, tests_for(paths, ROOT))
     for verdict, name, detail in results:
         print("%-8s %s  %s" % (verdict, name, detail))
     return P.exit_code(results)

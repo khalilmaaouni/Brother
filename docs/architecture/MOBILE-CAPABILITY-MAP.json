@@ -14,5 +14,30 @@
     {"id":"memory","product":"vault","role":"append-only lessons and findings","entry":"existing handover ceremony","evidence":"vault note and context pack"}
   ],
   "adapter_policy": {"hosted_services":"optional and separately verified", "third_party_code":"retain license notices or implement original behavior", "missing_access":"NO-DATA", "release_authority":"human"},
-  "invariants": ["one outcome", "one passport", "one receipt", "one native lease", "exact tests", "fresh evidence", "NO-DATA is not PASS", "no new public command without founder decision"]
+  "invariants": ["one outcome", "one passport", "one receipt", "one native lease", "exact tests", "fresh evidence", "NO-DATA is not PASS", "no new public command without founder decision"],
+  "modules": [
+    {"module":"context_action_adapter","class":"INTERNAL","reason":"no production caller; a claims gate and an action resolver with passing tests and no consumer","delete_proposed":true},
+    {"module":"mobile_appium_adapter","class":"INTERNAL","reason":"Appium driver adapter for canonical actions, exercised by the adapter conformance checks"},
+    {"module":"mobile_canonical_action","class":"INTERNAL","reason":"canonical mobile action vocabulary and validator imported by the driver adapters"},
+    {"module":"mobile_design","class":"SHIP","reason":"reference board search and creative inspection, named in the native mobile guidance and run by the door"},
+    {"module":"mobile_deterministic_hooks","class":"INTERNAL","reason":"deterministic time and randomness hooks for mobile state fixtures"},
+    {"module":"mobile_driver_contract","class":"INTERNAL","reason":"driver advertisement contract validator imported by the driver adapters"},
+    {"module":"mobile_hybrid_action_router","class":"INTERNAL","reason":"hybrid action route choosing between native, Appium and visual adapters"},
+    {"module":"mobile_journey_contract","class":"INTERNAL","reason":"journey record contract validator used by the plan compiler and the journey passport"},
+    {"module":"mobile_native_ios_adapter","class":"INTERNAL","reason":"native iOS driver adapter for canonical actions, exercised by the adapter conformance checks"},
+    {"module":"mobile_ownership_resolver","class":"INTERNAL","reason":"ownership resolver over compiled mobile plans"},
+    {"module":"mobile_plan_compiler","class":"INTERNAL","reason":"mobile plan compiler used by the ownership resolver and the canary smoke"},
+    {"module":"mobile_product_claims","class":"INTERNAL","reason":"no production caller; a claims gate and an action resolver with passing tests and no consumer","delete_proposed":true},
+    {"module":"mobile_project_profile","class":"SHIP","reason":"read only project profile detector imported by mobile_workflow profile-init"},
+    {"module":"mobile_reference_lock","class":"INTERNAL","reason":"reference lock record used by the journey passport and the canary smoke"},
+    {"module":"mobile_screen_observation","class":"INTERNAL","reason":"screen observation record builder and validator"},
+    {"module":"mobile_simulator_pool","class":"SHIP","reason":"claimed by mobile_workflow run for the profile's simulator"},
+    {"module":"mobile_state_fixture","class":"INTERNAL","reason":"mobile state fixture loader and validator used by the reset adapters and state provenance"},
+    {"module":"mobile_state_reset","class":"INTERNAL","reason":"mobile state reset adapters used by the deterministic hooks"},
+    {"module":"mobile_test_route","class":"INTERNAL","reason":"mobile test route record validator and documentation generator, a contract with no live consumer"},
+    {"module":"mobile_toolchain_probe","class":"INTERNAL","reason":"read only mobile toolchain probe"},
+    {"module":"mobile_visual_fallback_adapter","class":"INTERNAL","reason":"visual fallback driver adapter for canonical actions, exercised by the adapter conformance checks"},
+    {"module":"mobile_workflow","class":"SHIP","reason":"native mobile workflow, named in the native mobile guidance and run by the door"},
+    {"module":"mobile_xcode_canary_local","class":"INTERNAL","reason":"local Xcode canary run by hand, not shipped"}
+  ]
 }
