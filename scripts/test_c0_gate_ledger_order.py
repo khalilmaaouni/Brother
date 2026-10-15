@@ -163,6 +163,21 @@ class TestLedger(unittest.TestCase):
             gate_ledger.append_ledger(path, self._record(gate_name="h"))
             self.assertTrue(gate_ledger.verify_chain(path))
 
+    def test_append_creates_a_missing_parent_folder(self):
+        """A clean checkout has no logs/: the first append there was refused with ENOENT (cut_ready hub rows, 2026-10-14)."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "logs", "deeper", "ledger.jsonl")
+            gate_ledger.append_ledger(path, self._record())
+            gate_ledger.append_ledger(path, self._record(gate_name="h"))
+            self.assertTrue(gate_ledger.verify_chain(path))
+
+    def test_append_under_a_parent_that_is_a_file_still_refuses(self):
+        with tempfile.TemporaryDirectory() as d:
+            blocker = os.path.join(d, "logs")
+            open(blocker, "w").close()
+            with self.assertRaises(OSError):
+                gate_ledger.append_ledger(os.path.join(blocker, "ledger.jsonl"), self._record())
+
     def test_append_refuses_missing_gate_name(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "ledger.jsonl")

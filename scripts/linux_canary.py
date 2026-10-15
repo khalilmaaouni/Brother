@@ -557,7 +557,7 @@ def run_canary(root: str, version: str, gh: Optional[Gh] = None, git: Optional[G
         return "NO-DATA", "nothing recorded, nothing pushed: " + why, ""
     if build is None:
         import cut_preflight
-        build = cut_preflight.export_tree_builder(root)
+        build = cut_preflight.export_tree_builder(root, cache=True)
     dest = os.path.join(scratch_root(), "canary-build", "%d-%d" % (int(time.time()), os.getpid()))
     try:
         os.makedirs(dest)

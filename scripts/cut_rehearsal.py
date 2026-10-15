@@ -35,7 +35,15 @@ MAX_AGE_HOURS = 24.0
 FUTURE_SLACK_S = 300
 DEFAULT_TIMEOUT_S = 10800
 VERDICTS = ("READY", "NOT-READY", "NO-DATA")
-EXIT_FOR = {"READY": 0, "NOT-READY": 1, "NO-DATA": 2}
+EXIT_FOR = {"READY": 0, "NOT-READY": 1, "NO-DATA": 2, "LOCAL-PASS": 0}
+
+# FR1.g (C8): the local half of a rehearsal (no export rows, no Linux canary) writes its own kind of record under its
+# own prefix. Nothing that decides a cut reads it: _load_records globs rehearsal-<version>-*.json, which
+# local-rehearsal-<version>-*.json does not match, and its schema is not in SCHEMAS_READ. Only row_sources reads it,
+# for the rows a full check may reuse.
+LOCAL_SCHEMA = "cv1.local.1"
+LOCAL_VERDICTS = ("LOCAL-PASS", "NOT-READY", "NO-DATA")
+LOCAL_PREFIX = "local-rehearsal-"
 
 # products/brothermode/tools holds bm_store.py, which cut.py loads by path for the fence: a changed fence module
 # after a READY record is a changed cut.
@@ -341,6 +349,63 @@ def record_rehearsal(version, candidate, tree, exit_code, verdict, log_path, sec
     return path
 
 
+def record_local(version, candidate, tree, exit_code, verdict, log_path, seconds, directory="", now=None, rows=(),
+                 note=""):
+    """Write a LOCAL record atomically under LOCAL_PREFIX and return its path (FR1.g). The fields are
+    record_rehearsal's, the schema is LOCAL_SCHEMA and the verdict one of LOCAL_VERDICTS. Raises ValueError on a
+    verdict outside LOCAL_VERDICTS and on any other malformed field, a malformed row included. A LOCAL-PASS needs a
+    readable log. Nothing that decides a cut reads this file."""
+    if isinstance(rows, (str, bytes, dict)) or not isinstance(rows, (list, tuple)):
+        raise ValueError("rows must be a list of rows")
+    for row in rows:
+        why = validate_row(row)
+        if why:
+            raise ValueError(why)
+    if not _is_str(version) or not VERSION_RE.fullmatch(version):
+        raise ValueError("version %r is not X.Y.Z" % (version,))
+    for what, value in (("candidate", candidate), ("candidate tree", tree)):
+        if not _is_str(value) or not SHA_RE.fullmatch(value):
+            raise ValueError("%s %r is not 40 hex" % (what, value))
+    if not _is_str(verdict) or verdict not in LOCAL_VERDICTS:
+        raise ValueError("verdict %r is not one of %s" % (verdict, ", ".join(LOCAL_VERDICTS)))
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        raise ValueError("exit_code %r is not an int" % (exit_code,))
+    if not _is_num(seconds) or seconds < 0:
+        raise ValueError("seconds %r is not a finite number" % (seconds,))
+    if not _is_str(log_path) or not _is_str(directory) or not _is_str(note):
+        raise ValueError("log_path, directory and note must be strings")
+    if now is not None and not _is_num(now):
+        raise ValueError("now %r is not a finite number" % (now,))
+    log_sha = ""
+    if log_path:
+        try:
+            log_sha = _sha256_file(log_path)
+        except OSError as exc:
+            if verdict == "LOCAL-PASS":
+                raise ValueError("a LOCAL-PASS record needs a readable log: %s" % exc)
+            log_path = ""
+    elif verdict == "LOCAL-PASS":
+        raise ValueError("a LOCAL-PASS record needs a log")
+    stamp = time.time() if now is None else float(now)
+    directory = directory or evidence_dir()
+    os.makedirs(directory, exist_ok=True)
+    record = {"schema": LOCAL_SCHEMA, "version": version, "candidate_sha": candidate, "candidate_tree": tree,
+              "exit_code": exit_code, "verdict": verdict, "log_path": log_path, "log_sha256": log_sha,
+              "cut_py_sha256": running_cut_py_sha256(), "script_trees": {}, "seconds": float(seconds),
+              "finished_at": _iso(stamp), "rows": [dict(r) for r in rows]}
+    if note:
+        record["note"] = note
+    path = os.path.join(directory, "%s%s-%s-%d.json" % (LOCAL_PREFIX, version, candidate[:12], int(stamp)))
+    tmp = "%s.tmp-%d-%s" % (path, os.getpid(), uuid.uuid4().hex[:6])
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    return path
+
+
 def _inside(path, folder):
     """True when `path` is strictly under `folder` once both are resolved."""
     path, folder = os.path.realpath(path), os.path.realpath(folder)
@@ -410,8 +475,10 @@ def _release_lock(path):
         pass
 
 
-def _ready_line(output, version):
-    return re.search(r"^READY for %s(?![\w.])" % re.escape(version), output, re.MULTILINE) is not None
+def _ready_line(output, version, word="READY"):
+    """True when `output` has a line that begins `<word> for <version>`. A LOCAL-READY line (FR1.g) never matches the
+    default word: the pattern is anchored at the line start."""
+    return re.search(r"^%s for %s(?![\w.])" % (re.escape(word), re.escape(version)), output, re.MULTILINE) is not None
 
 
 #: FC1.b: the absolute path, as scripts/night_tick.py spells it; -i -m -s are the assertions the session's wrapper
@@ -468,10 +535,14 @@ def _awake_for(runner, awake):
 
 
 def run_rehearsal(root, version, candidate="", directory="", timeout_s=DEFAULT_TIMEOUT_S, runner=None, clock=None,
-                  awake=None):
+                  awake=None, local=False):
     """(verdict, exit_code, record_path). Never raises on a child failure: a worktree that cannot be made, a child that
     times out or a log that cannot be written is NO-DATA with a record that says why, or a RehearsalRefused when even
-    the record cannot be written or another rehearsal is running. A malformed argument raises ValueError."""
+    the record cannot be written or another rehearsal is running. A malformed argument raises ValueError.
+    `local` (FR1.g): the child runs `cut.py --check --local` and the verdict is LOCAL-PASS, NOT-READY or NO-DATA,
+    recorded by record_local under LOCAL_PREFIX."""
+    if not isinstance(local, bool):
+        raise ValueError("local must be a bool")
     if not _is_str(root) or not root or not _is_str(version) or not VERSION_RE.fullmatch(version):
         raise ValueError("run_rehearsal needs a root and an X.Y.Z version")
     if not _is_str(candidate) or not _is_str(directory):
@@ -495,12 +566,12 @@ def run_rehearsal(root, version, candidate="", directory="", timeout_s=DEFAULT_T
         _release_lock(lock)
         raise RehearsalRefused("the machine cannot be held awake for the rehearsal: %s" % why)
     try:
-        return _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock)
+        return _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock, local)
     finally:
         release_awake(handle)
 
 
-def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock):
+def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock, local=False):
     """run_rehearsal from the lock to the record, while the machine is held awake."""
     started = clock()
     worktree = ""
@@ -522,6 +593,8 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
             env = dict(os.environ)
             env["TMPDIR"] = tmpdir
             child = [sys.executable, os.path.join(worktree, "scripts", "cut.py"), "--check", "--version", version]
+            if local:
+                child.append("--local")
             # an injected runner (the tests) keeps cut._run's shape; the real run kills its whole tree on a timeout
             proc = _sh(child, worktree, runner, env=env, timeout=timeout_s) if runner else _run_tree(child, worktree, env, timeout_s)
             code = _rc(proc)
@@ -532,20 +605,22 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
         if made and not _remove_worktree(root, worktree, scratch, runner):
             note = (note + "; " if note else "") + "the worktree %s could not be removed" % worktree
         _release_lock(lock)
-    if code == 0 and _ready_line(output, version):
-        verdict = "READY"
+    word, line = ("LOCAL-PASS", "LOCAL-READY") if local else ("READY", "READY")
+    if code == 0 and _ready_line(output, version, line):
+        verdict = word
     elif code == 1:
         verdict = "NOT-READY"
     else:
         verdict = "NO-DATA"
         note = note or ("the child exited %s" % code if code != 0
-                        else "the child exited 0 without the line 'READY for %s'" % version)
+                        else "the child exited 0 without the line '%s for %s'" % (line, version))
     finished = clock()
     try:
         os.makedirs(directory, exist_ok=True)
     except OSError as exc:
         raise RehearsalRefused("the evidence folder %s cannot be made: %s" % (directory, exc))
-    log_path = os.path.join(directory, "rehearsal-%s-%s-%d.log" % (version, sha[:12], int(finished)))
+    log_path = os.path.join(directory, "%s%s-%s-%d.log" % (LOCAL_PREFIX if local else "rehearsal-", version, sha[:12],
+                                                           int(finished)))
     try:
         with open(log_path, "w", encoding="utf-8") as fh:
             fh.write(output)
@@ -565,6 +640,14 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
             problems.append("row %s was dropped: its log %s does not hash to its log_sha256" % (row["row"], row["log_path"]))
     if problems:
         note = (note + "; " if note else "") + "; ".join(problems)
+    if local:
+        # a local record never covers a cut, so it carries no script trees and no cut.py hash to be checked later
+        try:
+            path = record_local(version, sha, tree, code, verdict, log_path, max(finished - started, 0.0), directory,
+                                now=finished, rows=rows, note=note)
+        except (OSError, ValueError) as exc:
+            raise RehearsalRefused("the local record could not be written: %s" % exc)
+        return verdict, code, path
     trees, why = _script_trees(root, sha, runner)
     cut_sha = ""
     shown = _sh(["git", "show", "%s:scripts/cut.py" % sha], root, runner)
@@ -762,16 +845,17 @@ def _load_records(directory, version):
     return records, ""
 
 
-def _record_problem(data, name):
-    """'' when `data` is a whole record of a schema in SCHEMAS_READ, else the reason. A whole record gains `_epoch`,
-    and a .1 record gains rows == []."""
-    if not isinstance(data, dict) or not _is_str(data.get("schema")) or data.get("schema") not in SCHEMAS_READ:
+def _record_problem(data, name, schemas=SCHEMAS_READ, verdicts=VERDICTS):
+    """'' when `data` is a whole record of a schema in `schemas` (default SCHEMAS_READ), else the reason. A whole
+    record gains `_epoch`, and a .1 record gains rows == []. `schemas` and `verdicts` widen only for the local record
+    reader (FR1.g); every other caller keeps the strict defaults."""
+    if not isinstance(data, dict) or not _is_str(data.get("schema")) or data.get("schema") not in schemas:
         seen = data.get("schema") if isinstance(data, dict) else None
-        return "the rehearsal record %s has schema %r, not one of %s" % (name, seen, ", ".join(SCHEMAS_READ))
+        return "the rehearsal record %s has schema %r, not one of %s" % (name, seen, ", ".join(schemas))
     bad = [f for f in RECORD_FIELDS if f not in data]
     stamp = _parse_iso(data.get("finished_at"))
     if (bad or not _is_str(data["version"]) or not _is_str(data["candidate_sha"])
-            or not SHA_RE.fullmatch(data["candidate_sha"]) or data["verdict"] not in VERDICTS
+            or not SHA_RE.fullmatch(data["candidate_sha"]) or data["verdict"] not in verdicts
             or not _is_str(data["verdict"]) or stamp is None or not isinstance(data["script_trees"], dict)
             or not _is_str(data["log_path"]) or not _is_str(data["log_sha256"])
             or not _is_str(data["cut_py_sha256"])):
@@ -844,6 +928,94 @@ def reusable_row(record, row, key, home, now=None):
         return None, "the %s row measured key %s, not %s" % (row, last["key"][:12], key[:12])
     if last["verdict"] != "PASS":
         return None, "the %s row said %s, not PASS" % (row, last["verdict"])
+    try:
+        log_sha = _sha256_file(last["log_path"])
+    except OSError as exc:
+        return None, "the log of the %s row is missing or unreadable: %s" % (row, exc)
+    if log_sha != last["log_sha256"]:
+        return None, "the log of the %s row was altered after it was recorded" % row
+    return last, ""
+
+
+# FR1.e (C5): a --check rehearsal may reuse a PASS row from the newest record of this version, READY or not. The strict
+# reader above still refuses a whole folder on one corrupt file, because covering_record decides a cut; a row only
+# decides whether a check is skipped, so a bad file here costs a reason and nothing else.
+CHECK_ROW_VERDICTS = ("READY", "NOT-READY")
+LOCAL_ROW_VERDICTS = ("LOCAL-PASS", "NOT-READY")   # FR1.g: the local record verdicts whose rows may be read
+_WORSE = {"FAIL": 2, "NO-DATA": 1, "PASS": 0}
+
+
+def row_sources(version, directory=""):
+    """([records whose verdict is in CHECK_ROW_VERDICTS], [reasons]) from every rehearsal-<version>-*.json in the
+    evidence folder. A corrupt, foreign, malformed or NO-DATA file contributes a reason only. Never raises."""
+    if not _is_str(version) or not VERSION_RE.fullmatch(version):
+        return [], ["version %r is not X.Y.Z" % (version,)]
+    if not _is_str(directory):
+        return [], ["the evidence folder %r is not a path" % (directory,)]
+    directory = directory or evidence_dir()
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        return [], ["no rehearsal record: the evidence folder %s is unreadable (%s)" % (directory, exc)]
+    # FR1.g: a full record and a local record feed rows alike; each kind is read under its own schema and verdicts
+    kinds = (("rehearsal-%s-" % version, SCHEMAS_READ, VERDICTS, CHECK_ROW_VERDICTS),
+             ("%s%s-" % (LOCAL_PREFIX, version), (LOCAL_SCHEMA,), LOCAL_VERDICTS, LOCAL_ROW_VERDICTS))
+    records, reasons = [], []
+    for name in names:
+        kind = [k for k in kinds if name.startswith(k[0])]
+        if not (kind and name.endswith(".json")):
+            continue
+        _prefix, schemas, verdicts, keep = kind[0]
+        try:
+            with open(os.path.join(directory, name), "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            reasons.append("the rehearsal record %s is corrupt or unreadable (%s)" % (name, exc))
+            continue
+        why = _record_problem(data, name, schemas, verdicts)
+        if not why and data["version"] != version:
+            why = "the rehearsal record %s is malformed (it names version %r)" % (name, data["version"])
+        if not why and data["verdict"] not in keep:
+            why = "the rehearsal record %s says %s, so none of its rows are read" % (name, data["verdict"])
+        if why:
+            reasons.append(why)
+            continue
+        data["_name"] = name
+        records.append(data)
+    return records, reasons
+
+
+def reusable_check_row(version, row, key, home, directory="", now=None):
+    """(row, '') when the newest record holding a `row` row for `home` at exactly `key` says PASS, is not from the
+    future, is not older than MAX_AGE_HOURS and its log still hashes to log_sha256; (None, reason) otherwise, so the
+    caller runs the row. Of two records at one instant the worse verdict wins. Never raises."""
+    if not _is_str(row) or row not in ROW_NAMES or not _is_str(home) or home not in ROW_HOMES:
+        return None, "row %r with home %r is not a known row" % (row, home)
+    if not _is_str(key) or not SHA_RE.fullmatch(key):
+        return None, "the key %r is not a 40 hex tree id" % (key,)
+    if now is not None and not _is_num(now):
+        return None, "the clock %r is not a finite number" % (now,)
+    records, reasons = row_sources(version, directory)
+    best = None
+    for rec in records:
+        mine = [r for r in rec["rows"] if r["row"] == row and r["home"] == home and r["key"] == key]
+        if not mine:
+            continue
+        rank = (rec["_epoch"], _WORSE[mine[-1]["verdict"]])
+        if best is None or rank > best[0]:
+            best = (rank, rec, mine[-1])
+    if best is None:
+        return None, "no record holds a %s row for home %s at key %s%s" % (
+            row, home, key[:12], (" (" + reasons[0] + ")") if reasons else "")
+    _, rec, last = best
+    age = (time.time() if now is None else float(now)) - rec["_epoch"]
+    if age < -FUTURE_SLACK_S:
+        return None, "the record %s is stamped from the future (%s)" % (rec["_name"], rec["finished_at"])
+    if age > MAX_AGE_HOURS * 3600:
+        return None, "the record %s is stale: finished %s, older than %g hours" % (
+            rec["_name"], rec["finished_at"], MAX_AGE_HOURS)
+    if last["verdict"] != "PASS":
+        return None, "the newest %s row said %s, not PASS" % (row, last["verdict"])
     try:
         log_sha = _sha256_file(last["log_path"])
     except OSError as exc:
@@ -936,6 +1108,237 @@ def covering_record(root, version, resume_sha="", directory="", runner=None, now
     return os.path.join(directory, where), ""
 
 
+# FR0.b: the cut ready record (scripts/cut_ready.py writes it) is a different file kind from a rehearsal record. It is
+# read here, beside covering_record, and never through SCHEMAS_READ, so one can never stand in for the other.
+READY_SCHEMA = "cv1.ready.1"
+READY_MAX_AGE_S = 6 * 3600
+READY_VERDICTS = ("PASS", "FAIL", "NO-DATA")
+
+
+def _ready_problem(data):
+    """'' when `data` is a whole cut ready record, else the reason (the record is then moved aside by the reader)."""
+    if not isinstance(data, dict) or data.get("schema") != READY_SCHEMA:
+        return "not a %s record" % READY_SCHEMA
+    for key in ("version", "candidate_tree", "verdict", "epoch", "rows"):
+        if key not in data:
+            return "missing %s" % key
+    if not _is_str(data["version"]) or not _is_str(data["candidate_tree"]) or data["verdict"] not in READY_VERDICTS \
+            or not _is_str(data["verdict"]) or not isinstance(data["rows"], list):
+        return "a field has the wrong type or value"
+    for row in data["rows"]:
+        if not isinstance(row, dict) or not _is_str(row.get("verdict")) or row["verdict"] not in READY_VERDICTS:
+            return "a row has no known verdict"
+    return ""
+
+
+def ready_record(version, tree, directory="", now=None):
+    """(path, verdict, reason) for the cut ready record that decides `tree`. PASS only for the newest record whose
+    body names this version and this tree, whose verdict is the one its rows give, and which is not older than
+    READY_MAX_AGE_S. Everything else is FAIL (the newest record says so) or NO-DATA with the reason and path ''.
+    A file that is not a whole record is moved aside to <name>.corrupt-<epoch>, never deleted. Never reads a
+    rehearsal file. Unknown, corrupt or unreadable input never reads PASS."""
+    if not _is_str(version) or not VERSION_RE.fullmatch(version):
+        return "", "NO-DATA", "the cut version %r is not X.Y.Z" % (version,)
+    if not _is_str(tree) or not SHA_RE.fullmatch(tree):
+        return "", "NO-DATA", "the tree %r is not 40 hex" % (tree,)
+    if not _is_str(directory):
+        return "", "NO-DATA", "the evidence folder is not a path"
+    if now is not None and not _is_num(now):
+        return "", "NO-DATA", "the clock %r is not a finite number" % (now,)
+    clock_now = time.time() if now is None else float(now)
+    directory = directory or evidence_dir()
+    none = "no cut-ready record for tree %s" % tree[:12]
+    if not os.path.isdir(directory):
+        return "", "NO-DATA", none
+    prefix = "cut-ready-%s-" % version
+    kept = []
+    for name in sorted(os.listdir(directory)):
+        if not (name.startswith(prefix) and name.endswith(".json")):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except OSError:
+            continue
+        except ValueError:
+            data = None
+        if _ready_problem(data):
+            try:
+                os.replace(path, "%s.corrupt-%d" % (path, int(clock_now)))
+            except OSError:
+                pass
+            continue
+        epoch = data["epoch"]
+        if data["version"] != version or data["candidate_tree"] != tree or not _is_num(epoch) \
+                or epoch - clock_now > FUTURE_SLACK_S:
+            continue
+        kept.append((epoch, data["verdict"] != "PASS", path, data))
+    if not kept:
+        return "", "NO-DATA", none
+    epoch, _worse, path, data = max(kept, key=lambda k: (k[0], k[1]))
+    rows = [r["verdict"] for r in data["rows"]]
+    computed = "FAIL" if "FAIL" in rows else ("NO-DATA" if "NO-DATA" in rows or not rows else "PASS")
+    if computed != data["verdict"]:
+        return "", "NO-DATA", "the record %s contradicts its rows (says %s, rows give %s)" % (
+            os.path.basename(path), data["verdict"], computed)
+    if computed != "PASS":
+        return path, computed, "the newest record %s says %s" % (os.path.basename(path), computed)
+    if clock_now - epoch > READY_MAX_AGE_S:
+        return "", "NO-DATA", "older than 6 h (%s)" % os.path.basename(path)
+    return path, "PASS", ""
+
+
+# FR1.a: the preflight record. cut_driver.preflight_phase writes it, cut.check_mode reads it, so a rehearsal of the
+# same candidate does not run the minutes long export rows a second time. Its own file kind (preflight-*.json), read
+# only here; a rehearsal record can never stand in for it nor it for one.
+PREFLIGHT_SCHEMA = "cv1.preflight.1"
+PREFLIGHT_VERDICTS = ("PASS", "FAIL", "NO-DATA")
+PREFLIGHT_EXPORT_ROWS = ("export-real-home", "virgin-gate")
+PREFLIGHT_ROW_VERDICTS = ("OK", "REFUSED", "NO-DATA")
+PREFLIGHT_FIELDS = ("schema", "version", "candidate_sha", "candidate_tree", "export_tree_id", "verdict", "rows",
+                    "log_path", "log_sha256", "interpreter", "seconds", "finished_at")
+_PREFLIGHT_LINE_RE = re.compile(r"^(OK|REFUSED|NO-DATA) +(\S+)", re.M)   # cut_preflight prints "%-8s %-16s %s"
+
+
+def _interpreter():
+    return "%d.%d.%d" % sys.version_info[:3]
+
+
+def record_preflight(version, candidate, tree, export_tree_id, verdict, log_path, seconds, directory="", now=None):
+    """Write preflight-<version>-<candidate12>-<epoch>.json atomically and return its path. The rows are parsed from
+    the log (the `OK|REFUSED|NO-DATA <name>` lines cut_preflight.py prints). Raises ValueError on a version not X.Y.Z,
+    a candidate or tree that is not 40 lower case hex, an export tree id that is neither '' nor 40 hex, a verdict
+    outside PREFLIGHT_VERDICTS, a log that cannot be read, or a negative or non finite `seconds`."""
+    if not _is_str(version) or not VERSION_RE.fullmatch(version):
+        raise ValueError("version %r is not X.Y.Z" % (version,))
+    for label, value in (("candidate", candidate), ("tree", tree)):
+        if not _is_str(value) or not SHA_RE.fullmatch(value):
+            raise ValueError("%s %r is not 40 hex" % (label, value))
+    if not _is_str(export_tree_id) or (export_tree_id and not SHA_RE.fullmatch(export_tree_id)):
+        raise ValueError("export tree id %r is neither empty nor 40 hex" % (export_tree_id,))
+    if not _is_str(verdict) or verdict not in PREFLIGHT_VERDICTS:
+        raise ValueError("verdict %r is not one of %s" % (verdict, ", ".join(PREFLIGHT_VERDICTS)))
+    if not _is_num(seconds) or seconds < 0:
+        raise ValueError("seconds %r is not a finite number" % (seconds,))
+    if not _is_str(log_path) or not log_path or not _is_str(directory):
+        raise ValueError("log_path and directory must be strings and the log a path")
+    if now is not None and not _is_num(now):
+        raise ValueError("now %r is not a finite number" % (now,))
+    try:
+        with open(log_path, "rb") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        raise ValueError("the preflight log cannot be read: %s" % exc)
+    rows = [{"verdict": v, "name": n} for v, n in _PREFLIGHT_LINE_RE.findall(raw.decode("utf-8", "replace"))]
+    stamp = time.time() if now is None else float(now)
+    directory = directory or evidence_dir()
+    os.makedirs(directory, exist_ok=True)
+    record = {"schema": PREFLIGHT_SCHEMA, "version": version, "candidate_sha": candidate, "candidate_tree": tree,
+              "export_tree_id": export_tree_id, "verdict": verdict, "rows": rows, "log_path": log_path,
+              "log_sha256": hashlib.sha256(raw).hexdigest(), "interpreter": _interpreter(),
+              "seconds": float(seconds), "finished_at": _iso(stamp)}
+    path = os.path.join(directory, "preflight-%s-%s-%d.json" % (version, candidate[:12], int(stamp)))
+    tmp = "%s.tmp-%d-%s" % (path, os.getpid(), uuid.uuid4().hex[:6])
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    return path
+
+
+def _preflight_problem(data):
+    """'' when `data` is a whole cv1.preflight.1 record, else the reason."""
+    if not isinstance(data, dict) or data.get("schema") != PREFLIGHT_SCHEMA:
+        return "not a %s record" % PREFLIGHT_SCHEMA
+    bad = [f for f in PREFLIGHT_FIELDS if f not in data]
+    if bad:
+        return "missing " + ", ".join(bad)
+    if not all(_is_str(data[f]) for f in PREFLIGHT_FIELDS if f not in ("rows", "seconds")):
+        return "a field has the wrong type"
+    rows = data["rows"]
+    if (not SHA_RE.fullmatch(data["candidate_sha"]) or not SHA_RE.fullmatch(data["candidate_tree"])
+            or (data["export_tree_id"] and not SHA_RE.fullmatch(data["export_tree_id"]))
+            or data["verdict"] not in PREFLIGHT_VERDICTS or not _is_num(data["seconds"]) or data["seconds"] < 0
+            or _parse_iso(data["finished_at"]) is None or not isinstance(rows, list)
+            or not all(isinstance(r, dict) and _is_str(r.get("name")) and _is_str(r.get("verdict"))
+                       and r["verdict"] in PREFLIGHT_ROW_VERDICTS for r in rows)):
+        return "a field has the wrong value"
+    return ""
+
+
+def newest_preflight(version, candidate, tree, directory="", now=None):
+    """(record, '') for the newest preflight record of exactly this candidate and tree when it may be reused, else
+    (None, reason). A reusable record is a PASS with both PREFLIGHT_EXPORT_ROWS OK, a 40 hex export tree id, the
+    running interpreter, an age within MAX_AGE_HOURS (and not FUTURE_SLACK_S ahead), and a log still hashing to
+    log_sha256. The NEWEST record decides, so a later FAIL is never hidden by an earlier PASS. A file that is not a
+    whole record is skipped and left where it is. The record gains `_path`. Never raises."""
+    try:
+        return _newest_preflight(version, candidate, tree, directory, now)
+    except Exception as exc:  # noqa: BLE001 sbe: allow-silent any doubt reads as no record, so the full preflight runs
+        return None, "the preflight records could not be read (%s)" % exc
+
+
+def _newest_preflight(version, candidate, tree, directory, now):
+    if not _is_str(version) or not VERSION_RE.fullmatch(version):
+        return None, "the cut version %r is not X.Y.Z" % (version,)
+    for label, value in (("candidate", candidate), ("tree", tree)):
+        if not _is_str(value) or not SHA_RE.fullmatch(value):
+            return None, "the %s %r is not 40 hex" % (label, value)
+    if not _is_str(directory) or (now is not None and not _is_num(now)):
+        return None, "the evidence folder or the clock is not usable"
+    clock_now = time.time() if now is None else float(now)
+    directory = directory or evidence_dir()
+    if not os.path.isdir(directory):
+        return None, "no preflight record: the evidence folder %s does not exist" % directory
+    prefix = "preflight-%s-" % version
+    kept, skipped = [], []
+    for name in sorted(os.listdir(directory)):
+        if not (name.startswith(prefix) and name.endswith(".json")):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            skipped.append("%s is unreadable (%s)" % (name, exc))
+            continue
+        why = _preflight_problem(data)
+        if why:
+            skipped.append("%s is not a whole record (%s)" % (name, why))
+        elif data["version"] == version and data["candidate_sha"] == candidate and data["candidate_tree"] == tree:
+            data["_path"] = path
+            kept.append((_parse_iso(data["finished_at"]), data["verdict"] != "PASS", data))
+    if not kept:
+        return None, "no preflight record for %s tree %s%s" % (candidate[:12], tree[:12],
+                                                               ("; skipped: " + "; ".join(skipped[:3])) if skipped else "")
+    stamp, _worse, rec = max(kept, key=lambda k: (k[0], k[1]))
+    where = os.path.basename(rec["_path"])
+    if rec["verdict"] != "PASS":
+        return None, "the newest preflight record %s says %s" % (where, rec["verdict"])
+    for want in PREFLIGHT_EXPORT_ROWS:
+        said = [r["verdict"] for r in rec["rows"] if r["name"] == want]
+        if not said or any(v != "OK" for v in said):
+            return None, "the preflight record %s has no OK %s row" % (where, want)
+    if not SHA_RE.fullmatch(rec["export_tree_id"]):
+        return None, "the preflight record %s names no export tree" % where
+    if rec["interpreter"] != _interpreter():
+        return None, "the preflight record %s ran on python %s, this is %s" % (where, rec["interpreter"],
+                                                                             _interpreter())
+    age = clock_now - stamp
+    if age > MAX_AGE_HOURS * 3600 or -age > FUTURE_SLACK_S:
+        return None, "the preflight record %s is %.1f h old (the bar is %g h)" % (where, age / 3600.0, MAX_AGE_HOURS)
+    try:
+        log_ok = _sha256_file(rec["log_path"]) == rec["log_sha256"]
+    except OSError:
+        log_ok = False
+    if not log_ok:
+        return None, "the log of the preflight record %s is missing or changed" % where
+    return rec, ""
+
+
 def rehearsal_refusal(root, version, resume_sha="", directory="", runner=None, now=None, allowed_paths=()):
     """'' when covering_record finds a record, else its reason. `allowed_paths` is passed through to covering_record
     and on to resume_chain_problem; an empty tuple on a resume means every path refuses."""
@@ -955,10 +1358,15 @@ def main(argv=None, root=None, runner=None):
     ap.add_argument("--candidate", default="", help="the commit to rehearse (default HEAD)")
     ap.add_argument("--verify", action="store_true", help="only say whether a record covers HEAD now")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S, help="seconds the child may run")
+    ap.add_argument("--local", action="store_true",
+                    help="the local half only (no export rows, no Linux canary): a LOCAL-PASS record that never covers a cut")
     args = ap.parse_args(argv)
     root = root or ROOT
     if not VERSION_RE.fullmatch(args.version):
         print("NO-DATA: --version %r is not X.Y.Z" % args.version)
+        return 2
+    if args.local and args.verify:
+        print("NO-DATA: --local and --verify contradict each other: a local record never covers a cut")
         return 2
     if args.verify:
         import cut as C
@@ -967,11 +1375,12 @@ def main(argv=None, root=None, runner=None):
         return 0 if not reason else 1
     try:
         verdict, code, path = run_rehearsal(root, args.version, args.candidate, timeout_s=args.timeout,
-                                            runner=runner)
+                                            runner=runner, local=args.local)
     except (RehearsalRefused, ValueError) as exc:
         print("REFUSED: %s" % exc)
         return 2
-    sha12 = os.path.basename(path).split("-")[2]
+    named = os.path.basename(path)
+    sha12 = (named[len("local-"):] if named.startswith(LOCAL_PREFIX) else named).split("-")[2]
     print("REHEARSAL %s %s %s exit %d record %s" % (verdict, args.version, sha12, code, path))
     return EXIT_FOR[verdict]
 

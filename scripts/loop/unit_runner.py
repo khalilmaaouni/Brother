@@ -205,6 +205,72 @@ def status(text):
     write_status(os.path.join(run, "STATUS"), text + "\n"); print(text, flush=True)
 
 
+REMEDY_FALLBACK = "read this run folder's STATUS and logs, then fix the cause named above"
+
+
+def one_line(text, limit=300):
+    """Total on text: anything becomes one bounded line. str() makes a value text (a non text value is shown,
+    never refused, so a hostile brief or grader line can never crash a park), every control character (newline,
+    carriage return, escape, and every other C0 code, plus DEL) becomes one space, runs of spaces collapse, the
+    result is stripped and cut to limit characters. A limit that is not a whole, non negative number is refused
+    with ValueError, this module's own deliberate refusal, never a raw TypeError. Never raises on text."""
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("one_line limit is not a whole number: %r" % (limit,))
+    if limit < 0:
+        raise ValueError("one_line limit is negative: %r" % (limit,))
+    if not isinstance(text, str):
+        try:
+            text = str(text)
+        except Exception:   # sbe: allow-silent a hostile __str__ is shown as nothing rather than taken as a crash
+            text = ""
+    spaced = "".join(" " if ch < " " or ch == "\x7f" else ch for ch in text)
+    return " ".join(spaced.split())[:limit]
+
+
+def grader_said(lane):
+    """The grader's own last words: the last non blank line of the grader's lane log through one_line at 160
+    characters, or the phrase "the grader printed nothing" for blank or non text input. A parked sub unit reads
+    the grader's own sentence here, never a runner paraphrase of it."""
+    if not isinstance(lane, str):
+        return "the grader printed nothing"
+    for line in reversed(lane.splitlines()):
+        said = one_line(line, 160)
+        if said:
+            return said
+    return "the grader printed nothing"
+
+
+def with_remedy(line, remedy):
+    """One bounded line plus its remedy: one_line(line, 700) + "; remedy: " + one_line(remedy, 160). A line that
+    already carries "remedy:" is returned as it stands, so the helper is idempotent and a second wrap never stacks
+    two remedies. A blank or unreadable remedy becomes REMEDY_FALLBACK, because a parked line with no remedy at all
+    is the defect this unit exists to remove. Never raises on text."""
+    body = one_line(line, 700)
+    if "remedy:" in body:
+        return body
+    said = one_line(remedy, 160)
+    return body + "; remedy: " + (said or REMEDY_FALLBACK)
+
+
+def grade_nothing_line(rnd, grc, lane, out_dir, code_root_set):
+    """The whole line a sub unit parks on when its grade judged nothing. The prefix the pool and the older suites
+    match ("WITHHELD round <rnd>: NO-DATA, the grade judged nothing") is kept, the grader's own last words are
+    quoted inside it, the kept builds are named, and when the launch has no BROTHER_CODE_ROOT the line says exactly
+    that no diagnosis note will arrive and names the variable. It ends in with_remedy, so the parked line carries
+    its remedy and stays under the 900 characters previous_reason keeps for the next brief."""
+    kept = one_line(out_dir, 300)
+    line = ("WITHHELD round %s: NO-DATA, the grade judged nothing (grade stage exit %s, no completed verdict; the grader said: %s) "
+            "builds kept in %s; no model repair and no lesson; re-seated when its spec, a judge tool, the resolved program or a "
+            "diagnosis note changes (runner_pool fact rule); the kept builds are not re-graded automatically"
+            % (rnd, grc, grader_said(lane), kept[-120:]))
+    if not code_root_set:
+        line += "; no diagnosis note will arrive: the diagnostician is skipped because BROTHER_CODE_ROOT is not set in this launch"
+        remedy = "set BROTHER_CODE_ROOT to the absolute path of the frozen code directory and relaunch the loop"
+    else:
+        remedy = "read lane.log and grades/ in this round folder, fix the grader or machine fact it names; the pool re-seats the sub unit when its spec or a judge tool changes"
+    return with_remedy(line, remedy)
+
+
 def private(text):
     return P.G.private_hits(text)
 
@@ -356,6 +422,16 @@ def probe_admits(verdict, finds):
     return probe_outcome(verdict, finds) == "ADMIT"
 
 
+# THE WORDS A REJECTED RUN'S STATUS STARTS WITH, one set for the reader below. 2026-10-14, first live 1.1.4 run: the
+# landing writes "DROPPED at landing: <reason>" (land_batch) while this reader learned only QUARANTINE, EXHAUSTED and
+# WITHHELD, so FR0.a was rebuilt from a brief with no word of why its build was dropped. scripts/test_unit_runner_probe_gate.py
+# reads every rejection note land_batch writes and fails if its first word is not in this set.
+REJECTED_WORDS = ("QUARANTINE", "EXHAUSTED", "WITHHELD", "DROPPED")
+# A run that was INTERRUPTED reached no verdict (2026-10-14: a clean stop for a redeploy wrote "STALLED dead runner"
+# on FR0.a's blind retry, which then hid the DROPPED lesson of the run before it). Such a run neither teaches nor erases.
+INTERRUPTED_WORDS = ("STALLED", "PAUSED", "DRAINED", "CONFIG_WAIT", "UNFUNDED", "WITHDRAWN")
+
+
 def previous_reason(sub_id, runs_dir=None, exclude=None, listdir=None, read=None, mtime=None):
     """Why the PREVIOUS run of this sub unit was rejected, in its own words, or "" when there is nothing to learn.
 
@@ -391,10 +467,12 @@ def previous_reason(sub_id, runs_dir=None, exclude=None, listdir=None, read=None
             text, when = read(os.path.join(path, "STATUS")).strip(), mtime(path)
         except OSError:  # sbe: allow-silent a sibling run with no STATUS file yet is still running, so it cannot be the newest finished one
             continue
+        if text.split()[:1] and text.split()[0] in INTERRUPTED_WORDS:
+            continue   # no verdict: an interrupted run must not hide the lesson of the run before it
         if newest[0] is None or when >= newest[0]:
             newest = (when, text)
     word = newest[1].split()[:1]
-    return newest[1][:900] if word and word[0] in ("QUARANTINE", "EXHAUSTED", "WITHHELD") else ""
+    return newest[1][:900] if word and word[0] in REJECTED_WORDS else ""
 
 
 # THE CODE ROOT (U3, B5-08): the fan out and the failure ledger are CODE and run from the tree the launcher froze
@@ -408,7 +486,8 @@ except _MR0.Refused as _exc:
 base = os.path.join(run, "brief-base.md")
 r = subprocess.run([sys.executable, os.path.join(BIN, "build_brief.py"), unit, sub, spec, base], capture_output=True, text=True, timeout=300)
 if r.returncode != 0 or not os.path.isfile(base):
-    status("WITHHELD brief could not be built: %s" % (r.stderr or r.stdout).strip()[-160:]); sys.exit(2)
+    status(with_remedy("WITHHELD brief could not be built: %s" % ((r.stderr or r.stdout).strip()[-160:]),
+                       "repair the spec section it names; the pool re-seats the sub unit when its spec changes")); sys.exit(2)
 # THE BRIEF GATE (owner 2026-09-24: clear briefs per unit and from the epic, ENFORCED): a brief that does not show the
 # files its section names or the modules its named test imports, is over the dispatcher budget, carries no runnable
 # done_check, or does not state the unit's WBS row is refused HERE, before eight workers are paid to guess against it.
@@ -443,7 +522,8 @@ if chk.returncode != 0:
         _gate_waived = ", ".join(_props)
         print("NATIVE  brief gate %s waived: a native session reads the tree itself (%s)" % (_gate_waived, why[:300]), flush=True)
     else:
-        status("WITHHELD brief refused by brief_check (exit %d): %s" % (chk.returncode, why[:700])); sys.exit(2)
+        status(with_remedy("WITHHELD brief refused by brief_check (exit %d): %s" % (chk.returncode, why[:700]),
+                           "repair the property it names in the spec section; a changed brief_check readmits it")); sys.exit(2)
 brief = open(base, encoding="utf-8").read()
 # The brief learns from the LAST attempt at this sub unit, from two sources that rarely both exist: a
 # diagnostician's verified fact in RUNNER_HINT, and the machine's own rejection reason left in the
@@ -601,7 +681,7 @@ RULES_SCREEN = SCREEN_POINTER + RULES_REST  # the switch picks one of the two at
 try:
     _screen_on = grade_build.brief_screen_mode() == "on"
 except ValueError as _exc:   # unreachable in practice: build_brief already exited 2 on the same value
-    status("WITHHELD %s" % _exc); sys.exit(2)
+    status(with_remedy("WITHHELD %s" % _exc, "set BROTHER_BRIEF_SCREEN to a value grade_build accepts and relaunch")); sys.exit(2)
 # A STRAGGLER IS WAITED FOR, NEVER KILLED WHILE IT HOLDS A CALL (U5, objection 9). The cut grades what is on disk; the fan
 # out keeps running and every call it started ends with its own terminal row. A fan out's calls end within twice its
 # call timeout (a slot wait of up to one timeout, then the call itself: openrouter_dispatch.dispatch passes the same
@@ -671,7 +751,8 @@ for rnd in range(max_rounds):
     # lines that differ between round N and round N+1, so the static text yields to it, lessons first.
     text = brief_fit.fit(brief, (RULES_SCREEN if _screen_on else RULES).replace("{RUNNERS}", _runners or "none for this unit"), LESSONS, note)
     if private(text) or len(text.encode()) > 199500:
-        status("WITHHELD round %d brief: private term or %d bytes" % (rnd, len(text.encode()))); sys.exit(2)
+        status(with_remedy("WITHHELD round %d brief: private term or %d bytes" % (rnd, len(text.encode())),
+                           "remove the private term or shrink the spec section; the pool re-seats the sub unit when its spec changes")); sys.exit(2)
     pf = os.path.join(wd, "prompts", sub + ".md"); open(pf, "w", encoding="utf-8").write(text)
     stage_log.enter("model", sub, unit)
     # THE MODEL IS CHOSEN, NOT TYPED IN. This read a single hardcoded name until 2026-09-21, so
@@ -741,12 +822,13 @@ for rnd in range(max_rounds):
         if not _native:
             print("NATIVE  off this round: an arm is not on the claude transport (%s)" % ", ".join(sorted(set(j["model"] for j in jobs))), flush=True)
     if _gate_waived and not _native:
-        status("WITHHELD round %d: the brief gate waived %s for a native session, and this round would run blind on that brief"
-               % (rnd, _gate_waived)); sys.exit(2)
+        status(with_remedy("WITHHELD round %d: the brief gate waived %s for a native session, and this round would run blind on that brief"
+                           % (rnd, _gate_waived),
+                           "pin a native capable model on the claude transport or repair the spec so the brief gate passes")); sys.exit(2)
     if _native:
         import native_worker as _NW   # only when on: a run with the switch off never loads it
         try:
-            _seats_n, _native_s = _NW.seats(), _NW.session_seconds()
+            _seats_n, _native_s = _NW.seats(), _NW.session_seconds(size=_unit_rec.get("size"))
         except ValueError as _exc:
             status("BLOCKED %s" % _exc); sys.exit(2)
         _head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
@@ -757,7 +839,8 @@ for rnd in range(max_rounds):
         if _head.returncode != 0 or not _head.stdout.strip():
             status("BLOCKED round %d native: the graded tree's HEAD cannot be read" % rnd); sys.exit(2)
         if not _section:
-            status("WITHHELD round %d native brief: %s names no section for %s" % (rnd, spec, sub)); sys.exit(2)
+            status(with_remedy("WITHHELD round %d native brief: %s names no section for %s" % (rnd, spec, sub),
+                               "add a heading for this sub unit to the spec file it names")); sys.exit(2)
         _native_base = _head.stdout.strip()
         # THE PREVIOUS REFUSAL TOO (2026-10-02 10:13): FX-13.4's native build was refused at landing and the session that
         # re-seated it would never have learned why, since hint (RUNNER_HINT, the diagnostician's note, the last landing
@@ -766,7 +849,8 @@ for rnd in range(max_rounds):
         _ntext = _NW.brief(sub, _section, _NW.contract_text([r.strip() for r in _runners.split(",") if r.strip()]),
                            "\n\n".join(x for x in (_learned, native_note) if x))
         if private(_ntext):
-            status("WITHHELD round %d native brief: private term" % rnd); sys.exit(2)
+            status(with_remedy("WITHHELD round %d native brief: private term" % rnd,
+                               "remove the private term from the spec section")); sys.exit(2)
         _npf = os.path.join(wd, "prompts", sub + "-native.md")
         with open(_npf, "w", encoding="utf-8") as _fh:
             _fh.write(_ntext)
@@ -905,10 +989,12 @@ for rnd in range(max_rounds):
     # and the sub unit parks WITHHELD until a fact changes (GRADE_TIMEOUT, the grader, the machine), like any NO-DATA park.
     if not hit and not judged(wd, sub):
         stage_log.leave("grade", sub, unit, ok=None)   # nothing learned: never counted as a rejection
-        status("WITHHELD round %d: NO-DATA, the grade judged nothing (grade stage exit %s, no completed verdict); "
-               "builds kept in %s; no model repair and no lesson; re-seated when its spec, a judge tool, the resolved program or a "
-               "diagnosis note changes (runner_pool fact rule); the kept builds are not re-graded automatically"
-               % (rnd, _grc, os.path.join(wd, "out")))
+        try:
+            with open(os.path.join(wd, "lane.log"), encoding="utf-8", errors="replace") as _lane_fh:
+                _lane_text = _lane_fh.read()
+        except OSError:   # sbe: allow-silent an unreadable lane log reads as the grader having printed nothing
+            _lane_text = ""
+        status(grade_nothing_line(rnd, _grc, _lane_text, os.path.join(wd, "out"), bool(os.environ.get("BROTHER_CODE_ROOT"))))
         sys.exit(2)
     stage_log.leave("grade", sub, unit, ok=bool(hit))
     if not hit:

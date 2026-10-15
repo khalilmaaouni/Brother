@@ -115,6 +115,7 @@ import sys
 import tempfile
 import time
 import uuid
+from typing import Dict, List, Tuple, Union
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -1287,7 +1288,14 @@ def _is_unfinished(record):
     """A run is terminal once every row it decomposed into is DONE. A run
     with no rows at all (should not happen past a real door success, but
     never trusted) is not offered as something to continue."""
+    # CX2.b: a Work document that is not an object, or whose rows are not a
+    # list of objects, is unreadable: left out, never a crash and never a
+    # row (--continue and --unfinished share this one reader).
+    if not isinstance(record, dict):
+        return False
     rows = record.get("rows") or record.get("units") or []
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return False
     return bool(rows) and any(r.get("status") != "DONE" for r in rows)
 
 
@@ -1325,6 +1333,50 @@ def find_unfinished_runs(runs_root, cwd):
         out.append((run_dir, record.get("outcome") or "(no outcome recorded)",
                     record))
     return out
+
+
+def unfinished_summary(runs_root: str, cwd: str) -> List[Dict[str, Union[int, str, None]]]:
+    """CX2.b, the READ ONLY listing behind --unfinished: one row per
+    unfinished run for `cwd`, oldest first, taken from find_unfinished_runs
+    (the exact discovery --continue uses, so the two cannot disagree). Reads
+    the Work document and looks for the receipt file; writes nothing."""
+    rows = []
+    for n, (run_dir, outcome, record) in enumerate(find_unfinished_runs(runs_root, cwd), 1):
+        units = record.get("rows") or record.get("units") or []
+        receipt = os.path.join(run_dir, RECEIPT_DIRNAME, RECEIPT_FILENAME)
+        rows.append({"n": n, "outcome": outcome,
+                     "done": sum(1 for u in units if u.get("status") == "DONE"),
+                     "total": len(units),
+                     "receipt": receipt if os.path.isfile(receipt) else None})
+    return rows
+
+
+def render_unfinished(rows: List[Dict[str, Union[int, str, None]]], cwd: str) -> Tuple[int, List[str]]:
+    """(exit code, lines). No rows is NO-DATA, exit 2, never a pass; the
+    words `no unfinished run found` stay verbatim for readers of the old
+    --continue output."""
+    if not rows:
+        return 2, ["brother_run: NO-DATA: no unfinished run found for %s; nothing was started" % cwd]
+    lines = ["brother_run: %d unfinished run(s) for %s" % (len(rows), cwd)]
+    for row in rows:
+        lines.append("  %d. %s (%d of %d units done; receipt: %s)"
+                     % (row["n"], row["outcome"], row["done"], row["total"],
+                        row["receipt"] or "NO-DATA, none written yet"))
+    return 0, lines
+
+
+def _unfinished_main(args: argparse.Namespace) -> int:
+    """--unfinished: list, start nothing. Called before anything that can
+    write or start work has run."""
+    if args.outcome.strip() or args.resume or args.cont is not None or args.plan or args.contract:
+        print("brother_run: --unfinished replaces an outcome, --resume, --continue, --plan and "
+              "--contract, it does not take any of them", file=sys.stderr)
+        return 1
+    cwd = os.path.abspath(args.cwd)
+    code, lines = render_unfinished(unfinished_summary(_resolve_runs_root(args.runs_root), cwd), cwd)
+    for line in lines:
+        print(line)
+    return code
 
 
 def _normalize_outcome(text):
@@ -6021,6 +6073,11 @@ def _main(argv=None):
                          "one; bare picks the only match (or lists them, "
                          "numbered, when there is more than one), --continue "
                          "N picks the Nth from that list")
+    ap.add_argument("--unfinished", action="store_true",
+                    help="list the unfinished runs for --cwd (outcome, units "
+                         "done of total, receipt path) and exit; read only, "
+                         "nothing is started, resumed or written. Exit 2 and "
+                         "NO-DATA when there is none")
     ap.add_argument("--heartbeat-seconds", type=float, default=None,
                     metavar="N",
                     help="how often, in seconds, a running piece of work "
@@ -6059,6 +6116,9 @@ def _main(argv=None):
                          "same refusal the merge would give later after "
                          "every worker had spent its attempts")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+
+    if args.unfinished:
+        return _unfinished_main(args)
 
     # A PATH SOMEBODY TYPED IS A TRUST BOUNDARY, checked here rather than
     # left to the door: an absent plan file would otherwise reach door.py as

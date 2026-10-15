@@ -42,6 +42,7 @@ a 1.1.0 name still ships as a skill directory. Python 3.9, standard library.
 import argparse
 import re
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 MARKER = "<!-- generated-codex-surface: v1 -->"
 DOOR = "using-brother"
@@ -100,9 +101,10 @@ VERBS = (
      "waiting on them. Reads the run's receipt and answers in plain language with PASS, FAIL and NO-DATA kept "
      "distinct, never from memory. Invoke as /brother status, or by this skill's name where there is no slash "
      "command.",
-     "Where things stand, read from evidence. \"Show me what happened\" is this verb: run the engine's own "
-     "discovery, `brother_run.py --continue --cwd <repo>`, which names the unfinished outcome or prints `no "
-     "unfinished run found`, then open the newest receipt the engine wrote under the runs root (its last line "
+     "Where things stand, read from evidence. \"Show me what happened\" is this verb: to name an "
+     "unfinished outcome without starting anything, run the engine's read only listing, `brother_run.py "
+     "--unfinished --cwd <repo>` (it exits 2 and says NO-DATA when there is none); then open the newest "
+     "receipt the engine wrote under the runs root (its last line "
      "names the path, `brother_run: receipt: <path>`) and report every "
      "entry: the file, the check, the exit code that decided it. There is no second run database and no "
      "second registry; the receipt is the record. A missing receipt is NO-DATA, said as such, never a pass. "
@@ -261,7 +263,68 @@ def retired_route(name):
     return "%s %s" % (verb, words) if words else verb
 
 
+#: verb -> "reads" or "writes"; exactly the verbs of VERBS. A read only verb
+#: answers from evidence and never starts or resumes a run.
+VERB_EFFECTS = {"status": "reads", "next": "reads", "help": "reads", "review": "reads",
+                "start": "writes", "deliver": "writes"}  # type: Dict[str, str]
+#: effect -> the one line rendered under the skill heading.
+EFFECT_LINES = {
+    "reads": "Effect: reads only. This verb answers from evidence and never starts a run, resumes one, "
+             "or writes a file in the repository.",
+    "writes": "Effect: writes. This verb may start or resume a run, write files and move state; say what "
+              "it will do before it does it.",
+}  # type: Dict[str, str]
+#: Regular expressions (case folded) that mark a command which writes. A read
+#: only verb's description and body may name none of them.
+WRITING_PATTERNS = (r"--continue\b", r"--resume\b",
+                    r'bm_controller\.py"?\s+(?:stop|adopt)\b')  # type: Tuple[str, ...]
+
+
+def effect_of(verb: str) -> str:
+    """The declared effect of a verb; a verb with none is an error, never a default."""
+    if verb not in VERB_EFFECTS:
+        raise ValueError("%s declares no effect in VERB_EFFECTS" % verb)
+    return VERB_EFFECTS[verb]
+
+
+def effect_line(verb: str) -> str:
+    return EFFECT_LINES[effect_of(verb)]
+
+
+def writing_command_in(text: str) -> Optional[str]:
+    """The first writing command the text names (whitespace collapsed, case
+    folded), or None."""
+    folded = " ".join(text.split()).lower()
+    for pattern in WRITING_PATTERNS:
+        found = re.search(pattern, folded)
+        if found:
+            return found.group(0)
+    return None
+
+
+def _validate_effects() -> None:
+    verbs = [v for v, _d, _b in VERBS]
+    for verb in verbs:
+        if verb not in VERB_EFFECTS:
+            raise ValueError("%s declares no effect in VERB_EFFECTS" % verb)
+    for verb in VERB_EFFECTS:
+        if verb not in verbs:
+            raise ValueError("VERB_EFFECTS names %r, which is no verb" % (verb,))
+    for verb, effect in VERB_EFFECTS.items():
+        if not isinstance(effect, str) or effect not in EFFECT_LINES:
+            raise ValueError("%s declares the unknown effect %r" % (verb, effect))
+    for verb, description, body in VERBS:
+        if VERB_EFFECTS[verb] != "reads":
+            continue
+        if not isinstance(description, str) or not isinstance(body, str):
+            raise ValueError("%s: description or body is not text" % verb)
+        found = writing_command_in("%s %s" % (description, body))
+        if found:
+            raise ValueError("%s is read only but its text names the writing command %r" % (verb, found))
+
+
 def _validate():
+    _validate_effects()
     verbs = [v for v, _d, _b in VERBS]
     if len(set(verbs)) != len(verbs):
         raise ValueError("a verb is listed twice in VERBS")
@@ -309,7 +372,7 @@ def render_skill(verb, description, body, root):
         for name in routed)
     return (
         "---\nname: brother-%s\ndescription: \"%s\"\n---\n\n"
-        "# brother %s\n\n%s\n\n"
+        "# brother %s\n\n%s\n\n%s\n\n"
         "This is one of the six verbs behind the one door. Under Claude Code and Cursor the door is "
         "`/brother <what you are trying to do>`, and the verb word is optional: the door's routing order in "
         "`%s/skills/using-brother/SKILL.md` decides (%s). Codex and Antigravity have no slash command "
@@ -326,7 +389,7 @@ def render_skill(verb, description, body, root):
         "A request opening with one of them gets one line, `<old name> is now /brother %s` (with the words "
         "the table gives it), then this verb with the rest of the words. The whole table: "
         "`%s/skills/using-brother/references/retired-names.md`.\n"
-        "%s\n" % (verb, description, verb, body, ROOT_VAR, ROOT_ALT, foot, verb, ROOT_VAR, MARKER)
+        "%s\n" % (verb, description, verb, effect_line(verb), body, ROOT_VAR, ROOT_ALT, foot, verb, ROOT_VAR, MARKER)
     )
 
 
@@ -426,8 +489,8 @@ def _candidates(dest):
 
 def generate(root):
     dest = generated_paths(root)
+    expected_files = expected(root)  # first: a refusal leaves the tree untouched
     dest.mkdir(parents=True, exist_ok=True)
-    expected_files = expected(root)
     changed = []
     for rel, content in expected_files.items():
         path = dest / rel
@@ -480,6 +543,14 @@ def main():
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
+    try:
+        return _run(args, root)
+    except ValueError as exc:
+        print("codex_surface: REFUSED: %s" % exc)
+        return 1
+
+
+def _run(args, root):
     if args.check:
         problems = check(root)
         if problems:

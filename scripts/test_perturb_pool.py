@@ -354,5 +354,283 @@ class TheMeasurement(Base):
             self.assertIn("usage", str(ctx.exception.code), argv)
 
 
+
+# FR1.d1 and FR1.d2 (docs/plan/specs/FR1.md): baseline receipts, the disk floor
+# read first, the worker count read again. Fixtures isolate one condition each.
+import release_note_from_tree as RN  # noqa: E402
+import release_note_perturb as RP  # noqa: E402
+import cut_rehearsal as CR  # noqa: E402
+
+VER = "9.9.9"
+SUITE = "scripts/test_x.py"
+
+
+def _quiet(*args, **kw):
+    return contextlib.redirect_stderr(io.StringIO())
+
+
+class TestFR1D(unittest.TestCase):
+    """The baseline receipts (d1)."""
+
+    def setUp(self):
+        self.top = os.path.realpath(tempfile.mkdtemp(prefix="fr1d-test-"))
+        self.addCleanup(shutil.rmtree, self.top, True)
+        self.root = os.path.join(self.top, "repo")
+        self.ev = os.path.join(self.top, "evidence")
+        for rel in CR.SCRIPT_DIRS:
+            os.makedirs(os.path.join(self.root, rel))
+            with open(os.path.join(self.root, rel, "keep.txt"), "w") as fh:
+                fh.write("keep\n")
+        with open(os.path.join(self.root, SUITE), "w") as fh:
+            fh.write("# suite\n")
+        sh(["git", "init", "-q", "-b", "main", self.root], self.top)
+        sh(["git", "add", "-A"], self.root)
+        sh(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+            "commit", "-q", "-m", "one"], self.root)
+        RP._RECEIPT_DURATION.clear()
+        self.addCleanup(RP._RECEIPT_DURATION.clear)
+        self.path = RP.baseline_path(VER, self.ev)
+
+    def write(self, seconds=12.0, now=None, suite=SUITE):
+        return RP.write_baseline_receipt(suite, seconds, VER, root=self.root, directory=self.ev, now=now)
+
+    def load(self, now=None, suite=SUITE):
+        return RP.load_baseline_seconds(suite, VER, root=self.root, directory=self.ev, now=now)
+
+    def edit(self, fn):
+        data = json.load(open(self.path))
+        fn(data["suites"][SUITE])
+        json.dump(data, open(self.path, "w"))
+
+    def commit_change(self, rel, text):
+        with open(os.path.join(self.root, rel), "a") as fh:
+            fh.write(text)
+        sh(["git", "add", "-A"], self.root)
+        sh(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+            "commit", "-q", "-m", "two"], self.root)
+
+    # pooled_rows through its real entry point
+    def pooled(self, perturb, version=VER):
+        pool = lambda pairs, root, wall, workers: [(f, s, True, "d") for f, s in pairs]
+        env = {"BROTHER_CUT_TEST": "1", "BROTHER_CUT_EVIDENCE_DIR": self.ev}
+        with mock.patch.dict(os.environ, env), mock.patch.object(RN, "ROOT", self.root), \
+                mock.patch.object(RN, "subject_files", return_value=["scripts/a.py"]), \
+                mock.patch("refresh_cut.dirty_paths", return_value=([], "")), \
+                mock.patch.object(PP, "free_gib", lambda p: 999.0), _quiet():
+            return RN.pooled_rows([("c", SUITE)], perturb, pool, workers=1, version=version)
+
+    def real_perturb(self, rc=0):
+        calls = []
+        patches = (mock.patch.object(RP, "run_suite", lambda s, **k: calls.append(s) or (rc, "")),
+                   mock.patch.object(RP, "sibling_suite", lambda rel: None))
+        for p_ in patches:
+            p_.start()
+            self.addCleanup(p_.stop)
+        return RP, calls
+
+    def test_a_green_baseline_writes_a_receipt(self):
+        perturb, calls = self.real_perturb()
+        self.pooled(perturb)
+        entry = json.load(open(self.path))["suites"][SUITE]
+        self.assertEqual((calls, entry["exit"], entry["interpreter"]), ([SUITE], 0, sys.executable))
+        self.assertEqual(entry["suite_sha256"], RP._file_sha(self.root, SUITE))
+        self.assertEqual(entry["trees"], RP.script_tree_key(self.root)[0])
+        self.assertGreater(entry["seconds"], 0)
+
+    def test_an_exact_receipt_skips_the_baseline_run(self):
+        self.assertEqual(self.write(12.0), "")
+        perturb, calls = self.real_perturb()
+        rows, problem = self.pooled(perturb)
+        self.assertEqual((calls, problem, len(rows)), ([], None, 1))
+        self.assertEqual(RP._RECEIPT_DURATION[SUITE], 12.0)
+
+    def test_a_changed_suite_reruns_its_baseline(self):
+        self.write()
+        # commit, so only the suite digest can differ once the trees are re-pinned
+        self.commit_change(SUITE, "# more\n")
+        self.edit(lambda e: e.update(trees=RP.script_tree_key(self.root)[0]))
+        self.assertIsNone(self.load()[0])
+        self.assertIn("changed since", self.load()[1])
+
+    def test_a_changed_script_tree_reruns_its_baseline(self):
+        self.write()
+        self.commit_change("products/brothermode/scripts/keep.txt", "more\n")
+        self.assertIn("script tree changed", self.load()[1])
+
+    def test_another_interpreter_reruns_its_baseline(self):
+        self.write()
+        self.edit(lambda e: e.update(interpreter="/elsewhere/python"))
+        self.assertIn("another interpreter", self.load()[1])
+
+    def test_a_stale_receipt_reruns_its_baseline(self):
+        self.write(now=1000.0)
+        self.assertIsNone(self.load(now=1000.0 + RP.RECEIPT_MAX_AGE_S + 1)[0])
+        self.assertEqual(self.load(now=1000.0 + RP.RECEIPT_MAX_AGE_S)[0], 12.0)
+        self.assertIsNone(self.load(now=1000.0 - RP.RECEIPT_FUTURE_SLACK_S - 1)[0])
+
+    def test_a_red_or_unrunnable_baseline_writes_no_receipt(self):
+        perturb, calls = self.real_perturb(rc=1)
+        self.pooled(perturb)
+        self.assertEqual(calls, [SUITE])
+        self.assertFalse(os.path.exists(self.path))
+        for bad in (None, 0, -3.0, float("nan"), float("inf"), "12", True):
+            self.assertNotEqual(self.write(bad), "", bad)
+        self.assertFalse(os.path.exists(self.path))
+        self.assertNotEqual(self.write(suite="scripts/missing.py"), "")
+
+    def test_the_wall_is_the_larger_of_receipt_and_live(self):
+        RP._RECEIPT_DURATION[SUITE] = 100.0
+        self.assertEqual(RP.wall_for(SUITE), 100 * RP.WALL_FACTOR + 1)
+        with mock.patch.dict(RP._LAST_DURATION, {SUITE: 200.0}):
+            self.assertEqual(RP.wall_for(SUITE), 200 * RP.WALL_FACTOR + 1)
+        with mock.patch.dict(RP._LAST_DURATION, {SUITE: 50.0}):
+            self.assertEqual(RP.wall_for(SUITE), 100 * RP.WALL_FACTOR + 1)
+        RP._RECEIPT_DURATION.clear()
+        self.assertEqual(RP.wall_for(SUITE), RP.TIMEOUT)
+        self.assertEqual(RP._C01_CALIBRATED.get((self.root, SUITE)), None)
+
+    def test_a_dirty_script_tree_reads_and_writes_no_receipt(self):
+        self.write()
+        with open(os.path.join(self.root, "scripts", "keep.txt"), "a") as fh:
+            fh.write("dirty\n")
+        self.assertIsNone(self.load()[0])
+        os.remove(self.path)
+        self.assertIn("uncommitted", self.write())
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_a_corrupt_receipt_file_is_replaced_not_trusted(self):
+        for junk in ('{"schema": "cv1.bas', "[1, 2]", json.dumps({"schema": RP.BASELINE_SCHEMA, "suites": []})):
+            os.makedirs(self.ev, exist_ok=True)
+            open(self.path, "w").write(junk)
+            self.assertIsNone(self.load()[0])
+            self.assertEqual(self.write(7.0, now=5.0), "")
+            self.assertEqual(self.load(now=5.0)[0], 7.0)
+        self.assertTrue([e for e in os.listdir(self.ev) if ".corrupt-" in e])
+        self.edit(lambda e: e.pop("trees"))  # an entry missing a field is ignored
+        self.assertIsNone(self.load(now=5.0)[0])
+
+    def test_a_perturb_object_without_receipts_still_runs_every_baseline(self):
+        self.write()
+
+        class Bare(object):
+            def __init__(self):
+                self.ran = []
+
+            def run_suite(self, s):
+                self.ran.append(s)
+                return 0, ""
+
+            def wall_for(self, s):
+                return 60
+
+            def sibling_suite(self, rel):
+                return None
+        bare = Bare()
+        self.pooled(bare)
+        self.assertEqual(bare.ran, [SUITE])
+
+    def test_a_receipt_for_some_suites_reuses_only_those(self):
+        self.write()
+        self.assertIsNone(self.load(suite="scripts/test_other.py")[0])
+        self.assertEqual(self.write(3.0, suite=SUITE), "")  # merge keeps one file whole
+        self.assertEqual(self.load()[0], 3.0)
+
+    def test_no_version_uses_no_receipts(self):
+        self.write()
+        perturb, calls = self.real_perturb()
+        self.pooled(perturb, version=None)
+        self.assertEqual(calls, [SUITE])
+
+    # ---- FR1.d2: the disk floor first, the worker count re-read, a line per admission ----
+    ROWS8 = [("scripts/m%d.py" % i, "scripts/test_%s.py" % "xy"[i % 2]) for i in range(8)]
+
+    def pool_run(self, rows, workers, settled, cap, dies=()):
+        """run_rows with a synchronous spawn and a fake copier. Returns (out, spawned row lists, say lines)."""
+        spawned, lines, n = [], [], [0]
+        base = tempfile.mkdtemp(prefix="run-", dir=self.top)
+
+        def copier(src, dest):
+            os.makedirs(dest)
+            open(dest + PP.MARKER_SUFFIX, "w").close()
+
+        def spawn(argv, env):
+            mine = json.load(open(argv[4]))
+            spawned.append([tuple(r) for r in mine])
+            n[0] += 1
+            if n[0] - 1 in dies:
+                return FakeProc(1, b"worker died")
+            json.dump([[f, s_, True, "red"] for f, s_ in mine], open(argv[6], "w"))
+            return FakeProc(0)
+        with mock.patch.object(PP, "settled_workers", lambda w, **k: settled), _quiet():
+            out = PP.run_rows(rows, self.top, 5, workers=workers, base=base, spawn=spawn,
+                              copier=copier, cap=cap, say=lines.append)
+        return out, spawned, [l for l in lines if l.startswith("workers:")]
+
+    def test_the_disk_floor_is_read_before_any_baseline(self):
+        calls = []
+        perturb = type("P", (), {"run_suite": lambda self, s: calls.append(s) or (0, ""),
+                                 "wall_for": lambda self, s: 60, "sibling_suite": lambda self, r: None})()
+        with mock.patch.dict(os.environ, {"BROTHER_CUT_TEST": "1", "BROTHER_CUT_EVIDENCE_DIR": self.ev}), \
+                mock.patch.object(RN, "ROOT", self.root), \
+                mock.patch.object(RN, "subject_files", return_value=["scripts/a.py"]), \
+                mock.patch("refresh_cut.dirty_paths", return_value=([], "")), \
+                mock.patch.object(PP, "free_gib", lambda p: 5.0):
+            rows, problem = RN.pooled_rows([("c", SUITE)], perturb, lambda *a: [], workers=1, version=VER)
+        self.assertEqual((rows, calls), ([], []))
+        self.assertTrue(problem.startswith("NO-DATA") and "5.0 GiB" in problem and "floor is 15" in problem, problem)
+
+    def test_an_unreadable_disk_reading_blocks(self):
+        def boom(path):
+            raise OSError("no such volume")
+        self.assertIn("cannot be read", PP.floor_problem("/x", free=boom))
+        self.assertEqual(PP.floor_problem("/x", free=lambda p: 15.0), "")
+        self.assertNotEqual(PP.floor_problem("/x", free=lambda p: 14.99), "")
+        with mock.patch.object(PP, "free_gib", boom):
+            self.assertNotEqual(PP.floor_problem("/x"), "")
+
+    def test_a_cap_that_decays_admits_the_waiting_slices(self):
+        out, spawned, lines = self.pool_run(self.ROWS8, 4, 2, lambda w: 4)
+        self.assertEqual(len(spawned), 4, "the base starts settled_workers once and never again")
+        self.assertEqual([len(x) for x in spawned], [2, 2, 2, 2])
+        self.assertIn("workers: 4 requested, 2 admitted", lines[0])
+        self.assertIn("workers: 4 requested, 3 admitted", lines[1])
+
+    def test_the_cap_never_grows_past_the_request(self):
+        out, spawned, lines = self.pool_run(self.ROWS8, 2, 1, lambda w: 99)
+        self.assertEqual(len(spawned), 2)
+        admitted = [int(l.split(", ")[1].split()[0]) for l in lines]
+        self.assertLessEqual(max(admitted), 2)
+        out, spawned, _ = self.pool_run(self.ROWS8[:3], 8, 1, lambda w: 99)
+        self.assertEqual(len(spawned), 3, "never more workers than rows")
+
+    def test_a_load_that_stays_high_merges_the_waiting_rows_into_one_worker(self):
+        out, spawned, lines = self.pool_run(self.ROWS8, 4, 1, lambda w: 1)
+        self.assertEqual([len(x) for x in spawned], [2, 6])
+        self.assertTrue([l for l in lines if "merged into 1 worker" in l], lines)
+
+    def test_every_row_is_answered_once_in_the_order_asked(self):
+        for settled, cap in ((1, lambda w: 1), (2, lambda w: 4), (4, lambda w: 4), (1, lambda w: 2)):
+            out, spawned, _ = self.pool_run(self.ROWS8, 4, settled, cap)
+            self.assertEqual([(f, s_) for f, s_, _v, _d in out], self.ROWS8)
+            asked = [r for part in spawned for r in part]
+            self.assertEqual(sorted(asked), sorted(self.ROWS8), "a row was handed out twice or never")
+            self.assertEqual([v for _f, _s, v, _d in out], [True] * 8)
+        self.assertEqual(PP.run_rows([], self.top, 5), [])
+
+    def test_the_workers_line_names_requested_admitted_and_load(self):
+        _, _, lines = self.pool_run(self.ROWS8, 4, 2, lambda w: 4)
+        import re
+        for line in lines[:2]:
+            self.assertRegex(line, r"^workers: 4 requested, \d+ admitted, load (\d+\.\d|unknown)$")
+
+    def test_a_worker_that_dies_leaves_its_rows_no_data_and_the_rest_run(self):
+        out, spawned, _ = self.pool_run(self.ROWS8, 4, 1, lambda w: 1, dies=(0,))
+        by = {(f, s_): (v, d) for f, s_, v, d in out}
+        for key in spawned[0]:
+            self.assertIsNone(by[key][0])
+            self.assertIn("the worker ended before this row", by[key][1])
+        for key in spawned[1]:
+            self.assertEqual(by[key][0], True)
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+from typing import Optional, Tuple
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))   # the one load rule ships with the loop tools
+from load_rule import load_reading, machine_busy  # noqa: E402,F401  (the estate's one load rule, REQ-LA5-B-03)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 #: Written BESIDE the copy, never inside it: an untracked file inside would
@@ -82,6 +88,20 @@ def make_copy(source_root, dest, floor_gib=DISK_FLOOR_GIB, free=free_gib):
     return sha
 
 
+def floor_problem(path, floor_gib=DISK_FLOOR_GIB, free=None):
+    """FR1.d2: '' when `path` has at least `floor_gib` GiB free, else the NO-DATA reason. An unreadable reading blocks.
+    Asked by the caller before any baseline runs, so a refusal costs no minutes (make_copy keeps its own W6 check)."""
+    free = free or free_gib
+    try:
+        have = free(path)
+    except (OSError, ValueError, TypeError) as exc:
+        return "NO-DATA: the free space under %s cannot be read (%s), floor is %d, read before any baseline" % (
+            path, exc, floor_gib)
+    if have < floor_gib:
+        return "NO-DATA: %.1f GiB free under %s, floor is %d, read before any baseline" % (have, path, floor_gib)
+    return ""
+
+
 def remove_copy(path):
     """W5: exact path, and only a directory this module made (its marker
     file stands beside it)."""
@@ -94,12 +114,25 @@ def remove_copy(path):
 
 def capped_workers(requested, load1=None, ncpu=None):
     """W4. Below one runnable process per core the request stands (up to the
-    core count); at or above it, one worker."""
+    core count); at or above it, one worker. The one comparison is machine_busy's,
+    the estate's own load rule, so this cap and the loop pool's load hold can never
+    disagree at the boundary (REQ-LA5-B-03)."""
     ncpu = ncpu or os.cpu_count() or 1
-    load1 = os.getloadavg()[0] if load1 is None else load1
-    if load1 >= ncpu:
+    if machine_busy(load1, ncpu):
         return 1
     return max(1, min(int(requested), ncpu))
+
+
+def default_workers(ncpu=None):
+    """CF1.a: cores minus one, so one core stays free for the rest of the
+    machine. A missing, bool, non-int or sub-one count reads as 1 core, which
+    only ever means fewer workers (slower, never wrong). The settle still
+    caps the request in run_rows."""
+    if ncpu is None:
+        ncpu = os.cpu_count() or 1
+    if isinstance(ncpu, bool) or not isinstance(ncpu, int) or ncpu < 1:
+        ncpu = 1
+    return max(1, ncpu - 1)
 
 
 #: W4b (2026-10-12): the live baselines that run just before the pool push the
@@ -145,23 +178,94 @@ def run_worker(copy, rows, baseline_wall, out_path):
             json.dump(results, fh)
 
 
+#: FR1.f (C7): how often the row watcher reads the workers' answer files.
+ROW_POLL_S = 5.0
+_WORD = {True: "red", False: "NOT red", None: "NO-DATA"}
+
+
+def _say(text):
+    sys.stderr.write(text + "\n")
+    sys.stderr.flush()
+
+
+def _watch_rows(watched, total, say, stop, poll_s=None, clock=None):
+    """FR1.f: say one line per newly answered row, read from each worker's
+    out<i>.json (a torn read is skipped until the next poll). One last read
+    runs after `stop` is set, so a worker that ended between polls is still
+    heard. `watched` is a list of out paths that run_rows appends to. A
+    line is information only: nothing reads it."""
+    clock = clock or time.monotonic
+    start, seen = clock(), set()
+    poll_s = ROW_POLL_S if poll_s is None else poll_s
+    while True:
+        ended = stop.wait(poll_s)
+        for path in list(watched):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    got = json.load(fh)
+                items = [(r[0], r[1], r[2]) for r in got]
+            except (OSError, ValueError, IndexError, TypeError):
+                continue
+            for file_rel, suite_rel, verdict in items:
+                if (file_rel, suite_rel) in seen:
+                    continue
+                seen.add((file_rel, suite_rel))
+                say("row %d/%d %s -> %s %s after %d s"
+                    % (len(seen), total, file_rel, suite_rel,
+                       _WORD.get(verdict, "NO-DATA"), int(clock() - start)))
+        if ended:
+            return
+
+
+def _load_text():
+    try:
+        return "%.1f" % os.getloadavg()[0]
+    except (OSError, AttributeError):
+        return "unknown"
+
+
 def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
-             spawn=None, copier=make_copy):
+             spawn=None, copier=make_copy, cap=None, say=None):
     """[(file_rel, suite_rel, verdict, detail)] in the order of `rows`.
-    verdict is covers()'s own True / False / None."""
+    verdict is covers()'s own True / False / None.
+
+    FR1.d2: `slots` slices are made round robin; the first wave admits as many
+    as settled_workers allows, and each time a worker ends the cap is read
+    again (`cap` or capped_workers, never above the request) and the free
+    places start the waiting slices, merged round robin when fewer places are
+    free than slices wait. The cap only ever admits; it never stops a worker."""
     rows = [tuple(r) for r in rows]
+    if not rows:
+        return []
+    say = say or _say
+    cap = cap or capped_workers
+    requested = max(1, int(workers))
+    slots = min(requested, len(rows))
+    waiting = [rows[i::slots] for i in range(slots)]
     own_base = base is None
     base = base or tempfile.mkdtemp(prefix="perturb-pool-")
-    n = settled_workers(workers)
+    first = max(1, min(int(settled_workers(workers)), slots))
+    watched, stop = [], threading.Event()
+    watcher = threading.Thread(target=_watch_rows, daemon=True,
+                               args=(watched, len(rows), say, stop))
+    try:
+        watcher.start()
+    except RuntimeError as exc:
+        watcher = None
+        sys.stderr.write("perturb_pool: no row watcher: %s\n" % exc)
     spawn = spawn or (lambda argv, env: subprocess.Popen(argv, env=env,
                                                          stdout=subprocess.DEVNULL,
                                                          stderr=subprocess.PIPE))
-    answers, running = {}, []
-    try:
-        for i in range(n):
-            mine = rows[i::n]
-            if not mine:
-                continue
+    answers, running, made = {}, [], [0]
+
+    def admit(limit):
+        """Start waiting slices until `limit` workers run; a slice whose copy
+        cannot be made is answered NO-DATA and takes no place."""
+        started = 0
+        while waiting and started < limit:
+            mine = waiting.pop(0)
+            i = made[0]
+            made[0] += 1
             copy = os.path.join(base, "copy%d" % i)
             scratch = os.path.join(base, "scratch%d" % i)
             try:
@@ -179,7 +283,14 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
                           rows_path, str(baseline_wall), out_path],
                          clean_env({"TMPDIR": scratch}))
             running.append((mine, copy, out_path, proc))
-        for mine, copy, out_path, proc in running:
+            watched.append(out_path)
+            started += 1
+        say("workers: %d requested, %d admitted, load %s" % (requested, len(running), _load_text()))
+
+    try:
+        admit(first)
+        while running:
+            mine, copy, out_path, proc = running.pop(0)
             err = proc.communicate()[1]
             done = {}
             if os.path.isfile(out_path):
@@ -192,8 +303,23 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
                 remove_copy(copy)
             except (CopyFailed, OSError) as exc:
                 sys.stderr.write("perturb_pool: left behind %s: %s\n" % (copy, exc))
+            if not waiting:
+                continue
+            free = max(1, min(int(cap(workers)), slots)) - len(running)
+            if not running:
+                free = max(free, 1)
+            if free <= 0:
+                continue
+            if free < len(waiting):
+                was = len(waiting)
+                waiting[:] = [[r for part in waiting[j::free] for r in part] for j in range(free)]
+                say("workers: %d waiting slice(s) merged into %d worker(s)" % (was, free))
+            admit(len(waiting))
         return [(f, s) + answers[(f, s)] for f, s in rows]
     finally:
+        stop.set()
+        if watcher is not None:
+            watcher.join(2.0)
         if own_base:
             leftovers = [e for e in os.listdir(base)
                          if e.startswith("copy") and not e.endswith(MARKER_SUFFIX)]

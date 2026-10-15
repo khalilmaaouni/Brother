@@ -244,5 +244,70 @@ class EvidenceObligationTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
 
 
-if __name__ == "__main__":
+def run_bl_owns(cwd):
+    script = os.path.join(HERE, 'test_bl_owns_complete.py')
+    return subprocess.run(
+        [sys.executable, script],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+    )
+
+
+class TestFR0C(unittest.TestCase):
+    def test_a_tree_without_the_plan_file_exits_2_and_says_skipped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            proc = run_bl_owns(temp_dir)
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn('SKIPPED:', proc.stdout)
+            self.assertIn('BROTHER-1.1.0-LAUNCH-WBS.json', proc.stdout)
+
+    def test_the_export_tree_no_data_is_explained_by_the_obligation_map(self):
+        with open(os.path.join(HERE, 'gate_obligations.json'), 'r', encoding='utf-8') as handle:
+            obligations = json.load(handle)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = make_repo(temp_dir, obligations)
+            proc = run_transition(repo, 'merge', [('loop-owns-complete', 2)])
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn('loop-owns-complete\tNO-DATA\tREQUIRED_FOR_MERGE\tALLOWED', proc.stdout)
+            self.assertIn('NO-DATA_ALLOWED', proc.stdout)
+
+    def test_the_hub_tree_no_data_still_blocks_and_a_plan_without_bl_fails(self):
+        with open(os.path.join(HERE, 'gate_obligations.json'), 'r', encoding='utf-8') as handle:
+            obligations = json.load(handle)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = make_repo(temp_dir, obligations)
+            plan_path = os.path.join(repo, 'docs', 'plan', 'BROTHER-1.1.0-LAUNCH-WBS.json')
+            os.makedirs(os.path.dirname(plan_path), exist_ok=True)
+            with open(plan_path, 'w', encoding='utf-8') as handle:
+                handle.write(json.dumps({'units': [{'id': 'OTHER', 'owns': []}]}))
+            proc = run_transition(repo, 'merge', [('loop-owns-complete', 2)])
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn('loop-owns-complete\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED', proc.stdout)
+            self.assertIn('NO-DATA_BLOCKING', proc.stdout)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = os.path.join(temp_dir, 'docs', 'plan', 'BROTHER-1.1.0-LAUNCH-WBS.json')
+            os.makedirs(os.path.dirname(plan_path), exist_ok=True)
+            with open(plan_path, 'w', encoding='utf-8') as handle:
+                handle.write(json.dumps({'units': [{'id': 'OTHER', 'owns': []}]}))
+            proc = run_bl_owns(temp_dir)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn('FAIL:', proc.stdout)
+
+    def test_the_obligation_entry_names_the_scripts_plan_path(self):
+        plan = None
+        with open(os.path.join(HERE, 'test_bl_owns_complete.py'), 'r', encoding='utf-8') as handle:
+            for line in handle:
+                if line.startswith('PLAN = '):
+                    plan = line.split('=', 1)[1].strip()[1:-1]
+                    break
+        self.assertIsNotNone(plan, 'PLAN constant not found in scripts/test_bl_owns_complete.py')
+        with open(os.path.join(HERE, 'gate_obligations.json'), 'r', encoding='utf-8') as handle:
+            obligations = json.load(handle)
+        entry = obligations['checks']['loop-owns-complete']
+        self.assertEqual(entry['expected_absent_input'], plan)
+
+
+if __name__ == '__main__':
     unittest.main()

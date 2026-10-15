@@ -21,6 +21,8 @@ sys.path.insert(0, HERE)
 import cut_driver as D  # noqa: E402
 import cut_rehearsal as CR  # noqa: E402
 
+REAL_COVERING_RECORD = CR.covering_record   # Fixture.setUp patches the module attribute; this stays the real one
+
 try:
     import tmp_sandbox
     tmp_sandbox.install()
@@ -91,12 +93,39 @@ class Fixture(unittest.TestCase):
         with open(self.body, "w") as fh:
             fh.write("notes\n")
 
+    def ready(self, verdict="PASS", tree=None, epoch=None, name_tree=None, rows=None, version=V, **over):
+        """Writes a cut ready record by hand (the cv1.ready.1 shape scripts/cut_ready.py writes); returns its path."""
+        tree = tree or self.tree
+        epoch = time.time() if epoch is None else epoch
+        if rows is None:
+            rows = [{"group": "premise", "name": "tree-clean", "verdict": "PASS", "seconds": 0.1, "detail": ""}]
+            if verdict != "PASS":
+                rows.append({"group": "hub", "name": "hub:x", "verdict": verdict, "seconds": 1.0, "detail": "d"})
+        rec = {"schema": CR.READY_SCHEMA, "version": version, "candidate_sha": self.cand, "candidate_tree": tree,
+               "verdict": verdict, "epoch": epoch, "finished_at": "t", "summary": "s", "rows": rows,
+               "horizon_hours": 6, "horizon_source": "floor constant, no measurement read"}
+        rec.update(over)
+        os.makedirs(self.ev, exist_ok=True)
+        path = os.path.join(self.ev, "cut-ready-%s-%s-%d.json" % (version, (name_tree or tree)[:12], int(epoch * 1000)))
+        with open(path, "w") as fh:
+            json.dump(rec, fh)
+        return path
+
     def drive(self, handlers=GREEN, **kw):
+        """seed_ready=True (default) writes a PASS cut ready record for the CURRENT HEAD^{tree} and drops the
+        resulting `PHASE ready REUSED` line, so every earlier test keeps its line indexes; False turns both off."""
+        seed = kw.pop("seed_ready", True)
+        if seed:
+            self.ready(tree=git(self.root, "rev-parse", "HEAD^{tree}"))
         runner = Runner(handlers)
         out = io.StringIO()
         code = D.run(self.root, V, kw.pop("candidate", ""), self.body, kw.pop("release_branch", "main"),
-                     runner=runner, out=out, **kw)
-        return code, out.getvalue().splitlines(), runner
+                     runner=runner, out=out, power=kw.pop("power", lambda: ("ac", "open")),
+                     sleeps=kw.pop("sleeps", lambda a, b: ""), **kw)
+        lines = out.getvalue().splitlines()
+        if seed:
+            lines = [ln for ln in lines if not ln.startswith("PHASE ready REUSED ")]
+        return code, lines, runner
 
     def state(self, phases=None, **over):
         st = D.new_state(V, self.cand, self.tree, "main", time.time())
@@ -210,8 +239,9 @@ class TheStateIsResumedOnlyForThisCandidate(Fixture):
         self.assertTrue(lines[0].startswith("PHASE preflight PASS"), lines)
 
     def test_next_phase(self):
-        self.assertEqual(D.next_phase(self.state()), "freeze")
-        st = self.state(self.passed("freeze"))
+        self.assertEqual(D.next_phase(self.state()), "ready")
+        self.assertEqual(D.next_phase(self.state(self.passed("ready"))), "freeze")
+        st = self.state(self.passed("ready", "freeze"))
         st["phases"]["preflight"] = {"verdict": "FAIL"}
         self.assertEqual(D.next_phase(st), "preflight")
         st = self.state(dict((n, {"verdict": "REUSED"}) for n in D.PHASES))
@@ -494,7 +524,8 @@ class TheBranchInvariant(Fixture):
         moved = []
 
         def preflight_then_move(cmd, cwd):
-            moved.append(self.ahead(2))
+            if not moved:   # FR1.a: preflight_phase also asks --export-tree-id through this same handler
+                moved.append(self.ahead(2))
             return 0, "cut-preflight: CLEAR\n"
         handlers = [("cut_preflight.py", preflight_then_move)] + GREEN
         code, lines, runner = self.drive(handlers)
@@ -741,13 +772,288 @@ class TheCheckAndTheRunbook(Fixture):
         with open(RUNBOOK, encoding="utf-8") as fh:
             text = fh.read()
         for phase in D.PHASES:
-            self.assertIn("### %s" % phase, text)
+            if phase != "ready":    # the 1.1.3 runbook is a shipped historical file; FR0.e tests the 1.1.4 one
+                self.assertIn("### %s" % phase, text)
         for word in ("cut_driver.py run --version 1.1.3", "cut_driver.py resume", "cut_driver.py wait",
                      "cut_driver.py check --version 1.1.3", "run_rehearsal_112.sh", "cut_from_rehearsal_112.sh"):
             self.assertIn(word, text)
         self.assertIn("the owner types the y", text)
         for code in (0x2013, 0x2014):
             self.assertNotIn(chr(code), text)
+
+
+class TestFR0B(Fixture):
+    """FR0.b (docs/plan/specs/FR0.md): the driver's ready phase and the freeze refusal, keyed by HEAD^{tree}."""
+
+    def freeze(self, **kw):
+        runner = Runner([("close_ceremony_check.py", (0, "PASS ceremony\n"))])
+        got = D.freeze_phase(self.root, V, runner, self.cand, "main", **kw)
+        return got, runner
+
+    def tree12(self):
+        return self.tree[:12]
+
+    # REQ-FR0-08. The state says ready is done, so only freeze_phase can refuse: one condition, one guard.
+    def test_a_fail_record_refuses_the_launch(self):
+        self.ready("FAIL")
+        D.save_state(D.state_path(V, self.cand), self.state(self.passed("ready")))
+        code, lines, runner = self.drive(seed_ready=False)
+        self.assertEqual(code, 1, lines)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertTrue(lines[0].startswith("PHASE freeze FAIL "), lines)
+        self.assertIn("run python3 scripts/cut_ready.py --version %s" % V, lines[0])
+        self.assertEqual(runner.saw("ls-remote"), [])
+        self.assertEqual(runner.saw("close_ceremony_check.py"), [])
+
+    def test_a_fail_record_stops_the_run_at_the_ready_phase(self):
+        self.ready("FAIL")
+        handlers = [("cut_ready.py", (1, "cut-ready: FAIL\n"))] + GREEN
+        code, lines, runner = self.drive(handlers, seed_ready=False)
+        self.assertEqual(code, 1, lines)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertTrue(lines[0].startswith("PHASE ready FAIL "), lines)
+        self.assertEqual(runner.saw("ls-remote"), [])
+
+    def test_no_record_and_a_no_data_record_refuse_the_freeze_as_no_data(self):
+        (verdict, detail), runner = self.freeze()
+        self.assertEqual(verdict, "NO-DATA", detail)
+        self.assertIn("no cut-ready PASS record for tree %s younger than 6 h" % self.tree12(), detail)
+        self.assertEqual(runner.saw("ls-remote"), [])
+        self.ready("NO-DATA")
+        (verdict, detail), runner = self.freeze()
+        self.assertEqual(verdict, "NO-DATA", detail)
+        self.assertEqual(runner.saw("ls-remote"), [])
+        self.ready("PASS", epoch=time.time() + 5)
+        (verdict, detail), runner = self.freeze()
+        self.assertEqual(verdict, "PASS", detail)
+        self.assertTrue(runner.saw("ls-remote"))
+
+    # REQ-FR0-09
+    def test_a_record_for_another_tree_is_not_a_pass(self):
+        other = "e" * 40
+        self.ready("PASS", tree=other, name_tree=self.tree)       # the file name says this tree, the body says another
+        path, verdict, why = CR.ready_record(V, self.tree, self.ev)
+        self.assertEqual((path, verdict), ("", "NO-DATA"), why)
+        self.assertIn("no cut-ready record for tree %s" % self.tree12(), why)
+        (verdict, detail), _r = self.freeze()
+        self.assertEqual(verdict, "NO-DATA", detail)
+        good = self.ready("PASS", name_tree=other)                  # the body says this tree, the name another
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev)[:2], (good, "PASS"))
+        shutil.rmtree(self.ev)
+        self.ready("PASS", version="8.8.8")
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev)[1], "NO-DATA")
+        self.assertEqual(CR.ready_record("8.8.8", self.tree, self.ev)[1], "PASS")
+        shutil.rmtree(self.ev)
+        path = self.ready("PASS")                                   # body version differs from the file name's
+        with open(path) as fh:
+            rec = json.load(fh)
+        rec["version"] = "8.8.8"
+        with open(path, "w") as fh:
+            json.dump(rec, fh)
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev)[1], "NO-DATA")
+
+    # REQ-FR0-10
+    def test_a_pass_older_than_six_hours_or_from_the_future_is_no_record(self):
+        now = 1760000000.0
+        cases = ((now - 7 * 3600, "NO-DATA"), (now - 5 * 3600, "PASS"), (now - 6 * 3600 - 1, "NO-DATA"),
+                 (now + 3600, "NO-DATA"), (now + CR.FUTURE_SLACK_S - 1, "PASS"), (now + CR.FUTURE_SLACK_S + 1, "NO-DATA"))
+        for epoch, want in cases:
+            shutil.rmtree(self.ev, ignore_errors=True)
+            self.ready("PASS", epoch=epoch)
+            path, verdict, why = CR.ready_record(V, self.tree, self.ev, now)
+            self.assertEqual(verdict, want, (epoch - now, why))
+            self.assertEqual(bool(path), want == "PASS", (epoch - now, why))
+        shutil.rmtree(self.ev, ignore_errors=True)
+        self.ready("PASS", epoch=now - 7 * 3600)
+        self.assertIn("older than 6 h", CR.ready_record(V, self.tree, self.ev, now)[2])
+        self.assertEqual(CR.READY_MAX_AGE_S, 6 * 3600)
+        shutil.rmtree(self.ev, ignore_errors=True)
+        self.ready("PASS", epoch=now)
+        for bad in (float("nan"), float("inf"), "1760000000", True):
+            self.assertEqual(CR.ready_record(V, self.tree, self.ev, bad)[1], "NO-DATA", bad)
+        for epoch in (float("nan"), "now", True, None, float("inf")):    # a body epoch that is not a finite number
+            shutil.rmtree(self.ev, ignore_errors=True)
+            path = self.ready("PASS", epoch=now)
+            with open(path) as fh:
+                rec = json.load(fh)
+            rec["epoch"] = epoch
+            with open(path, "w") as fh:
+                json.dump(rec, fh)
+            self.assertEqual(CR.ready_record(V, self.tree, self.ev, now)[1], "NO-DATA", epoch)
+
+    # REQ-FR0-11
+    def test_a_corrupt_record_is_moved_aside_and_refuses(self):
+        os.makedirs(self.ev)
+        now = 1760000000.0
+        whole = {"schema": CR.READY_SCHEMA, "version": V, "candidate_tree": self.tree, "verdict": "PASS",
+                 "epoch": now, "rows": []}
+        shapes = {"truncated": "{trunc", "list": "[]", "wrong schema": json.dumps({"schema": "cv1.ready.0"}),
+                  "no rows": json.dumps(dict((k, v) for k, v in whole.items() if k != "rows")),
+                  "whole but wrong schema": json.dumps(dict(whole, schema="cv1.ready.0")),
+                  "rows not a list": json.dumps(dict(whole, rows="all")),
+                  "rows an empty dict": json.dumps(dict(whole, rows={})),
+                  "unknown verdict": json.dumps(dict(whole, verdict="GREEN")),
+                  "unknown row verdict": json.dumps(dict(whole, rows=[{"verdict": "OK"}]))}
+        for n, (label, body) in enumerate(sorted(shapes.items()), 100):
+            name = "cut-ready-%s-%s-%d.json" % (V, self.tree12(), n)
+            path = os.path.join(self.ev, name)
+            with open(path, "w") as fh:
+                fh.write(body)
+            got = CR.ready_record(V, self.tree, self.ev, now)
+            self.assertEqual(got[:2], ("", "NO-DATA"), label)
+            self.assertFalse(os.path.exists(path), label)
+            with open("%s.corrupt-%d" % (path, int(now))) as fh:
+                self.assertEqual(fh.read(), body, label)
+        # a corrupt file beside a whole PASS record does not stop the PASS, and is still moved aside, never deleted
+        with open(os.path.join(self.ev, "cut-ready-%s-%s-1.json" % (V, self.tree12())), "w") as fh:
+            fh.write("{trunc")
+        good = self.ready("PASS", epoch=now)
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev, now)[:2], (good, "PASS"))
+        self.assertEqual(len([n for n in os.listdir(self.ev) if ".corrupt-" in n]), len(shapes) + 1)
+        # and the driver refuses on a corrupt-only folder
+        shutil.rmtree(self.ev)
+        os.makedirs(self.ev)
+        with open(os.path.join(self.ev, "cut-ready-%s-%s-1.json" % (V, self.tree12())), "w") as fh:
+            fh.write("{trunc")
+        (verdict, detail), _r = self.freeze()
+        self.assertEqual(verdict, "NO-DATA", detail)
+        self.assertEqual(len([n for n in os.listdir(self.ev) if ".corrupt-" in n]), 1)
+
+    # REQ-FR0-12
+    def test_a_cut_ready_record_never_covers_a_rehearsal(self):
+        self.ready("PASS")
+        log = os.path.join(self.tmp, "r.log")
+        with open(log, "w") as fh:
+            fh.write("x\n")
+        trees = dict((d, "a" * 40) for d in CR.SCRIPT_DIRS)
+        rec = CR.record_rehearsal(V, self.cand, self.tree, 0, "READY", log, 1.0, "0" * 64, directory=self.ev,
+                                  script_trees=trees)
+        with open(rec) as fh:
+            body = json.load(fh)
+        os.remove(rec)
+        # (1) the ready file alone covers nothing
+        path, why = REAL_COVERING_RECORD(self.root, V, directory=self.ev)
+        self.assertEqual(path, "")
+        self.assertIn("no record at all", why)
+        # (2) a rehearsal-named file carrying the ready schema is refused by the rehearsal reader
+        body["schema"] = CR.READY_SCHEMA
+        with open(os.path.join(self.ev, "rehearsal-%s-%s-1.json" % (V, self.cand[:12])), "w") as fh:
+            json.dump(body, fh)
+        self.assertNotEqual(CR._record_problem(body, "x"), "")
+        self.assertEqual(CR._load_records(self.ev, V)[0], [])
+        path, why = REAL_COVERING_RECORD(self.root, V, directory=self.ev)
+        self.assertEqual(path, "")
+        self.assertIn("schema", why)
+        self.assertNotIn(CR.READY_SCHEMA, CR.SCHEMAS_READ)
+        # (3) and the ready reader never reads a rehearsal file
+        shutil.rmtree(self.ev)
+        os.makedirs(self.ev)
+        real = CR.record_rehearsal(V, self.cand, self.tree, 0, "READY", log, 1.0, "0" * 64, directory=self.ev,
+                                   script_trees=trees)
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev)[:2], ("", "NO-DATA"))
+        self.assertTrue(os.path.exists(real))
+
+    # REQ-FR0-13
+    def test_the_ready_phase_reuses_a_pass_and_judges_by_the_record(self):
+        keep = self.ready("PASS")
+        runner = Runner([("cut_ready.py", (0, "x\n"))])
+        self.assertEqual(D.ready_phase(self.root, V, runner)[0], "REUSED")
+        self.assertEqual(runner.saw("cut_ready.py"), [])
+        os.remove(keep)
+
+        def writes(verdict, rc):
+            def answer(cmd, cwd):
+                if verdict:
+                    self.ready(verdict)
+                return rc, "out\n"
+            return answer
+        want = ((None, 0, "NO-DATA"), ("PASS", 0, "PASS"), ("PASS", 1, "FAIL"), ("PASS", 2, "NO-DATA"),
+                ("PASS", 127, "NO-DATA"), ("FAIL", 0, "NO-DATA"), ("FAIL", 1, "FAIL"), (None, 1, "FAIL"),
+                ("NO-DATA", 2, "NO-DATA"), ("NO-DATA", 0, "NO-DATA"))
+        for verdict, rc, expect in want:
+            shutil.rmtree(self.ev, ignore_errors=True)
+            runner = Runner([("cut_ready.py", writes(verdict, rc))])
+            got, detail = D.ready_phase(self.root, V, runner)
+            self.assertEqual(got, expect, (verdict, rc, detail))
+            self.assertEqual(len(runner.saw("cut_ready.py --version %s" % V)), 1)
+        shutil.rmtree(self.ev, ignore_errors=True)
+        got, detail = D.ready_phase(self.root, V, Runner([("cut_ready.py", writes(None, 0))]))
+        self.assertIn("cut_ready exited 0 and wrote no PASS record for this tree", detail)
+        self.assertTrue(any(n.startswith("driver-%s-ready-" % V) for n in os.listdir(self.ev)))
+        # the first line of a real run is the ready phase
+        shutil.rmtree(self.ev, ignore_errors=True)
+        self.ready("PASS")
+        code, lines, _r = self.drive(seed_ready=False)
+        self.assertTrue(lines[0].startswith("PHASE ready REUSED "), lines)
+        self.assertTrue(lines[1].startswith("PHASE freeze PASS "), lines)
+
+    # REQ-FR0-14
+    def test_a_newer_fail_beats_an_older_pass_for_the_same_tree(self):
+        now = 1760000000.0
+        self.ready("PASS", epoch=now - 3000)
+        self.ready("PASS", epoch=now - 2000)
+        new = self.ready("FAIL", epoch=now - 1000)
+        self.ready("PASS", tree="d" * 40, epoch=now - 10)            # another tree, newer, ignored
+        path, verdict, why = CR.ready_record(V, self.tree, self.ev, now)
+        self.assertEqual((path, verdict), (new, "FAIL"), why)
+        newest_pass = self.ready("PASS", epoch=now - 500)
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev, now)[:2], (newest_pass, "PASS"))
+        shutil.rmtree(self.ev)                                       # a tie goes to the worse verdict
+        self.ready("PASS", epoch=now - 5)
+        tie = self.ready("FAIL", epoch=now - 5, name_tree="c" * 40)
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev, now)[:2], (tie, "FAIL"))
+
+    def test_a_pass_that_contradicts_its_rows_or_has_none_is_no_data(self):
+        self.ready("PASS", rows=[{"verdict": "PASS"}, {"verdict": "FAIL"}])
+        path, verdict, why = CR.ready_record(V, self.tree, self.ev)
+        self.assertEqual((path, verdict), ("", "NO-DATA"))
+        self.assertIn("contradicts its rows", why)
+        shutil.rmtree(self.ev)
+        self.ready("PASS", rows=[])
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev)[1], "NO-DATA")
+        shutil.rmtree(self.ev)
+        self.ready("FAIL", rows=[{"verdict": "PASS"}])
+        self.assertIn("contradicts", CR.ready_record(V, self.tree, self.ev)[2])
+
+    def test_a_bad_version_tree_or_missing_folder_is_no_data(self):
+        for version, tree in (("1.1", self.tree), ("x", self.tree), ("", self.tree), (V, "abc"), (V, ""),
+                              (None, self.tree), (V, 7)):
+            self.assertEqual(CR.ready_record(version, tree, self.ev)[:2], ("", "NO-DATA"), (version, tree))
+        self.assertFalse(os.path.exists(self.ev))
+        self.assertEqual(CR.ready_record(V, self.tree, self.ev)[:2], ("", "NO-DATA"))
+        self.assertEqual(CR.ready_record(V, self.tree, 5)[:2], ("", "NO-DATA"))
+
+    def test_an_older_six_phase_state_starts_at_ready_and_is_not_a_complete_check(self):
+        self.assertEqual(D.PHASES[:2], ("ready", "freeze"))
+        six = self.passed(*D.PHASES[1:])
+        self.assertEqual(D.next_phase(self.state(six)), "ready")
+        D.save_state(D.state_path(V, self.cand), self.state(six))
+        out = io.StringIO()
+        self.assertEqual(D.check(V, out=out), 1)
+        self.assertIn("INCOMPLETE", out.getvalue())
+        self.assertIn("ready is not run", out.getvalue())
+        code, lines, runner = self.drive(seed_ready=False, handlers=[("cut_ready.py", (1, "FAIL\n"))] + GREEN)
+        self.assertEqual(code, 1, lines)
+        self.assertTrue(lines[-1].startswith("PHASE ready FAIL "), lines)
+
+
+class TheVerifierPipesJsonIntact(unittest.TestCase):
+    """2026-10-13, the 1.1.3 after phase: post_publish_verify.sh piped the Release JSON with `echo "$J"`,
+    and macOS /bin/sh's echo turns a body's escaped \\n into a raw newline, so json.load refused it
+    (Invalid control character) and the whole after phase read NO-DATA on a clean release. This runs the
+    script's own pipe prefix under /bin/sh on a body carrying \\n, \\t and \\\\."""
+
+    def test_the_release_json_reaches_python_unchanged(self):
+        script = os.path.join(HERE, "post_publish_verify.sh")
+        with open(script, encoding="utf-8") as fh:
+            lines = [l for l in fh if '"$J" | python3' in l]
+        self.assertEqual(len(lines), 1, lines)
+        prefix = lines[0].split("| python3", 1)[0].strip()
+        body = json.dumps({"body": "line one\nline two\ttab \\ slash"})
+        out = subprocess.run(["/bin/sh", "-c", 'J=$1; %s' % prefix, "_", body],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)["body"], "line one\nline two\ttab \\ slash")
 
 
 if __name__ == "__main__":

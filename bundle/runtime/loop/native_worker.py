@@ -20,6 +20,7 @@ Footprint: one worktree per seat, reused and reset (checkout -f, clean -fdx), ne
 Test: python3 -B scripts/loop/test_native_worker.py
 """
 import contextlib, fcntl, hashlib, json, os, re, shutil, stat, subprocess, sys, tempfile, threading, time, uuid
+from typing import Iterable, List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -158,6 +159,11 @@ SEAT_WAIT = "NO-DATA no native seat free"   # and every session that never got a
 #: in a run's last DEFAULT_SESSION_S. BROTHER_NATIVE_SESSION_S moves it within SESSION_RANGE.
 DEFAULT_SESSION_S = 2700
 SESSION_RANGE = (600, 7200)
+#: THE CAP IS SIZED TO THE UNIT (LS2.a, 2026-10-14): the plan records a size letter per unit (S, M, L), and the one
+#: 2700 s constant above for every unit of every size was the measured cause of the three 1.1.3 timeouts (2908 to
+#: 4409 s) on units whose suites ran slowly under load. Each value is inside SESSION_RANGE, and a test asserts it so a
+#: later edit cannot move one out. A size that is not a key here refuses (ValueError), never a silent default.
+SESSION_BY_SIZE = {"S": 2700, "M": 4500, "L": 5400}
 
 
 def spec_section(spec_text, sub):
@@ -240,12 +246,18 @@ def seats(env=None):
     return int(raw)
 
 
-def session_seconds(env=None):
-    """BROTHER_NATIVE_SESSION_S as whole seconds within SESSION_RANGE; unset means DEFAULT_SESSION_S; anything else
-    refuses (ValueError): a cap nobody can read is never quietly replaced by another."""
+def session_seconds(env=None, size=None):
+    """The native session cap in whole seconds (LS2.a). `size` is the unit's own size letter from the plan record:
+    None keeps DEFAULT_SESSION_S, and a SESSION_BY_SIZE key answers its own cap. The size is judged FIRST, so an
+    unreadable unit is never rescued by an unrelated variable; then BROTHER_NATIVE_SESSION_S is read and judged
+    exactly as before, and when it is set and valid it wins over the size. Anything else refuses (ValueError): a cap
+    nobody can read is never quietly replaced by another."""
+    if size is not None:
+        if not isinstance(size, str) or size not in SESSION_BY_SIZE:
+            raise ValueError("unit size must be one of S, M, L, not %r; fix the size field of the unit in the plan" % (size,))
     raw = str((os.environ if env is None else env).get("BROTHER_NATIVE_SESSION_S", "")).strip()
     if not raw:
-        return DEFAULT_SESSION_S
+        return DEFAULT_SESSION_S if size is None else SESSION_BY_SIZE[size]
     if not raw.isdigit() or not SESSION_RANGE[0] <= int(raw) <= SESSION_RANGE[1]:
         raise ValueError("BROTHER_NATIVE_SESSION_S must be whole seconds from %d to %d, not %r" % (SESSION_RANGE + (raw,)))
     return int(raw)
@@ -430,27 +442,163 @@ def profile(token_on=False):
     return PROFILE + TOKEN_DENY if token_on else PROFILE
 
 
-def session_argv(model_id, effort, wt, program, common="", env=None, token_on=False):
-    """sandbox-exec around `claude -p` with real tools; the prompt goes on stdin. common: the repository's git dir, the
-    one path outside the seat a session reads so git works in its worktree (status, diff, log; writes stay refused).
+#: The -D names _sandbox_head passes to sandbox-exec. A profile naming a parameter outside this set would be refused
+#: by the system at launch, so the static reader names it before a session ever starts.
+SANDBOX_PARAMS = ("WT", "TMP", "HOME", "TOOLDIR", "COMMON")
+
+
+def _profile_tokens(text):
+    """(tokens, unterminated): the profile text split into "(", ")", ("word", w) and ("str", s) tokens. A double
+    quote opens a string or a regex literal (`#"..."`); the literal closes at the next quote not preceded by a
+    backslash. unterminated is True when a literal opens and never closes, and the tokens seen before it are still
+    answered."""
+    toks, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c.isspace():
+            i += 1
+        elif c == "(" or c == ")":
+            toks.append(c)
+            i += 1
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            if j >= n:
+                return toks, True
+            toks.append(("str", text[i + 1:j]))
+            i = j + 1
+        else:
+            j = i
+            while j < n and not text[j].isspace() and text[j] not in "()\"":
+                j += 1
+            toks.append(("word", text[i:j]))
+            i = j
+    return toks, False
+
+
+def _profile_forms(toks):
+    """(forms, unbalanced): the top level forms of a token list, each a list of tokens (a nested form is a list
+    inside it), and True when a closing paren has no opener or an opener is still open at the end."""
+    forms, stack, unbalanced = [], [], False
+    for tok in toks:
+        if tok == "(":
+            stack.append([])
+        elif tok == ")":
+            if not stack:
+                unbalanced = True
+            else:
+                done = stack.pop()
+                (stack[-1] if stack else forms).append(done)
+        elif stack:
+            stack[-1].append(tok)
+    if stack:
+        unbalanced = True
+    return forms, unbalanced
+
+
+def _profile_param_names(toks):
+    """Every distinct NAME written as (param "NAME"), in the order it first appears."""
+    names = []
+    for k in range(len(toks) - 1):
+        a, b = toks[k], toks[k + 1]
+        if (isinstance(a, tuple) and a[0] == "word" and a[1] == "param"
+                and isinstance(b, tuple) and b[0] == "str" and b[1] not in names):
+            names.append(b[1])
+    return names
+
+
+def profile_problems(profile_text: str, params: Optional[Iterable[str]] = None) -> List[str]:
+    """Read a sandbox profile statically (L26): one sentence per defect and an empty list for a sound profile. It is
+    pure: it never starts a sandbox and never raises on the profile text, and no seat path calls it, so a defect in
+    this reader can never stop a session. params: the -D names the caller passes (default SANDBOX_PARAMS)."""
+    if not isinstance(profile_text, str) or not profile_text.strip():
+        return ["the profile is not text"]
+    if params is None:
+        known = frozenset(SANDBOX_PARAMS)
+    else:
+        try:
+            known = frozenset(params)
+        except TypeError:
+            raise ValueError("params must be an iterable of parameter names, not %s" % type(params).__name__)
+    toks, unterminated = _profile_tokens(profile_text)
+    forms, unbalanced = _profile_forms(toks)
+    problems = []
+    if not forms or forms[0] != [("word", "version"), ("word", "1")]:
+        problems.append("the first form is not (version 1)")
+    if unbalanced:
+        problems.append("parentheses are unbalanced")
+    if unterminated:
+        problems.append("a string literal is not closed")
+    for name in _profile_param_names(toks):
+        if name not in known:
+            problems.append("unknown parameter %s" % name)
+    for form in forms:
+        head = form[0][1] if form and isinstance(form[0], tuple) and form[0][0] == "word" else None
+        if head not in ("allow", "deny", "version"):
+            problems.append("a top level form is not allow or deny or version")
+    return problems
+
+
+def _sandbox_head(wt, common, env, token_on):
+    """Everything of a sandboxed Claude command line up to the program: sandbox-exec with the profile and its -D
+    parameters, then the env wrapper that unsets the credential-shaped names and pins TMPDIR and the push block. ONE
+    place, so a seat (session_argv) and a role call on the loop login (role_argv) can never carry different walls.
     Every path is resolved first: sandbox rules match resolved paths (third review: a symlinked ~/.claude made the
-    seat unreadable and unwritable). env: the environment the child will run under (default: this process's); on the
-    token lane (token_on) it is the scrubbed copy naming the login's descriptor (brother_login.FD_VAR), the ONE
-    credential-shaped name the scrub below leaves alone: its value is a descriptor number this process opened a moment
-    ago, never a secret and never a parent's."""
+    seat unreadable and unwritable). env: the environment the child will run under; on the token lane (token_on) it is
+    the scrubbed copy naming the login's descriptor (brother_login.FD_VAR), the ONE credential-shaped name the scrub
+    leaves alone: its value is a descriptor number this process opened a moment ago, never a secret and never a parent's."""
     wt = os.path.realpath(wt)
     tmp = os.path.join(wt, ".tmp")
-    env = os.environ if env is None else env
     # sixth review 2026-10-02: the session inherited every variable of the loop; strip each credential-shaped name, the
     # grader's own rule (grade_build.SECRET_ENV), so no key in the environment reaches a session with the network open
     unset = [a for k in sorted(env) if G.SECRET_ENV.search(k) and not (token_on and k == BL.FD_VAR) for a in ("-u", k)]
-    allowed = ["--allowedTools", TOOLS] if token_on else []   # the scrub forces default mode; declared tools still run
-    return (["sandbox-exec", "-p", profile(token_on), "-D", "WT=" + wt, "-D", "TMP=" + tmp,
+    return ([MC.SANDBOX_EXEC, "-p", profile(token_on), "-D", "WT=" + wt, "-D", "TMP=" + tmp,
              "-D", "HOME=" + os.path.realpath(os.path.expanduser("~")),   # rules match resolved paths
              "-D", "TOOLDIR=" + tool_dir(wt), "-D", "COMMON=" + (os.path.realpath(common) if common else wt),
-             "env", "-u", "GH_TOKEN", "-u", "GITHUB_TOKEN", "-u", "SSH_AUTH_SOCK"] + unset + ["TMPDIR=" + tmp] + PUSH_BLOCK + [program, "-p", "--model", model_id] + MC.CLAUDE_TRIM
+             "env", "-u", "GH_TOKEN", "-u", "GITHUB_TOKEN", "-u", "SSH_AUTH_SOCK"] + unset + ["TMPDIR=" + tmp] + PUSH_BLOCK)
+
+
+def session_argv(model_id, effort, wt, program, common="", env=None, token_on=False):
+    """sandbox-exec around `claude -p` with real tools; the prompt goes on stdin. common: the repository's git dir, the
+    one path outside the seat a session reads so git works in its worktree (status, diff, log; writes stay refused).
+    env and token_on: see _sandbox_head."""
+    env = os.environ if env is None else env
+    allowed = ["--allowedTools", TOOLS] if token_on else []   # the scrub forces default mode; declared tools still run
+    return (_sandbox_head(wt, common, env, token_on) + [program, "-p", "--model", model_id] + MC.CLAUDE_TRIM
             + ["--tools", TOOLS] + allowed + ["--permission-mode", "bypassPermissions"] + MC.CLAUDE_IO + ["--effort", effort]
             + (["--max-budget-usd", budget_usd()] if budget_usd() is not None else []))
+
+
+def role_argv(inner, wt, env):
+    """A role's headless Claude call (model_call's plain command line `inner`, which allows no tool and takes the prompt
+    on stdin) inside the SEAT'S sandbox on the loop token lane: the same head as a seat's, the token lane profile, a
+    scratch folder `wt` for its only writable place. 2026-10-14: under BROTHER_LOOP_TOKEN=on model_call refused every
+    unsandboxed call, so no planner, repair advisor, finisher or checker could run on the loop login at all."""
+    return _sandbox_head(wt, "", env, True) + list(inner)
+
+
+#: THE TOKEN CHILD'S ENVIRONMENT IS AN ALLOWLIST (review 2026-10-14, G2): the child holds the owner's login, and a name that
+#: routes its traffic (ANTHROPIC_BASE_URL, HTTPS_PROXY in any case, NODE_OPTIONS, NODE_EXTRA_CA_CERTS, DYLD_*) would send it
+#: to another host or load another program's code into it. Only these names (the ones brother_login.base_env keeps, plus the
+#: locale, time zone and temp folder a tool needs) and the LC_ and BROTHER_ prefixes pass, and never a credential shaped name
+#: (grade_build.SECRET_ENV). Everything else is absent from the child, seats and roles alike.
+CHILD_ENV_NAMES = frozenset(("HOME", "USER", "LOGNAME", "PATH", "LANG", "LANGUAGE", "TERM", "TZ", "SHELL", "TMPDIR"))
+CHILD_ENV_PREFIXES = ("LC_", "BROTHER_")
+
+
+def child_env_name(name):
+    """True when `name` may reach a token lane child."""
+    return (name in CHILD_ENV_NAMES or name.startswith(CHILD_ENV_PREFIXES)) and not G.SECRET_ENV.search(name)
+
+
+def login_child():
+    """(child_env, fd) for ONE token lane child: the Keychain login on a pipe (fd, named by FD_VAR in child_env), never in
+    an environment, with the CLI's own tool children scrubbed too. Raises brother_login.Failure when the login cannot be
+    read (a plain message, never the login). The caller passes fd to that one child and closes it afterwards."""
+    child_env, fd = BL.with_login({k: v for k, v in os.environ.items() if child_env_name(k)})
+    child_env[SCRUB_VAR] = "1"   # the CLI's own tool children never inherit its environment
+    return child_env, fd
 
 
 def _seat_session(m, effort, wt, common, held_fds, program=None):
@@ -478,11 +626,10 @@ def _seat_session(m, effort, wt, common, held_fds, program=None):
     child_env = login_fd = None
     if token_on:
         try:
-            child_env, login_fd = BL.with_login({k: v for k, v in os.environ.items() if not G.SECRET_ENV.search(k)})
+            child_env, login_fd = login_child()
         except BL.Failure as exc:
             return None, None, None, None, "%s: %s" % (MC.CONFIG_WAIT, exc)
         held_fds.append(login_fd)
-        child_env[SCRUB_VAR] = "1"   # the CLI's own tool children never inherit its environment
     os.makedirs(tool_dir(wt), exist_ok=True)   # outside the sandbox, so the session never needs its parent
     return session_argv(m["id"], effort, wt, program, common, env=child_env, token_on=token_on), effort, child_env, login_fd, ""
 

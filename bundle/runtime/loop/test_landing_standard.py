@@ -40,9 +40,9 @@ class OwnTest(unittest.TestCase):
 class Mirrored(unittest.TestCase):
     MIRRORED = {"bundle/runtime/loop/start_run.sh"}
 
-    def test_a_loop_built_section_naming_a_mirrored_file_is_refused(self):
-        why = L.mirrored_refusal(["scripts/loop/start_run.sh"], self.MIRRORED, True)
-        self.assertEqual(why, "MIRRORED: scripts/loop/start_run.sh is mirrored into bundle/ (S4)")
+    def test_a_loop_built_section_naming_a_mirrored_file_is_accepted(self):
+        """LM1.c: the landing regenerates the mirror, so a mirrored source is no longer refused."""
+        self.assertEqual(L.mirrored_refusal(["scripts/loop/start_run.sh"], self.MIRRORED, True), "")
 
     def test_a_loop_built_section_naming_bundle_itself_is_refused(self):
         self.assertIn("MIRRORED", L.mirrored_refusal(["bundle/skills/x/SKILL.md"], set(), True))

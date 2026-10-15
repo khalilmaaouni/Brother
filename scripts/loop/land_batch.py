@@ -68,6 +68,12 @@ def code_root(frozen=None):
 sys.path.insert(0, BIN); import plan_path as _PP   # noqa: E402  THIS directory's copy of the one plan selector (BROTHER_WBS or the default; an invalid value refuses)
 PLAN = _PP.selected(); CHECK_ALL = "scripts/check_all.sh"
 LOOP_UNIT = "BL"   # the unit whose owns names every brother.loop component (scripts/test_bl_owns_complete.py)
+#: The plan that HOLDS unit BL when the run's plan does not: the file scripts/test_bl_owns_complete.py reads (its PLAN is the
+#: other reader of this string; scripts/loop/test_land_batch_bl_owns_plan.py asserts the two are equal). Measured 2026-10-14
+#: on the first live 1.1.4 landing: BL was looked up only in the run's plan, so every other plan left new loop files unowned.
+#: Spelled once, by plan_path.DEFAULT (a second literal fails scripts/loop/test_loop_plan_selection.py's source scan);
+#: Contract.test_the_fallback_is_the_file_the_check_reads pins the two strings equal.
+LOOP_OWNS_PLAN = _PP.DEFAULT
 ANCHOR = "# LAST, on purpose"
 #: A test path the lander may write into check_all.sh, a shell script run unsandboxed by people (ninth review 2026-10-02,
 #: reproduced: a build-created scripts/test_$(cmd).py was pasted verbatim and ran at the next battery). Plain names only.
@@ -106,6 +112,18 @@ def landing_records(lines, seen=None, owns=(), owner=LOOP_UNIT):
     ids = {uid: list(add) for uid, add in lines.items()}
     if owns: ids.setdefault(owner, [])
     return {uid: append(uid, add, list(owns) if uid == owner else []) for uid, add in ids.items()}
+
+def owner_plan(plan, run_plan=PLAN, fallback=LOOP_OWNS_PLAN, owner=LOOP_UNIT):
+    """(path, why): the plan file that holds unit `owner`, the run's plan first (`plan` is its parsed copy), else the
+    fallback file read now. why is '' when one holds it, else what is missing. FAIL DIRECTION: a fallback that is
+    unreadable, not JSON, not a {"units": [...]} object or without the owner is no home, so the caller refuses the landing."""
+    has = lambda doc: isinstance(doc, dict) and isinstance(doc.get("units"), list) and any(isinstance(u, dict) and u.get("id") == owner for u in doc["units"])
+    if has(plan): return run_plan, ""
+    if fallback != run_plan:
+        other = load_json(fallback)
+        if has(other): return fallback, ""
+        return "", "unit %s is in neither %s nor %s (%s)" % (owner, run_plan, fallback, "unreadable or not a plan" if other is None or not isinstance(other, dict) else "no such unit")
+    return "", "unit %s is not in %s" % (owner, run_plan)
 
 def loop_components(paths):
     """The paths that make up brother.loop by scripts/test_bl_owns_complete.py's own rule (its components()): a .py or
@@ -335,6 +353,41 @@ GATES = (("registration", ["scripts/test_battery_registration.py"], None, ()),
          ("system_doc", ["scripts/system_doc.py", "--check"], ["scripts/system_doc.py"], ("SYSTEM.md",)),
          ("bundle", ["scripts/bundle_runtime.py", "--check"], ["scripts/bundle_runtime.py"],
           ("bundle/runtime/", "bundle/codex-skills/", "bundle/hooks/hooks.json", "bundle/mcp.json", "bundle/.antigravity-plugin/scripts/")))
+
+
+#: the suffixes scripts/bundle_runtime.loop_files mirrors from scripts/loop into bundle/runtime/loop (read 2026-10-14)
+LOOP_MIRROR_SUFFIXES = (".py", ".sh", ".md", ".c")
+#: gate names whose generator runs BEFORE their check when the batch changed a mirrored source (LM1.a): the check would read
+#: red anyway, so the first run is skipped and the generator's output goes through the one screen every generator passes
+REGEN_FIRST = ("bundle",)
+
+
+def mirror_touched(paths, tracked):
+    """The sorted repo relative paths among `paths` that are mirrored sources: a file directly under scripts/loop with a
+    LOOP_MIRROR_SUFFIXES suffix (new or old, the twin need not exist yet), or any other scripts/ file whose twin
+    bundle/runtime/<rest> `tracked` reports. Normalized and case folded for the compare. A non string, empty, absolute or
+    .. path is skipped, never a crash and never mirrored (the check after it still gates, so that direction is never PASS)."""
+    try:
+        items = list(paths)
+    except TypeError:
+        return []
+    out = set()
+    for p in items:
+        if not isinstance(p, str) or not p or p.startswith("/") or "\x00" in p or ".." in p.split("/"):
+            continue
+        n = os.path.normpath(p); parts = n.split("/")
+        if len(parts) < 2 or parts[0].casefold() != "scripts":
+            continue
+        if len(parts) == 3 and parts[1].casefold() == "loop" and parts[2].casefold().endswith(LOOP_MIRROR_SUFFIXES):
+            out.add(n)
+        else:
+            try:
+                twin = tracked("bundle/runtime/" + "/".join(parts[1:]))
+            except (OSError, ValueError):
+                twin = False
+            if twin:
+                out.add(n)
+    return sorted(out)
 
 
 def undeclared_outputs(paths, outputs):
@@ -678,6 +731,71 @@ def gate_quarantine(landed, status_paths, why, prev):
     if len(landed) != 1 or not status_paths: return None
     return "QUARANTINE refused at the gates alone, %s | previous: %s\n" % (why, prev)
 
+#: A LANDING REFUSAL IS THE FACT THE NEXT ATTEMPT NEEDS (1.1.4, measured 2026-10-14: LA5.b built to grader PASS, the landing
+#: refused it on ONE neighbour test, and the pool offered it no fact it accepts, so every unit behind it drained and the run
+#: stopped). reject_status is the one place every landing rejection writes a STATUS (four writers route through it): it also
+#: records the rejection as the sub unit's diagnosis note, which runner_pool counts as a fact (fact_time) and unit_runner
+#: carries into the next brief. The SAME failure REJECTION_REPEAT_LIMIT times parks the sub unit instead, with a cause and a
+#: remedy (the LD1 shape), so one real defect never loops forever. Out of scope: a failure that changes every time is progress.
+REJECTION_REPEAT_LIMIT = 2
+REJECTION_BODY_MAX = 300
+REJECTION_NOTE_RE = re.compile(r"^LANDING REFUSAL (\d+) \((\w+)\) sig=([0-9a-f]{12}): ")
+#: text that differs between two runs of one failure: addresses, paths, then every number (durations, line numbers, pids)
+VOLATILE_TEXT = ((re.compile(r"0x[0-9a-fA-F]+"), "N"), (re.compile(r"(?:/[^\s/:;,|()]+)+"), "P"), (re.compile(r"\d+"), "N"))
+
+def one_line(text, limit):
+    """text as one line of at most limit characters: control characters and runs of blanks become one space. Never raises."""
+    return " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", str(text)).split())[:limit]
+
+def first_failure(output):
+    """A gate's failing test name and its first assertion line, bounded to REJECTION_BODY_MAX, from the gate's own output
+    (unittest's FAIL or ERROR header, then the first Error or Exception line after it). Neither found: the last line."""
+    lines = [l.strip() for l in str(output or "").splitlines() if l.strip()]
+    test = next((l for l in lines if re.match(r"(?:FAIL|ERROR): ", l)), "")
+    said = next((l for l in lines[(lines.index(test) + 1 if test else 0):] if re.match(r"(?:\w+\.)*\w*(?:Error|Exception)\b", l)), "")
+    return one_line(" | ".join(x for x in (test, said) if x) or (lines[-1] if lines else ""), REJECTION_BODY_MAX)
+
+def rejection_signature(kind, why, detail=""):
+    """Twelve hex characters naming a failure with its volatile text removed, so two refusals of one defect compare equal."""
+    text = one_line("%s %s %s" % (kind, why, detail), 4000)
+    for pat, repl in VOLATILE_TEXT: text = pat.sub(repl, text)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+def rejection_text(st, text, kind, why, detail, sub, plan):
+    """The STATUS text for a rejected build, after the landing's refusal is kept as the sub unit's diagnosis note. The note
+    is written on the first refusal of a failure and on every repeat under the limit; the repeat that reaches the limit
+    writes none and returns the parked STATUS instead. Raises OSError, ValueError or ImportError when the note cannot be
+    kept (the caller reports it and writes the plain STATUS)."""
+    sub = sub or re.sub(r"-\d{6}$", "", os.path.basename(os.path.dirname(st)))
+    plan = plan if plan is not None else load_json(PLAN)
+    unit = unit_of(sub, plan) if isinstance(plan, dict) and sub else None
+    if not unit: raise ValueError("no plan unit holds sub unit %r" % (sub,))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import diag_notes
+    body = one_line("%s | %s" % (one_line(why, 120), one_line(detail, REJECTION_BODY_MAX)) if detail else why, REJECTION_BODY_MAX)
+    sig = rejection_signature(kind, why, detail)
+    old = REJECTION_NOTE_RE.match(diag_notes.note_for(unit["id"], sub))
+    n = int(old.group(1)) + 1 if old and old.group(3) == sig else 1
+    if n >= max(1, REJECTION_REPEAT_LIMIT):
+        print("PARKED  %-10s refused at the landing %d time(s) with the same failure; no new diagnosis note" % (sub, n))
+        return ("WITHHELD at landing: refused %d time(s) with the same %s failure (%s); remedy: fix that failure on the "
+                "landing tree or repair the sub unit's spec so a build can meet it; the pool re-seats it when its spec, "
+                "a judge tool or a diagnosis note changes\n" % (n, kind, body))   # body is one line of at most 300 characters: whole inside previous_reason's 900
+    diag_notes.write_note(unit["id"], sub, "LANDING REFUSAL %d (%s) sig=%s: %s" % (n, kind, sig, body))
+    print("NOTE    %-10s landing refusal %d recorded as a diagnosis note: the next brief carries it" % (sub, n))
+    return text
+
+def reject_status(st, text, kind, why, detail="", sub=None, plan=None):
+    """THE ONE PLACE a landing rejection writes its STATUS (the drop, the gates alone, the commit refusals, the unwind).
+    The diagnosis note is best effort: a notes folder that cannot be written is reported and never blocks the landing,
+    and the plain STATUS text is written. A STATUS that cannot be written raises OSError as write_status does."""
+    final = text
+    try:
+        final = rejection_text(st, text, kind, why, detail, sub, plan)
+    except (OSError, ValueError, ImportError) as exc:
+        print("note: could not record the landing refusal for %s as a diagnosis note (%s); the sub unit is not re-seated by it" % (sub or st, exc))
+    write_status(st, final)
+    return final
+
 def bisect_plan(landed, builds, no_bisect):
     """The retries for a refused multi build batch: a list of argument lists, ONE build each, never the batch
     again. Measured 2026-09-21: one poisoned build in a batch of five reverted all five, and the identical
@@ -970,7 +1088,7 @@ def refuse_landing(why, paths, status_paths, landed, log, run=None, prev_reader=
             prev = (prev_reader or (lambda q: open(q, encoding="utf-8").read().strip()))(st)
             note = gate_quarantine(landed, status_paths, why, prev)
             if note:
-                write_status(st, note)
+                reject_status(st, note, "commit", why, sub=landed[0])
                 held += 1
         except (OSError, ValueError) as exc:
             print("note: could not quarantine %s (%s)" % (st, exc))
@@ -1011,7 +1129,7 @@ def unwind(started_from, why, status_paths, log, rev, run=None, changed=None):
     for st in status_paths:
         try:
             with open(st, encoding="utf-8") as fh: prev = fh.read().strip()
-            write_status(st, "QUARANTINE refused after the commit, %s; the commit is kept as refs/brother/unlanded/%s | previous: %s\n" % (why, sha, prev))
+            reject_status(st, "QUARANTINE refused after the commit, %s; the commit is kept as refs/brother/unlanded/%s | previous: %s\n" % (why, sha, prev), "push", why)
             held += 1
         except (OSError, ValueError) as exc:
             print("        note: could not quarantine %s (%s), it may be offered again" % (st, exc))
@@ -1444,29 +1562,45 @@ def revert(paths, log):
     return len(tracked), len(created)
 
 
+class Appended(dict):
+    """What a landing appended to the run's plan ({unit id: (evidence re-read, evidence written[, owns added])}, filled by
+    landing_records), plus .homes: {plan path: that same shape} for every OTHER plan the landing wrote, the one that holds
+    unit BL when the run's plan does not (owner_plan). One object, so every refusal that passes `appended` to
+    revert_landing takes back every plan this landing wrote, and no call site can forget the second one (the 2026-10-14
+    sweep: six call sites that each had to remember an extra argument all survived its removal)."""
+    def __init__(self, *a, **kw):
+        dict.__init__(self, *a, **kw)
+        self.homes = {}
+
 def revert_landing(paths, log, appended, plan_path=PLAN):
-    """Undo a refused landing that has appended its evidence: every applied path by name, EXCEPT the plan. Other writers
-    append to the plan under its lock while the gates run, and a blanket checkout of it erased their evidence and left a
-    clean tree that hid the loss (X1 finding 3, 2026-09-27). The plan gets back only this landing's own lines, taken back
+    """Undo a refused landing that has appended its evidence: every applied path by name, EXCEPT the plans. Other writers
+    append to a plan under its lock while the gates run, and a blanket checkout of it erased their evidence and left a
+    clean tree that hid the loss (X1 finding 3, 2026-09-27). A plan gets back only this landing's own lines, taken back
     under the same lock by plan_store.undo_appended (appended: {unit id: (evidence re-read, evidence written[, owns
-    added])}, filled by landing_records), and so are the owns entries it added. Returns (tracked, created, note): note is '' when the plan reads as committed, else what it still
+    added])}, filled by landing_records), and so are the owns entries it added. appended.homes: the other plans this landing
+    wrote (Appended), undone the same way.
+    Returns (tracked, created, note): note is '' when every plan reads as committed, else what it still
     holds and why. FAIL DIRECTION: lines that cannot be taken back stay, named; nothing is committed either way."""
     paths = set(paths)
-    t, c = revert(paths - {plan_path}, log)
-    if plan_path not in paths:
-        return t, c, ""
+    plans = [(plan_path, appended)] + [(q, a) for q, a in getattr(appended, "homes", {}).items()]
+    t, c = revert(paths - {p for p, _ in plans}, log)
+    return t, c, "".join(undo_plan(p, a, paths, log) for p, a in plans if p in paths)
+
+
+def undo_plan(plan_path, appended, paths, log):
+    """'' when `plan_path` reads as committed after taking back what this landing appended, else why it still differs."""
     try:
         sys.path.insert(0, BIN)
         import plan_store
         shown = subprocess.run(["git", "show", "HEAD:" + plan_path], capture_output=True)
         missed = plan_store.undo_appended(plan_path, appended or {}, committed=shown.stdout if shown.returncode == 0 else None)
     except (ImportError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        return t, c, "; the plan keeps this landing's evidence (%s: %s), a human must take it out" % (type(exc).__name__, str(exc)[:80])
+        return "; the plan keeps this landing's evidence (%s: %s), a human must take it out" % (type(exc).__name__, str(exc)[:80])
     if missed:
-        return t, c, "; the plan keeps this landing's evidence for %s, rewritten since it was appended, a human must take it out" % ", ".join(missed)
+        return "; the plan keeps this landing's evidence for %s, rewritten since it was appended, a human must take it out" % ", ".join(missed)
     if subprocess.run(["git", "diff", "--quiet", "--", plan_path], capture_output=True).returncode != 0:
-        return t, c, "; the plan keeps what other writers added under its lock meanwhile (or a build's own edit to it), never checked out over it"
-    return t, c, ""
+        return "; the plan keeps what other writers added under its lock meanwhile (or a build's own edit to it), never checked out over it"
+    return ""
 
 
 def load_json(p):
@@ -2049,7 +2183,7 @@ def main():
             # loop livelocks on it (seen 2026-09-21: two builds offered three passes running). The reason is kept in
             # the STATUS so the next runner knows what to fix rather than rediscovering it.
             try:
-                write_status(st, note)
+                reject_status(st, note, "dropped", payload, sub=sub_of(b), plan=plan)
             except (OSError, ValueError) as exc:
                 print("        note: could not quarantine %s (%s), it may be offered again" % (st, exc))
             left = rollback(before, changed_paths(), log)
@@ -2077,7 +2211,7 @@ def main():
         t, c = revert(attributed & changed_paths(), log)
         print("REFUSED: %s has no anchor line; reverted %d and removed %d path(s)" % (CHECK_ALL, t, c)); return 1
     if new_text != text: open(CHECK_ALL, "w", encoding="utf-8").write(new_text)
-    attributed.add(CHECK_ALL); graded.update(snapshot([CHECK_ALL])); red = []
+    attributed.add(CHECK_ALL); graded.update(snapshot([CHECK_ALL])); red = []; faults = {}   # faults: {gate name: its first failing test and assertion line}
     # THE GATE RUNS BESIDE FIVE GRADERS (2026-09-24 01:49: every landing went RED on discover because one selftest's vault
     # capture subprocess hit its 10 s budget under load, alone and in batch): the vault doors get a wide budget here, so a
     # loaded machine never reads as a broken product
@@ -2097,8 +2231,12 @@ def main():
     reds = []   # (test path, dotted, python, name): red WITH the build, judged against the base once the copy is gone
     try:
         for name, cmd, regen, outputs in ordered:
-            t0 = time.time(); argv = [sys.executable, "-B"] + cmd; r = boxed(argv, log, 2400, env, cwd=copy); note_check(checks, cmds, name, list(r.args), r.returncode)
-            if r.returncode and regen:
+            t0 = time.time(); argv = [sys.executable, "-B"] + cmd
+            # LM1.a: a batch that changed a mirrored source regenerates first, so the check runs once, after the generator
+            pre = bool(regen) and name in REGEN_FIRST and bool(mirror_touched(attributed & changed_paths(), lambda rel: os.path.isfile(os.path.join(copy, rel))))
+            if not pre:
+                r = boxed(argv, log, 2400, env, cwd=copy); note_check(checks, cmds, name, list(r.args), r.returncode)
+            if regen and (pre or r.returncode):
                 before = snapshot(sorted(changed_paths(copy)), root=copy)
                 regen_argv = [sys.executable, "-B"] + regen
                 rr = boxed(regen_argv, log, 2400, env, cwd=copy); note_check(checks, cmds, name + " regenerate", list(rr.args), rr.returncode)
@@ -2119,7 +2257,7 @@ def main():
                     record_gate(os.environ.get("BROTHER_RUN_DIR", ""), "landing." + name, 1, (time.time() - t0) * 1000); red.append(name); continue
                 r = boxed(argv, log, 2400, env, cwd=copy); note_check(checks, cmds, name, list(r.args), r.returncode)
             record_gate(os.environ.get("BROTHER_RUN_DIR", ""), "landing." + name, r.returncode, (time.time() - t0) * 1000)
-            if r.returncode: red.append(name)
+            if r.returncode: red.append(name); faults[name] = first_failure((r.stdout or "") + "\n" + (r.stderr or ""))
         # THE FIFTH GATE: the registered tests named after every module this landing edited, on both Pythons.
         try:
             with open(CHECK_ALL, encoding="utf-8") as fh: _reg = fh.read()
@@ -2134,6 +2272,7 @@ def main():
                 record_gate(os.environ.get("BROTHER_RUN_DIR", ""), "landing.neighbour." + os.path.basename(tp)[:-3], r.returncode, (time.time() - t0) * 1000)
                 if r.returncode:
                     reds.append((tp, dotted, py, "neighbour %s on %s" % (tp, "py3.9" if py != sys.executable else "py3")))
+                    faults[reds[-1][3]] = first_failure((r.stdout or "") + "\n" + (r.stderr or ""))
                     break
     finally:
         drop_copy(copy)
@@ -2173,14 +2312,24 @@ def main():
     # landing touched are written, and each line is appended to the unit RE-READ under the lock, so evidence a closer
     # or another landing wrote meanwhile is kept (plan_store refuses a record that would erase it).
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import plan_store
-    appended = {}   # {unit id: (evidence re-read, evidence written[, owns added])}: what a refusal takes back, and nothing else
+    appended = Appended()   # {unit id: (evidence re-read, evidence written[, owns added])}: what a refusal takes back, and nothing else
     # EVERY NEW LOOP FILE IS OWNED IN THE SAME WRITE (queue item 5): a file this landing created in brother.loop's shape
     # goes into unit BL's owns under the same lock as the evidence, and leaves with it on any refusal below.
     owned = [p for p in loop_components(sorted(attributed & changed_paths()))
              if subprocess.run(["git", "ls-files", "--error-unmatch", p], capture_output=True).returncode != 0]
-    if owned and not any(u.get("id") == LOOP_UNIT for u in plan.get("units", [])):
-        print("OWNS    unit %s is not in the plan: %d new loop file(s) left unowned %s" % (LOOP_UNIT, len(owned), owned[:3])); owned = []
+    # THE OWNER UNIT'S PLAN IS NOT ALWAYS THE RUN'S (2026-10-14): BL lives in the launch WBS the check reads, so a run on
+    # any other plan writes the owns there. No plan holds BL: the build is dropped, never landed with unowned loop files.
+    own_path, own_why = owner_plan(plan) if owned else (PLAN, "")
+    if own_why:
+        print("OWNS    %s; %d new loop file(s) would land unowned %s" % (own_why, len(owned), owned[:3]))
+        print(refuse_landing("unowned loop file(s) %s: %s" % (", ".join(owned[:5]), own_why), attributed & changed_paths(), status_paths, landed, log, appended=appended)); return retry_alone(landed, builds)
+    if owned and own_path != PLAN:
+        appended.homes[own_path] = {}
+        plan_store.update_units(own_path, landing_records({}, appended.homes[own_path], owns=owned), fields=("owns",)); attributed.add(own_path)
+        owned = []
     plan_store.update_units(PLAN, landing_records(lines, appended, owns=owned), fields=("evidence", "owns")); attributed.add(PLAN)
+    for path, seen in appended.homes.items():
+        if seen: print("OWNS    unit %s in %s now names %s" % (LOOP_UNIT, path, ", ".join(seen[LOOP_UNIT][2])))
     if len(appended.get(LOOP_UNIT, ())) > 2:
         print("OWNS    unit %s now names %s" % (LOOP_UNIT, ", ".join(appended[LOOP_UNIT][2])))
     stray = unattributed(changed_paths(), attributed)
@@ -2197,7 +2346,7 @@ def main():
                 with open(status_paths[0], encoding="utf-8") as fh: prev = fh.read().strip()
                 note = gate_quarantine(landed, status_paths, why, prev)
                 if note:
-                    write_status(status_paths[0], note)
+                    reject_status(status_paths[0], note, "gates", why, "; ".join(faults[n] for n in red if faults.get(n)), sub=landed[0], plan=plan)
                     print("QUARANTINED %s: it failed the gates on its own, so it is not offered again" % landed[0])
             except (OSError, ValueError) as exc:
                 print("note: could not quarantine %s (%s)" % (status_paths[0], exc))
@@ -2218,7 +2367,7 @@ def main():
     # bytes the lander (or a gate's generator, or this file) wrote; the plan is excepted, other writers append to it
     # under its lock by design. A link, a rewrite or a mode change since then refuses the batch, whoever did it.
     now = snapshot(landed_files)
-    moved = sorted(p for p in landed_files if p != PLAN and now[p] != graded.get(p))
+    moved = sorted(p for p in landed_files if p != PLAN and p not in appended.homes and now[p] != graded.get(p))
     if moved:
         t, c, plan_note = revert_landing(attributed & changed_paths(), log, appended)
         print("REFUSED: %d landed path(s) changed after the lander wrote them (%s); nothing committed, reverted %d tracked and "

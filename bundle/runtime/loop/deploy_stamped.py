@@ -51,9 +51,11 @@ CANDIDATE_ENTRIES = (
     "plugin/runtime/brother/core/or_fanout.py", "plugin/runtime/brother/core/dream_report.py",
     # the lander's D13 gate order runs these from the code root in a boxed child (land_batch.GATE_ORDER_CHILD, review 17):
     # a string the import closure cannot read, so they are named here or the proof's order is always the fixed one
-    "plugin/runtime/brother/core/dream_gate.py", "plugin/runtime/brother/core/dream_gate_policy.py")
+    "plugin/runtime/brother/core/dream_gate.py", "plugin/runtime/brother/core/dream_gate_policy.py",
+    # land_apply starts the fuzz child by path (nothing imports it), and its one computed import is a declared work input
+    "scripts/loop/land_fuzz_child.py")
 CANDIDATE_OPTIONAL = ("duckdb=rollups",)
-CANDIDATE_WORK_INPUTS = ("scripts/loop/land_apply.py:main=build-receipt-covers-new-modules",)
+CANDIDATE_WORK_INPUTS = ("scripts/loop/land_fuzz_child.py:main=build-receipt-covers-new-modules",)
 
 
 def candidate_work_inputs(candidate):
@@ -219,7 +221,7 @@ def stage_candidate(source_dir, dest):
         freeze_manifest._validate_optional(CANDIDATE_OPTIONAL), freeze_manifest._validate_work_inputs(work),
         home, seeds=seeds)
     reached = set(imports.values()) | {site["target"] for site in sites}
-    only_run_from_bin = {path for path, _ in tools} - reached
+    only_run_from_bin = {path for path, _ in tools} - reached - {str(source / rel) for rel in CANDIDATE_ENTRIES}   # a declared entry is staged even when nothing imports it
     chosen = sorted(os.path.relpath(p, str(source)) for p in files
                     if p.startswith(str(source) + os.sep) and p not in only_run_from_bin)
     dest = Path(dest)

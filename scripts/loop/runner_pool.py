@@ -16,7 +16,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # THIS director
 import plan_store  # noqa: E402  (the one landed test every loop reader shares: plan_store.sub_landed, X3 finding 5)
 import plan_lint  # noqa: E402  (FX-13.6: the plan lint, run on the one sub unit this pass is about to start)
 import spec_check  # noqa: E402  (the landing gate's own done check verdict: spec_check.gate_refusal, 2026-09-29)
+import builder_claim  # noqa: E402  (LC1.a: one claim store, so a builder the session dispatches is a live runner to the pool)
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
+# LA5.b: scripts/loop/load_rule.py, whose machine_busy is the estate's ONE load rule (perturb_pool asks it too). It lives
+# BESIDE this file on purpose: the bin deploy copies scripts/loop whole, so the deployed pool finds it; one a directory up
+# (scripts/load_rule.py, 2026-10-15 and before) resolved to ~/.claude/load_rule.py in the deployed bin, which nothing
+# installs, so the deployed pool held with NO-DATA on every pass.
+LOAD_RULE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "load_rule.py")
 # ONE definition of scope (review 2026-09-22): loop_done reads BROTHER_SCOPE, this file had its own regex, and the
 # two could disagree about what "in scope" means. The env var wins when set; the literal below is the default both use.
 # A DEFAULT NEVER NARROWS THE WORK (owner, 2026-09-27: "This is a hard lesson you should always remember"). The default
@@ -519,12 +525,53 @@ def unit_landed(u):
         return False
 
 
+def after_held(sub, unit, units):
+    """The hold reason when `unit` names an after predecessor that has not landed, else ''. An after entry the
+    plan does not hold, a self reference, or an unreadable after list holds with its reason; a RETIRED
+    predecessor is skipped; a DEFERRED predecessor holds with its reason. A predecessor counts landed when
+    unit_landed says so (state DONE or every sub unit recorded landed). Every unreadable value holds, never
+    admits."""
+    if not isinstance(sub, str) or not sub:
+        raise ValueError("sub must be a non-empty string")
+    if not isinstance(unit, dict):
+        raise ValueError("unit must be a dict")
+    if not isinstance(units, list):
+        raise ValueError("units must be a list")
+    names = unit.get("after") or []
+    if not isinstance(names, list) or any(not isinstance(d, str) or not d.strip() for d in names):
+        return "NO-DATA unreadable after on unit %s" % unit.get("id")
+    uid = unit.get("id")
+    if not isinstance(uid, str) or not uid:
+        return "NO-DATA unreadable after on unit %s" % uid
+    by_id = {u.get("id"): u for u in units if isinstance(u, dict)}
+    for dep in names:
+        if dep == uid:
+            return "NO-DATA unit %s names itself in after" % uid
+        d = by_id.get(dep)
+        if d is None:
+            return "%s held: after %s, which the plan does not hold" % (sub, dep)
+        state = d.get("state")
+        if state == "RETIRED":
+            continue
+        if state == "DEFERRED":
+            return "%s held: after %s, DEFERRED to a later release" % (sub, dep)
+        if not unit_landed(d):
+            return "%s held: after %s (%s), not yet landed" % (sub, dep, state)
+    return ""
+
+
 def depends_held(sub, unit, units):
-    """The hold reason when `unit` names a depends_on that has not landed, else ''. Every predecessor must be a unit
-    the plan holds and unit_landed; an unreadable list or an unknown name holds with its reason (never admits)."""
-    deps = unit.get("depends_on") or []
-    if not isinstance(deps, list) or any(not isinstance(d, str) or not d.strip() for d in deps):
-        return "NO-DATA unreadable depends_on on unit %s" % unit.get("id")
+    """The hold reason when `unit` names a predecessor that has not landed, else ''. A predecessor is anything in the
+    UNION of depends_on and after (2026-10-14: two release plans in a row filled only `after`, and the pool read
+    only depends_on, so units were admitted out of order on shared files; plan_lint AFTER-ORDER refuses that plan
+    shape, this is the second end). Every predecessor must be a unit the plan holds and unit_landed; an unreadable
+    list or an unknown name holds with its reason (never admits)."""
+    deps = []
+    for key in ("depends_on", "after"):
+        names = unit.get(key) or []
+        if not isinstance(names, list) or any(not isinstance(d, str) or not d.strip() for d in names):
+            return "NO-DATA unreadable %s on unit %s" % (key, unit.get("id"))
+        deps.extend(d for d in names if d not in deps)
     by_id = {u.get("id"): u for u in units if isinstance(u, dict)}
     for dep in deps:
         d = by_id.get(dep)
@@ -536,6 +583,36 @@ def depends_held(sub, unit, units):
             return "%s held: unit %s depends on %s, DEFERRED to a later release" % (sub, unit.get("id"), dep)
         if not unit_landed(d):
             return "%s held: unit %s depends on %s (%s), not yet landed" % (sub, unit.get("id"), dep, d.get("state"))
+    return ""
+
+
+def _owns_judgeable(unit):
+    """True when the unit carries an owns list the OWNS rule can judge path by path."""
+    owns = unit.get("owns") if isinstance(unit, dict) else None
+    return isinstance(owns, list) and bool(owns) and all(isinstance(o, str) and o.strip() for o in owns)
+
+
+def lint_refusal(unit, sub, spec_text):
+    """LL1.c: "" or "LINT <RULE>: <text> | FIX: <fix>" for the first BLOCKING or NO-DATA finding the plan lint's own
+    hard_findings returns for ONE section. ADVISORY findings admit. A lint that cannot run refuses with NO-DATA: doubt
+    never admits. START is changed to Start as plan_lint._line does, so loop_pass.sh never counts a lint line as a
+    started unit. This refusal is independent of BROTHER_RUNFLOW_LINT: every other lint rule keeps its mode.
+    A unit whose owns is absent or unreadable leaves the OWNS rule nothing to judge path by path; that plan level
+    finding is the lint report's own, so the pool still refuses every OWNS finding about a path a section names
+    outside a readable owns, plus every PROTECTED-TOUCH finding."""
+    try:
+        findings = plan_lint.hard_findings(unit.get("id") if isinstance(unit, dict) else None, sub, unit, spec_text)
+    except Exception as exc:
+        return "NO-DATA the lint could not run (%s)" % type(exc).__name__
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        if finding.get("severity") not in ("BLOCKING", "NO-DATA"):
+            continue
+        if finding.get("rule") == plan_lint.RULE_OWNS and not _owns_judgeable(unit):
+            continue
+        line = "LINT %s: %s | FIX: %s" % (finding.get("rule"), finding.get("text"), finding.get("fix"))
+        return line.replace("START", "Start")
     return ""
 
 
@@ -605,6 +682,11 @@ def admissible(plan, sub):
     refusal = spec_check.gate_refusal(spec_text, sub)
     if refusal:
         return "DONE CHECK refused by the landing gate: %s; route: spec repair" % refusal
+    # LL1.c: PROTECTED-TOUCH and OWNS refuse whatever BROTHER_RUNFLOW_LINT says (the mode still governs every other
+    # lint rule). ONE place: the pass and diag_apply.py and salvage.py inherit it with no edit.
+    refusal = lint_refusal(unit, sub, spec_text)
+    if refusal:
+        return refusal
     return ""
 
 
@@ -897,6 +979,113 @@ def _wip_record_refusal(raw, at_now: float, age_limit: float) -> str:
     return ""
 
 
+def _seat_facts(env, which=None):
+    """(native seats, workers per round, seat cap) when this pass builds with native sessions, else None.
+    Native needs loop_switches.native_on(env, which) true and a non blank BROTHER_PIN_MODEL, the two facts
+    native_intent starts from; native_worker is imported here, only when on, exactly as the runner does.
+    seats(env) must be a positive whole number and WORKERS_PER_ROUND (default "5", the runner's own
+    default, unit_runner line 684) a whole number of at least 1; anything else raises ValueError. The floor
+    of 1 is deliberate: on the launcher defaults of 2 seats and 6 workers a plain division is 0 and the loop
+    would never start. Every unreadable value admits nothing, so the caller sets the seat cap to 0."""
+    try:
+        env.get("BROTHER_PIN_MODEL")
+    except AttributeError:
+        raise ValueError("env must be a mapping, not %s" % type(env).__name__)
+    if which is not None and not isinstance(which, str):
+        raise ValueError("which must be a string or None, not %s" % type(which).__name__)
+    try:
+        import loop_switches
+    except ImportError as exc:
+        raise ValueError("loop_switches cannot be imported, so the native switch is unknown: %s" % exc)
+    try:
+        on = loop_switches.native_on(env, which)
+    except (ValueError, KeyError) as exc:
+        raise ValueError("the native switch cannot be read: %s" % exc)
+    if not on:
+        return None
+    pin = env.get("BROTHER_PIN_MODEL")
+    if not isinstance(pin, str) or not pin.strip():
+        return None
+    try:
+        import native_worker
+    except ImportError as exc:
+        raise ValueError("native_worker cannot be imported, so the native seat count is unknown: %s" % exc)
+    try:
+        count = native_worker.seats(env)
+    except ValueError as exc:
+        raise ValueError("the native seat count is unreadable: %s" % exc)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError("native seats must be a positive whole number, not %r" % (count,))
+    raw = env.get("WORKERS_PER_ROUND", "5")
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        raise ValueError("WORKERS_PER_ROUND must be a whole number, not %r" % (raw,))
+    text = str(raw).strip()
+    workers = int(text) if text.isdigit() else 0
+    if workers < 1:
+        raise ValueError("WORKERS_PER_ROUND must be a whole number of at least 1, not %r" % (raw,))
+    return (count, workers, max(1, count // workers))
+
+
+def seat_cap(env: dict, which=None) -> Optional[int]:
+    """The native seat cap for one pass, or None when this pass is not native (REQ-LA5-A-01, REQ-LA5-A-03):
+    max(1, native_worker.seats(env) // WORKERS_PER_ROUND). Every unreadable value raises ValueError, and an
+    unreadable value admits nothing (the caller sets the cap to 0)."""
+    facts = _seat_facts(env, which)
+    return None if facts is None else facts[2]
+
+
+def load_hold(reading=None) -> str:
+    """The load hold for one pass, or "" when the machine is free (REQ-LA5-B-01, REQ-LA5-B-04, REQ-LA5-B-05).
+
+    Loads load_rule.py from exactly LOAD_RULE (a test swaps the module constant, never an argument: the
+    deploy freeze must resolve every dynamic loader to one literal path) with the three loading lines
+    wip_reading uses (spec_from_file_location, module_from_spec, exec_module, never sys.modules), takes
+    `reading` (default the loaded module's own load_reading: the seam a caller or a test drives), asks the
+    loaded module's machine_busy, and answers the busy line when the one minute load is at or above the core
+    count. Any failure (module missing, reading raised, value refused) is NO-DATA and HOLDS, never admits.
+    `reading` is a callable returning (load1, ncpu); anything else is a caller defect and raises ValueError."""
+    if reading is not None and not callable(reading):
+        raise ValueError("reading must be a callable or None, not %s" % type(reading).__name__)
+    try:
+        spec = importlib.util.spec_from_file_location("load_rule", LOAD_RULE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        read = reading or module.load_reading
+        load1, ncpu = read()
+        if module.machine_busy(load1, ncpu):
+            return "machine busy: one minute load %s is at or above %s core(s)" % (load1, ncpu)
+        return ""
+    except Exception as exc:   # sbe: allow-silent a missing module, a reading that raised or a value it refused is NO-DATA and HOLDS, never a free machine
+        return "NO-DATA load reading unavailable: %s: %s" % (type(exc).__name__, exc)
+
+
+def room_of(burn_free: int, wip_free: int, seat_free: Optional[int] = None, busy: str = "") -> Tuple[int, str]:
+    """(room, why): room is the smallest of the three free counts, clamped at 0, and why names the binding
+    cap (REQ-LA5-A-06): one of "budget cap", "WIP cap", "no seat", ties naming the earlier of that order.
+    seat_free is None when the pass has no seat cap. A non blank `busy` (the load hold's own text,
+    REQ-LA5-B-01) forces room 0 and is the reason, before any cap is compared, so a busy machine admits no
+    new runner whoever caused the load. burn_free and wip_free must be ints and not bool, seat_free an int or
+    None and busy a string; anything else raises ValueError."""
+    for name, value in (("burn_free", burn_free), ("wip_free", wip_free)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("%s must be an int, not %s" % (name, type(value).__name__))
+    if seat_free is not None:
+        if isinstance(seat_free, bool) or not isinstance(seat_free, int):
+            raise ValueError("seat_free must be an int or None, not %s" % type(seat_free).__name__)
+    if not isinstance(busy, str):
+        raise ValueError("busy must be a string, not %s" % type(busy).__name__)
+    if busy:
+        return (0, busy)
+    caps = []
+    for name, value in (("burn_free", burn_free), ("wip_free", wip_free)):
+        caps.append((value, "budget cap" if name == "burn_free" else "WIP cap"))
+    if seat_free is not None:
+        caps.append((seat_free, "no seat"))
+    smallest = min(value for value, _w in caps)
+    why = next(w for value, w in caps if value == smallest)
+    return (max(0, smallest), why)
+
+
 def main():
     os.makedirs(RUNS, exist_ok=True)
     dry = "--dry" in sys.argv
@@ -985,9 +1174,37 @@ def main():
     _b, _unk = busy_paths([(x["id"], _s) for x in units if x["id"] in _ready - alive_units for _s in x["sub_units"]
                            if waits_to_land(last.get(_s, "")) and not plan_store.sub_landed(_s, x.get("evidence") or "")], spec_of)
     busy.update(_b); unknown_alive.extend(_unk)   # LS1.c: a READY build's files stay busy until it lands
-    room = max(0, min(BURN_CAP - len(alive_units), WIP - len(in_progress)))
-    print("BUDGET cap %d runner(s) | WIP cap %d unit(s) | %d alive, %d READY to land | room for %d"
-          % (BURN_CAP, WIP, len(alive_units), len(_ready - alive_units), room))
+    # LA5.a: the room is also capped by the native seats over the workers per round, and the BUDGET line prints
+    # the seat count. The seat facts are read once per pass; an unreadable seat count or workers value admits
+    # nothing (cap 0) and says NO-DATA, never a seat cap a reader could trust. os.environ is a mapping, not a
+    # dict, so _seat_facts checks it has get() rather than isinstance(env, dict). The binding cap is kept in
+    # cap_why, NOT in why: `why` is the per unit skip reason and the loop below overwrites it.
+    _seat_n = 0; _seat_w = 0; _seat_cap = None; _seat_word = "native seats off"
+    try:
+        _seat_facts_now = _seat_facts(os.environ)
+    except ValueError as exc:
+        _seat_cap = 0
+        _seat_word = "native seats NO-DATA %s" % exc
+    else:
+        if _seat_facts_now is not None:
+            _seat_n, _seat_w, _seat_cap = _seat_facts_now
+            _seat_word = "native seats %d, %d worker(s) per round, seat cap %d runner(s)" % (_seat_n, _seat_w, _seat_cap)
+    # LA5.b: the load hold, read ONCE per pass beside the seat read. THE SEAM: BROTHER_LOAD_CAP unset or
+    # empty means this pass reads no load at all, so admission is exactly as it was before LA5.b and the
+    # existing pool suites stay green on a busy machine. "auto" reads the real load through the pool's own
+    # load_reading; any other value is the load1 a test drives the whole pass with, paired with the host's
+    # core count. Anything unreadable holds with NO-DATA, never admits. A dry pass reads the load too, so a
+    # dry pass predicts the real one (REQ-LA5-B-01, REQ-LA5-B-04, REQ-LA5-B-06).
+    _load_raw = os.environ.get("BROTHER_LOAD_CAP")
+    busy_text = ""
+    if _load_raw is not None and _load_raw != "":
+        if _load_raw == "auto":
+            busy_text = load_hold()
+        else:
+            busy_text = load_hold(reading=lambda _raw=_load_raw: (float(_raw.strip()), os.cpu_count() or 1))
+    room, cap_why = room_of(BURN_CAP - len(alive_units), WIP - len(in_progress), _seat_cap, busy_text)
+    print("BUDGET cap %d runner(s) | WIP cap %d unit(s) | %d alive, %d READY to land | %s | room for %d"
+          % (BURN_CAP, WIP, len(alive_units), len(_ready - alive_units), _seat_word, room))
     # ACC3.b: the finish-first limits are read once per pass, before any unit is admitted (wiring steps 1 to 3).
     mode = wip_mode(os.environ.get("BROTHER_WIP_GATE"))
     if mode == "off":
@@ -1022,7 +1239,8 @@ def main():
             print("%-5s every sub unit landed: run the unit done-check and mark DONE" % u["id"]); continue
         sub = next((s for s in todo if not hold_reason(s)), None)
         waiting = [s for s in u["sub_units"] if waits_to_land(last.get(s, "")) and s in todo]
-        why = ("runner alive" if u["id"] in alive_units else "READY build of %s waits to land" % waiting[0] if waiting
+        claimed = builder_claim.claim_hold(RUNS, sub) if sub is not None else ""
+        why = claimed or ("runner alive" if u["id"] in alive_units else "READY build of %s waits to land" % waiting[0] if waiting
                else hold_reason(todo[0]) if sub is None else "last run of %s ended %s: needs a fact, then RUNNER_HINT" % (sub, last[sub]) if sub is not None and still_parked(last.get(sub), last_at.get(sub, 0.0), parked_fact(last.get(sub), u["id"], spec_path=u.get("spec"))) else "")
         if not why and sub is not None and sunk(REC.get(u["id"])) and not fact_time(u["id"], spec_path=u.get("spec")) > REC[u["id"]][2]:
             _c = max(REC[u["id"]][3].items(), key=lambda kv: kv[1])[0] if REC[u["id"]][3] else "SUITE"
@@ -1063,7 +1281,15 @@ def main():
         if why:
             print("%-5s %-8s skip: %s" % (u["id"], sub or todo[0], why)); continue
         if started >= room:
-            print("%-5s %-8s skip: budget cap reached (%d new this pass)" % (u["id"], sub, room)); continue
+            if busy_text and cap_why == busy_text:
+                print("%-5s %-8s skip: %s; no new runner this pass, remedy: wait for the load to fall or stop other heavy work"
+                      % (u["id"], sub, busy_text))
+            elif cap_why == "no seat":
+                print("%-5s %-8s skip: no seat (%d native seat(s), %d worker(s) per round, cap %d runner(s), %d alive)"
+                      % (u["id"], sub, _seat_n, _seat_w, _seat_cap, len(alive_units)))
+            else:
+                print("%-5s %-8s skip: budget cap reached (%d new this pass)" % (u["id"], sub, room))
+            continue
         busy.update({p: sub for p in ts})
         if not dry:
             log = os.path.join(RUNS, sub + ".log")

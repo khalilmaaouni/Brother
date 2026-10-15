@@ -88,11 +88,20 @@ class Landing(unittest.TestCase):
         self.assertEqual(rc, 0, out[-800:])
         self.assertEqual(self.committed_owns(fx), [OLD], out[-800:])
 
-    def test_a_plan_without_bl_still_lands_and_says_so(self):
+    def test_a_plan_without_bl_drops_a_build_that_adds_a_loop_file(self):
+        """1.1.4 (2026-10-14): no plan holds BL (here the run's plan is the launch WBS itself), so the new loop file would
+        land unowned. It was landed and reported; it is now refused, naming the file. The other plan is
+        test_land_batch_bl_owns_plan.py's."""
         fx = self.fixture(units=(U1,), edits=[{"path": NEW, "new_file_content": "print('tool')\n"}])
         rc, out = fx.land()
+        self.assertNotEqual(rc, 0, out[-800:])
+        self.assertIn(NEW, out)
+        self.assertEqual(fx.rev("HEAD"), fx.base, out[-600:])
+
+    def test_a_plan_without_bl_still_lands_a_build_that_adds_no_loop_file(self):
+        fx = self.fixture(units=(U1,), edits=[{"path": "docs/landed-u1a.txt", "new_file_content": "landed\n"}])
+        rc, out = fx.land()
         self.assertEqual(rc, 0, out[-800:])
-        self.assertIn("unit BL is not in the plan", out)
 
     def test_two_new_loop_files_are_both_named_in_order(self):
         """FX-13.1's own shape: a tool and its test landed together (the gate on dfd97cee4: a lander claiming only the

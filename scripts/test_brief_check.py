@@ -149,6 +149,27 @@ class TheGate(unittest.TestCase):
         self.assertIn("pkg/test_unreadable.py", out)
         self.assertIn("B1 NAMED SHOWN    PASS", out)
 
+    def test_B2_a_bare_name_of_a_test_the_section_names_in_full_is_that_test(self):
+        # 2026-10-14: LL1.c was WITHHELD on its first pass because one line named the test in full and another by its
+        # bare file name; the bare name was opened at the repository root and refused as unreadable.
+        spec = SPEC.replace("File: `pkg/test_thing.py` existing.", "File: `pkg/test_thing.py` existing. Cases live in `test_thing.py`.")
+        code, out = self.run_main(self.brief_with(spec, "pkg/test_thing.py", "import os\nimport helper\n"))
+        self.assertIn("B2 IMPORTS SHOWN  PASS", out)
+
+    def test_B2_a_bare_name_with_no_full_path_in_the_section_is_still_refused(self):
+        spec = SPEC.replace("File: `pkg/test_thing.py` existing.", "File: `pkg/test_thing.py` existing. See `test_other.py`.")
+        code, out = self.run_main(self.brief_with(spec, "pkg/test_thing.py", "import os\nimport helper\n"))
+        self.assertIn("B2 IMPORTS SHOWN  REFUSED", out)
+        self.assertIn("test_other.py", out)
+
+    def test_B2_a_bare_name_matching_two_full_paths_is_still_refused(self):
+        os.makedirs(os.path.join(self.tmp, "pkg2"))
+        self.write("pkg2/test_thing.py", "import os\n")
+        spec = SPEC.replace("File: `pkg/test_thing.py` existing.",
+                            "File: `pkg/test_thing.py` existing. Also `pkg2/test_thing.py`. Cases in `test_thing.py`.")
+        code, out = self.run_main(self.brief_with(spec, "pkg/test_thing.py", "import os\nimport helper\n"))
+        self.assertIn("B2 IMPORTS SHOWN  REFUSED", out)
+
     def test_B2_a_test_the_section_marks_NEW_and_that_does_not_exist_yet_passes(self):
         # 2026-09-25: five sub units (D14.6, H3.c, H4.b, L5a-3, R2.1) were WITHHELD before a single build because the
         # test their spec tells the builder to CREATE did not exist yet and read as unreadable; the pool drained.

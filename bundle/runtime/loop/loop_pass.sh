@@ -186,10 +186,18 @@ echo "REPROBE  retired: a silent probe goes to the landing gates"
 # proves it, diag_apply runs the grep, and only a proven fact restarts the runner with RUNNER_HINT. Detached like the
 # reprobe, at most 6 lanes a pass, and diag_brief asks each stuck run ONCE (its DIAGNOSED marker), so the spend is bounded
 # by the number of stuck runs, never by the number of passes.
-if [ -z "$CODE_ROOT" ]; then echo "DIAGNOSE skipped: no frozen code root (BROTHER_CODE_ROOT); the diagnostician calls models, so it cannot run boxed, and the landing tree's code never runs unboxed"
+# OUTSIDE A PROOF (owner decision 2026-10-14, loop self repair): with no BROTHER_CODE_ROOT the diagnostician runs from the
+# DEPLOYED FROZEN CANDIDATE, ~/.claude/bin/candidate (staged from a committed revision by deploy_stamped, frozen and stamped
+# with the bin), never from the landing tree. Since f429cd159 (2026-10-03) it was skipped here, so a parked sub unit never got
+# a new fact and the pool drained to ALARM UNPRODUCTIVE. The landing tree is read only as DATA (the cwd its proving grep
+# runs in). BROTHER_CODE_ROOT is NOT set for it: night_tick and burn_guard read that variable as "this is a proof run";
+# the candidate is handed to the tool as --code-root, which the tool refuses when it sits inside the working directory.
+DIAG_ROOT="$CODE_ROOT"; DIAG_ARGS=""
+if [ -z "$CODE_ROOT" ]; then DIAG_ROOT=~/.claude/bin/candidate; DIAG_ARGS="$DIAG_ROOT"; fi
+if [ -z "$CODE_ROOT" ] && [ ! -d "$DIAG_ROOT/plugin/runtime/brother/core" ]; then echo "DIAGNOSE skipped: no frozen code root (BROTHER_CODE_ROOT) and no deployed candidate at ${DIAG_ROOT}; NO-DATA until a deploy stages one"
 elif pgrep -f "scripts/diag_round\.py" >/dev/null 2>&1; then echo "DIAGNOSE already running from an earlier pass"; else
-  python3 -c "import subprocess,sys,os; subprocess.Popen([sys.executable,'-B',sys.argv[1],'--limit','6'], stdout=open(os.path.expanduser('~/.claude/evidence/diag-round.log'),'a'), stderr=subprocess.STDOUT, start_new_session=True)" "$CODE_ROOT/scripts/diag_round.py"
-  echo "DIAGNOSE started detached, log ~/.claude/evidence/diag-round.log"
+  python3 -c "import subprocess,sys,os; a=sys.argv[2:]; subprocess.Popen([sys.executable,'-B',sys.argv[1],'--limit','6']+(['--code-root',a[0]] if a and a[0] else []), stdout=open(os.path.expanduser('~/.claude/evidence/diag-round.log'),'a'), stderr=subprocess.STDOUT, start_new_session=True)" "$DIAG_ROOT/scripts/diag_round.py" "$DIAG_ARGS"
+  echo "DIAGNOSE started detached from ${DIAG_ROOT}, log ~/.claude/evidence/diag-round.log"
 fi
 # SALVAGE BEFORE THE DIGEST READS WHAT IS READY (2026-09-22): a sub unit parked as EXHAUSTED or quarantined while a
 # build of it sits on disk that is grader PASS, probe CLEAN and still applies is paid work thrown away. 15 such builds

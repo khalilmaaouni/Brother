@@ -191,13 +191,19 @@ step_clock "2b2"
 # command) only ran under --push --tag, 45 minutes after this line's own
 # candidate export tree was first built. The 1.0.2 cut hit the same class
 # on 2026-09-04 (scripts/readiness_gate.py's own docstring records it).
-# --tag-time-checks reaches the same verdict here, in a plain dry run, in
-# about 3 minutes, before the perturbation drive, validate and the final
-# dry run below. It sits AFTER 2b on purpose: before the note for $VERSION
-# exists, the readiness gate's release-invariant item fails by construction
-# (measured 2026-09-07 22:0x in a built export tree of the drill revision),
-# so a preflight at 1c would refuse every cut.
-python3 scripts/export_public.py --dry-run --tag-time-checks
+# FR1.c (C3): this step now runs a PLAIN dry run, no --tag-time-checks. It
+# keeps the exporter's early gates and the note's stamped revision check, so a refusal of that kind still
+# shows here, before the perturbation drive. The tag-time half
+# (--tag-time-checks: every product's verify-install.sh, readiness_gate.py,
+# every relative markdown link, every README prove command) runs ONCE, in
+# cut.py's chain, as the export-real-home row with --prove-required-fast, on
+# the bytes that ship; a second run here measured the same bytes again. A
+# readiness refusal that only the tag-time half finds now shows at that row,
+# about 10 minutes after this line, instead of here. It sits AFTER 2b on
+# purpose: before the note for $VERSION exists, the readiness gate's
+# release-invariant item fails by construction (measured 2026-09-07 22:0x in
+# a built export tree of the drill revision).
+python3 scripts/export_public.py --dry-run
 
 echo "== 2c. refuse if any release note the export ships still carries the placeholder stamp =="
 step_clock "2c"

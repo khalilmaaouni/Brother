@@ -957,6 +957,10 @@ class ThePoolMeasuresTheTable(unittest.TestCase):
         patcher = mock.patch.object(R, "ROOT", self.tmp)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # FR1.d2: the pool refuses under its disk floor; these tests are about the table, not the disk
+        floor = mock.patch("perturb_pool.free_gib", lambda path: 999.0)
+        floor.start()
+        self.addCleanup(floor.stop)
 
     def test_the_pool_is_asked_once_per_pair_with_the_quiet_wall(self):
         fake = PoolPerturb({}, walls={"test_thing.py": 42})
@@ -969,7 +973,8 @@ class ThePoolMeasuresTheTable(unittest.TestCase):
         pairs, root, wall, workers = pool.calls[0]
         self.assertEqual(pairs, [("other.py", "test_thing.py"),
                                  ("subject.py", "test_thing.py")])
-        self.assertEqual((root, wall, workers), (self.tmp, 42, 4))
+        self.assertEqual((root, wall, workers),
+                         (self.tmp, 42, max(1, (os.cpu_count() or 1) - 1)))
         self.assertEqual(fake.baselines_run, ["test_thing.py"])
         self.assertEqual(fake.driven, [], "the live tree was perturbed")
         self.assertEqual(rows, [("claim", "other.py", "test_thing.py"),
@@ -1254,9 +1259,11 @@ class ThePreflightStepRunsBeforeTheLongSteps(unittest.TestCase):
         self.assertTrue(two_b < pre < two_c,
                         "step 2b2 must sit between the refresh (2b) and the drive (2c)")
         step_1c_body = text[pre:two_c]
-        self.assertIn(
-            "python3 scripts/export_public.py --dry-run --tag-time-checks",
-            step_1c_body)
+        # FR1.c (C3): 2b2 is a plain dry run; the tag-time half runs once, in
+        # cut.py's export-real-home row. The flag may be named in a comment.
+        runs = [l.strip() for l in step_1c_body.splitlines()
+                if l.strip().startswith("python3 scripts/export_public.py")]
+        self.assertEqual(runs, ["python3 scripts/export_public.py --dry-run"])
 
     def test_step_4_runs_only_the_invariant_and_the_chain_runs_the_dry_run(self):
         """RC1.b1: step 4 keeps release_invariant.py and no longer runs a
@@ -1376,6 +1383,87 @@ class TheNoteWritesItsReceipts(unittest.TestCase):
             text = fh.read()
         body = text[text.index("== 2d."):text.index("== 2t.")]
         self.assertIn('python3 scripts/release_note_perturb.py --version "$VERSION" --receipts auto', body)
+
+
+class TestCF1A(unittest.TestCase):
+    """CF1.a: the pool is asked for cores minus one by default."""
+
+    GIT = ThePoolMeasuresTheTable.GIT
+
+    def setUp(self):
+        import subprocess
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        for name, text in (("subject.py", "x = 1\n"), ("test_thing.py", "import subject\n")):
+            with open(os.path.join(self.tmp, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+        for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "one"]):
+            subprocess.run(self.GIT + args, cwd=self.tmp, env=env, check=True,
+                           capture_output=True)
+        patcher = mock.patch.object(R, "ROOT", self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # FR1.d2: the pool refuses under its disk floor; these tests are about the table, not the disk
+        floor = mock.patch("perturb_pool.free_gib", lambda path: 999.0)
+        floor.start()
+        self.addCleanup(floor.stop)
+
+    def _ask(self, **kw):
+        pool = FakePool(caught={("test_thing.py", "subject.py"): True})
+        rows, problem = R.pooled_rows([("c", "test_thing.py")], PoolPerturb({}), pool, **kw)
+        self.assertIsNone(problem)
+        return pool.calls[0][3]
+
+    def test_default_workers_is_cores_minus_one_and_never_below_one(self):
+        import perturb_pool as PP
+        self.assertEqual(PP.default_workers(8), 7)
+        self.assertEqual(PP.default_workers(2), 1)
+        self.assertEqual(PP.default_workers(1), 1)
+        self.assertEqual(PP.default_workers(64), 63)
+        with mock.patch.object(PP.os, "cpu_count", return_value=None):
+            self.assertEqual(PP.default_workers(), 1)
+        with mock.patch.object(PP.os, "cpu_count", return_value=8):
+            self.assertEqual(PP.default_workers(), 7)
+
+    def test_pooled_rows_asks_the_pool_for_cores_minus_one_by_default(self):
+        with mock.patch.object(os, "cpu_count", return_value=8):
+            self.assertEqual(self._ask(), 7)
+
+    def test_an_explicit_worker_count_still_wins(self):
+        with mock.patch.object(os, "cpu_count", return_value=8):
+            self.assertEqual(self._ask(workers=3), 3)
+
+    def test_the_default_goes_through_the_settle_not_around_it(self):
+        import perturb_pool as PP
+        seen = []
+
+        def stop(requested, *a, **k):
+            seen.append(requested)
+            raise RuntimeError("stop after the settle")
+
+        with mock.patch.object(os, "cpu_count", return_value=8), \
+                mock.patch.object(PP, "settled_workers", stop), \
+                mock.patch.object(PP, "capped_workers", lambda *a, **k: 2):
+            rows, problem = R.pooled_rows([("c", "test_thing.py")], PoolPerturb({}),
+                                          PP.run_rows)
+        self.assertEqual(seen, [7])
+        self.assertIn("stop after the settle", problem)
+
+    def test_hostile_core_counts_and_the_caller_passes_nothing(self):
+        import perturb_pool as PP
+        for bad in (True, False, 0, -3, "8", 3.5, [], 1):
+            self.assertEqual(PP.default_workers(bad), 1, bad)
+        seen = {}
+
+        def fake_pooled(claim_suites, real, pool, **kw):
+            seen.update(kw)
+            return [], None
+
+        with mock.patch.object(R, "pooled_rows", fake_pooled):
+            R.measured_file_rows([("c", "test_thing.py")])
+        self.assertNotIn("workers", seen)
 
 
 def setUpModule():

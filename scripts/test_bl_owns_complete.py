@@ -68,7 +68,7 @@ def main():
         # judge, and a check that cannot look must not pretend to a verdict in either direction.
         print("SKIPPED: %s is not in this tree, so there is nothing to judge here. This check is meaningful "
               "only in a checkout that carries the plan." % PLAN)
-        return 0
+        return 2
     try:
         plan = json.load(open(PLAN, encoding="utf-8"))
     except ValueError as exc:

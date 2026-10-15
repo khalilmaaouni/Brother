@@ -115,7 +115,7 @@ get BROTHER_BRIEF_SCREEN >/dev/null || put BROTHER_BRIEF_SCREEN on
 CWI=$(inE python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import deploy_stamped as D
 for w in D.candidate_work_inputs(sys.argv[2]): print("--work-input=" + w)' "$HERE" "$HERE/candidate" 2>&1) \
   || refuse "the candidate's work inputs could not be listed: $(printf '%s' "$CWI" | tail -1)"
-WI=(--work-input land_apply.py:main=build-receipt-covers-new-modules)
+WI=(--work-input land_fuzz_child.py:main=build-receipt-covers-new-modules)
 while IFS= read -r w; do [ -n "$w" ] && WI+=("$w"); done <<< "$CWI"
 FROZE=$(inE python3 -B "$HERE/freeze_manifest.py" write "$PAIR/freeze.json" --bin "$HERE" \
   --module-root "$HERE/candidate" --module-root "$HERE/candidate/scripts" --module-root "$HOME/.claude/hooks" \

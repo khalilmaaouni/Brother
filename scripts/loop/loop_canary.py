@@ -17,6 +17,7 @@ Pythons as the grader does it), the STATUS word rule (the checker hold is gone w
 (it needs a model), the battery on the whole tree (minutes; the landing runs it), the push.
 """
 import json, os, re, shutil, subprocess, sys, tempfile
+from typing import List
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # THIS file's own directory: the copies installed beside it
@@ -140,6 +141,30 @@ def real_run(argv, cwd):
         return 99, str(exc)
 
 
+def missing_fixture_files(spec: dict) -> List[str]:
+    """One <sub>: <build path> line for every fixture whose build is not an existing regular file, in fixture
+    order. The canary calls this before it replays anything: a fixture whose build file is absent is NO-DATA
+    (exit 3), one line each, never a stage that runs for minutes and then fails. A fixture entry that
+    fixtures_of skips (it lacks sub, base_commit or build) is not reported again. A spec that is not a dict,
+    and a spec whose fixtures value is neither absent nor a list, are corrupt input refused with ValueError."""
+    if not isinstance(spec, dict):
+        raise ValueError("spec must be a dict, not %s" % type(spec).__name__)
+    listed = spec.get("fixtures")
+    if listed is not None and not isinstance(listed, list):
+        raise ValueError("spec fixtures must be a list, not %s" % type(listed).__name__)
+    out = []
+    for fixture in fixtures_of(spec):
+        sub = fixture.get("sub") if isinstance(fixture, dict) else fixture
+        build = fixture.get("build") if isinstance(fixture, dict) else None
+        if not isinstance(build, str):
+            out.append("%s: %r" % (sub, build))
+            continue
+        path = os.path.expanduser(build)
+        if not os.path.isfile(path):
+            out.append("%s: %s" % (sub, path))
+    return out
+
+
 def fixtures_of(spec):
     """The fixture set: the spec's own build first, then every entry of its "fixtures" list that carries sub, base_commit
     and build (2026-09-24, I7: one fixture proves the path runs; a set of build shapes is what calibrates the rules).
@@ -201,6 +226,14 @@ def main():
     spec = load_spec()
     if spec is None:
         print("CANARY NO-DATA: docs/plan/loop-canary.json cannot be read or lacks sub, base_commit or build"); return 3
+    missing = missing_fixture_files(spec)
+    if missing:
+        for m in missing:
+            print(m)
+        # the verdict is the LAST line: tool_stamp.prove keeps only the last line as the deploy's refusal reason, and
+        # the deploy canary test reads CANARY NO-DATA there (the file list after it hid the verdict, 2026-10-14)
+        print("CANARY NO-DATA: %d fixture build file(s) missing, no fixture was replayed" % len(missing))
+        return 3
     results = []
     for fx in fixtures_of(spec):
         rows = stages(fx, real_run)

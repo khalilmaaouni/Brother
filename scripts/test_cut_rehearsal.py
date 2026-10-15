@@ -488,5 +488,251 @@ class TheRehearsalKeepsOnlyRowsWithTheirLog(unittest.TestCase):
         self.assertIn("CUTROW", rec.get("note", ""))
 
 
+FR1E_EXPORT_TREE = "e" * 40
+
+
+class TestFR1E(unittest.TestCase):
+    """FR1.e (docs/plan/specs/FR1.md): a --check rehearsal reuses a finished PASS row of an earlier rehearsal on its
+    exact key, and stops the long rows after a refusal it cannot change."""
+
+    def setUp(self):
+        base = tempfile.mkdtemp(prefix="fr1e-")
+        self.addCleanup(shutil.rmtree, base, True)
+        self.base, self.ev = base, os.path.join(base, "ev")
+        os.makedirs(self.ev)
+        patcher = mock.patch.dict(os.environ, {"BROTHER_CUT_TEST": "1", "BROTHER_CUT_EVIDENCE_DIR": self.ev})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.n = 0
+
+    def row(self, name="required-fast-hub", key=KEY, home="real", verdict="PASS", text="row output\n"):
+        self.n += 1
+        log = os.path.join(self.base, "row%d.log" % self.n)
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return {"row": name, "argv": ["sh", "scripts/required_fast.sh"], "key": key, "home": home,
+                "verdict": verdict, "seconds": 1.0, "log_path": log, "log_sha256": CR._sha256_file(log)}
+
+    def record(self, rows, verdict="NOT-READY", age_s=60):
+        self.n += 1
+        sha = ("%040x" % self.n)
+        kw = {}
+        if verdict == "READY":
+            kw["script_trees"] = TREES
+            log = os.path.join(self.base, "rec%d.log" % self.n)
+            with open(log, "w", encoding="utf-8") as fh:
+                fh.write("READY for %s\n" % V)
+        else:
+            log = ""
+        return CR.record_rehearsal(V, sha, "f" * 40, 0 if verdict == "READY" else 1, verdict, log, 1.0, "d" * 64,
+                                   self.ev, now=time.time() - age_s, rows=rows, **kw)
+
+    def reuse(self, key=KEY, name="required-fast-hub", home="real"):
+        return CR.reusable_check_row(V, name, key, home, self.ev)
+
+    def test_a_pass_row_of_a_not_ready_record_is_reused_on_check(self):
+        for verdict in ("NOT-READY", "READY"):
+            with self.subTest(record=verdict):
+                shutil.rmtree(self.ev)
+                os.makedirs(self.ev)
+                held = self.row()
+                self.record([held], verdict)
+                got, why = self.reuse()
+                self.assertEqual((got, why), (held, ""))
+        held = self.row()
+        self.record([held])
+        code, out, labels, _ = self.check({})
+        self.assertNotIn("required_fast.sh", labels, out)
+        self.assertIn("REUSED required-fast-hub %s %s" % (KEY[:12], held["log_path"]), out)
+
+    def test_a_fail_row_is_never_reused(self):
+        for verdict in ("FAIL", "NO-DATA"):
+            with self.subTest(row=verdict):
+                shutil.rmtree(self.ev)
+                os.makedirs(self.ev)
+                self.record([self.row(verdict=verdict)])
+                got, why = self.reuse()
+                self.assertIsNone(got)
+                self.assertIn("not PASS", why)
+
+    def test_a_row_measured_on_other_bytes_runs(self):
+        self.record([self.row(key=KEY[:12] + "b" * 28)])
+        got, why = self.reuse()
+        self.assertIsNone(got, why)
+        self.assertIn("no record holds", why)
+
+    def test_a_row_older_than_24_h_runs(self):
+        self.record([self.row()], age_s=25 * 3600)
+        got, why = self.reuse()
+        self.assertIsNone(got)
+        self.assertIn("stale", why)
+        shutil.rmtree(self.ev)
+        os.makedirs(self.ev)
+        self.record([self.row()], age_s=23 * 3600)
+        self.assertEqual(self.reuse()[1], "")
+
+    def test_a_record_from_the_future_yields_no_row(self):
+        self.record([self.row()], age_s=-3600)
+        got, why = self.reuse()
+        self.assertIsNone(got)
+        self.assertIn("future", why)
+
+    def test_an_altered_row_log_runs(self):
+        held = self.row()
+        self.record([held])
+        with open(held["log_path"], "a", encoding="utf-8") as fh:
+            fh.write("edited afterwards\n")
+        got, why = self.reuse()
+        self.assertIsNone(got)
+        self.assertIn("altered", why)
+        os.remove(held["log_path"])
+        got, why = self.reuse()
+        self.assertIsNone(got)
+        self.assertIn("missing or unreadable", why)
+
+    def test_a_no_data_record_yields_no_row(self):
+        self.record([self.row()], "NO-DATA")
+        records, reasons = CR.row_sources(V, self.ev)
+        self.assertEqual(records, [])
+        self.assertIn("NO-DATA", reasons[0])
+        self.assertIsNone(self.reuse()[0])
+
+    def test_a_newer_fail_beats_an_older_pass_row(self):
+        self.record([self.row()], age_s=3600)
+        self.record([self.row(verdict="FAIL")], age_s=60)
+        got, why = self.reuse()
+        self.assertIsNone(got)
+        self.assertIn("FAIL", why)
+
+    def test_a_newer_pass_beats_an_older_fail_row(self):
+        self.record([self.row(verdict="FAIL")], age_s=3600)
+        held = self.row()
+        self.record([held], age_s=60)
+        self.assertEqual(self.reuse(), (held, ""))
+
+    def test_a_corrupt_record_beside_a_good_one_does_not_hide_it(self):
+        held = self.row()
+        self.record([held])
+        prefix = os.path.join(self.ev, "rehearsal-%s-" % V)
+        with open(prefix + "zz-1.json", "w", encoding="utf-8") as fh:
+            fh.write('{"schema": "cv1.rehearsal.2", "ver')
+        with open(prefix + "yy-1.json", "w", encoding="utf-8") as fh:
+            json.dump({"schema": "cv1.rehearsal.2", "rows": "no"}, fh)
+        records, reasons = CR.row_sources(V, self.ev)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(len(reasons), 2, reasons)
+        self.assertEqual(self.reuse(), (held, ""))
+        # the strict reader that decides a cut still refuses the folder
+        self.assertNotEqual(CR._load_records(self.ev, V)[1], "")
+
+    def test_an_empty_or_missing_folder_reuses_nothing(self):
+        got, why = self.reuse()
+        self.assertIsNone(got)
+        self.assertTrue(why)
+        got, why = CR.reusable_check_row(V, "required-fast-hub", KEY, "real", os.path.join(self.base, "absent"))
+        self.assertIsNone(got)
+        self.assertIn("unreadable", why)
+
+    def test_hostile_arguments_to_reusable_check_row_return_a_reason(self):
+        self.record([self.row()])
+        cases = [(V, None, KEY, "real"), (V, "required-fast-hub", None, "real"), (V, "required-fast-hub", KEY, []),
+                 (V, [], KEY, "real"), (V, "required-fast-hub", KEY[:39], "real"),
+                 (V, "required-fast-hub", KEY.upper(), "real"), (V, "required-fast-hub", 123, "real"),
+                 (V, "nope", KEY, "real"), (V, "required-fast-hub", KEY, "nowhere"), (None, "required-fast-hub", KEY, "real"),
+                 ("abc", "required-fast-hub", KEY, "real"), (["9.9.9"], "required-fast-hub", KEY, "real")]
+        for args in cases:
+            with self.subTest(args=args):
+                got, why = CR.reusable_check_row(*args, directory=self.ev)
+                self.assertIsNone(got)
+                self.assertTrue(isinstance(why, str) and why)
+        for now in ("x", float("nan"), [1]):
+            with self.subTest(now=now):
+                got, why = CR.reusable_check_row(V, "required-fast-hub", KEY, "real", self.ev, now)
+                self.assertIsNone(got)
+                self.assertIn("clock", why)
+        got, why = CR.reusable_check_row(V, "required-fast-hub", KEY, "real", 123)
+        self.assertIsNone(got)
+
+    def check(self, answers, argv=None, handle=None):
+        """(code, stdout, labels, mocks) of cut.main --check with the fake rehearsal tree KEY. Every long seam is a
+        mock so a test can say whether it was reached."""
+        runner = Runner(dict(GREEN, **dict({"git rev-parse HEAD^{tree}": (0, KEY + "\n")}, **answers)))
+        out = io.StringIO()
+        with mock.patch.object(C, "_load_bm_store", return_value=(None, None, "absent")), \
+                mock.patch.object(C, "release_paths", return_value=["scripts/"]), \
+                mock.patch.object(C, "export_tree", return_value=(FR1E_EXPORT_TREE, "")), \
+                mock.patch.object(C, "export_rows", return_value=(True, ["export rows: stubbed"])) as rows, \
+                mock.patch.object(C, "start_canary", return_value=handle), \
+                mock.patch.object(C, "stop_canary") as stopped, \
+                mock.patch.object(C, "await_canary", return_value=(True, ["linux canary: stubbed"])) as awaited, \
+                mock.patch.object(tempfile, "tempdir", self.base), contextlib.redirect_stdout(out):
+            code = C.main(["--check", "--version", V] + list(argv or []), root="/fake/root", runner=runner)
+        return code, out.getvalue(), runner.labels, {"export_rows": rows, "stop_canary": stopped,
+                                                      "await_canary": awaited}
+
+    def test_full_chain_runs_every_row(self):
+        self.record([self.row()])
+        code, out, labels, _ = self.check({}, ["--full-chain"])
+        self.assertIn("required_fast.sh", labels, out)
+        self.assertNotIn("REUSED required-fast-hub", out)
+        code, out, labels, _ = self.check({})
+        self.assertNotIn("required_fast.sh", labels, out)
+
+    def test_a_refused_plugin_bump_gate_skips_required_fast_but_runs_the_cheap_rows(self):
+        code, out, labels, mocks = self.check({"plugin_bump_gate.py": (1, "plugin bump gate: REFUSED\n")})
+        self.assertEqual(code, C.EXIT_REFUSED, out)
+        self.assertNotIn("required_fast.sh", labels, out)
+        self.assertIn("required_fast: skipped, plugin_bump_gate refused earlier (stop early for long rows)", out)
+        for cheap in ("refresh_cut.py", "release_invariant.py", "donecheck_u8.py", "retire_catalogs.py"):
+            self.assertIn(cheap, labels)
+        self.assertIn("NOT READY for %s" % V, out)
+        self.assertNotIn("READY for %s:" % V, out.replace("NOT READY", ""))
+        mocks["export_rows"].assert_not_called()
+
+    def test_a_refused_plugin_bump_gate_still_runs_required_fast_under_full_chain(self):
+        code, out, labels, _ = self.check({"plugin_bump_gate.py": (1, "")}, ["--full-chain"])
+        self.assertIn("required_fast.sh", labels, out)
+        self.assertEqual(code, C.EXIT_REFUSED)
+
+    def test_a_refused_hub_row_ends_the_chain_before_the_export_rows(self):
+        code, out, labels, mocks = self.check({"required_fast.sh": (1, "FAILED: a check\n")})
+        self.assertEqual(code, C.EXIT_REFUSED, out)
+        mocks["export_rows"].assert_not_called()
+        self.assertIn("refresh_cut.py", labels)
+
+    def test_a_refused_row_stops_the_canary(self):
+        handle = object()
+        code, out, labels, mocks = self.check({"plugin_bump_gate.py": (1, "")}, handle=handle)
+        mocks["stop_canary"].assert_called_once_with(handle)
+        mocks["await_canary"].assert_not_called()
+        code, out, labels, mocks = self.check({}, handle=handle)
+        mocks["await_canary"].assert_called_once()
+        mocks["stop_canary"].assert_not_called()
+
+    def test_export_rows_are_reused_on_the_export_tree_id(self):
+        rows = [self.row("export-real-home", FR1E_EXPORT_TREE, "real"), self.row("virgin-gate", FR1E_EXPORT_TREE, "empty")]
+        self.record(rows)
+        code, out, labels, mocks = self.check({})
+        self.assertIn("REUSED export-real-home %s %s" % (FR1E_EXPORT_TREE[:12], rows[0]["log_path"]), out)
+        self.assertIn("REUSED virgin-gate %s %s" % (FR1E_EXPORT_TREE[:12], rows[1]["log_path"]), out)
+        mocks["export_rows"].assert_not_called()
+
+    def test_an_unreadable_export_tree_reuses_nothing_and_runs_the_rows(self):
+        self.record([self.row("export-real-home", FR1E_EXPORT_TREE, "real")])
+        with mock.patch.object(C, "export_tree", return_value=("", "no tree")):
+            runner = Runner(dict(GREEN, **{"git rev-parse HEAD^{tree}": (0, KEY + "\n")}))
+            with mock.patch.object(C, "export_rows", return_value=(False, ["NO-DATA: stub"])) as rows:
+                ok, lines = C.reused_or_run_export_rows("/fake/root", V, C.CheckReuse(V, self.ev), "", runner)
+        self.assertFalse(ok)
+        rows.assert_called_once()
+
+    def test_a_record_dict_still_routes_to_reusable_row(self):
+        held = self.row()
+        record = {"verdict": "READY", "finished_at": CR._iso(time.time()), "rows": [held]}
+        self.assertEqual(C._reusable(record, "required-fast-hub", KEY, "real"), (held, ""))
+        self.assertIsNone(C._reusable(None, "required-fast-hub", KEY, "real")[0])
+        self.assertEqual(C.CheckReuse(V, self.ev).row("required-fast-hub", KEY, "real")[0], None)
+
+
 if __name__ == "__main__":
     unittest.main()

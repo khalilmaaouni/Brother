@@ -5,7 +5,7 @@ handover ceremony becomes a FEATURE of /brother that automatically updates
 the estate's wisdom (vault notes, learnings, mistakes) and is parsable and
 searchable by the vault architecture.
 
-Four independent actions, any combination in one invocation:
+Five independent actions, any combination in one invocation:
 
   --collect               print the measurable close state as JSON on
                            stdout: git HEAD/clean state per --repo PATH
@@ -63,6 +63,24 @@ Four independent actions, any combination in one invocation:
                            day-plan ready set, open pull requests), then
                            the lessons captured this session.
 
+  --emit-seed PATH         PG1.a: write the next release's plan seed (schema
+                           brother-plan-seed/1, scripts/plan_seed.py) to PATH:
+                           the units the closing plan left DEFERRED, PARKED
+                           or OPEN, the open findings of its PLAN-DECISIONS
+                           file, the failure notes dated since the plan, and
+                           the WITHHELD, EXHAUSTED and FAIL loop and cut
+                           evidence, with the quoted lines of every reads
+                           entry. The plan comes from scripts/loop/
+                           plan_path.py (BROTHER_WBS) under --root DIR
+                           (default the current directory). Optional inputs:
+                           --failures-index FILE, --runs DIR and --cut DIR
+                           (defaults under ~/.claude/evidence), --grant FILE
+                           (a baseline record's owner lines). An absent
+                           input is NO-DATA inside the seed; an unreadable
+                           plan or named file is exit 2; a PATH holding
+                           another schema is refused, exit 1. Prints
+                           "SEED: <path> units <n> sources <present>/<total>".
+
 This tool only emits. It never pushes, never commits, never closes a task.
 Exit 0 on a clean run, 1 when something was refused or flagged, 2 on
 NO-DATA (a required input could not be read, never presented as a pass).
@@ -81,6 +99,7 @@ Failures-Index lines through open(index_path, "a") and never rewrites the
 file.
 """
 
+import glob
 import json
 import os
 import re
@@ -712,8 +731,76 @@ def _load_lessons(path):
     return data
 
 
+def _next_version(plan_file):
+    """N.N.(M+1) from a plan file name 'BROTHER-N.N.M-...', else None."""
+    m = re.search(r"BROTHER-(\d+)\.(\d+)\.(\d+)", os.path.basename(plan_file))
+    if not m:
+        return None, None
+    cur = "%s.%s.%s" % m.groups()
+    return cur, "%s.%s.%d" % (m.group(1), m.group(2), int(m.group(3)) + 1)
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def emit_seed(path, root=None, failures_index=None, runs=None, cut=None,
+              grant_file=None, now=None):
+    """The --emit-seed action; returns the exit code (0 written, 1 refused,
+    2 NO-DATA) after printing its one line. Every input named but unreadable
+    is exit 2; an input not named is NO-DATA inside the seed."""
+    import plan_seed
+    root = root or os.getcwd()
+    base = os.path.join(os.path.expanduser("~"), ".claude", "evidence")
+    runs = runs or os.path.join(base, "unit-runs")
+    cut = cut or os.path.join(base, "cut")
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))  # one line: the parity gate reads the pin
+        import plan_path
+        plan_rel = plan_path.selected()
+        plan = json.loads(_read_text(os.path.join(root, plan_rel)))
+        current, version = _next_version(plan_rel)
+        if version is None:
+            raise ValueError("plan file %s names no BROTHER-N.N.N version"
+                             % plan_rel)
+        decisions = None
+        found = sorted(glob.glob(os.path.join(
+            root, "docs", "plan", "specs", current, "**", "PLAN-DECISIONS.md"),
+            recursive=True), key=os.path.getmtime)
+        if found:
+            decisions = _read_text(found[-1])
+        index = _read_text(failures_index) if failures_index else None
+        grant = plan_seed.read_grant(grant_file) if grant_file else {}
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(plan.get("as_of", "")))
+        since = datetime(*[int(g) for g in m.groups()],
+                         tzinfo=timezone.utc).timestamp() if m else 0.0
+        evidence = plan_seed.evidence_findings(runs, cut, since)
+        seed = plan_seed.build_seed(
+            version, plan, decisions, index, evidence, grant,
+            now if now is not None else datetime.now(timezone.utc).timestamp(),
+            root=root)
+    except (OSError, ValueError, ImportError, AttributeError) as e:
+        print("handover-ceremony: NO-DATA: the seed could not be built: %s" % e)
+        return 2
+    try:
+        plan_seed.write_seed(path, seed)
+    except ValueError as e:
+        print("handover-ceremony: REFUSED: %s" % e)
+        return 1
+    except OSError as e:
+        print("handover-ceremony: NO-DATA: could not write %s: %s" % (path, e))
+        return 2
+    present = sum(1 for src in seed["sources"] if src["status"] == "PRESENT")
+    print("SEED: %s units %d sources %d/%d" % (
+        path, len(seed["units"]), present, len(seed["sources"])))
+    return 0
+
+
 def main(argv):
     repos, lesson_file = [], None
+    emit_seed_path = failures_index = runs_dir = cut_dir = None
+    grant_file = root_dir = None
     emit_vault_dir = emit_handover_path = None
     limit_state_path = None
     green_close_file = pattern_vault = None
@@ -736,6 +823,18 @@ def main(argv):
             project = argv[i + 1]; i += 1
         elif arg == "--limit-state" and i + 1 < len(argv):
             limit_state_path = argv[i + 1]; i += 1
+        elif arg == "--emit-seed" and i + 1 < len(argv):
+            emit_seed_path = argv[i + 1]; i += 1
+        elif arg == "--failures-index" and i + 1 < len(argv):
+            failures_index = argv[i + 1]; i += 1
+        elif arg == "--runs" and i + 1 < len(argv):
+            runs_dir = argv[i + 1]; i += 1
+        elif arg == "--cut" and i + 1 < len(argv):
+            cut_dir = argv[i + 1]; i += 1
+        elif arg == "--grant" and i + 1 < len(argv):
+            grant_file = argv[i + 1]; i += 1
+        elif arg == "--root" and i + 1 < len(argv):
+            root_dir = argv[i + 1]; i += 1
         elif arg == "--emit-patterns":
             do_emit_patterns = True
         elif arg == "--green-close-file" and i + 1 < len(argv):
@@ -745,7 +844,7 @@ def main(argv):
         i += 1
 
     if not (do_collect or emit_vault_dir or emit_handover_path
-            or do_emit_patterns):
+            or do_emit_patterns or emit_seed_path):
         print("handover-ceremony: nothing to do; pass --collect, "
               "--emit-vault DIR, --emit-handover PATH, or --emit-patterns")
         return 2
@@ -819,6 +918,11 @@ def main(argv):
             for reason in skipped:
                 print("handover-ceremony: SKIPPED: %s" % reason)
             codes.append(1 if skipped else 0)
+
+    if emit_seed_path:
+        codes.append(emit_seed(emit_seed_path, root=root_dir,
+                               failures_index=failures_index, runs=runs_dir,
+                               cut=cut_dir, grant_file=grant_file))
 
     return max(codes) if codes else 0
 

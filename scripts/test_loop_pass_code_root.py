@@ -97,7 +97,7 @@ class PassCodeRoot(unittest.TestCase):
         stubs = {
             "loop_heartbeat.py": "", "salvage.py": 'print("SALVAGE nothing")\n',
             "loop_done.py": "import sys\nsys.exit(1)\n",
-            "pass_digest.py": 'print("DIGEST")\nprint("   /builds/U1-build.json")\n',
+            "pass_digest.py": 'import sys\nif "--ready-counts" in sys.argv:   # RD1.a: the pass asks the digest whether its count and list agree\n    print("1 1"); sys.exit(0)\nprint("DIGEST")\nprint("   /builds/U1-build.json")\n',
             # the lander stub: a landing prints LANDED; --push (the reconcile and the closure, review 14 finding 3) commits a
             # dirty plan and pushes, both with hooks off, as the real lander does from a frozen copy
             "land_batch.py": "REAL_LANDER = %r\n" % os.path.join(HERE, "loop", "land_batch.py") + LAND_BATCH_STUB,
@@ -235,6 +235,49 @@ class PassCodeRoot(unittest.TestCase):
         self.assertIn("DIAGNOSE skipped: no frozen code root", r.stdout, out)
         self.assertIn("U1-build.json", self.read("landed"), "the boxed sentry fingerprinted the tree and the pass landed: " + out)
         self.assertEqual(self.read("tripwire") + self.read("witness"), "", out)
+
+    # OWNER DECISION 2026-10-14 (loop self repair): outside a proof the diagnostician runs from the DEPLOYED FROZEN CANDIDATE
+    # (<bin>/candidate), never from the landing tree, and BROTHER_CODE_ROOT is not set for it.
+    def plant_candidate(self):
+        cand = os.path.join(self.bin, "candidate")
+        w(os.path.join(cand, "scripts", "diag_round.py"), WITNESS % "CAND", 0o755)
+        w(os.path.join(cand, "plugin", "runtime", "brother", "core", "or_fanout.py"), "")
+        w(os.path.join(self.tree, "scripts", "loop", "diag_round.py"), TRIPWIRE, 0o755)   # beside scripts/diag_round.py, already planted
+        git(self.tree, "add", "-A")
+        git(self.tree, "commit", "-q", "-m", "planted landing tree diag_round copies")
+        git(self.tree, "push", "-q")
+        return cand
+
+    def box_ready(self):
+        sys.path.insert(0, os.path.join(HERE, "loop"))
+        import grade_build
+        if grade_build.sandbox_ready():
+            self.skipTest("NO-DATA: %s" % grade_build.sandbox_ready())
+
+    def test_outside_a_proof_the_diagnostician_runs_the_deployed_candidate_never_the_tree(self):
+        self.box_ready()
+        cand = self.plant_candidate()
+        r = self.run_pass()
+        out = r.stdout + r.stderr
+        self.assertIn("CAND diag_round.py --limit 6 --code-root " + cand, self.read("witness"), out)
+        self.assertEqual(self.read("tripwire"), "", "landing tree code ran: " + out)
+        self.assertIn("DIAGNOSE started detached from " + cand, r.stdout, out)
+
+    def test_outside_a_proof_with_no_deployed_candidate_the_diagnostician_says_so_and_runs_nothing(self):
+        self.box_ready()
+        r = self.run_pass()
+        out = r.stdout + r.stderr
+        self.assertIn("DIAGNOSE skipped: no frozen code root (BROTHER_CODE_ROOT) and no deployed candidate", r.stdout, out)
+        self.assertEqual(self.read("tripwire") + self.read("witness"), "", out)
+
+    def test_with_a_code_root_set_the_diagnostician_gets_no_code_root_flag(self):
+        self.plant_candidate()
+        r = self.run_pass(BROTHER_CODE_ROOT=self.code)
+        line = [l for l in self.read("witness").splitlines() if "diag_round.py" in l]
+        self.assertEqual(len(line), 1, r.stdout + r.stderr)
+        self.assertTrue(line[0].startswith("CODE diag_round.py --limit 6"), line[0])
+        self.assertNotIn("--code-root", line[0])
+        self.assertEqual(self.read("tripwire"), "", r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

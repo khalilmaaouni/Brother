@@ -150,16 +150,12 @@ class EntryPoint(unittest.TestCase):
             self.assertTrue(all("amod.boom" in l for l in crash[:N]) and all("bmod.boom" in l for l in crash[N:]), out)
             self.assertIn("VERDICT SUITES GREEN", out)
 
-    def test_inprocess_switch_is_exactly_one(self):
-        for value in ("yes", "0", ""):
+    def test_inprocess_switch_is_retired(self):
+        # 2026-10-15: the in-process fuzz held a computed import_module inside the reviewed runtime surface; no caller
+        # used the switch, so every value, "1" included, now fuzzes in the child
+        for value in ("yes", "0", "", "1"):
             for py, rc, out in both(self, {}, env=clean_env(BROTHER_LAND_FUZZ_INPROCESS=value)):
                 self.assertIn("FUZZ    mode child (timeout 120 s)", out, (py, value))
-        for py, rc, out in both(self, {}, env=clean_env(BROTHER_LAND_FUZZ_INPROCESS="1")):
-            self.assertIn("FUZZ    mode in-process (BROTHER_LAND_FUZZ_INPROCESS=1)", out, py)
-
-    def test_inprocess_switch_still_fuzzes_in_process(self):
-        for py, rc, out in both(self, {"ipmod": CRASHES + RETURNS}, env=clean_env(BROTHER_LAND_FUZZ_INPROCESS="1")):
-            self.assertIn(SUMMARY % (1, N, N), out, py)
 
     def test_timeout_setting_outside_range_keeps_default(self):
         for py, rc, out in both(self, {}, env=clean_env(BROTHER_LAND_FUZZ_TIMEOUT_S="0")):
@@ -683,6 +679,64 @@ class TimeoutSetting(unittest.TestCase):
         self.assertEqual(land_apply.fuzz_timeout("2"), (2.0, None))
         self.assertEqual(land_apply.fuzz_timeout("1800"), (1800.0, None))
         self.assertEqual(land_apply.fuzz_timeout(None), (120, None))
+
+
+NATIVE = "scripts/loop/native_worker.py"
+
+
+def loop_files():
+    """The files native_worker.py and its sibling suite import, as the lander's copy would see them: scripts/loop (its
+    adapters package too) and the top level of scripts (the real files, not stand-ins), keyed by repository path."""
+    out, scripts = {}, os.path.dirname(HERE)
+    for d, rel in ((scripts, "scripts/"),):
+        for n in os.listdir(d):
+            if os.path.isfile(os.path.join(d, n)) and n.endswith((".py", ".sb", ".sh", ".json", ".txt", ".md")):
+                with open(os.path.join(d, n), "rb") as fh:
+                    out[rel + n] = fh.read().decode("utf-8", "surrogateescape")
+    for d, _, names in os.walk(HERE):
+        if "__pycache__" in d:
+            continue
+        for n in names:
+            if n.endswith((".py", ".sb", ".sh", ".json", ".txt", ".md")):
+                with open(os.path.join(d, n), "rb") as fh:
+                    out["scripts/loop/" + os.path.relpath(os.path.join(d, n), HERE)] = fh.read().decode("utf-8", "surrogateescape")
+    with open(os.path.join(os.path.dirname(scripts), "docs", "plan", "model-registry.json"), "rb") as fh:   # the router reads it
+        out["docs/plan/model-registry.json"] = fh.read().decode("utf-8")
+    return out
+
+
+@unittest.skipIf(land_apply.grade_build.sandbox_ready() != "", "NO-DATA: the lander's sandbox cannot start here")
+class NativeWorkerThroughTheGate(unittest.TestCase):
+    """The real lander, a real git worktree copy and the real sandbox, on the real native_worker.py and its real suite. Before
+    2026-10-14 EVERY build editing native_worker.py read RED (52 cases): the suite wrote the fixed /private/tmp tool folder
+    and started a sandbox inside the gate's sandbox, and neither can happen there."""
+
+    ANCHOR = "import contextlib, fcntl, hashlib, json, os, re, shutil, stat, subprocess, sys, tempfile, threading, time, uuid"
+
+    def tree(self, replace):
+        files = loop_files()
+        t = Tree({}, files=files)
+        self.addCleanup(t.close)
+        with open(t.build, "w", encoding="utf-8") as fh:
+            json.dump({"edits": [{"path": NATIVE, "find": self.ANCHOR, "replace": replace}], "tests": []}, fh)
+        return t
+
+    def test_an_unchanged_native_worker_passes_the_gate(self):
+        rc, out = self.tree(self.ANCHOR).run(timeout=600)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("VERDICT SUITES GREEN", out)
+        for label in ("py3 ", "py3.9"):
+            self.assertTrue(any(l.startswith(label) and "test_native_worker.py" in l and "exit=0" in l and "OK" in l
+                                for l in out.splitlines()), (label, out))
+
+    def test_a_native_worker_that_really_breaks_its_suite_is_still_red(self):
+        t = self.tree(self.ANCHOR + "\nraise RuntimeError('a build that breaks the module')")
+        rc, out = t.run(timeout=600)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("VERDICT RED", out)
+        self.assertTrue(any("test_native_worker.py" in l and "exit=" in l and "exit=0" not in l for l in out.splitlines()), out)
+        with open(os.path.join(t.dir, NATIVE), encoding="utf-8") as fh:
+            self.assertNotIn("a build that breaks", fh.read(), "a RED build reaches nothing")
 
 
 if __name__ == "__main__":

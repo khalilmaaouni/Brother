@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""One DuckDB view over ~/.claude/evidence/unit-runs: every worker build as one row (unit, sub unit, unit class, run,
-round, model, grade, refusal reason, probes, cost), and the four rollups the loop's decisions read: pass rate by model,
-by unit class, by round, and the refusal reason histogram. Until 2026-09-22 every one of these was a grep over logs.
+"""Every worker build under ~/.claude/evidence/unit-runs as one row (unit, sub unit, unit class, run,
+round, model, grade, refusal reason, probes, cost). Until 2026-09-22 every one of these was a grep over logs.
 usage (repo root):  unit_ledger.py [--runs DIR] [--ledger FILE] [--plan FILE] [--out FILE.jsonl] [--db FILE.duckdb] [--since HOURS]
                     unit_ledger.py --selftest
-The rows are written to --out (JSONL, stdlib only, works under every Python); the view and the rollups need duckdb, and a
-Python without it prints NO-DATA and exits 3 after writing the rows (never a pass, never an empty table read as zero).
+The rows are written to --out (JSONL, stdlib only, works under every Python). The DuckDB view and the four rollups moved
+to unit_ledger_rollups.py (2026-10-15): this module is inside the reviewed runtime surface, which allows no third party import.
 Cost: the dispatcher ledger's RECONCILE row whose holder is the build id and whose time falls inside the round's window
 (jobs.json written to results.json written); a build with no such row carries null, never 0.
 Model time (FX-10, 2026-09-29): model_seconds is the dispatcher ledger's RESERVE to its first close (RECONCILE, ABANDONED
@@ -19,7 +18,6 @@ import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or th
 RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
 LEDGER = os.path.expanduser("~/.claude/brother-or-dispatch-state/openrouter-ledger.jsonl")
 PLAN = _PP.selected()
-ROLLUPS = [("by model", "actual_model"), ("by unit class", "unit_class"), ("by round", "round"), ("by refusal reason", "refusal")]
 
 
 def _mtime(p):
@@ -546,22 +544,6 @@ def write_rows(rs, out_path):
         for r in rs: fh.write(json.dumps(r, sort_keys=True) + "\n")
 
 
-def rollups(out_path, db_path):
-    """Create or refresh the view in db_path over out_path and return {title: [(key, builds, passes, pass_rate, cost)]}.
-    Raises ImportError when duckdb is absent: the caller says NO-DATA."""
-    import duckdb  # noqa: the whole point of the tool; absent means NO-DATA, decided by the caller
-    con = duckdb.connect(db_path)
-    # a CREATE VIEW cannot take a prepared parameter (duckdb binder), so the path is quoted by hand
-    con.execute("CREATE OR REPLACE VIEW unit_runs AS SELECT * FROM read_json_auto('%s', format='newline_delimited')" % os.path.abspath(out_path).replace("'", "''"))
-    out = {}
-    for title, col in ROLLUPS:
-        where = " WHERE grade = 'FAIL' AND refusal <> ''" if col == "refusal" else ""
-        out[title] = con.execute("SELECT CAST(%s AS VARCHAR) k, count(*) n, sum(CASE WHEN grade='PASS' THEN 1 ELSE 0 END) p, "
-                                 "round(100.0 * sum(CASE WHEN grade='PASS' THEN 1 ELSE 0 END) / count(*), 1) rate, round(coalesce(sum(TRY_CAST(cost_usd AS DOUBLE)), 0), 2) usd "
-                                 "FROM (SELECT * FROM unit_runs QUALIFY row_number() OVER (PARTITION BY run, round, build ORDER BY coalesce(\"at\", 0) DESC) = 1)%s GROUP BY 1 ORDER BY n DESC, k" % (col, where)).fetchall()
-    con.close(); return out
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(); ap.add_argument("--runs", default=RUNS); ap.add_argument("--ledger", default=LEDGER); ap.add_argument("--plan", default=PLAN)
     ap.add_argument("--out", default=os.path.expanduser("~/.claude/evidence/unit-ledger.jsonl")); ap.add_argument("--db", default=os.path.expanduser("~/.claude/evidence/unit-ledger.duckdb"))
@@ -581,12 +563,7 @@ def main(argv=None):
         rs = last_rows(a.out)
     print("ROWS %d build(s) over %d run(s) -> %s" % (len(rs), len({r["run"] for r in rs}), a.out))
     if not rs: print("NO-DATA: no build under %s" % a.runs); return 3
-    try: tables = rollups(a.out, a.db)
-    except ImportError: print("NO-DATA: duckdb is not importable under %s; the rows are written, the view is not (/usr/bin/python3 carries duckdb)" % sys.executable); return 3
-    print("VIEW unit_runs in %s" % a.db)
-    for title, table in tables.items():
-        print("\n%-24s %6s %6s %6s %8s" % (title.upper(), "builds", "pass", "rate%", "usd"))
-        for k, n, p, rate, usd in table[:12]: print("%-24s %6d %6d %6s %8.2f" % ((k or "")[:24], n, p, rate, usd))
+    print("VIEW and rollups (need duckdb): python3 unit_ledger_rollups.py --out %s --db %s" % (a.out, a.db))
     return 0
 
 
@@ -815,24 +792,6 @@ def _selftest_body():
     try: list_rc = append_run(race, os.path.join(d, "locked-append.jsonl"), ledger, plan)
     finally: os.chmod(race, 0o700)
     cases.append(("a run folder whose rounds cannot be listed appends nothing and says NO-DATA", list_rc == 3 and not os.path.exists(os.path.join(d, "locked-append.jsonl"))))
-    try:
-        tb = rollups(out, os.path.join(d, "t.duckdb"))
-        m = {k: (n, p) for k, n, p, rate, usd in tb["by model"]}
-        cases += [("view: pass rate by model counts builds and passes", m.get("deepseek/v") == (2, 1) and m.get("muse/v") == (4, 0)),
-                  ("view: refusal histogram lists only FAIL rows with a reason", sorted(k for k, *_ in tb["by refusal reason"]) == ["N patch problems", "safety screen", "suite not green with the code"]),
-                  ("view: cost sums what was reconciled", [usd for k, n, p, rate, usd in tb["by unit class"] if k == "runner"] == [0.03])]
-        # cost_usd arrives as JSON shaped or text in some rows (Claude builds carry no per build cost; arm A 2026-09-23 rows
-        # made duckdb infer JSON and sum() raised a BinderException): the rollup casts, never crashes, and sums the numbers
-        with open(out, "a") as fh:
-            fh.write(json.dumps({"run": "X-1", "round": 0, "build": "X-r9", "unit": "X", "model": "muse/v", "grade": "FAIL", "refusal": "", "cost_usd": {"note": "none"}, "at": 1.0}) + "\n")
-            fh.write(json.dumps({"run": "X-1", "round": 0, "build": "X-r8", "unit": "X", "model": "muse/v", "grade": "FAIL", "refusal": "", "cost_usd": "0.02", "at": 1.0}) + "\n")
-        try:
-            tb2 = rollups(out, os.path.join(d, "t2.duckdb")); ok2 = abs(sum(usd for k, n, p, rate, usd in tb2["by model"]) - 0.05) < 1e-6
-        except Exception as exc:   # sbe: allow-silent the exception IS the case under test, named in the case title
-            ok2 = False; print("rollup raised on mixed cost_usd: %s" % exc)
-        cases.append(("view: a JSON shaped or text cost_usd never crashes the rollup and numbers still sum", ok2))
-    except ImportError:
-        print("selftest: duckdb not importable under %s: the view cases are NO-DATA here (run under /usr/bin/python3 for them)" % sys.executable)
     bad = [n for n, ok in cases if not ok]
     print("selftest: %d cases, %s" % (len(cases), "OK" if not bad else "FAILED: " + ", ".join(bad))); return 1 if bad else 0
 

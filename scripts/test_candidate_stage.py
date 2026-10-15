@@ -36,7 +36,7 @@ import test_deploy_stamped  # noqa: E402  (by module: its own class must not run
 HOOK = '"""Scratch stand in for the machine installed session cap hook."""\nimport json\n'
 ROLLUPS_NO_DATA = ("NO-DATA optional capability rollups unavailable: "
                    "duckdb is absent under the frozen interpreter")
-WORK_INPUT = "land_apply.py:main=build-receipt-covers-new-modules"
+WORK_INPUT = "land_fuzz_child.py:main=build-receipt-covers-new-modules"
 
 
 def scratch(prefix):
@@ -46,14 +46,14 @@ def scratch(prefix):
 
 
 def fixture_source(box, extra=None):
-    """A minimal source tree holding every candidate entry, one loop tool and the land_apply work input."""
+    """A minimal source tree holding every candidate entry, one loop tool and the fuzz child work input."""
     src = box / "source"
     for rel in D.CANDIDATE_ENTRIES:
         (src / rel).parent.mkdir(parents=True, exist_ok=True)
         (src / rel).write_text("VALUE = 1\n")
     (src / "scripts/loop").mkdir(parents=True, exist_ok=True)
     (src / "scripts/loop/tool.py").write_text("import json\n")
-    (src / "scripts/loop/land_apply.py").write_text(
+    (src / "scripts/loop/land_fuzz_child.py").write_text(
         "import importlib\ndef main(name):\n    return importlib.import_module(name)\n")
     for rel, text in (extra or {}).items():
         (src / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -146,15 +146,15 @@ class StageThisTree(unittest.TestCase):
 
     def test_the_candidate_is_the_closure_not_the_tree(self):
         staged = self.staged()
-        self.assertIn("scripts/loop/land_apply.py", staged)   # reached: native_worker imports it (2026-10-05)
+        self.assertIn("scripts/loop/land_fuzz_child.py", staged)   # a candidate entry: land_apply starts it by path (2026-10-15)
         self.assertEqual(D.candidate_work_inputs(self.candidate), ["candidate/scripts/loop/" + WORK_INPUT])
         tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "scripts", "plugin/runtime"],
                                  capture_output=True, text=True).stdout.split()
         self.assertLess(len(staged), len([t for t in tracked if t.endswith(".py")]) // 4)
 
     def test_a_staged_relocated_work_input_without_its_declaration_refuses_the_freeze(self):
-        relocated = self.candidate / "scripts/loop/land_apply.py"
-        self.assertEqual(relocated.read_bytes(), (LOOP / "land_apply.py").read_bytes())
+        relocated = self.candidate / "scripts/loop/land_fuzz_child.py"
+        self.assertEqual(relocated.read_bytes(), (LOOP / "land_fuzz_child.py").read_bytes())
         r = self.freeze("write", self.box / "relocated.json", relocated=False)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("computed import has no frozen resolution in %s" % relocated, r.stdout)
@@ -176,7 +176,7 @@ class StageRefusals(unittest.TestCase):
         self.stage(fixture_source(self.box))
         self.assertEqual(sorted(str(p.relative_to(self.dest)) for p in self.dest.rglob("*") if p.is_file()),
                          sorted(D.CANDIDATE_ENTRIES))
-        self.assertEqual(D.candidate_work_inputs(self.dest), [])   # nothing staged, nothing declared
+        self.assertEqual(D.candidate_work_inputs(self.dest), ["candidate/scripts/loop/" + WORK_INPUT])   # the child is an entry: staged, so declared
 
     def test_an_entry_importing_a_computed_loader_refuses_naming_it(self):
         src = fixture_source(self.box, {
@@ -196,10 +196,10 @@ class StageRefusals(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
     def test_a_reached_work_input_is_staged_with_its_relocated_declaration(self):
-        # 2026-10-05: native_worker reached land_apply and the stage refused every deploy; the relocated copy is
-        # staged and declared for the freeze instead, which refuses it undeclared (StageThisTree above)
-        self.stage(fixture_source(self.box, {"scripts/close_unit.py": "import land_apply\n"}))
-        self.assertTrue((self.dest / "scripts/loop/land_apply.py").is_file())
+        # the fuzz child is a candidate entry (land_apply starts it by path): staged and declared for the freeze, which
+        # refuses it undeclared (StageThisTree above)
+        self.stage(fixture_source(self.box))
+        self.assertTrue((self.dest / "scripts/loop/land_fuzz_child.py").is_file())
         self.assertEqual(D.candidate_work_inputs(self.dest), ["candidate/scripts/loop/" + WORK_INPUT])
 
     def test_an_existing_destination_refuses(self):
@@ -215,6 +215,7 @@ class DeployCandidate(test_deploy_stamped.DeployStamped):
     def setUp(self):
         super().setUp()
         entries = {rel: "VALUE = 1\n" for rel in D.CANDIDATE_ENTRIES}
+        entries["scripts/loop/land_fuzz_child.py"] = "import importlib\ndef main(name):\n    return importlib.import_module(name)\n"
         entries["plugin/runtime/brother/core/or_fanout.py"] = "from . import helper\n"
         entries["plugin/runtime/brother/core/helper.py"] = "VALUE = 2\n"
         for rel, text in entries.items():

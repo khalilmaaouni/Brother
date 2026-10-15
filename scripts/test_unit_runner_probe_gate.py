@@ -321,6 +321,34 @@ def cases():
                         reason("D4.c", runs_dir=tmp, exclude=os.path.join(tmp, "now")) == ""))
         out.append(("an unreadable runs directory is empty, never an exception",
                     reason("D4.c", runs_dir="/no/such/runs/dir", exclude="/x") == ""))
+        with tempfile.TemporaryDirectory() as tmp:
+            # 2026-10-14: the landing's CURRENT wording; a reader that knew only the old QUARANTINE word read it as ""
+            quarantine_fixture(tmp, [("FR0.a-094147", "DROPPED at landing: wrote 3 path(s) it never declared: ['x/a.json']")])
+            out.append(("a build dropped at landing teaches the next run why",
+                        reason("FR0.a", runs_dir=tmp, exclude=os.path.join(tmp, "now")).startswith("DROPPED at landing: wrote 3")))
+        for word in ("STALLED", "PAUSED", "DRAINED", "CONFIG_WAIT", "UNFUNDED", "WITHDRAWN"):
+            with tempfile.TemporaryDirectory() as tmp:
+                # the dropped run, then an INTERRUPTED retry written later (2026-10-14: a clean stop for a redeploy)
+                quarantine_fixture(tmp, [("FR0.a-094147", "DROPPED at landing: wrote 3 path(s) it never declared"),
+                                         ("FR0.a-100314", "%s dead runner pid 1" % word)])
+                os.utime(os.path.join(tmp, "FR0.a-094147"), (1000, 1000))
+                os.utime(os.path.join(tmp, "FR0.a-100314"), (2000, 2000))
+                out.append(("an interrupted %s run does not hide the lesson of the run before it" % word,
+                            reason("FR0.a", runs_dir=tmp, exclude=os.path.join(tmp, "now")).startswith("DROPPED at landing")))
+        with tempfile.TemporaryDirectory() as tmp:
+            # a READY verdict after the drop is a real verdict: it still teaches nothing, and the old drop is not resurrected
+            quarantine_fixture(tmp, [("FR0.a-094147", "DROPPED at landing: x"), ("FR0.a-100314", "READY /x/b.json (round 1, grader PASS)")])
+            os.utime(os.path.join(tmp, "FR0.a-094147"), (1000, 1000))
+            os.utime(os.path.join(tmp, "FR0.a-100314"), (2000, 2000))
+            out.append(("a newer real verdict wins over an older rejection",
+                        reason("FR0.a", runs_dir=tmp, exclude=os.path.join(tmp, "now")) == ""))
+        # THE WRITER AND THE READER AGREE: every rejection note land_batch writes starts with a word previous_reason reads.
+        words = load_fn(UNIT_RUNNER, "previous_reason") and re.findall(r'note = "([A-Z][A-Z-]+)', open(os.path.join(LOOP, "land_batch.py"), encoding="utf-8").read())
+        src_ur = open(UNIT_RUNNER, encoding="utf-8").read()
+        known = re.search(r"^REJECTED_WORDS = \(([^)]*)\)", src_ur, re.M)
+        known = set(re.findall(r'"([A-Z-]+)"', known.group(1))) if known else set()
+        out.append(("every rejection word land_batch writes is one previous_reason learns from (writer and reader agree)",
+                    bool(words) and set(words) <= known))
     # ---- H7.b (REQ-H-CHEAPEST): the planner and the advisor default to the advice line's cheapest valid model ----
     # PRESENCE IS READ BY LIFTING THE FUNCTION OUT OF THE PARSED SOURCE WITH THE LOADER THIS FILE ALREADY SHIPS,
     # NEVER BY A NAME LOOKUP INTO A LIVE MODULE OBJECT: the grader's safety screen refuses that shape inside a build,

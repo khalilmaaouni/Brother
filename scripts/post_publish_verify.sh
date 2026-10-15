@@ -42,7 +42,7 @@ fi
 # 4. the GitHub Release exists, is published, and carries the body file
 J=$(gh release view "v$VER" -R "$R" --json tagName,isDraft,isPrerelease,publishedAt,body 2>/dev/null)
 if [ -z "$J" ]; then bad "no GitHub Release v$VER"; else
-  echo "$J" | python3 -c 'import json,sys; d=json.load(sys.stdin); b=open(sys.argv[1]).read(); ok=not d["isDraft"] and not d["isPrerelease"] and d["body"].strip()==b.strip(); print(("PASS    " if ok else "FAIL    ")+"release published %s, draft %s, prerelease %s, body equals file: %s" % (d["publishedAt"], d["isDraft"], d["isPrerelease"], d["body"].strip()==b.strip())); sys.exit(0 if ok else 1)' "$BODY" || fails=$((fails+1))
+  printf '%s\n' "$J" | python3 -c 'import json,sys; d=json.load(sys.stdin); b=open(sys.argv[1]).read(); ok=not d["isDraft"] and not d["isPrerelease"] and d["body"].strip()==b.strip(); print(("PASS    " if ok else "FAIL    ")+"release published %s, draft %s, prerelease %s, body equals file: %s" % (d["publishedAt"], d["isDraft"], d["isPrerelease"], d["body"].strip()==b.strip())); sys.exit(0 if ok else 1)' "$BODY" || fails=$((fails+1))
 fi
 
 # 5. the release PR's required check passed (required-fast runs on pull_request to main)

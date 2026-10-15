@@ -66,6 +66,10 @@ from adapters.bridge import BridgeAdapter  # noqa: E402
 from adapters.claude import ClaudeAdapter  # noqa: E402
 from adapters.codex import CodexAdapter  # noqa: E402
 LOOP_TOKEN_SWITCH = "BROTHER_LOOP_TOKEN"
+#: THE SANDBOX PROGRAM IS ONE ABSOLUTE PATH (review 2026-10-14, G3): a bare name is resolved through PATH, so an entry ahead of
+#: /usr/bin holding another program called sandbox-exec would run, unconfined, as the sandbox around the login. Every
+#: builder of a token lane argv (native_worker._sandbox_head) and the guard in _claude_run use this one constant.
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 def _codex_root():
     """Delegates to model_router.repo_root. ONE implementation, because two copies of the same path
     logic in two files is how they drift, and this exact logic already drifted once."""
@@ -258,7 +262,7 @@ def _claude_run(path, started, argv, stdin, timeout, runner):
         # THE TOKEN LANE IS THE ONLY LANE ONCE THE SWITCH IS ON (review 2026-10-03): a headless Claude call that is not
         # a native seat (argv[0] sandbox-exec) would run on this machine's own login with the Keychain open; refused
         # as a spawn failure (nothing sent, nothing billed) naming the two ways out.
-        if SW.on(LOOP_TOKEN_SWITCH) and (not argv or os.path.basename(argv[0]) != "sandbox-exec"):
+        if SW.on(LOOP_TOKEN_SWITCH) and (not argv or argv[0] != SANDBOX_EXEC):
             raise SpawnFailed(0, "BROTHER_LOOP_TOKEN is on: only native seats run on the loop login "
                                  "(set BROTHER_CLAUDE_NATIVE=on, or turn BROTHER_LOOP_TOKEN off)")
         r = (runner or _run)(argv, stdin, timeout)
@@ -511,6 +515,7 @@ def call_one(name, prompt, kind, sensitivity, timeout=300, reg=None, runner=None
     # completion can never cancel an uncosted call when a reader reconciles concurrent calls.
     call_id = "%d-%d-%s" % (os.getpid(), time.time_ns(), os.urandom(4).hex())
     slot = None
+    lane = None   # the token lane of a Claude role call (_TokenLane), closed in the finally below
     if admission is None:
         return Attempt(name, False, "", "admission refused: %s" % ADMISSION_WHY, time.time() - t0,
                        status="REFUSED_BY_GATE")
@@ -583,6 +588,16 @@ def call_one(name, prompt, kind, sensitivity, timeout=300, reg=None, runner=None
             except R.Refused as exc:   # the effort names no level: nothing to register, nothing sent, the chain moves on
                 return Attempt(name, False, "", "transport not runnable: %s" % exc, time.time() - t0,
                                status="TRANSPORT_DOWN")
+            if argv and SW.on(LOOP_TOKEN_SWITCH):
+                # THE LOOP LOGIN FOR A ROLE (2026-10-14): sandboxed, the login on a pipe, or nothing runs. Before the
+                # ledger START: a call refused here was never registered, sent or billed. _claude_run keeps refusing
+                # every call that is still not sandboxed.
+                try:
+                    lane = _TokenLane(argv, runner)
+                except R.Refused as exc:
+                    return Attempt(name, False, "", "%s: %s" % (CONFIG_WAIT, exc), time.time() - t0, failure="CONFIG",
+                                   status="CONFIG")
+                argv, runner = lane.argv, lane.go
             # START IS DURABLE BEFORE THE CHILD RUNS (U7, objection 12): a call the ledger did not register never runs
             path = CL.ledger_path()
             try:
@@ -607,6 +622,8 @@ def call_one(name, prompt, kind, sensitivity, timeout=300, reg=None, runner=None
         return Attempt(name, False, "", "timed out after %ds" % timeout, time.time() - t0,
                        status="TIMEOUT")
     finally:
+        if lane is not None:
+            lane.close()
         if slot is not None:
             admission.release_slot(slot)
     return _break_here(_judge(name, reg, kind, prompt, r, time.time() - t0, call_id,
@@ -774,6 +791,85 @@ def _run_in(argv, stdin, timeout, scratch, env=None, pass_fds=()):
         proc.communicate()
         raise
     return {"returncode": proc.returncode, "stdout": out, "stderr": err}
+
+
+def _have_sandbox():
+    """True when SANDBOX_EXEC exists and can run (macOS ships it at that path). A seam so a test can say it is absent."""
+    return os.path.isfile(SANDBOX_EXEC) and os.access(SANDBOX_EXEC, os.X_OK)
+
+
+def _takes_env(runner):
+    """True when runner can be called with an env keyword (an explicit env parameter or **kwargs). A runner whose
+    signature cannot be read is refused: an unknown never reads as the safe case."""
+    import inspect
+    try:
+        params = inspect.signature(runner).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "env" and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY) or p.kind == p.VAR_KEYWORD for p in params)
+
+
+class _TokenLane(object):
+    """ONE ROLE'S HEADLESS CLAUDE CALL ON THE LOOP LOGIN (2026-10-14). With BROTHER_LOOP_TOKEN=on _claude_run refuses every
+    call that is not sandboxed, and a role (planner, repair advisor, finisher, checker, build planner) is such a call,
+    so under the token the intake read NO START for all of them and with the token off they ran on this machine's own
+    sign-in, which lapses overnight: no setting let an unattended loop with Claude helper roles run. A role call now
+    becomes what a native seat is, built by the SAME code (native_worker): the Keychain login read by the trusted
+    reader and handed to this one child on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), never an environment,
+    argv, file or log; sandbox-exec with the seat's token lane profile around the plain command line (credential
+    folders denied, nothing writable but its own scratch); a scratch folder of its own, removed by close(). A role
+    allows no tool and takes its prompt on stdin, so it needs to read no repository file and none is opened.
+    FAILS CLOSED, never to the interactive login: no sandbox-exec, a program the sandbox cannot run, an unreadable
+    Keychain or a missing reader raise R.Refused naming the remedy BEFORE anything is spawned or registered.
+    argv: the plain command line, `go` the runner for _claude_run(argv, stdin, timeout) (an injected runner is called
+    runner(argv, stdin, timeout, env=child_env), as native_worker's tests do), close() releases the pipe and the scratch."""
+
+    def __init__(self, argv, runner):
+        self.fd = self.wt = self.tool = None
+        if runner is not None and not _takes_env(runner):
+            # G1 (review 2026-10-14): the lane calls an injected runner as runner(argv, stdin, timeout, env=child_env). One
+            # that cannot take env would raise TypeError AFTER the Keychain was read and the ledger START written, a phantom
+            # uncosted call; refused here, before either.
+            raise R.Refused("the injected runner does not accept env=, which the loop token lane passes to it")
+        if not _have_sandbox():
+            raise R.Refused("%s is missing, and the loop token lane runs a role only inside sandbox-exec: run the loop on "
+                            "macOS, or turn BROTHER_LOOP_TOKEN off" % SANDBOX_EXEC)
+        import native_worker as NW   # imported here: native_worker imports this module
+        why = NW.program_outside_sandbox(argv[0])
+        if why:
+            raise R.Refused(why)
+        os.makedirs(SCRATCH, exist_ok=True)   # an OSError here is the caller's transport not runnable, never an unsandboxed run
+        self.wt = os.path.realpath(tempfile.mkdtemp(prefix="role-", dir=SCRATCH))
+        self.tool = NW.tool_dir(self.wt)
+        try:
+            os.makedirs(os.path.join(self.wt, ".tmp"), exist_ok=True)
+            os.makedirs(self.tool, exist_ok=True)
+            try:
+                env, self.fd = NW.login_child()
+            except NW.BL.Failure as exc:
+                raise R.Refused("BROTHER_LOOP_TOKEN is on but the loop login cannot be used (%s); sign in once with "
+                                "python3 scripts/loop/brother_login.py" % exc)
+            self.argv = NW.role_argv(argv, self.wt, env)
+        except BaseException:
+            self.close()
+            raise
+        wt, fd = self.wt, self.fd
+        self.go = ((lambda a, s, t: runner(a, s, t, env=env)) if runner
+                   else (lambda a, s, t: _run_in(a, s, t, wt, env=env, pass_fds=(fd,))))
+
+    def close(self):
+        """Idempotent: the pipe's read end closed, the scratch and its tool folder removed."""
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass   # sbe: allow-silent the descriptor is already closed; nothing else holds the login
+            self.fd = None
+        import shutil
+        for d in (self.tool, self.wt):
+            if d:
+                shutil.rmtree(d, ignore_errors=True)   # sbe: allow-silent a scratch that cannot be removed never fails the call it served
+        self.tool = self.wt = None
 
 
 def call(prompt, kind="build", sensitivity=R.PUBLIC, pin=None, timeout=300,

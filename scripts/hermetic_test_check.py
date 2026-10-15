@@ -57,6 +57,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import cut_preflight as P  # noqa: E402
+import evidence_obligation as EO  # noqa: E402
 import timing_hunt as TH  # noqa: E402
 
 
@@ -494,6 +495,63 @@ def _checkout_rerun(root, test, runner, timeout):
         shutil.rmtree(home, ignore_errors=True)
 
 
+def _checks_running(tree, test):
+    """The names of the required_fast.sh checks whose whole command is this
+    exact test file (an optional python3, an optional -B, the path, nothing
+    else), read from the export tree's own copy. [] when the file is missing,
+    unreadable or names no such check."""
+    try:
+        with open(os.path.join(tree, "scripts", "required_fast.sh"), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    names = []
+    for line in lines:
+        try:
+            tokens = shlex.split(line, comments=True)
+        except ValueError:
+            continue
+        if len(tokens) < 3 or tokens[0] != "run_check":
+            continue
+        rest = tokens[2:]
+        if rest and os.path.basename(rest[0]).startswith("python"):
+            rest = rest[1:]
+        if rest and rest[0] == "-B":
+            rest = rest[1:]
+        if rest == [test]:
+            names.append(tokens[1])
+    return names
+
+def declared_no_data(tree, test, proc):
+    """(inputs, why): `inputs` is the list of declared absent inputs when a test's exit 2 is the estate's own declared
+    NO-DATA on this export tree, else None with `why`. THE ONE RULE required_fast.sh's obligation step applies
+    (scripts/evidence_obligation.py transition: an exit 2 whose check declares an expected_absent_input that is absent
+    from the repo is allowed), asked here of the tree the public runner would see, so a check that honestly says NO-DATA
+    is not forced into a false exit 0. All must hold, else None (the refusal stands, fail closed): the exit is exactly 2;
+    gate_obligations.json reads; every check that runs this file declares an input that stays inside the tree, is absent
+    (a dangling link counts as present), and is named in the output."""
+    if proc.returncode != 2:
+        return None, "exit %d is not NO-DATA" % proc.returncode
+    names = _checks_running(tree, test)
+    if not names:
+        return None, "no required_fast.sh check runs this file"
+    try:
+        checks = EO.load_obligations(tree).get("checks", {})
+    except EO.ObligationError as exc:
+        return None, "gate_obligations.json: %s" % exc
+    text = (proc.stdout or "") + (proc.stderr or "")
+    inputs = []
+    for name in names:
+        expected = (checks.get(name) or {}).get("expected_absent_input")
+        if not expected or EO.expected_absent_escapes(tree, expected):
+            return None, "check %s declares no usable expected_absent_input" % name
+        if os.path.lexists(os.path.join(tree, expected)):
+            return None, "check %s declares %s absent but it is present" % (name, expected)
+        if expected not in text:
+            return None, "the output never names %s" % expected
+        inputs.append(expected)
+    return inputs, ""
+
 def _refusal(root, test, proc, runner, timeout):
     """The refusal's words, chosen by a rerun in the checkout. Measured
     2026-09-26: the export only wording was false for 2 of 3 refusals, both
@@ -569,8 +627,13 @@ def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S):
             elif proc.returncode in (124, 127):
                 results.append((NODATA, test, "could not be run: %s" % P._last(proc)))
             else:
-                results.append((REFUSED, test,
-                                _refusal(root, test, proc, runner, timeout)))
+                inputs, _why = declared_no_data(tree, test, proc)
+                if inputs:
+                    results.append((OK, test, "NO-DATA on the export tree as declared (%s absent)"
+                                    % ", ".join(inputs)))
+                else:
+                    results.append((REFUSED, test,
+                                    _refusal(root, test, proc, runner, timeout)))
         return results
     finally:
         shutil.rmtree(tree, ignore_errors=True)

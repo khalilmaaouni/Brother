@@ -1721,6 +1721,7 @@ run_check "model-bench-self" python3 scripts/loop/model_bench.py --selftest
 run_check "plan-store-self" python3 scripts/loop/plan_store.py --selftest
 # unit_ledger needs duckdb, which this machine carries under /usr/bin/python3 only; under a Python without it the view cases are NO-DATA
 run_check "unit-ledger-self" /usr/bin/python3 -B scripts/loop/unit_ledger.py --selftest
+run_check "unit-ledger-rollups-self" /usr/bin/python3 -B scripts/loop/unit_ledger_rollups.py --selftest
 run_check "spec-accept-self" python3 -B scripts/loop/spec_accept.py --selftest
 run_check "judge-calibrate-self" python3 -B scripts/loop/judge_calibrate.py --selftest
 run_check "probe-build-self" python3 -B scripts/loop/probe_build.py --selftest
@@ -1782,6 +1783,30 @@ run_check "intake-parallel-py39" /usr/bin/python3 -B scripts/loop/test_intake_pa
 run_check "loop-gate-cache" python3 -B scripts/loop/test_loop_gate_cache.py
 run_check "loop-gate-cache-py39" /usr/bin/python3 -B scripts/loop/test_loop_gate_cache.py
 run_check "landing-standard" python3 -B scripts/loop/test_landing_standard.py
+run_check "land-batch-mirror" python3 -B scripts/loop/test_land_batch_mirror.py
+run_check "land-batch-mirror-py39" /usr/bin/python3 -B scripts/loop/test_land_batch_mirror.py
+run_check "grade-build-mirror" python3 -B scripts/loop/test_grade_build_mirror.py
+run_check "grade-build-mirror-py39" /usr/bin/python3 -B scripts/loop/test_grade_build_mirror.py
+run_check "landing-standard-mirror" python3 -B scripts/loop/test_landing_standard_mirror.py
+run_check "landing-standard-mirror-py39" /usr/bin/python3 -B scripts/loop/test_landing_standard_mirror.py
+run_check "plan-lint-protected" python3 -B scripts/loop/test_plan_lint_protected.py
+run_check "plan-lint-protected-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_protected.py
+run_check "plan-lint-owns" python3 -B scripts/loop/test_plan_lint_owns.py
+run_check "plan-lint-owns-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_owns.py
+run_check "plan-lint-shared" python3 -B scripts/loop/test_plan_lint_shared.py
+run_check "plan-lint-shared-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_shared.py
+run_check "spec-score-no-claim" python3 -B scripts/loop/test_spec_score_no_claim.py
+run_check "spec-score-no-claim-py39" /usr/bin/python3 -B scripts/loop/test_spec_score_no_claim.py
+run_check "plan-lint-after-order" python3 -B scripts/loop/test_plan_lint_after_order.py
+run_check "plan-lint-after-order-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_after_order.py
+run_check "plan-lint-named-test" python3 -B scripts/loop/test_plan_lint_named_test.py
+run_check "plan-lint-named-test-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_named_test.py
+run_check "model-call-token-roles" python3 -B scripts/loop/test_model_call_token_roles.py
+run_check "model-call-token-roles-py39" /usr/bin/python3 -B scripts/loop/test_model_call_token_roles.py
+run_check "hermetic-obligations-self" python3 -B scripts/test_hermetic_obligations.py
+run_check "hermetic-obligations-py39" /usr/bin/python3 -B scripts/test_hermetic_obligations.py
+run_check "runner-pool-after-union" python3 -B scripts/loop/test_runner_pool_after_union.py
+run_check "runner-pool-after-union-py39" /usr/bin/python3 -B scripts/loop/test_runner_pool_after_union.py
 run_check "spec-score-standard" python3 -B scripts/loop/test_spec_score_standard.py
 run_check "runner-pool-shared-files" python3 -B scripts/loop/test_runner_pool_shared_files.py
 run_check "codex-doc-release-refs" python3 scripts/test_codex_doc_release_refs.py
@@ -1792,6 +1817,24 @@ run_check "cut-rehearsal-self" python3 -B scripts/test_cut_rehearsal.py
 run_check "cut-rehearsal-awake-self" python3 -B scripts/test_cut_rehearsal_awake.py
 run_check "cut-driver-self" python3 -B scripts/test_cut_driver.py
 run_check "cut-driver-self-py39" /usr/bin/python3 -B scripts/test_cut_driver.py
+run_check "cut-ready-handover-self" python3 -B scripts/test_cut_ready_handover.py
+run_check "cut-ready-handover-py39" /usr/bin/python3 -B scripts/test_cut_ready_handover.py
+run_check "cut-ask-flush-self" python3 -B scripts/test_cut_ask_flush.py
+run_check "cut-ask-flush-py39" /usr/bin/python3 -B scripts/test_cut_ask_flush.py
+run_check "cut-preflight-run-self" python3 -B scripts/test_cut_preflight_run.py
+run_check "cut-preflight-run-py39" /usr/bin/python3 -B scripts/test_cut_preflight_run.py
+run_check "export-tree-cache-self" python3 -B scripts/test_export_tree_cache.py
+run_check "export-tree-cache-py39" /usr/bin/python3 -B scripts/test_export_tree_cache.py
+run_check "cut-preflight-reuse-self" python3 -B scripts/test_cut_preflight_reuse.py
+run_check "cut-preflight-reuse-py39" /usr/bin/python3 -B scripts/test_cut_preflight_reuse.py
+run_check "cut-heartbeat-self" python3 -B scripts/test_cut_heartbeat.py
+run_check "cut-heartbeat-py39" /usr/bin/python3 -B scripts/test_cut_heartbeat.py
+run_check "cut-local-rehearsal-self" python3 -B scripts/test_cut_local_rehearsal.py
+run_check "cut-local-rehearsal-py39" /usr/bin/python3 -B scripts/test_cut_local_rehearsal.py
+run_check "donecheck-114-loop-self" python3 -B scripts/test_donecheck_114_loop.py
+run_check "donecheck-114-loop-py39" /usr/bin/python3 -B scripts/test_donecheck_114_loop.py
+run_check "donecheck-114-cut-self" python3 -B scripts/test_donecheck_114_cut.py
+run_check "donecheck-114-cut-py39" /usr/bin/python3 -B scripts/test_donecheck_114_cut.py
 # RC0.a: the release candidate handover may say less than its evidence, never more.
 run_check "rc-handover-self" python3 -B scripts/test_rc_handover.py
 run_check "rc-handover-self-py39" /usr/bin/python3 -B scripts/test_rc_handover.py
@@ -2457,6 +2500,24 @@ run_check "jev-seam-wiring-self" python3 scripts/test_jev_seam_wiring.py
 run_check "jev-seam-wiring-py39" /usr/bin/python3 -B scripts/test_jev_seam_wiring.py
 run_check "baseline-113-self" python3 scripts/test_baseline_113.py
 run_check "baseline-113-py39" /usr/bin/python3 -B scripts/test_baseline_113.py
+run_check "plan-114-self" python3 -B scripts/test_plan_114.py
+run_check "plan-114-py39" /usr/bin/python3 -B scripts/test_plan_114.py
+run_check "baseline-114-self" python3 -B scripts/test_baseline_114.py
+run_check "baseline-114-py39" /usr/bin/python3 -B scripts/test_baseline_114.py
+run_check "plan-clock-self" python3 -B scripts/test_plan_clock.py
+run_check "plan-clock-py39" /usr/bin/python3 -B scripts/test_plan_clock.py
+run_check "plan-seed-self" python3 -B scripts/test_plan_seed.py
+run_check "plan-seed-py39" /usr/bin/python3 -B scripts/test_plan_seed.py
+run_check "plan-gen-self" python3 -B scripts/test_plan_gen.py
+run_check "plan-gen-py39" /usr/bin/python3 -B scripts/test_plan_gen.py
+run_check "plan-briefs-self" python3 -B scripts/test_plan_briefs.py
+run_check "plan-briefs-py39" /usr/bin/python3 -B scripts/test_plan_briefs.py
+run_check "plan-pipeline-self" python3 -B scripts/test_plan_pipeline.py
+run_check "plan-pipeline-py39" /usr/bin/python3 -B scripts/test_plan_pipeline.py
+run_check "codex-surface-effects-self" python3 -B scripts/test_codex_surface_effects.py
+run_check "codex-surface-effects-py39" /usr/bin/python3 -B scripts/test_codex_surface_effects.py
+run_check "brother-run-unfinished-self" python3 -B scripts/test_brother_run_unfinished.py
+run_check "brother-run-unfinished-py39" /usr/bin/python3 -B scripts/test_brother_run_unfinished.py
 run_check "runbook-wait-shape" python3 -B scripts/test_runbook_wait_shape.py
 run_check "runbook-wait-shape-py39" /usr/bin/python3 -B scripts/test_runbook_wait_shape.py
 run_check "jev-outcome-self" python3 -B scripts/test_jev_outcome.py
@@ -2481,6 +2542,7 @@ run_check "jev-start-refusal-py39" /usr/bin/python3 -B scripts/test_jev_start_re
 run_check "vault-resolver-self" python3 -B products/brothermode/tools/test_vault_resolver.py
 run_check "vault-resolver-py39" /usr/bin/python3 -B products/brothermode/tools/test_vault_resolver.py
 run_check "diag-round-self" python3 scripts/test_diag_round.py
+run_check "diag-round-candidate" python3 scripts/test_diag_round_candidate.py
 run_check "burn-guard-self" python3 scripts/test_burn_guard.py
 run_check "dream-world-d65-self" python3 -B -m unittest plugin.runtime.brother.core.test_dream_world_d65
 run_check "l61-self" python3 scripts/test_l61.py
@@ -2615,6 +2677,8 @@ run_check "plan-e-removals" python3 scripts/loop/test_plan_e_removals.py
 run_check "land-batch-h1b-self" python3 scripts/loop/test_land_batch_h1b.py
 run_check "land-batch-landings" python3 -B scripts/loop/test_land_batch_landings.py
 run_check "land-batch-bl-owns" python3 -B scripts/loop/test_land_batch_bl_owns.py
+run_check "land-batch-bl-owns-plan" python3 -B scripts/loop/test_land_batch_bl_owns_plan.py
+run_check "land-batch-rejection-fact" python3 -B scripts/loop/test_land_batch_rejection_fact.py
 run_check "native-adapter" python3 -B scripts/loop/test_native_adapter.py
 run_check "native-worker" python3 -B scripts/loop/test_native_worker.py
 # the build seat runs the landing fuzz and every brief carries its hostile input contract (build quality, 2026-10-05)
@@ -2811,6 +2875,8 @@ run_check "host-evidence-binding-py39" /usr/bin/python3 -B scripts/test_host_evi
 run_check "host-doc-check-self" python3 scripts/test_host_doc_check.py
 run_check "precut-review-self" python3 scripts/test_precut_review.py
 run_check "merge-gate-self" python3 scripts/test_merge_gate.py
+run_check "merge-gate-owns-self" python3 -B scripts/test_merge_gate_owns.py
+run_check "merge-gate-owns-py39" /usr/bin/python3 -B scripts/test_merge_gate_owns.py
 run_check "hp1-owner-steps-self" python3 scripts/test_hp1_owner_steps.py
 run_check "host-live-claude-self" python3 scripts/test_host_live_claude.py
 run_check "host-live-collect-self" python3 scripts/test_host_live_collect.py
@@ -2824,6 +2890,22 @@ run_check "linux-canary-self-py39" /usr/bin/python3 -B scripts/test_linux_canary
 run_check "escape-measure-self" python3 scripts/test_escape_measure.py
 run_check "bench-controls-self" python3 scripts/test_bench_controls.py
 run_check "door-overhead-self" python3 scripts/test_door_overhead.py
+run_check "runner-pool-lint-refusal-self" python3 scripts/loop/test_runner_pool_lint_refusal.py
+run_check "cut-ready-self" python3 scripts/test_cut_ready.py
+run_check "wiring-audit-tiers-self" python3 scripts/test_wiring_audit_tiers.py
+run_check "wiring-user-routes-self" python3 scripts/test_wiring_user_routes.py
+run_check "runner-pool-seats-self" python3 scripts/loop/test_runner_pool_seats.py
+run_check "cut-ready-margin-self" python3 scripts/test_cut_ready_margin.py
+run_check "runner-pool-load-self" python3 scripts/loop/test_runner_pool_load.py
+run_check "runner-pool-after-self" python3 scripts/loop/test_runner_pool_after.py
+run_check "builder-claim-self" python3 scripts/loop/test_builder_claim.py
+run_check "cut-ready-power-self" python3 scripts/test_cut_ready_power.py
+run_check "native-worker-session-cap-self" python3 scripts/loop/test_native_worker_session_cap.py
+run_check "unit-runner-withheld-reason-self" python3 scripts/loop/test_unit_runner_withheld_reason.py
+run_check "diag-notes-sources-self" python3 scripts/loop/test_diag_notes_sources.py
+run_check "loop-canary-fixtures-self" python3 scripts/loop/test_loop_canary_fixtures.py
+run_check "native-worker-profile-static-self" python3 scripts/loop/test_native_worker_profile_static.py
+run_check "sibling-new-self" python3 scripts/loop/test_sibling_new.py
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook
 # suites) is caught. See the snapshot comment above.

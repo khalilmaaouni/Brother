@@ -11,7 +11,7 @@ sentences in unit_runner.py and build_plan.py defer to it.
 """
 import ast  # module level: _bindings and _dotted below are helpers of unsafe(), which used to hold the only import
 import contextlib
-import hashlib, json, os, re, shutil, subprocess, sys, tempfile
+import hashlib, json, os, posixpath, re, shutil, subprocess, sys, tempfile
 
 BLOCK = re.compile(r"or_ask|urllib|http\.client|import requests|requests\.(?:get|post|put|patch|delete|request|Session)\(|import socket|socket\.socket|os\.system|\beval\(|\bexec\(|ftplib|smtplib|"
                    r"security find-generic-password|\.ssh|keychain", re.I)
@@ -374,6 +374,32 @@ def _in_context(it, prior, read, later=()):
     return (tree, first, first + body[at:end].count("\n")), ""
 
 
+BUNDLE_REFUSAL = "bundle/ is generated: edit the source under scripts/loop, the landing regenerates the mirror"
+
+
+def bundle_edit_reason(build: dict) -> str:
+    """"" when no edit, test or mutation item of `build` has a path under bundle/; else BUNDLE_REFUSAL followed by
+    " (<path>)" for the first such item. The path is normalized first: backslashes to slashes, normpath, leading ./ removed,
+    first part compared case folded; a bare "bundle" counts. A non dict item or a non string path is skipped here (preflight
+    refuses a missing path). A loop build must never write the shipped bundle: the landing regenerates the mirror (LM1)."""
+    if not isinstance(build, dict):
+        return ""
+    for key in ("edits", "tests", "mutations"):
+        items = build.get(key)
+        if not isinstance(items, (list, tuple)):
+            continue
+        for it in items:
+            path = it.get("path") if isinstance(it, dict) else None
+            if not isinstance(path, str):
+                continue
+            norm = posixpath.normpath(path.replace("\\", "/"))
+            while norm.startswith("./"):
+                norm = norm[2:]
+            if norm.split("/", 1)[0].casefold() == "bundle":
+                return "%s (%s)" % (BUNDLE_REFUSAL, path)
+    return ""
+
+
 def unsafe(build, runners=None, *, allowed_imports=frozenset(), read=None, contained=False):
     """The first reason this build is unsafe to run, or None. A Python fragment that does not parse alone is judged in
     context (_in_context): the whole file must parse where it lands, and the replaced lines meet the same screen;
@@ -388,6 +414,9 @@ def unsafe(build, runners=None, *, allowed_imports=frozenset(), read=None, conta
     import textwrap
     if not isinstance(build, dict):
         return "build must be a dict, got %s" % type(build).__name__
+    why = bundle_edit_reason(build)
+    if why:
+        return why
     if not isinstance(allowed_imports, (frozenset, set, list, tuple)):
         return "allowed_imports must be a frozenset of module names, got %s" % type(allowed_imports).__name__
     if any(not isinstance(x, str) for x in allowed_imports):
@@ -742,7 +771,7 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # bundle gate's codex_skills import), transitively (export_public.py, exempt then for unit T1,
                    # is protected below since T1 closed).
                    "scripts/private_terms_scan.py", "scripts/loop/secret_scan.py", "scripts/edition_guard.py",
-                   "scripts/codex_skills.py", "scripts/cut_preflight.py", "scripts/plugin_bump_gate.py",
+                   "scripts/codex_skills.py", "scripts/cut_preflight.py", "scripts/export_tree_cache.py", "scripts/plugin_bump_gate.py",
                    "scripts/tmp_sandbox.py", "scripts/git_location_guard.py", "scripts/loop/grade_build.py",
                    "scripts/loop/loop_switches.py",
                    # THE REST OF THAT CLOSURE, COMPUTED (review 15 finding 3, 2026-10-03): the hand written slice above missed
@@ -785,7 +814,7 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    "scripts/loop/loop_hold.py",
                    "plugin/runtime/brother/core/dream_gate.py", "plugin/runtime/brother/core/dream_gate_policy.py",
                    "scripts/failure_ledger.py", "scripts/gate_order.py", "scripts/grade_build.py", "scripts/prediction_ledger.py",
-                   "scripts/loop/ev_gate.py", "scripts/loop/freeze_manifest.py", "scripts/loop/land_batch.py",
+                   "scripts/loop/brief_check.py", "scripts/loop/ev_gate.py", "scripts/loop/freeze_manifest.py", "scripts/loop/land_batch.py",
                    "scripts/loop/loop_receipt.py", "scripts/loop/plan_lint.py", "scripts/loop/plan_store.py",
                    "scripts/loop/proof_accept.py", "scripts/loop/proof_launch.py", "scripts/loop/provenance.py",
                    "scripts/loop/spec_check.py", "scripts/loop/unit_ledger.py", "scripts/loop/worker_mix.py")

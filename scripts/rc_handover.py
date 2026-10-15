@@ -24,7 +24,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 FIELDS = ("Baseline SHA/tag", "Candidate SHA/branch", "Landed U-items and linked tests",
           "Reverted/refused items and reasons", "Public gate summary",
@@ -44,6 +44,11 @@ SOURCE = re.compile(r"\(source=([^)]+)\)\s*$")
 VERDICT = re.compile(r"(?<![\w-])(PASS|FAIL|NO-DATA|BLOCKED)(?![\w-])")
 SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 CLAIM = re.compile(r"\btagged\b|pushed to the public|\breleased\b", re.I)
+# FR0.e (2026-10-14): the cut ready record (scripts/cut_ready.py) is the Public gate summary's source on cut day. A text
+# that names this schema is read as a whole record or not at all: a torn file whose summary line survives never reads
+# as the counts regex's PASS.
+READY_SCHEMA = "cv1.ready.1"
+ROW_VERDICTS = ("PASS", "FAIL", "NO-DATA")
 
 
 def parse_handover(text: str) -> Dict[str, str]:
@@ -62,7 +67,48 @@ def parse_handover(text: str) -> Dict[str, str]:
     return out
 
 
+def ready_record_of(text: str) -> Optional[dict]:
+    """The text as a whole cv1.ready.1 record (schema, candidate_tree, verdict, a list of rows each with a verdict
+    word), or None for anything else, a torn or partial record included."""
+    try:
+        rec = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(rec, dict) or rec.get("schema") != READY_SCHEMA:
+        return None
+    tree, rows = rec.get("candidate_tree"), rec.get("rows")
+    if not isinstance(tree, str) or not re.match(r"^[0-9a-f]{40}$", tree) or rec.get("verdict") not in ROW_VERDICTS:
+        return None
+    if not isinstance(rows, list) or not rows:
+        return None
+    if any(not isinstance(r, dict) or r.get("verdict") not in ROW_VERDICTS for r in rows):
+        return None
+    return rec
+
+
+def ready_counts(rec: dict) -> Optional[Tuple[int, int, int]]:
+    """(pass, fail, no-data) over the record's rows, or None when the rows cannot be read."""
+    try:
+        verdicts = [r["verdict"] for r in rec["rows"]]
+    except (KeyError, TypeError):
+        return None
+    if any(v not in ROW_VERDICTS for v in verdicts):
+        return None
+    return (verdicts.count("PASS"), verdicts.count("FAIL"), verdicts.count("NO-DATA"))
+
+
+def _ready_verdict(rec: dict) -> str:
+    counts = ready_counts(rec)
+    if counts is None:
+        return "NO-DATA"
+    computed = "FAIL" if counts[1] else "NO-DATA" if counts[2] else "PASS"
+    return computed if rec.get("verdict") == computed else "NO-DATA"
+
+
 def source_verdict(text: str) -> str:
+    if READY_SCHEMA in text:
+        rec = ready_record_of(text)
+        return "NO-DATA" if rec is None else _ready_verdict(rec)
     lines = text.split("\n")
     lines = lines[:-1]  # the part after the last newline is torn (or empty) and never decides
     for line in reversed(lines):
@@ -137,7 +183,8 @@ def _units(value: str):
     return [(i.partition(":")[0].strip(), i.partition(":")[2].strip()) for i in value.split(";") if i.strip()]
 
 
-def check_handover(path: str, root: str, evidence_root: str, notes: Optional[List[str]] = None) -> List[str]:
+def check_handover(path: str, root: str, evidence_root: str, notes: Optional[List[str]] = None, wbs: str = "") -> List[str]:
+    wbs = wbs or WBS
     try:
         with open(path, "rb") as f:
             text = f.read().decode("utf-8")
@@ -163,6 +210,7 @@ def check_handover(path: str, root: str, evidence_root: str, notes: Optional[Lis
     get = lambda k: fields.get(k, "")  # noqa: E731
 
     cand_time = None
+    cand_sha = None
     for label in FIELDS[:2]:
         if not get(label):
             continue
@@ -177,6 +225,7 @@ def check_handover(path: str, root: str, evidence_root: str, notes: Optional[Lis
                 problems.append("%s: %s is not a commit in %s" % (label, sha, root))
             elif label == FIELDS[1]:
                 cand_time = _commit_time(root, sha)
+                cand_sha = sha
 
     for label in SOURCED:
         value = get(label)
@@ -199,6 +248,20 @@ def check_handover(path: str, root: str, evidence_root: str, notes: Optional[Lis
         said, src = value_verdict(value), source_verdict(text_src)
         if STRENGTH[said] > STRENGTH[src]:
             problems.append("%s: says %s but its source says %s" % (label, said, src))
+        if READY_SCHEMA in text_src:
+            rec = ready_record_of(text_src)
+            counts = ready_counts(rec) if rec is not None else None
+            got = COUNTS.search(SOURCE.sub("", value))
+            if counts is not None and (not got or tuple(int(x) for x in got.groups()) != counts):
+                problems.append("%s: counts %s differ from the record's rows pass %d fail %d no-data %d"
+                                % ((label, " ".join(got.groups()) if got else "absent") + counts))
+            tree = None
+            if cand_sha is not None:
+                proc = _git(root, "rev-parse", cand_sha + "^{tree}")
+                tree = proc.stdout.strip() if proc is not None and proc.returncode == 0 else None
+            if rec is not None and rec["candidate_tree"] != tree:
+                problems.append("%s: source %s describes another tree" % (label, m.group(1).strip()))
+            continue
         src_counts = [c.groups() for c in COUNTS.finditer(text_src)]
         if src_counts:
             got = COUNTS.search(SOURCE.sub("", value))
@@ -208,10 +271,10 @@ def check_handover(path: str, root: str, evidence_root: str, notes: Optional[Lis
 
     wbs_ids = None
     try:
-        with open(os.path.join(root, WBS), encoding="utf-8") as f:
+        with open(os.path.join(root, wbs), encoding="utf-8") as f:
             wbs_ids = {u["id"] for u in json.load(f)["units"]}
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        problems.append("WBS unreadable: %s (%s)" % (WBS, exc.__class__.__name__))
+        problems.append("WBS unreadable: %s (%s)" % (wbs, exc.__class__.__name__))
     in_wbs = lambda uid: wbs_ids is not None and uid.split(".")[0] in wbs_ids  # noqa: E731
     for uid, cmd in _units(get(FIELDS[2])):
         if not in_wbs(uid):
@@ -247,12 +310,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--check", required=True, metavar="FILE")
     ap.add_argument("--root", default=ROOT)
     ap.add_argument("--evidence", default=DEFAULT_EVIDENCE)
+    ap.add_argument("--wbs", default="", help="the plan whose units the handover names (default %s)" % WBS)
     args = ap.parse_args(argv)
     if not os.path.isfile(args.check):
         print("NO-DATA handover absent: %s" % args.check)
         return 2
     notes = []  # type: List[str]
-    problems = check_handover(args.check, args.root, args.evidence, notes)
+    problems = check_handover(args.check, args.root, args.evidence, notes, wbs=args.wbs)
     for line in notes + problems:
         print(line)
     if problems:

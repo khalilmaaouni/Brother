@@ -62,6 +62,21 @@ def power_source(env: Optional[dict] = None, run: Optional[Callable] = None) -> 
     return {"AC Power": "ac", "Battery Power": "battery"}.get(p, "unreadable")
 
 
+def command_stdout(cmd: List[str]) -> Optional[str]:
+    """stdout of cmd as a str, or None when it cannot start or when cmd is malformed.
+
+    One checked seam over this module's own _run, so a caller that must read a
+    host command (the lid through ioreg, the sleep log through pmset) reuses the
+    module's one process rule instead of writing a second one. An unknown or
+    malformed command refuses with None, never a raise.
+    """
+    if isinstance(cmd, (str, bytes)) or not isinstance(cmd, (list, tuple)):
+        return None
+    if not cmd or not all(isinstance(x, str) for x in cmd):
+        return None
+    return _run(list(cmd))
+
+
 def verdict(source: str, remaining_s: int, window: int) -> Tuple[int, str]:
     if source == "ac":
         return 0, ""

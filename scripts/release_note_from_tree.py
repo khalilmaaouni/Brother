@@ -75,6 +75,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import typing
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -363,7 +364,7 @@ def measured_file_rows(claim_suites, perturb=None, pool=None, version=None):
 ALLOW_DIRTY_ENV = "BROTHER_REFRESH_ALLOW_DIRTY"
 
 
-def pooled_rows(claim_suites, perturb, pool, workers=4, version=None,
+def pooled_rows(claim_suites, perturb, pool, workers=None, version=None,
                 allow_dirty=None):
     """measured_file_rows' rows, measured by `pool` (perturb_pool.run_rows'
     signature) in clones at HEAD: one quiet live baseline per suite, then
@@ -375,6 +376,8 @@ def pooled_rows(claim_suites, perturb, pool, workers=4, version=None,
     nothing at all, and a row must never read NO-DATA for that."""
     sys.path.insert(0, HERE)
     import perturb_pool  # noqa: E402
+    if workers is None:  # CF1.a: cores minus one; run_rows still settles it
+        workers = perturb_pool.default_workers()
     PERTURB = perturb
     candidates = [(label, rel, suite) for label, suite in claim_suites
                   for rel in subject_files(suite)]
@@ -396,11 +399,41 @@ def pooled_rows(claim_suites, perturb, pool, workers=4, version=None,
         return [], ("%s: the tree is dirty (%s); work copies stand at HEAD and "
                     "would measure other bytes" % (NODATA, ", ".join(unexpected[:3])))
 
+    # FR1.d2: the disk floor is read before any live baseline, so a refusal
+    # costs no minutes (run 5 spent 618 s in 2b, then refused on 8.3 GiB free).
+    floor = perturb_pool.floor_problem(tempfile.gettempdir())
+    if floor:
+        return [], floor
+
     baselines = {}
+
+    told = []
+
+    def tell(why):  # a receipt trouble is said once and never fails the table
+        if why not in told:
+            told.append(why)
+            print("baseline receipt: %s" % why, file=sys.stderr, flush=True)
 
     def green(suite):
         if suite not in baselines:
-            baselines[suite] = PERTURB.run_suite(suite)[0]
+            # FR1.d1: an exact receipt stands in for the quiet baseline run. The
+            # getattr guard keeps a perturb object without receipts running all.
+            load = getattr(PERTURB, "load_baseline_seconds", None) if version else None
+            seconds = None
+            if load is not None:
+                seconds, _why = load(suite, version, root=ROOT)
+            if seconds is not None:
+                print("baseline reused %s %s s" % (suite, seconds), file=sys.stderr, flush=True)
+                PERTURB._RECEIPT_DURATION[suite] = seconds
+                baselines[suite] = 0
+            else:
+                started = time.monotonic()
+                baselines[suite] = PERTURB.run_suite(suite)[0]
+                write = getattr(PERTURB, "write_baseline_receipt", None) if version else None
+                if baselines[suite] == 0 and write is not None:
+                    why = write(suite, time.monotonic() - started, version, root=ROOT)
+                    if why:
+                        tell(why)
         return baselines[suite] == 0
 
     answers = {}
@@ -411,6 +444,9 @@ def pooled_rows(claim_suites, perturb, pool, workers=4, version=None,
             return None
         # W3: the wall comes from the quiet live runs just made.
         wall = max(PERTURB.wall_for(s) for _, s in pairs)
+        # FR1.f (C7): one line per batch, on stderr so refresh_cut's stream shows it
+        print("pool: %d row(s), wall %s s, %s worker(s) requested"
+              % (len(pairs), wall, workers), file=sys.stderr, flush=True)
         try:
             got = pool(pairs, ROOT, wall, workers)
             got = {(r[0], r[1]): (r[2], r[3]) for r in got}

@@ -51,7 +51,9 @@ def main():
              # sys.path[:0] = [...] is a prepend too; four lanes shipped it on 2026-09-26 and each broke the deploy canary
              ("a slice prepend is read in search order", getattr(P, "search_order", lambda t: None)("sys.path[:0] = [str(HERE), str(LOOP)]\n") == ["str(HERE)", "str(LOOP)"]),
              ("prepends of both forms: the latest first, a slice left to right",
-              getattr(P, "search_order", lambda t: None)("sys.path.insert(0, A)\nsys.path[:0] = [B, f(C, [1, 2])]\nsys.path.insert(0, D)\n") == ["D", "B", "f(C, [1, 2])", "A"])]
+              getattr(P, "search_order", lambda t: None)("sys.path.insert(0, A)\nsys.path[:0] = [B, f(C, [1, 2])]\nsys.path.insert(0, D)\n") == ["D", "B", "f(C, [1, 2])", "A"]),
+             # an append is searched after every prepend, appends in the order they ran (cut_driver.py shape, 2026-10-14)
+             ("appends follow every prepend, in order", getattr(P, "search_order", lambda t: None)("sys.path.append(E)\nsys.path.insert(0, A)\nsys.path.append(os.path.join(HERE, \"loop\"))\n") == ["A", "E", "os.path.join(HERE, \"loop\")"])]
     bad = [n for n, ok in cases if not ok]
     print("selftest: %d cases, %s" % (len(cases), "OK" if not bad else "FAILED: " + ", ".join(bad)))
     return 1 if bad else 0

@@ -2,7 +2,10 @@
 """Diagnose every stuck sub unit in one round: ask for ONE fact plus the command that proves it, run that command,
 and restart only the runners whose fact survived execution.
 
-usage (launch worktree root): python3 scripts/diag_round.py [--dry] [--limit N] [--out DIR]
+usage (launch worktree root): python3 scripts/diag_round.py [--dry] [--limit N] [--out DIR] [--code-root DIR]
+--code-root names the frozen candidate the fan out runs from when no BROTHER_CODE_ROOT is set (the loop outside a proof
+passes ~/.claude/bin/candidate). It is refused when it is not an absolute directory holding the fan out module, or when it
+sits inside the working directory (the landing tree): landing tree code never runs.
 Exit 0 when at least one runner was restarted on a proven fact, 1 when none was, 2 when the state is unreadable.
 
 WHY. A runner that exhausts its rounds is almost never beaten by bad workers: it is missing ONE fact about the real
@@ -59,12 +62,24 @@ def main(argv=None):
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--limit", type=int, default=12, help="lanes per round, so one round cannot spend the night")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--code-root", default=None, help="frozen candidate to run the fan out from (see the docstring)")
     ap.add_argument("--timeout", type=int, default=600)
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     # the fan out runs in the code root, so every path it is handed is absolute
     out = os.path.abspath(args.out or os.path.expanduser("~/.claude/evidence/diag-round"))
     code_root = None
-    if not args.dry:
+    if not args.dry and args.code_root:
+        # an explicit candidate: refused (NO-DATA, nothing asked, nothing bought) unless it is a real directory with the
+        # fan out module and is NOT the landing tree or inside it; the working directory is the landing tree here
+        root, here = os.path.realpath(args.code_root), os.path.realpath(os.getcwd())
+        if not (os.path.isabs(args.code_root) and os.path.isfile(os.path.join(root, "plugin", "runtime", "brother", "core", "or_fanout.py"))):
+            print("NO-DATA: --code-root %s holds no fan out module; no lane is diagnosed" % args.code_root[:160])
+            return 2
+        if root == here or root.startswith(here + os.sep) or here.startswith(root + os.sep):
+            print("NO-DATA: --code-root %s overlaps the working tree; landing tree code never runs, no lane is diagnosed" % args.code_root[:160])
+            return 2
+        code_root = root
+    elif not args.dry:
         # THE FAN OUT RUNS THE FROZEN CANDIDATE (U3, B5-08): `-m` resolves the module from the cwd, which is the landing
         # tree. Asked before any brief is built; a refused code root (a proof phase with none set) asks nothing.
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
