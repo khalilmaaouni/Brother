@@ -26,6 +26,7 @@ REAL_SIBLINGS = ("land_batch.py", "plan_store.py", "spec_check.py", "grade_build
                  # the closer imports from this bin and nowhere else (land_batch.CLOSER, review 17): its whole closure is here
                  "provenance.py", "plan_lint.py", "ev_gate.py", "breaker.py", "claude_ledger.py", "freeze_manifest.py",
                  "loop_receipt.py", "model_call.py", "model_reachability.py", "worker_mix.py",
+                 "diag_notes.py",   # reject_status keeps a landing refusal as the sub unit's diagnosis note (1.1.4)
                  "loop_hold.py",   # the one reader of the loop's stop controls, asked first by main()
                  "plan_path.py",   # the one plan selector every reader and writer imports (2026-10-10)
                  "sandbox.sb")   # neighbours run under the sandbox (2026-10-02)

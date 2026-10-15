@@ -16,10 +16,10 @@ from then on; the last real landing was 20:01 that day. Found 2026-09-22 09:35 w
 second. This copy is byte identical to the one versioned at dde9045f3. A name the workers cannot collide with.
 THE CHILD (FX-08, 2026-09-28): a fuzzed call given True as a file name closed the lander's own stdout, the lander exited
 120 with no result line, and a READY build (L4.4) was dropped with no usable reason; another call given "x" created a
-directory in the landing tree that changed later runs' fuzz. Switches: BROTHER_LAND_FUZZ_INPROCESS exactly "1" restores
-the in-process fuzz (default unset: child); BROTHER_LAND_FUZZ_TIMEOUT_S a number in (0, 1800] replaces the 120 s bound
+directory in the landing tree that changed later runs' fuzz. The child is scripts/loop/land_fuzz_child.py (2026-10-15: the computed import moved out of this file; the
+BROTHER_LAND_FUZZ_INPROCESS switch, which no caller used, is retired). Switch: BROTHER_LAND_FUZZ_TIMEOUT_S a number in (0, 1800] replaces the 120 s bound
 per module (default 120; anything else is ignored with a line saying so)."""
-import importlib, inspect, json, math, os, re, shutil, signal, subprocess, sys, tempfile
+import inspect, json, math, os, re, shutil, signal, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import grade_build  # the loop's own grade_build, never scripts/grade_build.py
 import land_batch as _LB   # make_copy, drop_copy, run_group: one copy and one child discipline for the whole landing
@@ -77,7 +77,7 @@ def fuzz_targets(m):
 def fuzz_module(m, name, hostile, report=None, on_call=None):
     """(crashes, returned) for every public function of module m called with each hostile value. The CLASSIFIER: in
     child mode (the default) it runs inside the child process fuzz_in_child starts, never in the lander; it runs in the
-    lander only when BROTHER_LAND_FUZZ_INPROCESS is exactly "1". A ValueError (a documented refusal), LookupError,
+    lander only by a direct caller (the switch that did so is retired). A ValueError (a documented refusal), LookupError,
     SystemExit or a class the module defines itself is a refusal; any other exception is a crash, handed to report
     (default: printed on ONE line through grade_build.one_line). on_call(fn_name, value, n) runs before each call.
 
@@ -172,7 +172,7 @@ def read_child_results(results, mod, rc, timed_out, timeout, stderr_tail=""):
         return crashes + 1, end["returned"], lines + ["   CRASH %s child exit %s after %s%s" % (mod, rc, last, " | " + stderr_tail if stderr_tail else "")], 0
     return crashes, end["returned"], lines, 0
 def fuzz_in_child(name, hostile, env, home, i=0, root=None, timeout=FUZZ_TIMEOUT_S, say=_say, write_root=None):
-    """(crashes, returned, bad) for module `name`, fuzzed in a bounded child process: this file run with --fuzz-child,
+    """(crashes, returned, bad) for module `name`, fuzzed in a bounded child process: land_fuzz_child.py run by path,
     wrapped by the sandbox exactly as the suites are, cwd the tree (so the import resolves as in process), a fresh HOME
     and TMPDIR, stdin /dev/null, stdout and stderr to files under home, its own process group killed on timeout. The
     child reports through home/fuzz-<i>.jsonl and relative writes land in home/fuzz-<i>/. Lines go to say().
@@ -188,7 +188,7 @@ def fuzz_in_child(name, hostile, env, home, i=0, root=None, timeout=FUZZ_TIMEOUT
     if os.path.lexists(results) or os.path.lexists(work):  # never read or append to a file this call did not create
         say("   CRASH %s unreadable child result: results path already existed" % name); return 1, 0, 0
     os.mkdir(work)
-    cmd = [sys.executable, "-B", os.path.abspath(__file__), "--fuzz-child", name, results, work, ",".join(idx)]
+    cmd = [sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "land_fuzz_child.py"), name, results, work, ",".join(idx)]
     try: cmd = grade_build.sandboxed(cmd, write_root or root, home)
     except grade_build.SandboxRefused as e:
         say("FUZZ sandbox refused %s" % e); return 0, 0, 1
@@ -335,18 +335,6 @@ def apply_build(root, items):
         touched.append(rel)
     return touched
 def main():
-    if sys.argv[1:2] == ["--fuzz-child"]:  # THE CHILD. Its import_module stays in main's own body: the deploy freeze accepts a computed import only here
-        name, results, work = sys.argv[2], os.path.abspath(sys.argv[3]), sys.argv[4]
-        hostile = [HOSTILE[int(j)] for j in sys.argv[5].split(",") if j] if len(sys.argv) > 5 else HOSTILE
-        sys.path[:0] = tree_paths(os.getcwd())
-        try: m = importlib.import_module(name)
-        except BaseException as e: _record(results, {"import_failed": repr(e)[:200]}); return 3
-        os.chdir(work)  # relative writes land in scratch, never the tree (R2: the "x" directory of 2026-09-28)
-        _record(results, {"plan": len(fuzz_targets(m)) * len(hostile)})
-        c, r = fuzz_module(m, name, hostile, report=lambda l: _record(results, {"crash": l}),
-                           on_call=lambda f, h, n: _record(results, {"start": f, "value": repr(h)[:40], "n": n}))
-        _record(results, {"end": True, "crashes": c, "returned": r})
-        return 0
     b = load(sys.argv[1]); extra = sys.argv[2:]
     refused = grade_build.sandbox_ready()
     if refused: sys.exit("REFUSED: " + refused)
@@ -378,21 +366,10 @@ def main():
                 label = "sh" if s.endswith(".sh") else ("py3.9" if py != sys.executable else "py3")
                 print("%-7s %-62s exit=%d %s" % (label, s[-62:], r.returncode, " ".join(ran[-2:])[:60])); bad += r.returncode != 0
                 if r.returncode: print("   " + " | ".join(l[:120] for l in (r.stderr + r.stdout).splitlines() if l.startswith(("FAIL:", "ERROR:", "ImportError", "SyntaxError", "TypeError")))[:500])
-        inprocess = os.environ.get("BROTHER_LAND_FUZZ_INPROCESS") == "1"
         timeout, ignored = fuzz_timeout(os.environ.get("BROTHER_LAND_FUZZ_TIMEOUT_S"))
         if ignored is not None: _say("FUZZ    timeout setting ignored: %s" % ignored[:60])
-        print("FUZZ    mode in-process (BROTHER_LAND_FUZZ_INPROCESS=1)" if inprocess else "FUZZ    mode child (timeout %g s)" % timeout)
-        crashes = returned = 0
-        if not inprocess:
-            crashes, returned, x = fuzz_new_modules(copy, new_mods, env, home, timeout); bad += x
-        else:
-            sys.path[:0] = tree_paths(copy)
-        for rel in (new_mods if inprocess else []):
-            name = module_name(copy, rel)
-            if name is None: _say("FUZZ import failed %s: no importable module name" % rel); bad += 1; continue
-            try: m = importlib.import_module(name)
-            except Exception as e: _say("FUZZ import failed %s: %r" % (name, e)); bad += 1; continue
-            c, r = fuzz_module(m, name, HOSTILE); crashes += c; returned += r
+        print("FUZZ    mode child (timeout %g s)" % timeout)
+        crashes, returned, x = fuzz_new_modules(copy, new_mods, env, home, timeout); bad += x
         if not bad:
             apply_build(".", items)   # the landing tree receives exactly the graded bytes, only now, and only from this file
         print("FUZZ    new modules %d | crashes %d | calls that returned instead of refusing %d" % (len(new_mods), crashes, returned))

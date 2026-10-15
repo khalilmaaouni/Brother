@@ -7,7 +7,7 @@ unit_runner launches it; the child process is replaced at the tool boundary only
 config breaker check, the ledger rows and the adapter all run for real. ONE CONDITION PER FIXTURE: each refusal starts
 from the good session and breaks one thing.
 Run: python3 -B scripts/loop/test_native_worker.py"""
-import contextlib, io, json, os, shutil, subprocess, sys, tempfile, time, unittest, uuid
+import contextlib, io, json, os, re, shutil, subprocess, sys, tempfile, time, unittest, uuid
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +17,12 @@ import native_worker as NW  # noqa: E402
 import fanout_verdict as FV  # noqa: E402
 import loop_switches as NW_SW  # noqa: E402
 import brother_login as BL  # noqa: E402
+import grade_build as G  # noqa: E402
+
+# Cases that start the REAL sandbox-exec cannot run inside another sandbox (exit 71 "sandbox_apply: Operation not
+# permitted": the kernel refuses a sandbox in a sandbox), which is where the landing gate runs a sibling suite. They read
+# NO-DATA there (a visible "skipped=N" on the OK line), never a pass; the unsandboxed run of this suite is their gate.
+needs_real_sandbox = unittest.skipIf(G.sandbox_ready() != "", "NO-DATA: a real sandbox-exec cannot start here: %s" % G.sandbox_ready())
 
 PREFIX = "sk-" + "ant-oat01-"   # joined so no file holds the key shape at rest; the push gate scans for it
 CANARY = PREFIX + "CANARY" + "x7Qz" * 8 + "-_END"   # a synthetic login; the real Keychain is never touched
@@ -86,7 +92,10 @@ class Base(unittest.TestCase):
         os.environ.pop("BROTHER_RUN_DIR", None)
         self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v) for k, v in saved.items()])
         self.held = ""
-        patches = [(NW.MC, "config_admit", lambda transport, model_id: self.held),
+        # the Claude CLI's tool folder is a fixed path under /private/tmp; a test seat gets its own under the test root, so
+        # no test writes the system temp folder and the suite runs inside the landing gate's sandbox (writes only ROOT, TMP)
+        patches = [(NW, "tool_dir", lambda wt: os.path.join(self.root, "tool", re.sub(r"[/.]", "-", os.path.realpath(wt)))),
+                   (NW.MC, "config_admit", lambda transport, model_id: self.held),
                    (NW.R, "claude_bin", lambda: "/nonexistent/claude")]
         for mod, name, fake in patches:
             old = getattr(mod, name)
@@ -431,7 +440,7 @@ class Session(Base):
             return good_worker(a, s, t, c)
         self.assertTrue(self.go(runner=spy)[0])
         a = seen["argv"]
-        self.assertEqual(a[:3], ["sandbox-exec", "-p", NW.PROFILE])
+        self.assertEqual(a[:3], [NW.MC.SANDBOX_EXEC, "-p", NW.PROFILE])
         self.assertIn("(deny file-write*)", NW.PROFILE)
         self.assertIn(r"\.(ssh|aws|gnupg|netrc|docker|kube)", NW.PROFILE)
         self.assertIn("WT=" + os.path.realpath(seen["cwd"]), a)
@@ -522,6 +531,7 @@ class TokenLane(Base):
                     self.assertNotIn(CANARY.encode(), fh.read(), f)
         self.assertEqual(len(self.rows()), 2)
 
+    @needs_real_sandbox
     def test_on_the_cli_tool_children_cannot_see_the_login(self):
         """The REAL launch (sandbox-exec, env, the scrub) around a fake claude that behaves like the real one: its tool
         child inherits the whole environment unless CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is truthy, and prints the login
@@ -550,6 +560,7 @@ class TokenLane(Base):
         self.assertNotIn(CANARY, said, "the tool child printed the login")
         self.assertIn("tool said: \"", said, "the child saw nothing, in its environment or on the drained pipe")
 
+    @needs_real_sandbox
     def test_on_a_seat_reading_the_running_clis_process_arguments_finds_no_login(self):
         """F1 (review 2026-10-03, reproduced): sysctl KERN_PROCARGS2 on a running process returns its argv AND its
         environment to any process of the same user, from inside the seat sandbox too. The REAL launch around a fake
@@ -570,13 +581,13 @@ class TokenLane(Base):
         with open(fake, "w") as fh:
             fh.write("#!%s\nimport json, os, subprocess, sys\n"
                      "env = dict(os.environ, CANARY_SHAPE=%r)\n"
-                     "v = subprocess.run([sys.executable, '-c', os.environ['PROBE']], env=env, capture_output=True, text=True)\n"
+                     "v = subprocess.run([sys.executable, '-c', os.environ['BROTHER_PROBE_CODE']], env=env, capture_output=True, text=True)\n"
                      "print(json.dumps({'type': 'result', 'is_error': False, 'result': 'probe: ' + (v.stdout + v.stderr).strip()[-200:]}))\n"
                      % (os.path.realpath(sys.executable), CANARY[len(PREFIX):]))
         os.chmod(fake, 0o700)
-        os.environ["PROBE"] = probe
+        os.environ["BROTHER_PROBE_CODE"] = probe
         os.environ["BROTHER_PROBE_MARK"] = "seen"   # an ordinary variable the probe must see, proving it read the env
-        self.addCleanup(os.environ.pop, "PROBE", None)
+        self.addCleanup(os.environ.pop, "BROTHER_PROBE_CODE", None)
         self.addCleanup(os.environ.pop, "BROTHER_PROBE_MARK", None)
         NW.R.claude_bin = lambda: fake
         log = os.path.join(self.root, "log")
@@ -623,7 +634,7 @@ class TokenLane(Base):
         self.assertIn("only native seats", str(cm.exception))
         self.assertEqual(seen, [])
         started = NW.CL.start(path, {"model": "m", "effort": "low", "prompt_chars": 1, "call": "native-t-2", "kind": "native"}, 10)
-        NW.MC._claude_run(path, started, ["sandbox-exec", "-p", "x", "claude"], "x", 10, runner)
+        NW.MC._claude_run(path, started, [NW.MC.SANDBOX_EXEC, "-p", "x", "claude"], "x", 10, runner)
         self.assertEqual(len(seen), 1)
         os.environ["BROTHER_LOOP_TOKEN"] = "off"
         started = NW.CL.start(path, {"model": "m", "effort": "low", "prompt_chars": 1, "call": "native-t-3", "kind": "native"}, 10)
@@ -653,6 +664,7 @@ class TokenLane(Base):
         self.assertNotIn(CANARY, why)
 
 
+@needs_real_sandbox
 class TheSandboxGuardsWhatRunsIt(unittest.TestCase):
     """The REAL sandbox-exec with the module's own PROFILE, over a fake home. ONE PATH PER CASE."""
 

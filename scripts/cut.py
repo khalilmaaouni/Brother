@@ -95,6 +95,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -412,6 +413,55 @@ def _clock():
     return time.strftime("%H:%M:%S")
 
 
+def _interval(value):
+    """`value` as a float above 0 and finite, else HEARTBEAT_INTERVAL_S."""
+    ok = (isinstance(value, (int, float)) and not isinstance(value, bool)
+          and math.isfinite(value) and value > 0)
+    return float(value) if ok else float(HEARTBEAT_INTERVAL_S)
+
+
+class ProgressBeat(object):
+    """FR1.f (C7): the heartbeat of a --check, which holds no fence. It has
+    the duck type Heartbeat has (maybe(label, force=False) -> bool) but only
+    says a line: it never runs a command and never touches bm_store. A forced
+    call (a step boundary, which _stream already prints) only restarts the
+    clock; an unforced call says `<label>: running, <n> s since the last
+    line` once `interval_s` has passed. `ticks` asks _stream to run a
+    silence ticker beside a real child process."""
+
+    ticks = True
+
+    def __init__(self, interval_s=HEARTBEAT_INTERVAL_S, clock=None, emit=None):
+        self.interval_s = _interval(interval_s)
+        self.clock = clock or time.monotonic
+        self.emit = emit or (lambda line: print(line, flush=True))
+        self.last = self.clock()
+
+    def maybe(self, label, force=False):
+        now = self.clock()
+        waited = now - self.last
+        if force or waited < self.interval_s:
+            if force:
+                self.last = now
+            return True
+        self.last = now
+        self.emit("[cut %s] %s: running, %d s since the last line"
+                  % (_clock(), label, int(waited)))
+        return True
+
+
+def _silence_ticker(label, start, interval_s, emit, clock, stop, wait=None):
+    """FR1.f (C7): say `still running <label>: <elapsed> s` every
+    `interval_s` until `stop` is set. `wait` is the test seam (default
+    stop.wait): it returns True when the step has ended."""
+    wait = wait or stop.wait
+    while not wait(interval_s):
+        if stop.is_set():
+            break
+        emit("[cut %s] still running %s: %d s"
+             % (_clock(), label, int(clock() - start)))
+
+
 def _stream(label, cmd, root, runner=None, emit=None, clock=None,
            heartbeat=None):
     """Run one long chain step and show it LIVE. Measured 2026-09-17: the
@@ -444,22 +494,43 @@ def _stream(label, cmd, root, runner=None, emit=None, clock=None,
         # A Python grandchild writing to a pipe block-buffers, which would
         # hide its progress inside the step; unbuffered keeps it live.
         env = dict(os.environ, PYTHONUNBUFFERED="1")
+        # FR1.f: a beat that says lines (ProgressBeat.ticks) gets a ticker
+        # for the silent stretches; the fence Heartbeat beats per line
+        ticks = heartbeat is not None and getattr(heartbeat, "ticks", False)
+        stop = threading.Event()
+        ticker = None
         try:
             with subprocess.Popen(cmd, cwd=root, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True,
                                   bufsize=1, errors="replace",
                                   env=env) as child:
+                if ticks:
+                    ticker = threading.Thread(
+                        target=_silence_ticker, daemon=True,
+                        args=(label, start, _interval(
+                            getattr(heartbeat, "interval_s", None)), emit,
+                            clock, stop))
+                    try:
+                        ticker.start()
+                    except RuntimeError as exc:
+                        ticker = None
+                        emit("[cut %s] no ticker for %s: %s"
+                             % (_clock(), label, exc))
                 for raw in child.stdout:
                     line = ANSI_RE.sub("", raw.rstrip("\n"))
                     lines.append(line)
                     emit("  %s | %s" % (label, line))
-                    if heartbeat is not None:
+                    if heartbeat is not None and not ticks:
                         heartbeat.maybe(label)
                 code = child.wait()
             proc = subprocess.CompletedProcess(cmd, code, "\n".join(lines),
                                                "")
         except OSError as exc:
             proc = subprocess.CompletedProcess(cmd, 127, "", "%s" % exc)
+        finally:
+            stop.set()
+            if ticker is not None:
+                ticker.join(1.0)
     emit("[cut %s] end %s: exit %d after %ds"
          % (_clock(), label, proc.returncode, int(clock() - start)))
     if heartbeat is not None:
@@ -1221,6 +1292,29 @@ def reuse_record(root, version, resume_sha, runner=None):
     return record, path, ""
 
 
+class CheckReuse(object):
+    """FR1.e (C5): the reuse source of a --check rehearsal. Unlike a record dict (one READY record, --resume), it asks
+    every record of this version for the newest row at the exact key (cut_rehearsal.reusable_check_row)."""
+
+    def __init__(self, version, directory="", now=None):
+        self.version, self.directory, self.now = version, directory, now
+
+    def row(self, name, key, home):
+        return CR.reusable_check_row(self.version, name, key, home, self.directory, self.now)
+
+
+def _reusable(reuse, name, key, home):
+    """(row, reason) from a CheckReuse, or from a record dict as reusable_row always read it."""
+    if isinstance(reuse, CheckReuse):
+        return reuse.row(name, key, home)
+    return CR.reusable_row(reuse, name, key, home)
+
+
+def _reused_from(reuse, row, path):
+    """The path the REUSED line names: the row's own log for a CheckReuse, else the record path."""
+    return row["log_path"] if isinstance(reuse, CheckReuse) else path
+
+
 def reused_or_run_export_rows(root, version, record, record_path,
                               runner=None, checks=None, heartbeat=None):
     """(ok, lines): each export row is reused from `record` only on its exact
@@ -1229,14 +1323,18 @@ def reused_or_run_export_rows(root, version, record, record_path,
     and reuses nothing."""
     key, why = export_tree(root, version, runner)
     if not key:
+        if isinstance(record, CheckReuse):
+            # FR1.e: nothing can be keyed, so nothing is reused; export_rows
+            # reads the id itself and says the same NO-DATA
+            return export_rows(root, version, runner, checks, heartbeat)
         return False, ["NO-DATA: export rows not run: the export tree id "
                        "cannot be read: %s" % why]
     lines, missed = [], []
     for name in EXPORT_ROWS:
-        row, why = CR.reusable_row(record, name, key,
-                                   EXPORT_ROW_HOMES[name])
+        row, why = _reusable(record, name, key, EXPORT_ROW_HOMES[name])
         if row is not None:
-            print("REUSED %s %s %s" % (name, key[:12], record_path))
+            print("REUSED %s %s %s" % (name, key[:12],
+                                       _reused_from(record, row, record_path)))
             lines.append("%s reused (export tree %s)" % (name, key[:12]))
         else:
             print("%s not reused: %s" % (name, why))
@@ -1347,22 +1445,25 @@ def await_canary(handle, version):
 
 
 def chain(root, version, runner=None, stop_early=True, resume=False,
-          heartbeat=None, reuse=None, reuse_path=""):
+          heartbeat=None, reuse=None, reuse_path="", stop_long=False,
+          local=False):
     """_chain_rows, plus the Linux canary (LX1.b1): started when the export
     tree exists (cut_v1.0.0.sh passed, never on a resume), awaited after the
     last local row, terminated when the chain stops early. A FAIL or NO-DATA
     canary is the failed row `linux canary`. Returns (passed, failed)."""
-    canary = []
+    # FR1.g: a local chain starts no canary and runs no export rows
+    canary = [] if not local else None
     try:
         passed, failed = _chain_rows(root, version, runner, stop_early, resume,
-                                     heartbeat, reuse, reuse_path, canary)
+                                     heartbeat, reuse, reuse_path, canary,
+                                     stop_long, local)
     except BaseException:
         if canary:
             stop_canary(canary[0])
         raise
     if not canary:
         return passed, failed
-    if failed and stop_early:
+    if failed and (stop_early or stop_long):
         stop_canary(canary[0])
         return passed, failed
     ok, lines = await_canary(canary[0], version)
@@ -1375,7 +1476,8 @@ def chain(root, version, runner=None, stop_early=True, resume=False,
 
 
 def _chain_rows(root, version, runner=None, stop_early=True, resume=False,
-                heartbeat=None, reuse=None, reuse_path="", canary=None):
+                heartbeat=None, reuse=None, reuse_path="", canary=None,
+                stop_long=False, local=False):
     """The release chain in the order it can be true: cut_v1.0.0.sh first
     (bump, regenerate, commit, manifest and note, all LOCAL: it pushes
     nothing), then plugin_bump_gate.py and required_fast.sh on that bumped
@@ -1437,44 +1539,51 @@ def _chain_rows(root, version, runner=None, stop_early=True, resume=False,
         failed.append("plugin_bump_gate")
         if stop_early:
             return passed, failed
-    hub_key = _head_tree(root, runner)
-    hub_row = None
-    if reuse is not None:
-        # RC1.b2: the rehearsal's own hub run, on exactly this tree
-        hub_row, why = CR.reusable_row(reuse, "required-fast-hub", hub_key,
-                                       "real") if hub_key else (
-            None, "HEAD^{tree} cannot be read")
+    if failed and stop_long:
+        # FR1.e (C6): required_fast is minutes long and cannot change the
+        # refusal above; the closing rows below still run
+        print("required_fast: skipped, plugin_bump_gate refused earlier "
+              "(stop early for long rows)")
+    else:
+        hub_key = _head_tree(root, runner)
+        hub_row = None
+        if reuse is not None:
+            # RC1.b2: the rehearsal's own hub run, on exactly this tree
+            hub_row, why = _reusable(reuse, "required-fast-hub", hub_key,
+                                     "real") if hub_key else (
+                None, "HEAD^{tree} cannot be read")
+            if hub_row is not None:
+                print("REUSED required-fast-hub %s %s"
+                      % (hub_key[:12], _reused_from(reuse, hub_row,
+                                                    reuse_path)))
+            else:
+                print("required-fast-hub not reused: %s" % why)
         if hub_row is not None:
-            print("REUSED required-fast-hub %s %s" % (hub_key[:12],
-                                                       reuse_path))
+            ok = True
+            passed.append("required_fast (reused)")
         else:
-            print("required-fast-hub not reused: %s" % why)
-    if hub_row is not None:
-        ok = True
-        passed.append("required_fast (reused)")
-    else:
-        capture = {}
-        ok, lines = required_fast(root, version, runner, heartbeat=heartbeat,
-                                  capture=capture)
-        _print(lines)
-        # RC1.b1: the hub row, from the run just made; an unrecorded row only
-        # means a later cut cannot reuse it, so it never fails the chain
-        try:
-            emit_row("required-fast-hub", ["sh", "scripts/required_fast.sh"],
-                     hub_key, "real", "PASS" if ok else "FAIL",
-                     capture.get("seconds", 0.0), capture.get("text", ""))
-        except (OSError, ValueError) as exc:
-            print("NO-DATA: the required-fast-hub row was not recorded: %s"
-                  % exc)
-    if hub_row is not None:
-        pass
-    elif ok:
-        passed.append("required_fast")
-    else:
-        failed.append("required_fast.sh did not pass")
-        if stop_early:
-            return passed, failed
-    if not failed:
+            capture = {}
+            ok, lines = required_fast(root, version, runner, heartbeat=heartbeat,
+                                      capture=capture)
+            _print(lines)
+            # RC1.b1: the hub row, from the run just made; an unrecorded row only
+            # means a later cut cannot reuse it, so it never fails the chain
+            try:
+                emit_row("required-fast-hub", ["sh", "scripts/required_fast.sh"],
+                         hub_key, "real", "PASS" if ok else "FAIL",
+                         capture.get("seconds", 0.0), capture.get("text", ""))
+            except (OSError, ValueError) as exc:
+                print("NO-DATA: the required-fast-hub row was not recorded: %s"
+                      % exc)
+        if hub_row is not None:
+            pass
+        elif ok:
+            passed.append("required_fast")
+        else:
+            failed.append("required_fast.sh did not pass")
+            if stop_early:
+                return passed, failed
+    if not failed and not local:
         # RC1.b1: the export dry run and the virgin gate, once, here, on the
         # bytes that ship (cut_v1.0.0.sh step 4 no longer runs a dry run)
         if reuse is not None:
@@ -1708,17 +1817,48 @@ def rehearsed_exit_refusal(root, rehearsal, version, runner=None):
                                    _cut_own_paths(rehearsal), runner)
 
 
+def reusable_preflight(root, version, runner=None, directory="", now=None):
+    """(record path, '') when the driver's preflight record (FR1.a) covers this exact commit, tree and export tree
+    id, else ('', the reason). Every doubt is a reason, so the caller runs the full preflight: more work, never
+    less checking. Never raises."""
+    try:
+        head, why = CR._git(root, ["rev-parse", "HEAD"], runner)
+        tree, why2 = CR._git(root, ["rev-parse", "HEAD^{tree}"], runner)
+        if why or why2:
+            return "", why or why2
+        rec, why = CR.newest_preflight(version, head, tree, directory, now)
+        if rec is None:
+            return "", why
+        built, why = export_tree(root, version, runner)
+        if why or built != rec["export_tree_id"]:
+            return "", ("the export tree is %s, the record names %s" % (built or why, rec["export_tree_id"][:12]))
+        return rec["_path"], ""
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a doubt runs the full preflight, never a skipped one
+        return "", "the preflight record could not be checked (%s)" % exc
+
+
 def check_mode(root, version, bm, paths, force, runner=None,
-               notes_file=None):
+               notes_file=None, full_chain=False, local=False):
     """Readiness report with no fence and no write to this checkout: the
     fence scan and tree status here, then the WHOLE chain rehearsed in a
     throwaway detached worktree of this HEAD, removed afterwards. A check
     that ran the gates on the unbumped tree could never read READY for a
     release that changes the runtime; the rehearsal answers the question
-    the cut will actually ask."""
-    print("cut --check: %s" % version)
+    the cut will actually ask. `local` (FR1.g): the local half only, the
+    cheap preflight and the chain without the export rows and the Linux
+    canary; it ends LOCAL-READY, a line no cut ever reads as READY."""
+    print("cut --check%s: %s" % (" --local" if local else "", version))
+    if full_chain:
+        reused, why = "", "--full-chain runs every check once, no record reused"
+    elif local:
+        reused, why = "", "--local asks the cheap preflight only"
+    else:
+        reused, why = reusable_preflight(root, version, runner)
+    print("REUSED preflight %s" % reused if reused
+          else "preflight not reused: %s" % why)
     failures = readiness(root, version, bm, paths, force, runner,
-                         stop_early=False, include_fast=False)
+                         stop_early=False, include_fast=False,
+                         cheap_only=bool(reused) or local)
     # FC1.a (2026-10-11): a 1.1.1 rehearsal printed its preflight refusal,
     # then ran the chain for 50 more minutes to reach the same NOT-READY.
     # The chain cannot change a preflight verdict; every other reason still
@@ -1740,7 +1880,14 @@ def check_mode(root, version, bm, paths, force, runner=None,
         print("rehearsal: the chain runs in %s (detached, removed after)"
               % rehearsal)
         try:
-            _, failed = chain(rehearsal, version, runner, stop_early=False)
+            # FR1.e (C5, C6): a finished row of an earlier rehearsal of
+            # this version is reused on its exact key, and the long rows
+            # stop after a refusal; --full-chain runs every row once
+            _, failed = chain(rehearsal, version, runner, stop_early=False,
+                              reuse=None if full_chain
+                              else CheckReuse(version),
+                              stop_long=not full_chain,
+                              heartbeat=ProgressBeat(), local=local)
             failures.extend(failed)
             why = rehearsed_exit_refusal(root, rehearsal, version, runner)
             if why:
@@ -1779,6 +1926,13 @@ def check_mode(root, version, bm, paths, force, runner=None,
     if failures:
         print("NOT READY for %s: %s" % (version, "; ".join(failures)))
         return EXIT_REFUSED
+    if local:
+        print("LOCAL-READY for %s: fences clear, tree clean, and the local "
+              "half passed cut_v1.0.0.sh, plugin_bump_gate, required_fast, "
+              "refresh_cut --check, release_invariant, donecheck_u8 and the "
+              "retire_catalogs apply and check; the export rows and the "
+              "Linux canary did NOT run, so this never covers a cut" % version)
+        return EXIT_OK
     print("READY for %s: fences clear, tree clean, and the rehearsed cut "
           "passed cut_v1.0.0.sh, required_fast, refresh_cut --check, "
           "release_invariant, donecheck_u8 (one plugin) and the "
@@ -2317,6 +2471,47 @@ def _stdin_is_tty():
         return sys.stdin.isatty() is True
     except Exception:  # noqa: BLE001 - any error reads as no terminal
         return False
+
+
+def flush_input(isatty=None, flush=None):
+    """'' when nothing needs clearing (standard input is not a terminal) or
+    the unread input queue was cleared; otherwise the failure in words.
+    CF1.c: a `y` typed ahead of the question must not answer it. Any error,
+    including a host without termios, reads as a failure (the caller
+    declines). `isatty` and `flush` are test seams."""
+    try:
+        if (isatty or _stdin_is_tty)() is not True:
+            return ""
+        if flush is None:
+            import termios  # inside: a host without it still imports cut.py
+            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+        else:
+            flush()
+        return ""
+    except Exception as exc:  # noqa: BLE001 - fail closed: the cut declines
+        return "%s: %s" % (type(exc).__name__, exc)
+
+
+def terminal_ask(prompt, flush=None, read=None):
+    """The approve prompt, asked only after the input queue is cleared, so a
+    `y` typed ahead is gone and one typed after the question is read. If the
+    queue cannot be proven clear on a terminal the cut declines (returns '',
+    which the cut reads as "declined, nothing pushed"). A non terminal keeps
+    today's behavior: no flush, input() and its EOFError."""
+    if not isinstance(prompt, str):
+        raise ValueError("terminal_ask: prompt must be a str, got %s"
+                         % type(prompt).__name__)
+    try:
+        reason = (flush or flush_input)()
+    except Exception as exc:  # noqa: BLE001 - a raising flusher is a failure
+        reason = "%s: %s" % (type(exc).__name__, exc)
+    if not isinstance(reason, str):
+        reason = "flusher returned %s, not text" % type(reason).__name__
+    if reason:
+        print("REFUSED: could not clear typed ahead input (%s); declining, "
+              "nothing pushed" % reason)
+        return ""
+    return (read or input)(prompt)
 
 
 def yes_refusal(yes, stdin_is_tty):
@@ -3589,6 +3784,10 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     ap.add_argument("--full-chain", action="store_true",
                      help="run the full serial chain, every check once, no "
                           "cache and no dedupe")
+    ap.add_argument("--local", action="store_true",
+                     help="with --check: the local half only (cheap "
+                          "preflight, no export rows, no Linux canary); "
+                          "ends LOCAL-READY, which no cut reads as READY")
     ap.add_argument("--allow-unsafe", action="store_true",
                      help="with --fast, allow the fast path before the "
                           "shadow gate is true; requires --reason")
@@ -3614,6 +3813,10 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     refusal = yes_refusal(args.yes, _stdin_is_tty())
     if refusal:
         print(refusal)
+        return EXIT_NODATA
+    if args.local and (not args.check or args.resume is not None):
+        print("NO-DATA: --local only means something with --check, and not "
+              "with --resume")
         return EXIT_NODATA
     root = root or ROOT
     if args.shadow:
@@ -3699,7 +3902,7 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
         print("NO-DATA: --no-release-page and --release-notes-file "
               "contradict each other; pass one")
         return EXIT_NODATA
-    ask = ask or input
+    ask = ask or terminal_ask
     if args.force_conflicts is not None and not args.force_conflicts.strip():
         print("NO-DATA: --force-conflicts needs a one-line reason, e.g. "
               "--force-conflicts \"lane X is parked in all but name\"")
@@ -3736,7 +3939,8 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
         return EXIT_NODATA
     if args.check:
         return check_mode(root, version, bm, paths, args.force_conflicts,
-                          runner, notes_file=notes_file)
+                          runner, notes_file=notes_file,
+                          full_chain=args.full_chain, local=args.local)
     return cut_mode(root, version, bm, paths, args.force_conflicts,
                     args.yes, ask, runner, resume_sha=args.resume,
                     notes_file=notes_file, notes_sha256=notes_sha256)

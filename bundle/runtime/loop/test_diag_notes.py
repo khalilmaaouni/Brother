@@ -17,7 +17,9 @@ import diag_notes as D  # noqa: E402
 
 class Notes(unittest.TestCase):
     def setUp(self):
-        self.d = tempfile.mkdtemp(prefix="diag-notes-", dir=os.path.expanduser("~/.claude/brother-scratch"))
+        root = os.path.expanduser("~/.claude/brother-scratch")
+        os.makedirs(root, exist_ok=True)   # a fresh HOME (the landing gate's) has no scratch root yet
+        self.d = tempfile.mkdtemp(prefix="diag-notes-", dir=root)
 
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)

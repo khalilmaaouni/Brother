@@ -2,6 +2,11 @@
   "schema": "brother.gate-obligations/v1",
   "default": "REQUIRED_FOR_MERGE",
   "checks": {
+    "loop-owns-complete": {
+      "obligation": "REQUIRED_FOR_MERGE",
+      "expected_absent_input": "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json",
+      "reason": "the plan file is not shipped in the public edition; a tree without it has nothing for the row to judge, and the row exits 2 there, which the obligation map explains."
+    },
     "supply-chain-gate": {
       "obligation": "REQUIRED_FOR_MERGE",
       "reason": "an unverified dependency graph is not a clean one; NO-DATA here means the audit could not read the tree, which blocks merge rather than passing it."

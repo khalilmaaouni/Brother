@@ -140,6 +140,41 @@ def named_test_readable(path):
     return True, ""
 
 
+def tests_to_read(section, exists=None):
+    """The named test files B2 must open for one section text: every backticked test_*.py path (normalised, order kept,
+    duplicates kept) except those that need no file yet. THE ONE DECISION behind B2 IMPORTS SHOWN and plan_lint's
+    NAMED-TEST rule (2026-10-14: LL1.c and WR1.a were WITHHELD on a paid loop run because the lint read these sections
+    as clean). `exists(path)` answers whether a path is in the tree (default os.path.lexists, read at call time: this process's working directory).
+    A test the section marks NEW ("`path` NEW") is the builder's to write: when no file is there yet it has no imports
+    to show (2026-09-25: five sub units were WITHHELD before any build because their NEW test "did not exist").
+    THE SPECS SPELL "NEW" FIVE WAYS (2026-09-27: D14.6, L5a-3 and L5b.3 WITHHELD every pass on the three outside
+    spellings "`p` NEW", "`p` (NEW)" and "NEW `p`"; 2026-09-28: L0.2 WITHHELD four times on `NEW: p`, the label INSIDE
+    the backticks, freed only by a hand written FACTS line). labelled_paths is the one reader of every spelling; a
+    section may name the same new test later by its bare file name, which is the same new file.
+    A BARE TEST NAME IS THE FULL PATH THE SAME SECTION ALREADY NAMES (2026-10-14: LL1.c WITHHELD on its first pass,
+    its section naming scripts/test_runner_pool_guard.py on one line and `test_runner_pool_guard.py` on another; the
+    bare name was opened at the repository root and refused as unreadable). The same rule the NEW names follow, for
+    existing files: a bare name with exactly one full path of that basename in the section is that file, read once.
+    A section that is not text is refused by name (ValueError, from named_paths)."""
+    exists = exists or os.path.lexists
+    tests = [p for p in (os.path.normpath(q) for q in named_paths(section))
+             if os.path.basename(p).startswith("test_") and p.endswith(".py")]
+    new_tests = {os.path.normpath(p) for p, label, _, _ in labelled_paths(section) if label == "NEW"}
+    new_names = {os.path.basename(p) for p in new_tests}
+    full_by_name = {}
+    for p in tests:
+        if os.sep in p:
+            full_by_name.setdefault(os.path.basename(p), set()).add(p)
+    out = []
+    for t in tests:
+        if (t in new_tests or (os.sep not in t and t in new_names)) and not exists(t):
+            continue
+        if os.sep not in t and not exists(t) and len(full_by_name.get(t, ())) == 1:
+            continue   # its full path is in `tests` too and is read there
+        out.append(t)
+    return out
+
+
 def shown_in(brief):
     """path -> True when its FILE block carries content, False when the block is a NOT SHOWN marker. A brief that
     is not text is REFUSED by name (ValueError), never answered with an empty map: an empty map is the safe
@@ -167,24 +202,14 @@ def check(sub, spec, brief):
     named_all = [os.path.normpath(p) for p in named_paths(section)]
     named = [p for p in named_all if os.path.isfile(p)]
     verdict("B1 NAMED SHOWN", [p for p in named if not shown.get(p)], "section named file(s)")
-    tests = [p for p in named_all if os.path.basename(p).startswith("test_") and p.endswith(".py")]
     # REQ-H-UNREAD: every test the section NAMES is opened and parsed, whether or not a file of that name is there
     # to be listed. named_test_readable is the one place that decides; its reason is refused on the B2 line, by
     # name, and a test that vanished between listing and reading is refused by the same line, never skipped.
     unreadable = []
     imported = []
-    # A test the section marks NEW ("`path` NEW") is the builder's to write: when no file is there yet it has no imports
-    # to show (2026-09-25: five sub units were WITHHELD before any build because their NEW test "did not exist").
-    # An EXISTING test that cannot be read is still refused below (REQ-H-UNREAD).
-    # THE SPECS SPELL "NEW" FIVE WAYS (2026-09-27: D14.6, L5a-3 and L5b.3 WITHHELD every pass on the three outside
-    # spellings "`p` NEW", "`p` (NEW)" and "NEW `p`"; 2026-09-28: L0.2 WITHHELD four times on `NEW: p`, the label INSIDE
-    # the backticks, freed only by a hand written FACTS line). labelled_paths is the one reader of every spelling; a
-    # section may name the same new test later by its bare file name, which is the same new file.
-    new_tests = {os.path.normpath(p) for p, label, _, _ in labelled_paths(section) if label == "NEW"}
-    new_names = {os.path.basename(p) for p in new_tests}
-    for t in tests:
-        if (t in new_tests or (os.sep not in t and t in new_names)) and not os.path.lexists(t):
-            continue
+    # Which named tests B2 opens is tests_to_read's decision (the NEW and bare name rules live there, and plan_lint's
+    # NAMED-TEST rule asks the same function, so the loop side and the writer side cannot disagree).
+    for t in tests_to_read(section):
         ok, reason = named_test_readable(t)
         if not ok:
             unreadable.append("%s (%s)" % (t, reason))

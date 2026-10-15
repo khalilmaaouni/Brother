@@ -14,11 +14,13 @@ exits 2 rather than declaring a clean sweep.
   python3 scripts/wiring_audit.py [--root DIR] [--json]
 """
 import argparse
+import glob
 import json
 import os
 import re
 import subprocess
 import sys
+from typing import Dict, List, Tuple
 
 # Where a reference makes a tool reachable. Order matters only for reporting.
 WIRING_SITES = [
@@ -42,6 +44,79 @@ WIRING_SITES = [
 ]
 TOOL_DIRS = ("scripts", "products/brothermode/tools", "products/brothersbe/tools",
              "products/brothermode/scripts", "products/brothersbe/scripts")
+
+#: The tier of each classify label. The five wiring sites plus code-only are
+#: runtime: a user or a gate enters them through an import, a gate row, a
+#: hook, a manifest, the registry or the bundle closure. docs-only is a tier
+#: of its own: a doc a user reads names the tool, nothing executable does.
+#: unwired and orphan-cluster are test: nothing a user or a gate enters
+#: reaches them, so the weakest tier is the honest one.
+TIER_OF_BUCKET: Dict[str, str] = {
+    "gate": "runtime",
+    "hooks": "runtime",
+    "bundle": "runtime",
+    "registry": "runtime",
+    "manifest": "runtime",
+    "code-only": "runtime",
+    "docs-only": "docs",
+    "unwired": "test",
+    "orphan-cluster": "test",
+}
+
+#: The three tiers, weakest last.
+TIERS: tuple = ("runtime", "docs", "test")
+
+
+def tier_of(bucket: str) -> str:
+    """Return the tier of one bucket name, refusing anything that is not one."""
+    if not isinstance(bucket, str):
+        raise ValueError("unknown bucket: %r" % (bucket,))
+    if bucket not in TIER_OF_BUCKET:
+        raise ValueError("unknown bucket: %r" % (bucket,))
+    return TIER_OF_BUCKET[bucket]
+
+
+def tier_map(buckets: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """Group every tool path by tier: all three keys, sorted, once each."""
+    if not isinstance(buckets, dict):
+        raise ValueError("buckets must be a dict, got %s"
+                         % type(buckets).__name__)
+    grouped = {"runtime": set(), "docs": set(), "test": set()}
+    for name in buckets:
+        tier = tier_of(name)
+        paths = buckets[name]
+        if not isinstance(paths, (list, tuple)):
+            raise ValueError("bucket %r must be a list of paths, got %s"
+                             % (name, type(paths).__name__))
+        for path in paths:
+            if not isinstance(path, str):
+                raise ValueError("path in bucket %r must be a string, got %s"
+                                 % (name, type(path).__name__))
+            grouped[tier].add(path)
+    return {k: sorted(v) for k, v in grouped.items()}
+
+
+def tier_summary_line(tiers: Dict[str, List[str]]) -> str:
+    """One line: the runtime count over the total, docs and test named."""
+    if not isinstance(tiers, dict):
+        raise ValueError("tiers must be a dict, got %s" % type(tiers).__name__)
+    counts = {}
+    for name in TIERS:
+        if name not in tiers:
+            raise ValueError("tiers is missing the %r tier" % (name,))
+        paths = tiers[name]
+        if not isinstance(paths, (list, tuple)):
+            raise ValueError("tier %r must be a list of paths, got %s"
+                             % (name, type(paths).__name__))
+        for path in paths:
+            if not isinstance(path, str):
+                raise ValueError("path in tier %r must be a string, got %s"
+                                 % (name, type(path).__name__))
+        counts[name] = len(paths)
+    total = counts["runtime"] + counts["docs"] + counts["test"]
+    return ("WIRED (runtime tier): %d of %d tool(s); docs tier %d and test "
+            "tier %d are not counted as wired"
+            % (counts["runtime"], total, counts["docs"], counts["test"]))
 
 
 def tracked(root):
@@ -131,12 +206,123 @@ def selftest():
     return 0
 
 
-def main():
+_ROUTE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])runtime/[A-Za-z0-9_./-]*?\.(?:py|sh)"
+    r"(?![A-Za-z0-9_])(?!\.[A-Za-z0-9_])")
+
+
+def skill_routes(text: str) -> List[str]:
+    """Return the sorted distinct runtime command paths one skill names.
+
+    Both the bare form (runtime/...) and the variable form
+    (${BROTHER_PLUGIN_ROOT}/runtime/...) yield the same token. A trailing
+    sentence period is dropped; a longer extension such as runtime/x.py.bak
+    is not a runtime command and never matches.
+    """
+    if not isinstance(text, str):
+        raise ValueError("text must be a string, got %s"
+                         % type(text).__name__)
+    return sorted(set(_ROUTE_PATTERN.findall(text)))
+
+
+def resolve_route(root: str, route: str) -> str:
+    """Return "" when <root>/bundle/<route> is a live file under bundle/runtime.
+
+    Anything else returns the reason a user can act on: missing, not a
+    regular file, empty, or escapes bundle/runtime (a .. segment or a
+    symlink out of the runtime folder).
+    """
+    if not isinstance(root, str):
+        raise ValueError("root must be a string, got %s"
+                         % type(root).__name__)
+    if not isinstance(route, str):
+        raise ValueError("route must be a string, got %s"
+                         % type(route).__name__)
+    runtime = os.path.realpath(os.path.join(root, "bundle", "runtime"))
+    target = os.path.realpath(os.path.join(root, "bundle", route))
+    if target != runtime and not target.startswith(runtime + os.sep):
+        return "escapes bundle/runtime"
+    if not os.path.exists(target):
+        return "missing"
+    if not os.path.isfile(target):
+        return "not a regular file"
+    if os.path.getsize(target) == 0:
+        return "empty"
+    return ""
+
+
+def user_routes(root: str) -> Tuple[int, List[str]]:
+    """(code, lines): every runtime command the verb skills name, checked.
+
+    Exit 0 when every distinct command path resolves under bundle/runtime,
+    1 with one FAIL line per problem, and 2 with a NO-DATA line when no verb
+    skill exists or none names a runtime command at all. An unreadable skill
+    file is a FAIL line for that skill, never a skipped one.
+    """
+    if not isinstance(root, str):
+        raise ValueError("root must be a string, got %s"
+                         % type(root).__name__)
+    skills_dir = os.path.join(root, "bundle", "skills")
+    skills = sorted(glob.glob(os.path.join(skills_dir, "brother-*",
+                                           "SKILL.md")))
+    if not skills:
+        return (2, ["NO-DATA: no verb skill found under %s; nothing was "
+                    "measured" % skills_dir])
+    problems = []
+    routes = set()
+    for skill_path in skills:
+        skill_name = os.path.basename(os.path.dirname(skill_path))
+        try:
+            with open(skill_path, "rb") as handle:
+                text = handle.read().decode("utf-8", "replace")
+        except OSError as exc:
+            problems.append("FAIL %s: %s: unreadable (%s)"
+                            % (skill_name, skill_path, exc))
+            continue
+        named = skill_routes(text)
+        routes.update(named)
+        for route in named:
+            reason = resolve_route(root, route)
+            if reason:
+                problems.append("FAIL %s: %s: %s"
+                                % (skill_name, route, reason))
+    if problems:
+        return (1, sorted(problems))
+    if not routes:
+        return (2, ["NO-DATA: no runtime command named by any verb skill "
+                    "under %s; nothing was measured" % skills_dir])
+    return (0, ["PASS: %d distinct command path(s) in %d verb skill(s) "
+                "resolve under bundle/runtime" % (len(routes), len(skills))])
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    else:
+        if not isinstance(argv, list):
+            sys.stderr.write("refused: argv must be a list of strings\n")
+            raise SystemExit(2)
+        for item in argv:
+            if not isinstance(item, str):
+                sys.stderr.write("refused: argv must be a list of strings\n")
+                raise SystemExit(2)
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.expanduser("~/brother-hub"))
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")
-    args = ap.parse_args()
+    ap.add_argument("--tiers", action="store_true")
+    ap.add_argument("--user-routes", action="store_true")
+    args = ap.parse_args(argv)
+    if args.user_routes:
+        if args.json or args.tiers or args.selftest:
+            sys.stderr.write(
+                "refused: --user-routes cannot be combined with --json, "
+                "--tiers or --selftest\n")
+            return 1
+        code, lines = user_routes(args.root)
+        for line in lines:
+            print(line)
+        return code
     if args.selftest:
         return selftest()
 
@@ -286,7 +472,10 @@ def main():
         buckets.setdefault(classify(t), []).append(t)
 
     if args.json:
-        print(json.dumps({k: sorted(v) for k, v in buckets.items()}, indent=2))
+        payload = {k: sorted(v) for k, v in buckets.items()}
+        if args.tiers:
+            payload["tiers"] = tier_map(buckets)
+        print(json.dumps(payload, indent=2))
         return 0
 
     order = ["unwired", "orphan-cluster", "docs-only", "code-only", "registry", "manifest",
@@ -308,6 +497,8 @@ def main():
           "%d named only by code that is itself unreachable" % (unwired, docs, orphan))
     print("DEAD SURFACE: %d of %d tool(s) no entry point arrives at"
           % (unwired + docs + orphan, len(tools)))
+    if args.tiers:
+        print(tier_summary_line(tier_map(buckets)))
     return 1 if (unwired + orphan) else 0
 
 

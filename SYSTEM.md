@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 526 |
-| Parts with a purpose written in the file | 523 |
-| Parts with a suite wired into the battery | 459 |
-| Checks in the battery | 1133 |
+| Parts | 534 |
+| Parts with a purpose written in the file | 531 |
+| Parts with a suite wired into the battery | 466 |
+| Checks in the battery | 1215 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -82,7 +82,7 @@ undocumented corners looks complete and is not.
 | `budget_floor` | the minimum token budget for one model call, split into the | `budget_floor-self` |
 | `build_pipeline` | M5.2 per lane pipeline. | `build-pipeline-self` |
 | `bundle_mirror` | check that bundle/runtime mirrors plugin/runtime byte for byte. | `bundle-mirror-self` |
-| `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `regen-generated-self` |
+| `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `cut-ready-self`, `regen-generated-self` |
 | `burn_guard` | How many unit runners the REMAINING OpenRouter money funds until the stop hour, measured from the ledger. | `burn-guard-self` |
 | `c01_failfast_runner` | run ONE suite file exactly as `python3 <suite>` would, | `release-note-perturb`, `release-note-perturb-self` |
 | `canary_pipeline_smoke` | WBS-30.10 Canary Pipeline Smoke: prove the ten sibling mobile-path modules | `canary-pipeline-smoke-self` |
@@ -147,6 +147,7 @@ undocumented corners looks complete and is not.
 | `cut` | The release cut as ONE command: readiness, precedence, the chain, one | `cut-driver-self`, `cut-driver-self-py39`, `cut-rehearsal-self`, `cut-self` |
 | `cut_driver` | CD1 (docs/plan/specs/CD1.md): one command per release that drives the cut | `cut-driver-self`, `cut-driver-self-py39` |
 | `cut_preflight` | .py: everything that can refuse a release cut, asked FIRST. | `cut-preflight-self`, `cut-self` |
+| `cut_ready` | .py: every premise a cut can refuse on, one collect all table before the driver. | `cut-ready-self` |
 | `cut_rehearsal` | the cut rehearsal command whose verdict the real cut reads (CV1.b). | `cut-rehearsal-self` |
 | `cutover_pack` | The 1.0.13 cutover pack: one prompt and one zip a fresh session on another | `cutover-pack-self` |
 | `daybook` | The Daybook: the minimal board over the outcome contract (v2). | `daybook`, `daybook-self` |
@@ -161,6 +162,7 @@ undocumented corners looks complete and is not.
 | `doc_assurance` | the public documentation corpus is checked against the tree it | `doc-assurance`, `doc-assurance-self` |
 | `doc_numbers_check` | .py: every number a document claims is checked against | `doc_numbers_check-self` |
 | `dominance_scoreboard` | DOM-00.03: the one composite the Dominance rows (DOM-10 through DOM-50) | `dominance_scoreboard-self` |
+| `donecheck_114` | GM1: the owner's 1.1.4 mandate measured from the loop's own ledger and the cut driver's own state, never a report. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_C0` | Unit C0 done check. The subject and the verdict live in scripts/donecheck_units.py; this file is the command the plan names. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_L0` | L0 done check: the unification epic delivered what it promised. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_L1b` | Unit L1b done check. The subject and the verdict live in scripts/donecheck_units.py; this file is the command the plan names. | **NO-DATA**, nothing in the battery runs it |
@@ -210,7 +212,8 @@ undocumented corners looks complete and is not.
 | `evidence_retention` | What in the evidence folder could be pruned, oldest and largest first. DELETES NOTHING unless told to. | `evidence-retention-self` |
 | `execution_boundary` | DOM-40.01: the one provider interface the orchestration core depends on. | `execution_boundary-self` |
 | `execution_mode` | is parallelism worth it for THIS graph right now? | `execution-mode` |
-| `export_public` | the single route from the private hub to the public | `cut-preflight-self`, `cut-self`, `edition-guard-self`, `export-public-self`, `release-closeout-self` |
+| `export_public` | the single route from the private hub to the public | `cut-preflight-self`, `cut-self`, `edition-guard-self`, `export-public-self`, `export-tree-cache-py39`, `export-tree-cache-self`, `release-closeout-self` |
+| `export_tree_cache` | .py: one export tree per source tree, leased to every consumer of the cut path. | `export-tree-cache-py39`, `export-tree-cache-self` |
 | `fable_authority` | W3 of the readiness board: who decides when the founder is away, and how. | `fable-authority`, `fable-authority-self` |
 | `fabrication_scan` | LAW 0: an artifact may not assert what is not there. This is the check behind it. | `fabrication-scan` |
 | `failure_ledger` | Record every failure with its reason, and feed the recurring ones back into the next brief. | `failure-ledger-self`, `failure-ledger-selftest` |
@@ -411,6 +414,11 @@ undocumented corners looks complete and is not.
 | `perf_audit_load` | Load and CPU snapshot for the L5d performance audit. | **NO-DATA**, nothing in the battery runs it |
 | `perf_audit_run` | L5d steps 9 to 13 as one runnable driver: the loaded capture, the human gated quiet capture, the | `perf-audit-run-self` |
 | `perturb_pool` | .py (C0.4a): the release note's perturbation rows, each run in a | `perturb-pool-self` |
+| `plan_briefs` | PG1.e: one brief per sub unit from the writer batch file, dispatched at full width, the report filed by script. | `plan-briefs-py39`, `plan-briefs-self`, `plan-pipeline-py39`, `plan-pipeline-self` |
+| `plan_clock` | PG1.g: the plan pipeline's four bars, read from real timestamps, never from a report. | `plan-clock-py39`, `plan-clock-self` |
+| `plan_gen` | PG1.b: one command builds the next release plan from the closing ceremony's seed. | `plan-gen-py39`, `plan-gen-self`, `plan-pipeline-py39`, `plan-pipeline-self` |
+| `plan_pipeline` | PG1.f: the one command from the closing ceremony's seed to a loop that is building. | `plan-pipeline-py39`, `plan-pipeline-self` |
+| `plan_seed` | PG1.a: the closing ceremony's seed for the next release plan (schema brother-plan-seed/1). | `plan-seed-py39`, `plan-seed-self` |
 | `plugin_bump_gate` | .py: a plugin whose shipped files changed must carry a new | `cut-self`, `plugin-bump-gate-self` |
 | `plugin_runtime_fast_discover` | Run plugin/runtime/brother's tests, minus the 3 known real-multiprocess-fork | `plugin-runtime-fast-discover`, `plugin-runtime-fast-discover-self` |
 | `portable_pack` | Portable pack: R25.2's weekly half (docs/plan/READINESS-ROADMAP-2026-08-29.json, | `portable-pack-self` |
@@ -506,7 +514,7 @@ undocumented corners looks complete and is not.
 | `surface_budget` | Measure the user-invocable surface and generate bundle/MANIFEST.json. | `surface-budget`, `surface-budget-self` |
 | `survivorship_lineage` | WBS-40.09 Survivorship lineage: produce the per-field winner decision | `survivorship-lineage-self` |
 | `swarm_status` | one glanceable table saying what a swarm run is doing RIGHT NOW. | `swarm-status` |
-| `system_doc` | a description of this system that cannot drift, because it is generated. | `l5e-6-mutations-self`, `pre-push-gate`, `pre-push-gate-self`, `regen-generated-self`, `system-doc-current`, `system-doc-self` |
+| `system_doc` | a description of this system that cannot drift, because it is generated. | `cut-ready-self`, `l5e-6-mutations-self`, `pre-push-gate`, `pre-push-gate-self`, `regen-generated-self`, `system-doc-current`, `system-doc-self` |
 | `task_watchdog` | Task watchdog: per-task drift and block detection with the unlock printed. | `night-tick-selftest`, `task-watchdog-self` |
 | `temp_residue` | Report, and optionally prune, this estate's leftover temp trees. | `temp-residue-self` |
 | `throughput` | Sub units landed per hour in a window, measured the SAME WAY on both sides of a comparison. | **NO-DATA**, nothing in the battery runs it |
@@ -972,6 +980,7 @@ undocumented corners looks complete and is not.
 - `model-bench-self`: `python3 scripts/loop/model_bench.py --selftest`
 - `plan-store-self`: `python3 scripts/loop/plan_store.py --selftest`
 - `unit-ledger-self`: `/usr/bin/python3 -B scripts/loop/unit_ledger.py --selftest`
+- `unit-ledger-rollups-self`: `/usr/bin/python3 -B scripts/loop/unit_ledger_rollups.py --selftest`
 - `spec-accept-self`: `python3 -B scripts/loop/spec_accept.py --selftest`
 - `judge-calibrate-self`: `python3 -B scripts/loop/judge_calibrate.py --selftest`
 - `probe-build-self`: `python3 -B scripts/loop/probe_build.py --selftest`
@@ -1033,6 +1042,30 @@ undocumented corners looks complete and is not.
 - `loop-gate-cache`: `python3 -B scripts/loop/test_loop_gate_cache.py`
 - `loop-gate-cache-py39`: `/usr/bin/python3 -B scripts/loop/test_loop_gate_cache.py`
 - `landing-standard`: `python3 -B scripts/loop/test_landing_standard.py`
+- `land-batch-mirror`: `python3 -B scripts/loop/test_land_batch_mirror.py`
+- `land-batch-mirror-py39`: `/usr/bin/python3 -B scripts/loop/test_land_batch_mirror.py`
+- `grade-build-mirror`: `python3 -B scripts/loop/test_grade_build_mirror.py`
+- `grade-build-mirror-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_mirror.py`
+- `landing-standard-mirror`: `python3 -B scripts/loop/test_landing_standard_mirror.py`
+- `landing-standard-mirror-py39`: `/usr/bin/python3 -B scripts/loop/test_landing_standard_mirror.py`
+- `plan-lint-protected`: `python3 -B scripts/loop/test_plan_lint_protected.py`
+- `plan-lint-protected-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_protected.py`
+- `plan-lint-owns`: `python3 -B scripts/loop/test_plan_lint_owns.py`
+- `plan-lint-owns-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_owns.py`
+- `plan-lint-shared`: `python3 -B scripts/loop/test_plan_lint_shared.py`
+- `plan-lint-shared-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_shared.py`
+- `spec-score-no-claim`: `python3 -B scripts/loop/test_spec_score_no_claim.py`
+- `spec-score-no-claim-py39`: `/usr/bin/python3 -B scripts/loop/test_spec_score_no_claim.py`
+- `plan-lint-after-order`: `python3 -B scripts/loop/test_plan_lint_after_order.py`
+- `plan-lint-after-order-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_after_order.py`
+- `plan-lint-named-test`: `python3 -B scripts/loop/test_plan_lint_named_test.py`
+- `plan-lint-named-test-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_named_test.py`
+- `model-call-token-roles`: `python3 -B scripts/loop/test_model_call_token_roles.py`
+- `model-call-token-roles-py39`: `/usr/bin/python3 -B scripts/loop/test_model_call_token_roles.py`
+- `hermetic-obligations-self`: `python3 -B scripts/test_hermetic_obligations.py`
+- `hermetic-obligations-py39`: `/usr/bin/python3 -B scripts/test_hermetic_obligations.py`
+- `runner-pool-after-union`: `python3 -B scripts/loop/test_runner_pool_after_union.py`
+- `runner-pool-after-union-py39`: `/usr/bin/python3 -B scripts/loop/test_runner_pool_after_union.py`
 - `spec-score-standard`: `python3 -B scripts/loop/test_spec_score_standard.py`
 - `runner-pool-shared-files`: `python3 -B scripts/loop/test_runner_pool_shared_files.py`
 - `codex-doc-release-refs`: `python3 scripts/test_codex_doc_release_refs.py`
@@ -1043,6 +1076,24 @@ undocumented corners looks complete and is not.
 - `cut-rehearsal-awake-self`: `python3 -B scripts/test_cut_rehearsal_awake.py`
 - `cut-driver-self`: `python3 -B scripts/test_cut_driver.py`
 - `cut-driver-self-py39`: `/usr/bin/python3 -B scripts/test_cut_driver.py`
+- `cut-ready-handover-self`: `python3 -B scripts/test_cut_ready_handover.py`
+- `cut-ready-handover-py39`: `/usr/bin/python3 -B scripts/test_cut_ready_handover.py`
+- `cut-ask-flush-self`: `python3 -B scripts/test_cut_ask_flush.py`
+- `cut-ask-flush-py39`: `/usr/bin/python3 -B scripts/test_cut_ask_flush.py`
+- `cut-preflight-run-self`: `python3 -B scripts/test_cut_preflight_run.py`
+- `cut-preflight-run-py39`: `/usr/bin/python3 -B scripts/test_cut_preflight_run.py`
+- `export-tree-cache-self`: `python3 -B scripts/test_export_tree_cache.py`
+- `export-tree-cache-py39`: `/usr/bin/python3 -B scripts/test_export_tree_cache.py`
+- `cut-preflight-reuse-self`: `python3 -B scripts/test_cut_preflight_reuse.py`
+- `cut-preflight-reuse-py39`: `/usr/bin/python3 -B scripts/test_cut_preflight_reuse.py`
+- `cut-heartbeat-self`: `python3 -B scripts/test_cut_heartbeat.py`
+- `cut-heartbeat-py39`: `/usr/bin/python3 -B scripts/test_cut_heartbeat.py`
+- `cut-local-rehearsal-self`: `python3 -B scripts/test_cut_local_rehearsal.py`
+- `cut-local-rehearsal-py39`: `/usr/bin/python3 -B scripts/test_cut_local_rehearsal.py`
+- `donecheck-114-loop-self`: `python3 -B scripts/test_donecheck_114_loop.py`
+- `donecheck-114-loop-py39`: `/usr/bin/python3 -B scripts/test_donecheck_114_loop.py`
+- `donecheck-114-cut-self`: `python3 -B scripts/test_donecheck_114_cut.py`
+- `donecheck-114-cut-py39`: `/usr/bin/python3 -B scripts/test_donecheck_114_cut.py`
 - `rc-handover-self`: `python3 -B scripts/test_rc_handover.py`
 - `rc-handover-self-py39`: `/usr/bin/python3 -B scripts/test_rc_handover.py`
 - `cut-receipts-self`: `python3 -B scripts/test_cut_receipts.py`
@@ -1360,6 +1411,24 @@ undocumented corners looks complete and is not.
 - `jev-seam-wiring-py39`: `/usr/bin/python3 -B scripts/test_jev_seam_wiring.py`
 - `baseline-113-self`: `python3 scripts/test_baseline_113.py`
 - `baseline-113-py39`: `/usr/bin/python3 -B scripts/test_baseline_113.py`
+- `plan-114-self`: `python3 -B scripts/test_plan_114.py`
+- `plan-114-py39`: `/usr/bin/python3 -B scripts/test_plan_114.py`
+- `baseline-114-self`: `python3 -B scripts/test_baseline_114.py`
+- `baseline-114-py39`: `/usr/bin/python3 -B scripts/test_baseline_114.py`
+- `plan-clock-self`: `python3 -B scripts/test_plan_clock.py`
+- `plan-clock-py39`: `/usr/bin/python3 -B scripts/test_plan_clock.py`
+- `plan-seed-self`: `python3 -B scripts/test_plan_seed.py`
+- `plan-seed-py39`: `/usr/bin/python3 -B scripts/test_plan_seed.py`
+- `plan-gen-self`: `python3 -B scripts/test_plan_gen.py`
+- `plan-gen-py39`: `/usr/bin/python3 -B scripts/test_plan_gen.py`
+- `plan-briefs-self`: `python3 -B scripts/test_plan_briefs.py`
+- `plan-briefs-py39`: `/usr/bin/python3 -B scripts/test_plan_briefs.py`
+- `plan-pipeline-self`: `python3 -B scripts/test_plan_pipeline.py`
+- `plan-pipeline-py39`: `/usr/bin/python3 -B scripts/test_plan_pipeline.py`
+- `codex-surface-effects-self`: `python3 -B scripts/test_codex_surface_effects.py`
+- `codex-surface-effects-py39`: `/usr/bin/python3 -B scripts/test_codex_surface_effects.py`
+- `brother-run-unfinished-self`: `python3 -B scripts/test_brother_run_unfinished.py`
+- `brother-run-unfinished-py39`: `/usr/bin/python3 -B scripts/test_brother_run_unfinished.py`
 - `runbook-wait-shape`: `python3 -B scripts/test_runbook_wait_shape.py`
 - `runbook-wait-shape-py39`: `/usr/bin/python3 -B scripts/test_runbook_wait_shape.py`
 - `jev-outcome-self`: `python3 -B scripts/test_jev_outcome.py`
@@ -1383,6 +1452,7 @@ undocumented corners looks complete and is not.
 - `vault-resolver-self`: `python3 -B products/brothermode/tools/test_vault_resolver.py`
 - `vault-resolver-py39`: `/usr/bin/python3 -B products/brothermode/tools/test_vault_resolver.py`
 - `diag-round-self`: `python3 scripts/test_diag_round.py`
+- `diag-round-candidate`: `python3 scripts/test_diag_round_candidate.py`
 - `burn-guard-self`: `python3 scripts/test_burn_guard.py`
 - `dream-world-d65-self`: `python3 -B -m unittest plugin.runtime.brother.core.test_dream_world_d65`
 - `l61-self`: `python3 scripts/test_l61.py`
@@ -1507,6 +1577,8 @@ undocumented corners looks complete and is not.
 - `land-batch-h1b-self`: `python3 scripts/loop/test_land_batch_h1b.py`
 - `land-batch-landings`: `python3 -B scripts/loop/test_land_batch_landings.py`
 - `land-batch-bl-owns`: `python3 -B scripts/loop/test_land_batch_bl_owns.py`
+- `land-batch-bl-owns-plan`: `python3 -B scripts/loop/test_land_batch_bl_owns_plan.py`
+- `land-batch-rejection-fact`: `python3 -B scripts/loop/test_land_batch_rejection_fact.py`
 - `native-adapter`: `python3 -B scripts/loop/test_native_adapter.py`
 - `native-worker`: `python3 -B scripts/loop/test_native_worker.py`
 - `seat-fuzz`: `python3 -B scripts/loop/test_seat_fuzz.py`
@@ -1676,6 +1748,8 @@ undocumented corners looks complete and is not.
 - `host-doc-check-self`: `python3 scripts/test_host_doc_check.py`
 - `precut-review-self`: `python3 scripts/test_precut_review.py`
 - `merge-gate-self`: `python3 scripts/test_merge_gate.py`
+- `merge-gate-owns-self`: `python3 -B scripts/test_merge_gate_owns.py`
+- `merge-gate-owns-py39`: `/usr/bin/python3 -B scripts/test_merge_gate_owns.py`
 - `hp1-owner-steps-self`: `python3 scripts/test_hp1_owner_steps.py`
 - `host-live-claude-self`: `python3 scripts/test_host_live_claude.py`
 - `host-live-collect-self`: `python3 scripts/test_host_live_collect.py`
@@ -1687,5 +1761,21 @@ undocumented corners looks complete and is not.
 - `escape-measure-self`: `python3 scripts/test_escape_measure.py`
 - `bench-controls-self`: `python3 scripts/test_bench_controls.py`
 - `door-overhead-self`: `python3 scripts/test_door_overhead.py`
+- `runner-pool-lint-refusal-self`: `python3 scripts/loop/test_runner_pool_lint_refusal.py`
+- `cut-ready-self`: `python3 scripts/test_cut_ready.py`
+- `wiring-audit-tiers-self`: `python3 scripts/test_wiring_audit_tiers.py`
+- `wiring-user-routes-self`: `python3 scripts/test_wiring_user_routes.py`
+- `runner-pool-seats-self`: `python3 scripts/loop/test_runner_pool_seats.py`
+- `cut-ready-margin-self`: `python3 scripts/test_cut_ready_margin.py`
+- `runner-pool-load-self`: `python3 scripts/loop/test_runner_pool_load.py`
+- `runner-pool-after-self`: `python3 scripts/loop/test_runner_pool_after.py`
+- `builder-claim-self`: `python3 scripts/loop/test_builder_claim.py`
+- `cut-ready-power-self`: `python3 scripts/test_cut_ready_power.py`
+- `native-worker-session-cap-self`: `python3 scripts/loop/test_native_worker_session_cap.py`
+- `unit-runner-withheld-reason-self`: `python3 scripts/loop/test_unit_runner_withheld_reason.py`
+- `diag-notes-sources-self`: `python3 scripts/loop/test_diag_notes_sources.py`
+- `loop-canary-fixtures-self`: `python3 scripts/loop/test_loop_canary_fixtures.py`
+- `native-worker-profile-static-self`: `python3 scripts/loop/test_native_worker_profile_static.py`
+- `sibling-new-self`: `python3 scripts/loop/test_sibling_new.py`
 - `real-logs-unchanged`: `python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"`
 

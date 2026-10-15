@@ -586,6 +586,7 @@ run_check "loop-tool-parity"     python3 scripts/test_loop_tool_parity.py
 run_check "loop-owns-complete"   python3 scripts/test_bl_owns_complete.py
 run_check "loop-silent-failure"  python3 scripts/test_loop_report_run.py Lint
 run_check "loop-wiring"          python3 scripts/test_loop_wiring.py --max 4
+run_check "wiring-user-routes"  python3 scripts/wiring_audit.py --user-routes --root "$(pwd)"
 # The one plugin submission readiness, static bars only (docs/plan/specs/OP1.md
 # 5.5, OP1.f): no host binary, about 2 s. Exit 0 only when all six bars PASS,
 # 1 on any FAIL, 2 when a bar is NO-DATA or missing. Until the 1.1.0 cut

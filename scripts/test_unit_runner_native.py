@@ -23,7 +23,7 @@ def seats(env=None):
     v = os.environ.get("BROTHER_NATIVE_SEATS", "2")
     if not v.isdigit() or int(v) < 1: raise ValueError("BROTHER_NATIVE_SEATS must be a positive whole number")
     return int(v)
-def session_seconds(env=None):
+def session_seconds(env=None, size=None):
     v = os.environ.get("BROTHER_NATIVE_SESSION_S", "2700")
     if not v.isdigit() or not 600 <= int(v) <= 7200: raise ValueError("BROTHER_NATIVE_SESSION_S out of range")
     return int(v)

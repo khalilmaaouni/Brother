@@ -123,6 +123,7 @@ OPEN_UNIT = {
     "spec": "spec.md",
     "sub_units": ["U.1"],
     "evidence": "",
+    "owns": ["scripts/test_a.py"],   # the one path its section names (the OWNS rule blocks a unit with no owns, 2026-10-14)
 }
 
 
@@ -902,7 +903,7 @@ class PoolTest(_Fixture):
         self.write(spec, "# %s\n\n### %s the one sub unit\nIt changes `scripts/%s_1.py`.\nDone check: `python3 -B %s`\n"
                    % (uid, sub, uid.lower(), test))
         return {"id": uid, "state": "OPEN", "done_check": check or "python3 -B %s" % test, "spec": spec,
-                "sub_units": [sub], "evidence": ""}
+                "sub_units": [sub], "evidence": "", "owns": ["scripts/%s_1.py" % uid.lower(), test]}
 
     def verdict(self, uid, state, claims=()):
         """A council entry for `uid`, and one prompt holding its current spec text, so the verdict is not STALE."""

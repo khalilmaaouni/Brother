@@ -5,6 +5,8 @@ description: "Use when someone asks what Brother does, how to use it, whether th
 
 # brother help
 
+Effect: reads only. This verb answers from evidence and never starts a run, resumes one, or writes a file in the repository.
+
 Orient in plain language: Brother turns a plain language outcome into checked work with a rerunnable receipt, and the door is `/brother <what you are trying to do>` (on a host without slash commands, the `using-brother` skill). Say which verb fits the question asked, never a menu of all of them. A doubt about the install is answered by checking it with the install doctor, `python3 "${BROTHER_PLUGIN_ROOT}/runtime/hooks/brothermode/tools/brothermode_cli.py" doctor` (the eleven install health checks; `${CLAUDE_PLUGIN_ROOT}` under Claude Code), and relaying its verdicts. A version question is answered from the installed manifest, never from memory.
 
 This is one of the six verbs behind the one door. Under Claude Code and Cursor the door is `/brother <what you are trying to do>`, and the verb word is optional: the door's routing order in `${CLAUDE_PLUGIN_ROOT}/skills/using-brother/SKILL.md` decides (`${BROTHER_PLUGIN_ROOT}` under Codex, `${PLUGIN_ROOT}` under Cursor). Codex and Antigravity have no slash command surface: there this skill is reached by its name, or through the `using-brother` skill. Never ask the person to choose a product, an autonomy code, a plan format, a run id or a test framework.

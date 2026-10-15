@@ -122,6 +122,11 @@ def append_ledger(path, record):
     # the fast gate runs checks side by side and each appends here, and two
     # unlocked writers would both chain to the same last line (measured
     # 2026-09-26: 8 writers of 25 records forked the chain on 3 of 3 runs).
+    # A fresh checkout has no logs/ (the ledger is gitignored), so the first append used to be refused with ENOENT in
+    # every clean worktree. A parent that cannot be made still raises OSError: unwritable blocks, it never reads as written.
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(path, 'a', encoding='utf-8') as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         last_line = _read_last_line(path)

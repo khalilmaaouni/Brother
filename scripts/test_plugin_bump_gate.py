@@ -221,7 +221,9 @@ SHIPPED = ("plugin_bump_gate.py", "cut_preflight.py", "tmp_sandbox.py",
            # What retire_catalogs.py and version_source.py themselves import since the one plugin unit: the
            # catalog end state reader and the host manifest discovery. A fixture without them cannot load the
            # retirement rule at all, and every case would read the same NO-DATA for the wrong reason.
-           "donecheck_u8.py", "bundle_runtime.py")
+           "donecheck_u8.py", "bundle_runtime.py",
+           # cut_preflight._run kills a timed out read with its process group through this module (CF1.b).
+           "cut_rehearsal.py")
 
 #: The one collaborator that is a fixture. The real exporter needs the whole
 #: hub (its allowlist, its lints, every product); this one copies the fixture

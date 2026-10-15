@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Score the specification of every sub unit out of 10, deterministically, against the REAL tree. Owner rule 2026-09-20:
 no work starts and nothing lands for a sub unit whose spec scores under 9 of 10.
-usage (repo root): spec_score.py [unit ...] [--json out.json]     (no unit = every unit with a spec)
+usage (repo root): spec_score.py [unit ...] [--json out.json] [--no-claim] [--floor N]     (no unit = every unit with a spec)
+ --no-claim (PG1.d): a writer's self score. No prediction claim is recorded, and the exit code says whether it may stop:
+ 0 when every scored sub unit is at or above --floor (default 9), 1 when one is under, 2 when nothing scored. Without
+ --no-claim every run records its claims and exits 0, as the pool (runner_pool.py) and its other callers read it.
 One point each; a point is only given on evidence, and an unreadable input scores 0 (never a pass):
  1 SECTION      the sub unit has its own heading section in the unit spec
  2 FILES        the section names its files in backticks, and at least one is marked NEW or existing
@@ -15,10 +18,46 @@ One point each; a point is only given on evidence, and an unreadable input score
 10 NO UNKNOWN   the section leaves nothing UNKNOWN, TBD or 'to be decided': a builder must not have to guess
 Output: one line per sub unit with the score and the MISSING points by name."""
 import json, os, re, subprocess, sys
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-out_json = sys.argv[sys.argv.index("--json") + 1] if "--json" in sys.argv else None
-if out_json and out_json in args:
-    args.remove(out_json)
+from typing import List, Tuple
+USAGE = "usage: spec_score.py [unit ...] [--json out.json] [--no-claim] [--floor N]"
+
+def parse_args(argv: List[str]) -> Tuple[List[str], str, bool, int]:
+    """(unit ids, json path or '', no_claim, floor). --no-claim skips record_claim; --floor N (default 9) is the
+    exit rule under --no-claim; an unknown --flag, a --json or --floor with no value, or a non integer floor raises
+    SystemExit(2) with the usage line."""
+    units, out_json, no_claim, floor, i = [], "", False, 9, 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--no-claim":
+            no_claim = True
+        elif a in ("--json", "--floor"):
+            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+                sys.stderr.write("spec_score: %s needs a value\n%s\n" % (a, USAGE)); raise SystemExit(2)
+            i += 1
+            if a == "--json":
+                out_json = argv[i]
+            else:
+                try:
+                    floor = int(argv[i])
+                except ValueError:
+                    sys.stderr.write("spec_score: --floor needs an integer, got %r\n%s\n" % (argv[i], USAGE)); raise SystemExit(2)
+        elif a.startswith("--"):
+            sys.stderr.write("spec_score: unknown flag %s\n%s\n" % (a, USAGE)); raise SystemExit(2)
+        else:
+            units.append(a)
+        i += 1
+    return units, out_json, no_claim, floor
+
+def exit_code(scores: dict, no_claim: bool, floor: int) -> int:
+    """0 always without --no-claim (the pool's callers read stdout, never the code, runner_pool.py line 945);
+    under --no-claim 0 when every scored sub unit is at or above the floor, 1 otherwise, 2 when nothing scored."""
+    if not no_claim:
+        return 0
+    if not scores:
+        return 2
+    return 0 if all(n >= floor for n, _ in scores.values()) else 1
+
+args, out_json, no_claim, floor = parse_args(sys.argv[1:])
 if out_json and os.path.exists(out_json):
     os.remove(out_json)   # a run that dies leaves NO file, never the previous run's scores under this run's name
 # NO SCORE CACHE (plan E, 2026-10-01): its key read status text and one directory's metadata, so two different edits
@@ -154,7 +193,8 @@ for u in plan["units"]:
         if unknowns:
             miss.append("NO UNKNOWN: %d left in the section" % len(unknowns))
         scores[sub] = (max(0, 10 - len(miss)), miss)   # LS1.b: more than ten misses floor at 0, never negative
-        record_claim("spec_score", sub, "this spec scores 9 or more, so the lane can land", scores[sub][0] / 10.0)
+        if not no_claim:
+            record_claim("spec_score", sub, "this spec scores 9 or more, so the lane can land", scores[sub][0] / 10.0)
 _lines = ["%-8s %2d/10 %s" % (sub, n, "" if n == 10 else "| " + " | ".join(miss)) for sub, (n, miss) in scores.items()]
 ok = sum(1 for n, _ in scores.values() if n >= 9)
 _lines.append("\n%d sub units scored | %d at 9 or 10 (may start) | %d under 9 (HELD)" % (len(scores), ok, len(scores) - ok))
@@ -162,3 +202,4 @@ _text = "\n".join(_lines) + "\n"; sys.stdout.write(_text)
 _scores = {k: {"score": v[0], "missing": v[1]} for k, v in scores.items()}
 if out_json:
     with open(out_json, "w") as _f: json.dump(_scores, _f, indent=1)
+sys.exit(exit_code(scores, no_claim, floor))

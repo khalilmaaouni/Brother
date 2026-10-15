@@ -555,7 +555,10 @@ class E116TheRealPerturbationIsALongCheckTheBatterySkips(unittest.TestCase):
                 fh.write("#!/bin/sh\n"
                          "pass=0; fail=0; nodata=0\n"
                          'failed_names=""; nodata_names=""\n'
+                         'SEQ=0; OWNED=0; SHARD_N=""; SHARD_K=""; REACH_FILE=""; DRY=""\n'
                          + self.shell_function("run_check")
+                         + "\n"
+                         + self.shell_function("shard_take")
                          + "\n"
                          + self.gate_block()
                          + '\necho "counters pass=$pass fail=$fail '

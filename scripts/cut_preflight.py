@@ -75,10 +75,34 @@ BUMP_FILES = (".claude-plugin/marketplace.json", ".cursor-plugin/marketplace.jso
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
+#: CF1.b (2026-10-14): one bound for every network read of the cut path. The
+#: 1.1.3 cut day lost about two hours to a DNS stall in a read with no bound.
+NETWORK_TIMEOUT_S = 300
+#: git aborts an HTTP transfer slower than LOW_SPEED_LIMIT bytes per second for
+#: LOW_SPEED_TIME seconds, and never waits for a password on the terminal.
+LOW_SPEED_LIMIT = "1000"
+LOW_SPEED_TIME = "30"
+
+
+def network_bounds():
+    """The environment every network git read carries (REQ-CF1-08)."""
+    return {"GIT_HTTP_LOW_SPEED_LIMIT": LOW_SPEED_LIMIT,
+            "GIT_HTTP_LOW_SPEED_TIME": LOW_SPEED_TIME,
+            "GIT_TERMINAL_PROMPT": "0"}
+
+
 def _run(cmd, cwd, runner=None, env=None, timeout=None):
     """One subprocess, never raising: a missing binary reads as exit 127 and
-    a timeout as exit 124."""
-    runner = runner or subprocess.run
+    a timeout as exit 124. With no injected runner the child gets its own
+    session and a timeout kills its whole process group (cut_rehearsal.
+    _run_tree), so a helper the child started cannot outlive the bound.
+    A cmd that is not a non empty list of non empty strings is refused."""
+    if (not isinstance(cmd, (list, tuple)) or not cmd
+            or not all(isinstance(a, str) and a for a in cmd)):
+        raise ValueError("cmd must be a non-empty list of non-empty strings, got %r" % (cmd,))
+    if runner is None:
+        import cut_rehearsal  # lazy: it imports cut lazily, so no cycle
+        return cut_rehearsal._run_tree(cmd, cwd, env, timeout)
     try:
         return runner(cmd, cwd=cwd, capture_output=True, text=True, env=env,
                       timeout=timeout)
@@ -190,7 +214,10 @@ def check_public_remote(root, version, remote, runner=None):
     _require_text(version, "version")
     _require_text(remote, "remote")
     refs = ["refs/heads/release/%s" % version, "refs/tags/v%s" % version]
-    proc = _run(["git", "ls-remote", remote] + refs, root, runner)
+    env = dict(os.environ)
+    env.update(network_bounds())
+    proc = _run(["git", "ls-remote", remote] + refs, root, runner, env=env,
+                timeout=NETWORK_TIMEOUT_S)
     if proc.returncode != 0:
         return NODATA, "public-remote", "git ls-remote failed: %s" % _last(proc)
     found = [l.split()[-1] for l in (proc.stdout or "").splitlines() if l.strip()]
@@ -367,9 +394,13 @@ def no_git_location():
 EXPORT_TREE_MARKER = os.path.join("scripts", "required_fast.sh")
 
 
-def export_tree_builder(root):
+def export_tree_builder(root, cache=False):
     """build(dest): the exporter's own function, so the tree is the one the
-    public repository receives and never this module's idea of it."""
+    public repository receives and never this module's idea of it. FR1.b: with
+    cache=True, dest first becomes a detached worktree of the one export tree
+    built per (source tree, exporter, allowlist) by export_tree_cache; any
+    doubt there falls through to the build below, so the tree is the same
+    either way. Only the cut path asks for the cache."""
     import export_public
     # THE ALLOWLIST IS ROOT'S, not this module's (D13, 2026-10-02): the landing runs this builder from a frozen copy of the
     # base commit against the landing tree, and which files the public repository receives is that tree's own law. When
@@ -378,6 +409,16 @@ def export_tree_builder(root):
     allowlist = os.path.join(root, os.path.relpath(allow, top)) if isinstance(allow, str) and isinstance(top, str) else None
 
     def build(dest):
+        if cache:
+            import export_tree_cache
+            lease, _why = export_tree_cache.lease_into(
+                dest, root, build=lambda d: build_plain(d), exporter=getattr(export_public, "__file__", None) or "",
+                allowlist=allowlist or "")
+            if lease is not None:
+                return
+        build_plain(dest)
+
+    def build_plain(dest):
         # The exporter narrates on stdout; a verdict stream stays verdicts.
         with contextlib.redirect_stdout(sys.stderr), no_git_location():
             export_public.build_orphan_commit(dest, export_public.load_allowlist(allowlist),
@@ -396,7 +437,7 @@ def export_tree_id(root, build=None):
     _require_text(root, "root")
     if build is not None and not callable(build):
         raise ValueError("build must be callable or None, got %r" % (build,))
-    build = build or export_tree_builder(root)
+    build = build or export_tree_builder(root, cache=True)
     tree = tempfile.mkdtemp(prefix="cut-preflight-tree-id-")
     try:
         try:
@@ -459,7 +500,7 @@ def check_virgin_gate(root, runner=None, build=None, keep=None):
         raise ValueError("runner must be callable or None, got %r" % (runner,))
     if build is not None and not callable(build):
         raise ValueError("build must be callable or None, got %r" % (build,))
-    build = build or export_tree_builder(root)
+    build = build or export_tree_builder(root, cache=True)
     tree = tempfile.mkdtemp(prefix="cut-preflight-export-")
     home = tempfile.mkdtemp(prefix="cut-preflight-home-")
     try:

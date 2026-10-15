@@ -62,6 +62,8 @@ class World:
         self.gate_out = SUMMARY_OK
         self.gate_env = None
         self.worktree_tree = TREE   # what `git rev-parse HEAD^{tree}` answers in the scratch worktree
+        self.owns_code = 0          # LO1.a: the owns completeness check the merge gate runs first
+        self.owns_out = "PASS: unit BL names 1 component(s); every one exists and every one is committed\n"
 
     def candidate(self, tree=TREE, **edits):
         files = dict(self.main)
@@ -74,6 +76,8 @@ class World:
         return self.trees.get(ref, self.main)
 
     def __call__(self, argv, cwd=None, env=None):
+        if argv[0] == "python3":
+            return Proc(self.owns_code, self.owns_out, "")
         if argv[0] == "sh":
             self.gate_env = dict(env) if env is not None else None
             return Proc(self.gate_code, self.gate_out, "")

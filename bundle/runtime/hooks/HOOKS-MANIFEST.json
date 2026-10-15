@@ -210,7 +210,7 @@
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "704a825100fc68597eb86ff2e9f718a586aa4962bccb1f980ad507c1562cfa9a"
+   "sha256": "5ee78857e878d79a278960b143e1d609498d456926a43fd2403c123f7bab3534"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",

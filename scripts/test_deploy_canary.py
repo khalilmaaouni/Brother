@@ -69,7 +69,7 @@ def freeze_flags(s):
     return ["--module-root", str(candidate), "--module-root", str(candidate / "scripts"),
             "--module-root", str(s.home / ".claude/hooks"),
             "--optional-import", "duckdb=rollups",
-            "--work-input", "land_apply.py:main=build-receipt-covers-new-modules"] + [
+            "--work-input", "land_fuzz_child.py:main=build-receipt-covers-new-modules"] + [
             "--work-input=" + w for w in deploy_stamped.candidate_work_inputs(candidate)]
 ROLLUPS_NO_DATA = ("NO-DATA optional capability rollups unavailable: "
                    "duckdb is absent under the frozen interpreter")
@@ -308,8 +308,8 @@ class DeployCanary(unittest.TestCase):
                          "N2 capability check before rollups may be frozen as available")
         self.assertIn("duckdb", m["absent"])
         self.assertEqual(m["optional_imports"], ["duckdb=rollups"])
-        self.assertEqual(m["work_inputs"], ["candidate/scripts/loop/land_apply.py:main=build-receipt-covers-new-modules",
-                                            "land_apply.py:main=build-receipt-covers-new-modules"])
+        self.assertEqual(m["work_inputs"], ["candidate/scripts/loop/land_fuzz_child.py:main=build-receipt-covers-new-modules",
+                                            "land_fuzz_child.py:main=build-receipt-covers-new-modules"])
         self.assertEqual(m["home"], str(self.s.home))
         # The burn guard contract: the path the driver calls, the loop source's hash, a staged file.
         record = m["files"][str(self.s.home / ".claude/bin/burn_guard.py")]

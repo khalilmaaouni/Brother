@@ -78,6 +78,7 @@ EXEMPT = {
     "products/brotherds/.codex-plugin/plugin.json": "BrotherDS is published as an experimental standalone Python CLI; its optional Codex manifest is not a shipped Cursor adapter",
     "scripts/codex_surface.py": "generates shared bundle/skills consumed directly by Cursor and an adapted Codex mirror",
     "scripts/test_codex_surface.py": "tests the shared skill generator used by both clients",
+    "scripts/test_codex_surface_effects.py": "tests the effect line the shared generator renders into bundle/skills, which Cursor reads directly (CX2.a)",
     "bundle/codex-skills/": "Codex needs a stripped skill copy; Cursor reads bundle/skills directly through its manifest",
     "scripts/codex_skills.py": "generator for bundle/codex-skills, which Cursor does not need",
     "bundle/runtime/codex_hooks_install.py": "bundled mirror of the Codex hook installer; Cursor plugins carry hooks in the manifest",
@@ -104,6 +105,8 @@ BATTERY_PAIRS = {
 BATTERY_EXEMPT = {
     "codex-surface-current": "checks generated bundle skills consumed by both clients",
     "codex-surface-self": "tests scripts/codex_surface.py, the shared bundle/skills generator both clients read (EXEMPT above)",
+    "codex-surface-effects-self": "tests the effect line of the shared bundle/skills generator both clients read (EXEMPT above)",
+    "codex-surface-effects-py39": "the same suite under /usr/bin/python3 (EXEMPT above)",
     "codex-product-skills-self": "tests the opt-in Codex product-skills companion export; Cursor reads bundle/skills directly through its manifest",
     "codex-skills-current": "Codex needs a stripped skill copy; Cursor reads bundle/skills directly through its manifest",
     "codex-adapter-self": "runs scripts/loop/test_codex_adapter.py, the FX-31 model transport for codex exec (EXEMPT above); not a client install surface",

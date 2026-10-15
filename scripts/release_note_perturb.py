@@ -106,6 +106,9 @@ TIMEOUT = int(os.environ.get("BROTHER_PERTURB_TIMEOUT", "300"))
 WALL_FACTOR = int(os.environ.get("BROTHER_PERTURB_WALL_FACTOR", "3"))
 #: suite path -> seconds its last completed run took.
 _LAST_DURATION = {}
+#: FR1.d1: suite path -> seconds a reused baseline receipt holds. Set by the
+#: caller (pooled_rows), never by a run, and never copied into _C01_CALIBRATED.
+_RECEIPT_DURATION = {}
 
 #: C0.1: the ownership marker perturb_pool.py writes beside a work copy it
 #: made (its own MARKER_SUFFIX constant, duplicated here as a literal on
@@ -141,10 +144,13 @@ _C01_STATUS_RE = re.compile(
 def wall_for(suite_rel):
     """Seconds to allow this suite, from its own last measured runtime. Falls
     back to TIMEOUT for a suite that has never finished here."""
-    seen = _LAST_DURATION.get(suite_rel)
-    if seen is None:
+    # FR1.d1: the LARGER of the live run and a reused receipt; a short receipt
+    # from a quiet run never shrinks a wall a loaded live run has measured.
+    seen = [v for v in (_LAST_DURATION.get(suite_rel), _RECEIPT_DURATION.get(suite_rel))
+            if v is not None]
+    if not seen:
         return TIMEOUT
-    return max(60, int(seen * WALL_FACTOR) + 1)
+    return max(60, int(max(seen) * WALL_FACTOR) + 1)
 
 #: Injected verbatim. Every name in it carries the same long prefix so the
 #: loop that rewrites the module's own globals can skip itself by name rather
@@ -922,6 +928,103 @@ def _receipt_holds(receipt, source, suite, root):
     except OSError:
         return False
 
+
+#: FR1.d1: step 2b's baseline receipts. One entry per suite in baselines-<version>.json: the suite ran green on exactly
+#: these bytes, these clean script trees and this interpreter, in this many seconds. Any doubt runs the baseline.
+BASELINE_SCHEMA = "cv1.baseline.1"
+
+def baseline_path(version, directory=""):
+    """<evidence dir>/baselines-<version>.json, beside receipt_path's file."""
+    if not directory:
+        import cut_rehearsal
+        directory = cut_rehearsal.evidence_dir()
+    return os.path.join(directory, "baselines-%s.json" % version)
+
+def _finite_positive(x):
+    return (not isinstance(x, bool) and isinstance(x, (int, float)) and x == x
+            and x != float("inf") and x > 0)
+
+def write_baseline_receipt(suite_rel, seconds, version, root=ROOT, directory="", now=None):
+    """'' after merging one entry for `suite_rel` into the baselines file atomically, else the reason. Writes nothing
+    on a dirty or unreadable script tree, a seconds that is not a finite number above 0, or an unhashable suite. A
+    corrupt existing file is renamed aside and replaced by a file holding the one new entry."""
+    if not _finite_positive(seconds):
+        return "the baseline seconds %r are not a finite number above 0" % (seconds,)
+    trees, why = script_tree_key(root)
+    if why:
+        return why
+    try:
+        suite_sha = _file_sha(root, suite_rel)
+    except OSError as exc:
+        return "%s cannot be read: %s" % (suite_rel, exc)
+    stamp = time.time() if now is None else float(now)
+    path = baseline_path(version, directory)
+    entries = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if (not isinstance(data, dict) or data.get("schema") != BASELINE_SCHEMA
+                or not isinstance(data.get("suites"), dict)):
+            raise ValueError("not a baselines file")
+        entries = data["suites"]
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        try:
+            os.replace(path, "%s.corrupt-%d" % (path, int(stamp)))
+        except OSError as exc:
+            return "the corrupt baselines file %s cannot be moved aside: %s" % (path, exc)
+    entries[suite_rel] = {"suite_sha256": suite_sha, "trees": trees, "interpreter": sys.executable,
+                          "exit": 0, "seconds": float(seconds), "written_at": stamp}
+    data = {"schema": BASELINE_SCHEMA, "version": version, "suites": entries}
+    tmp = "%s.tmp-%d" % (path, os.getpid())
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except OSError as exc:
+        return "the baselines file %s cannot be written: %s" % (path, exc)
+    return ""
+
+def load_baseline_seconds(suite_rel, version, root=ROOT, directory="", now=None):
+    """(seconds, '') only for an entry whose suite bytes, clean script trees and interpreter equal today's, whose exit
+    is 0, whose seconds are a finite number above 0 and whose age is within RECEIPT_MAX_AGE_S; else (None, reason)."""
+    path = baseline_path(version, directory)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "no readable baselines file %s: %s" % (path, exc)
+    if not isinstance(data, dict) or data.get("schema") != BASELINE_SCHEMA or not isinstance(data.get("suites"), dict):
+        return None, "the baselines file %s does not carry schema %s" % (path, BASELINE_SCHEMA)
+    item = data["suites"].get(suite_rel)
+    if not isinstance(item, dict):
+        return None, "no baseline entry for %s" % suite_rel
+    stamp = item.get("written_at")
+    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or stamp != stamp:
+        return None, "the baseline entry for %s has no readable written_at" % suite_rel
+    age = (time.time() if now is None else float(now)) - stamp
+    if age > RECEIPT_MAX_AGE_S or age < -RECEIPT_FUTURE_SLACK_S:
+        return None, "the baseline entry for %s is stale or stamped from the future" % suite_rel
+    trees, why = script_tree_key(root)
+    if why:
+        return None, why
+    if item.get("trees") != trees:
+        return None, "the script tree changed since the baseline of %s" % suite_rel
+    try:
+        if _file_sha(root, suite_rel) != item.get("suite_sha256"):
+            return None, "%s changed since its baseline" % suite_rel
+    except OSError as exc:
+        return None, "%s cannot be read: %s" % (suite_rel, exc)
+    if item.get("interpreter") != sys.executable:
+        return None, "the baseline of %s ran under another interpreter" % suite_rel
+    if item.get("exit") != 0 or isinstance(item.get("exit"), bool):
+        return None, "the baseline of %s was not green" % suite_rel
+    if not _finite_positive(item.get("seconds")):
+        return None, "the baseline seconds of %s are unreadable" % suite_rel
+    return float(item["seconds"]), ""
 
 def default_version(root=ROOT):
     path = os.path.join(root, ".claude-plugin", "marketplace.json")

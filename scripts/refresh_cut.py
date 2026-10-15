@@ -74,6 +74,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -221,16 +222,34 @@ def regenerate(version, root=EP.ROOT):
     cmd = [sys.executable,
            os.path.join(root, "scripts", "release_note_from_tree.py"),
            "--write", "--version", version]
+    # FR1.f (C7): the child's stderr is copied to ours line by line as it
+    # arrives (the 2b pool says its progress there; capture_output held every
+    # line for the 68 silent minutes), and kept for the failure tail.
     try:
-        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+        child = subprocess.Popen(cmd, cwd=root, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True,
+                                 errors="replace")
     except OSError as exc:
         return False, ["NO-DATA: could not run %s (%s)"
                        % (" ".join(cmd), exc)]
-    lines = [l for l in (proc.stdout or "").splitlines() if l.strip()]
-    if proc.returncode != 0:
-        tail = (proc.stderr or "").strip().splitlines()
+    kept = []
+
+    def copy_stderr():
+        for raw in child.stderr:
+            kept.append(raw)
+            sys.stderr.write(raw)
+            sys.stderr.flush()
+
+    reader = threading.Thread(target=copy_stderr, daemon=True)
+    reader.start()
+    out = child.stdout.read()
+    returncode = child.wait()
+    reader.join(5.0)
+    lines = [l for l in (out or "").splitlines() if l.strip()]
+    if returncode != 0:
+        tail = "".join(kept).strip().splitlines()
         lines.append("NO-DATA: %s exited %d: %s"
-                     % (" ".join(cmd), proc.returncode,
+                     % (" ".join(cmd), returncode,
                         tail[-1] if tail else "(no output)"))
         return False, lines
     return True, lines

@@ -241,6 +241,7 @@ IMPORT = re.compile(r"^[ \t]*(?:import[ \t]+([A-Za-z_]\w*)|from[ \t]+([A-Za-z_]\
                     re.M)
 INSERT = re.compile(r"sys\.path\.insert\s*\(\s*\d+\s*,\s*(.+)\)")
 SLICE = re.compile(r"sys\.path\[\s*:\s*0\s*\]\s*=\s*\[")
+APPEND = re.compile(r"sys\.path\.append\s*\(\s*(.+)\)")
 
 
 def _slice_entries(text, open_at):
@@ -265,7 +266,7 @@ def _slice_entries(text, open_at):
 
 def search_order(text):
     """Every directory expression `text` puts in front of sys.path, in the order the interpreter then searches
-    them: the latest prepend first, and a slice prepend (sys.path[:0] = [a, b]) left to right. Both forms count:
+    them: the latest prepend first, a slice prepend (sys.path[:0] = [a, b]) left to right, then appends in order. All count:
     lanes wrote the slice form four times on 2026-09-26 and this gate, reading only insert, refused each deploy."""
     ops = [(m.start(), [m.group(1).strip()]) for m in INSERT.finditer(text)]
     for m in SLICE.finditer(text):
@@ -275,6 +276,11 @@ def search_order(text):
     order = []
     for _, exprs in sorted(ops, key=lambda op: op[0], reverse=True):
         order.extend(exprs)
+    # An append is searched AFTER every prepend, in the order the appends ran (2026-10-14: cut_driver.py and
+    # cut_ready.py append scripts/loop and import power_rule; reading only prepends called that ambiguous and
+    # refused the deploy). ponytail: the reader's own directory, which Python searches between the two, is not
+    # modelled; a module present both there and in an appended directory would bind to the appended copy here.
+    order.extend(m.group(1).strip() for m in APPEND.finditer(text))
     return order
 
 

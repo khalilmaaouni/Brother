@@ -132,7 +132,7 @@ class SeatProbe(Base):
         state, why = NW.seat_probe(program="/nonexistent/claude", runner=self.seat_runner())
         self.assertEqual(state, "OK", why)
         argv, cwd, existed = self.calls[0]
-        self.assertEqual(argv[0], "sandbox-exec")
+        self.assertEqual(argv[0], NW.MC.SANDBOX_EXEC)
         self.assertIn("/nonexistent/claude", argv)
         self.assertTrue(existed)
         self.assertTrue(cwd.startswith(os.path.realpath(os.environ["BROTHER_SCRATCH"])))

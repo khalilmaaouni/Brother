@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import sys
+from typing import Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -74,6 +75,7 @@ def lint_mode(env=None):
 import grade_build  # noqa: E402
 import plan_store  # noqa: E402
 import ev_gate  # noqa: E402  (FX-13.4: rule EV prices a round exactly as the runner does)
+import brief_check  # noqa: E402  (NAMED-TEST asks the loop's own B2 which named tests it opens)
 
 _SPEC_PATH = re.compile(r"`(?:[A-Za-z]+:\s*)?([A-Za-z0-9_./-]+\.(?:py|sh|json|md|jsonl))(?:\s+\((?:NEW|existing)\))?`")
 _INSIDE_LABEL = re.compile(r"^`(NEW|existing):|\((NEW|existing)\)`$")
@@ -326,6 +328,132 @@ def _inherited_red(unit, plan, uid):
     return out
 
 
+RULE_SHARED = "SHARED-FILE"
+
+
+def _edge_list(unit, key):
+    """(ids, ok). ok is False when `key` is present and is not a list of non empty text ids; absent is []."""
+    value = unit.get(key)
+    if value is None:
+        return ([], True)
+    if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+        return ([], False)
+    return (list(value), True)
+
+
+def after_closure(plan: dict) -> Dict[str, set]:
+    """unit id to the set of unit ids it transitively comes after (after and depends_on), cycles tolerated (a
+    cycle member sees the others, never itself); a plan whose units are not records raises ValueError. A malformed
+    edge list contributes no edges here: shared_file_findings is what reports it."""
+    units = plan.get("units") if isinstance(plan, dict) else None
+    if not isinstance(units, list) or not all(isinstance(u, dict) for u in units):
+        raise ValueError("after_closure: the plan units are not a list of records")
+    edges = {}
+    for unit in units:
+        uid = unit.get("id")
+        if isinstance(uid, str) and uid:
+            edges.setdefault(uid, set()).update(_edge_list(unit, "after")[0] + _edge_list(unit, "depends_on")[0])
+    closure = {}
+    for uid in edges:
+        seen, todo = set(), list(edges[uid])
+        while todo:
+            nxt = todo.pop()
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            todo.extend(edges.get(nxt, ()))
+        seen.discard(uid)
+        closure[uid] = seen
+    return closure
+
+
+def shared_file_findings(plan: dict) -> List[dict]:
+    """One BLOCKING finding per (path, unit A, unit B) where the path is in both owns, neither unit is DONE, and
+    neither is in the other's after closure; the fix names the after to add. Paths under docs/plan/specs/ are
+    exempt (the planner's own files). A malformed owns (or after, depends_on, id) is one NO-DATA finding for that
+    unit and the pairs it is in are not judged. The finding is filed under the unit that comes first in the plan
+    and carries "pair" (both ids) so admission can match either. A plan that is not a record with a units list
+    raises ValueError; entries of units that are not records are the per unit rules' to report, not judged here."""
+    units = plan.get("units") if isinstance(plan, dict) else None
+    if not isinstance(units, list):
+        raise ValueError("shared_file_findings: the plan units are not a list")
+    records = [u for u in units if isinstance(u, dict) and u.get("state") != "DONE"]
+    closure = after_closure({"units": [u for u in units if isinstance(u, dict)]})
+    out, owners, bad = [], {}, set()
+    for index, unit in enumerate(records):
+        uid = unit.get("id")
+        owns = unit.get("owns")
+        problem = ""
+        if not (isinstance(uid, str) and uid):
+            uid, problem = "-", "the unit id is not text"
+        elif owns is not None and (not isinstance(owns, list) or not all(isinstance(o, str) and o.strip() for o in owns)):
+            problem = "the unit owns is not a list of non empty text entries"
+        elif not (_edge_list(unit, "after")[1] and _edge_list(unit, "depends_on")[1]):
+            problem = "the unit after or depends_on is not a list of unit ids"
+        if problem:
+            bad.add(index)
+            out.append(dict(_finding(uid, "-", RULE_SHARED, "NO-DATA", problem + ", so its shared files were not judged",
+                                     "fix the unit in the plan"), pair=[uid]))
+            continue
+        for path in dict.fromkeys(os.path.normpath(o) for o in (owns or [])):
+            if not path.startswith("docs/plan/specs/"):
+                owners.setdefault(path, []).append(index)
+    for path, idxs in sorted(owners.items()):
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                first, second = records[idxs[a]], records[idxs[b]]
+                fid, sid = first["id"], second["id"]
+                if sid in closure.get(fid, ()) or fid in closure.get(sid, ()):
+                    continue
+                out.append(dict(_finding(fid, "-", RULE_SHARED, "BLOCKING",
+                                         "%s is in the owns of both %s and %s with no after between them" % (path, fid, sid),
+                                         "add %s to the after of %s (or the reverse), so the two never build at once"
+                                         % (fid, sid)), pair=[fid, sid]))
+    return out
+
+
+RULE_AFTER = "AFTER-ORDER"
+
+
+def after_order_findings(plan: dict) -> List[dict]:
+    """AFTER-ORDER (2026-10-14): a unit's `after` must be a list of unit ids, every one a unit the plan holds and every
+    one also in its `depends_on`, because the pool holds a unit on depends_on and two release plans in a row were
+    written with `after` filled and `depends_on` empty (the order the plan states was not the order enforced). The pool
+    reads the union since the same day (runner_pool.depends_held); this is the plan side, so the two files agree and a
+    reader of either sees one order. BLOCKING, never advisory: a plan whose order is stated twice and disagrees has no
+    order. DONE units are not judged (they are not built again), a unit whose id is not text is the per unit rules'.
+    Each finding carries "pair" ([uid]) so admission can match it. A plan whose units are not a list raises ValueError."""
+    units = plan.get("units") if isinstance(plan, dict) else None
+    if not isinstance(units, list):
+        raise ValueError("after_order_findings: the plan units are not a list")
+    held = {u.get("id") for u in units if isinstance(u, dict) and isinstance(u.get("id"), str)}
+    out = []
+    for unit in units:
+        uid = unit.get("id") if isinstance(unit, dict) else None
+        if not (isinstance(uid, str) and uid) or unit.get("state") == "DONE":
+            continue
+        after, ok = _edge_list(unit, "after")
+        fix = "copy the unit's after list into its depends_on in the plan, so the pool and the lint read one order"
+        if not ok:
+            out.append(dict(_finding(uid, "-", RULE_AFTER, "BLOCKING",
+                                     "the unit after is not a list of unit ids (text entries)", fix), pair=[uid]))
+            continue
+        deps = unit.get("depends_on")
+        deps = deps if isinstance(deps, list) else []
+        missing = [a for a in dict.fromkeys(after) if a not in deps]
+        if missing:
+            out.append(dict(_finding(uid, "-", RULE_AFTER, "BLOCKING",
+                                     "the unit after names %s, which its depends_on does not" % ", ".join(missing), fix),
+                            pair=[uid]))
+        absent = [a for a in dict.fromkeys(after) if a not in held]
+        if absent:
+            out.append(dict(_finding(uid, "-", RULE_AFTER, "BLOCKING",
+                                     "the unit after names %s, which the plan does not hold" % ", ".join(absent),
+                                     "correct the name, or remove it from the unit's after and depends_on in the plan"),
+                            pair=[uid]))
+    return out
+
+
 def _test_targets(command):
     """[(relative file path, class name or None)] for every test the command names."""
     out = []
@@ -461,6 +589,35 @@ def _named_test_findings(uid, sub, command, sec, root):
     return out
 
 
+RULE_NAMED_TEST = "NAMED-TEST"
+
+
+def _named_test_rule_findings(uid, sub, spec_text, root):
+    """NAMED-TEST (2026-10-14): a test file the section names that the loop's brief check (B2 IMPORTS SHOWN) would have
+    to open but cannot find WITHHOLDS the sub unit at loop time, after a paid run has started (LL1.c and WR1.a). The
+    decision is brief_check.tests_to_read, the very function B2 calls, with this tree's root as the place a path exists
+    in, so the writer side and the loop side cannot disagree. FAIL DIRECTION: a section the reader refuses is BLOCKING."""
+    section = brief_check.section_of(spec_text, sub)
+    if section is None:
+        return []   # no section: SECTION-CHECK already says so
+    base = root if isinstance(root, str) and root else None
+
+    def exists(path):
+        return base is not None and os.path.lexists(os.path.join(base, path))
+
+    try:
+        wanted = brief_check.tests_to_read(section, exists=exists)
+    except ValueError as exc:
+        return [_finding(uid, sub, RULE_NAMED_TEST, "BLOCKING", "the section cannot be read for its tests (%s)" % exc,
+                         "fix the section text")]
+    return [_finding(uid, sub, RULE_NAMED_TEST, "BLOCKING",
+                     "the section names the test file %s, which is not in the tree and not labelled NEW there, so the "
+                     "loop's brief check would WITHHOLD this sub unit" % path,
+                     "name the test by its full path, label it NEW, or describe a fixture file in words, not as a "
+                     "backticked tree path")
+            for path in dict.fromkeys(wanted) if not exists(path)]
+
+
 def _section_findings(uid, sub, unit, spec_text, root):
     """The rules for ONE open section: its check, the tests it names, and the touch set it names."""
     out = []
@@ -484,6 +641,156 @@ def _section_findings(uid, sub, unit, spec_text, root):
         out.append(_finding(uid, sub, "TOUCH", "BLOCKING",
                             "the section names no backticked path, so its touch set is unknown",
                             "name every file the section touches, backticked"))
+    out.extend(_named_test_rule_findings(uid, sub, spec_text, root))
+    out.extend(hard_findings(uid, sub, unit, spec_text))
+    return out
+
+
+# LL1.a PROTECTED-TOUCH: a spec that tells a loop build to write a path the landing refuses (or regenerates itself)
+# is refused before the spend, not after the paid session. Measured 2026-10-12/13: 3 of 5 post-session refusals
+# were builds that wrote scripts/check_all.sh. The pool's own reader of a write set (runner_pool.write_set) is
+# re-implemented here because runner_pool imports this module; test_plan_lint_protected keeps the two equal.
+# FAIL DIRECTION: a section with no Built by line is loop built, wrong typed input is NO-DATA; both block.
+PROTECTED_EXTRA = ("bundle/", "system.md", "scripts/check_all.sh")   # the loop's GENERATED set, case folded
+GENERATED_BASENAMES = ("checksums", "checksums.sha256")             # per product manifests, regenerated by checksums.sh
+RULE_PROTECTED = "PROTECTED-TOUCH"
+RULE_OWNS = "OWNS"
+_BUILT_BY = re.compile(r"(?im)^[ \t]*Built by:[ \t]*(.*)$")
+_BY_LOOP = re.compile(r"(?i)brother[.\s-]?loop")
+_BY_SESSION = re.compile(r"(?i)\bsession\b")
+_WRITE_HEAD = re.compile(r"^(?:Owns|Files):", re.M)
+_READ_ONLY = re.compile(r"(?i)read[ -]only|unchanged|^\W*reads\b")
+_EDIT_VERB = re.compile(
+    r"(?i)\b(?:edit(?:s|ed|ing)?|chang(?:e|es|ed|ing)|modif(?:y|ies|ied|ying)|add(?:s|ed|ing)?|"
+    r"append(?:s|ed|ing)?|register(?:s|ed|ing)?|patch(?:es|ed|ing)?|rewrit(?:e|es|ing|ten)|rewrote|"
+    r"updat(?:e|es|ed|ing)|regenerat(?:e|es|ed|ing)|writ(?:e|es|ing|ten)|wrote)\b")
+_NEGATION = re.compile(r"(?i)\b(?:never|not|no|without)\b")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s|\n\s*\n")
+
+
+def built_by_loop(section: str) -> bool:
+    """False only when the section has a Built by line that names the session and not Brother.Loop. A missing line, an
+    empty section, a non text section and a builder the lint does not recognise are loop built: doubt blocks."""
+    if not isinstance(section, str):
+        return True
+    m = _BUILT_BY.search(section)
+    return True if m is None else bool(_BY_LOOP.search(m.group(1)) or not _BY_SESSION.search(m.group(1)))
+
+
+def write_paths(section: str) -> List[str]:
+    """Normalised paths of the section's Owns: or Files: paragraph (to a blank line or a Reads: label), minus a path
+    whose own annotation (the text up to the next path) says read only, unchanged, or opens with reads. Order kept."""
+    if not isinstance(section, str):
+        return []
+    out = []
+    for head in _WRITE_HEAD.finditer(section):
+        para = re.split(r"\n\s*\n|\bReads?:", section[head.end():], maxsplit=1)[0]
+        hits = list(_SPEC_PATH.finditer(para))
+        for i, hit in enumerate(hits):
+            note = para[hit.end():hits[i + 1].start() if i + 1 < len(hits) else len(para)]
+            if not _READ_ONLY.search(note):
+                out.append(os.path.normpath(hit.group(1)))
+    return list(dict.fromkeys(out))
+
+
+def _read_spans(section):
+    """[(start, end)] of every Reads: paragraph, and the (start, end) of the annotation that follows each path."""
+    spans = []
+    for m in re.finditer(r"\bReads?:", section):
+        end = re.search(r"\n\s*\n", section[m.end():])
+        spans.append((m.start(), len(section) if end is None else m.end() + end.start()))
+    hits = list(_SPEC_PATH.finditer(section))
+    for i, hit in enumerate(hits):
+        stop = hits[i + 1].start() if i + 1 < len(hits) else len(section)
+        if _READ_ONLY.search(section[hit.end():min(stop, hit.end() + 80)]):
+            spans.append((hit.start(), hit.end()))
+    return spans
+
+
+def prose_touch_paths(section: str) -> List[str]:
+    """Backticked paths that follow, within 60 characters and the same sentence, an edit verb, unless that stretch
+    holds never, not, no or without. A path in a Reads paragraph or annotated read only is not a touch."""
+    if not isinstance(section, str):
+        return []
+    skip = _read_spans(section)
+    out = []
+    for m in _SPEC_PATH.finditer(section):
+        if any(a <= m.start() < b for a, b in skip):
+            continue
+        window = section[max(0, m.start() - 60):m.start()]
+        cuts = list(_SENTENCE_END.finditer(window))
+        if cuts:
+            window = window[cuts[-1].end():]
+        if _EDIT_VERB.search(window) and not _NEGATION.search(window):
+            out.append(os.path.normpath(m.group(1)))
+    return list(dict.fromkeys(out))
+
+
+def protected_reason(path: str) -> str:
+    """"" for a path a loop build may write, else a short reason. The adapter's own grade_build.dest decides (read from
+    the module at call time, never a copy of its lists), then the loop's generated set."""
+    if not isinstance(path, str) or not path:
+        return "not a path"
+    full, why = grade_build.dest(os.sep + "ll1-no-such-root", path)
+    if full is None:
+        shadow = re.search(r"\((.*)\)$", why)
+        if why.startswith("path is one the landing trusts"):
+            return "a path the landing trusts" + (" (%s)" % shadow.group(1) if shadow else "")
+        return "a path the grader refuses (%s)" % why.split(":")[0]
+    rel = os.path.normpath(path).casefold()
+    if any(rel == e or (e.endswith("/") and rel.startswith(e)) for e in PROTECTED_EXTRA) \
+            or os.path.basename(rel) in GENERATED_BASENAMES:
+        return "a generated file the landing regenerates itself"
+    return ""
+
+
+def _owns_findings(uid: str, sub: str, unit: dict, section: str) -> List[dict]:
+    """LL1.b OWNS: a path the section touches that is not in the unit's owns. Every section, whoever builds it."""
+    owns = unit.get("owns")
+    # NO OWNS IS NEVER CLEAN (2026-10-14): a unit with no owns (absent, empty, or not a list of non empty text) leaves
+    # the rule nothing to judge a section against, so it used to read clean at admission. It BLOCKS, whichever way the
+    # list is wrong; the old ADVISORY and its REPORT_ABSENT_OWNS knob are gone (the fixtures carry owns now).
+    if not isinstance(owns, list) or not owns or not all(isinstance(o, str) and o.strip() for o in owns):
+        return [_finding(uid, sub, RULE_OWNS, "BLOCKING",
+                         "the unit names no owns, or its owns is not a non empty list of non empty text entries, "
+                         "so the rule cannot judge its sections",
+                         "add the paths the unit writes to its owns list in the plan")]
+    exact = {os.path.normpath(o) for o in owns if not o.endswith("/")}
+    prefixes = [os.path.normpath(o) + "/" for o in owns if o.endswith("/")]
+    out = []
+    for path in list(dict.fromkeys(write_paths(section) + prose_touch_paths(section))):
+        if path.startswith("docs/plan/specs/") or path in exact or any(path.startswith(p) for p in prefixes):
+            continue
+        out.append(_finding(uid, sub, RULE_OWNS, "BLOCKING",
+                            "%s is named by the section but is not in the unit's owns" % path,
+                            "add the path to the unit's owns in the plan, or remove it from the section; "
+                            "reads belong on a Reads line"))
+    return out
+
+
+def hard_findings(uid: str, sub: str, unit: dict, spec_text: str) -> List[dict]:
+    """PROTECTED-TOUCH (loop built sections only) then OWNS for ONE section. The one place the rules live: the lint
+    report and admission reach it through _section_findings. A section that cannot be found is SECTION-CHECK's."""
+    uid = uid if isinstance(uid, str) and uid else "-"
+    sub = sub if isinstance(sub, str) and sub else "-"
+    if not isinstance(unit, dict) or not isinstance(spec_text, str):
+        return [_finding(uid, sub, RULE_PROTECTED, "NO-DATA",
+                         "the unit or the spec text is not readable (%s, %s)" % (type(unit).__name__, type(spec_text).__name__),
+                         "fix the plan or the spec file")]
+    section = _section(spec_text, sub)
+    if not section:
+        return []
+    out = []
+    if built_by_loop(section):
+        for path in list(dict.fromkeys(write_paths(section) + prose_touch_paths(section))):
+            reason = protected_reason(path)
+            if reason:
+                out.append(_finding(uid, sub, RULE_PROTECTED, "BLOCKING",
+                                    "%s is %s, which a loop build may not write" % (path, reason),
+                                    "remove the path from the section: a new test is registered in the check battery by "
+                                    "the landing itself (land_batch.register), and bundle/runtime is regenerated by "
+                                    "python3 scripts/bundle_runtime.py; or build this sub unit on the session route"))
+    out.extend(_owns_findings(uid, sub, unit, section))
     return out
 
 
@@ -609,6 +916,8 @@ def lint_plan(plan_path, root=".", scope=".", council_path=None, council_dir=Non
             findings.append(_finding("-", "-", "SCOPE", "NO-DATA",
                                      "the scope is not a regular expression (%s)" % exc, "fix the scope"))
             scope_re = re.compile(r"\A\Z")
+    findings.extend(f for f in shared_file_findings(plan) if scope_re.search(f["unit"]))
+    findings.extend(f for f in after_order_findings(plan) if scope_re.search(f["unit"]))
     for unit in plan["units"]:
         if not isinstance(unit, dict):
             findings.append(_finding("-", "-", "UNIT-CHECK", "NO-DATA", "a plan unit is not a record", "fix the plan"))
@@ -871,6 +1180,9 @@ def admission(plan, unit, sub, root=".", env=None, ledger=None, council=None, co
             open_subs, problem = _open_sub_ids(unit)
             if not problem:
                 findings.extend(_ev_findings(uid, sub, len(open_subs), unit, root, ledger, env))
+        if isinstance(plan.get("units"), list):
+            findings.extend(f for f in shared_file_findings(plan) if uid in f["pair"])
+            findings.extend(f for f in after_order_findings(plan) if uid in f["pair"])
         lines = []
         why = ""
         for finding in findings:

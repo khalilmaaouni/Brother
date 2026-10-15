@@ -23,7 +23,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "fb8d1a6431e707a694c87ffa6cce1b9a379aad76f63a3d76ba2fc168b27071c7"
+   "sha256": "7d08858a89c6d69f3fafac19e2862eae1b7a6d7a9781f4de5efb2a9070712622"
   },
   {
    "path": "brother_state.py",
@@ -327,6 +327,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "preflight/20260926-182529-1960-g38dba76c7-dirty",
- "source_revision": "38dba76c7499a3bfbc6a998230ede69bd65ec57a"
+ "source_describe": "preflight/20260926-182529-2147-g4a729b5f3-dirty",
+ "source_revision": "4a729b5f3abb4ee405e6cb0ec400e19725ad6185"
 }

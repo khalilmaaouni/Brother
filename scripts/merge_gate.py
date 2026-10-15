@@ -388,6 +388,10 @@ def mac_ok(clone, row):
 # ---------------------------------------------------------------------------------------------------------------------
 SCHEMA = 1
 GATE_SCRIPT = "scripts/required_fast.sh"
+# LO1.a (2026-10-14): the owns completeness check, read FIRST on every merge. On 1.1.3 a builder branch merged by
+# the session added a scripts/loop file no unit owned, and the cut refused it 2.6 hours in (rehearsal run 7). The
+# gate's own loop-owns-complete row still runs later; this is the same check read before 500 s are spent.
+OWNS_SCRIPT = "scripts/test_bl_owns_complete.py"
 MAIN_REF = "refs/remotes/hub/main"   # never the short name: a fetched tag refs/tags/hub/main outranks it
 LOGS_DIR = "logs"
 # BROTHER_CLAUDE_BIN (C10, 2026-10-10): the owner's pin for the Claude Code CLI the plugin-manifest row runs, read by
@@ -671,6 +675,7 @@ def run_gate(clone, worktree, tree, pr, head, base, env=None, runner=None):
     if actual != tree:
         raise MergeNoData("the worktree %s holds tree %s, not the tree %s this gate is asked to record; the gate "
                           "did not run and no row is written" % (worktree, actual[:40], tree))
+    check_owns(runner, worktree, child_env)
     started = time.time()
     code, out, err = _call(runner, ["sh", GATE_SCRIPT], worktree, child_env)
     scratch = tempfile.mkdtemp(prefix="merge-gate-run-")
@@ -682,6 +687,41 @@ def run_gate(clone, worktree, tree, pr, head, base, env=None, runner=None):
                           started=started, gate_sha256=gate_sha)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+def owns_verdict(code, out):
+    """("PASS", line) only for exit 0 with a line starting PASS: and no line starting SKIPPED; ("FAIL", text) for
+    exit 1, quoting up to three FAIL lines; ("NO-DATA", why) for everything else. A check that did not look never
+    reads as a pass."""
+    if isinstance(code, bool) or not isinstance(code, int) or not isinstance(out, str):
+        return ("NO-DATA", "the owns check returned no exit code or no text")
+    lines = [l.strip() for l in out.replace("\r", "\n").splitlines()]
+    if code == 1:
+        fails = [l for l in lines if l.startswith("FAIL")]
+        more = len(fails) - 3
+        text = "; ".join(l[:200] for l in fails[:3]) or "exit 1 with no FAIL line"
+        return ("FAIL", text + (" (and %d more)" % more if more > 0 else ""))
+    if code != 0:
+        return ("NO-DATA", "the owns check exited %d" % code)
+    if any(l.startswith("SKIPPED") for l in lines):
+        return ("NO-DATA", "the owns check skipped: it did not look, so it is not a pass")
+    passed = [l for l in lines if l.startswith("PASS:")]
+    if not passed:
+        return ("NO-DATA", "the owns check exited 0 with no PASS: line")
+    return ("PASS", passed[0][:300])
+
+
+def check_owns(runner, worktree, child_env):
+    """Run the owns completeness check in `worktree`; the PASS line, or MergeNoData naming why the merge is refused."""
+    code, out, err = _call(runner, ["python3", "-B", OWNS_SCRIPT], worktree, child_env)
+    verdict, text = owns_verdict(code, out)
+    if verdict == "PASS":
+        return text
+    if verdict == "FAIL":
+        raise MergeNoData("OWNS-FAIL: a scripts/loop component is not owned by unit BL (%s); the gate did not run "
+                          "and no row is written" % text)
+    raise MergeNoData("OWNS-NO-DATA: %s%s; the gate did not run and no row is written"
+                      % (text, (": " + err.strip()[:200]) if err.strip() else ""))
 
 
 def read_ledger(path):

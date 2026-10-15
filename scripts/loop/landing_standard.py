@@ -5,16 +5,19 @@ docs/plan/specs/LOOP-LANDING-STANDARD.md was a page; these are the parts of it a
 (spec_score.py) and the pool (runner_pool.py) refuse the shapes that cost real builds:
   own_test_refusal    the done check runs a test the sub unit does not name (RL3.a, 2026-10-02: three PASS builds
                       dropped at landing because RL3.a's check ran RL3.b's test).
-  mirrored_refusal    a LOOP built sub unit names a file mirrored into bundle/ (DR1, 2026-10-11: such a build can
-                      never grade green); a session built one may.
+  mirrored_refusal    a LOOP built sub unit names a path under bundle/ (S4, rewritten by LM1: a mirrored SOURCE is
+                      loop built and the landing regenerates its mirror; bundle/ itself is never written by a loop
+                      build); a session built one may.
   checklist_missing   the S1 to S12 checklist keys a section does not carry.
   shared_file_hold    two units in flight change one file (S3: a build against an old tree stops applying once its
                       sibling lands), so the later one waits.
 Each returns its refusal text, or "" when the rule holds; missing input fails closed (NO-DATA), never passes.
 """
+import posixpath
 import re
 
 CHECKLIST = ("S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S12")
+BUNDLE_REMEDY = "bundle/ is generated: edit the source under scripts/loop, the landing regenerates the mirror"
 _RUN_TEST = re.compile(r"(?:^|[\s;&|(])(?:/usr/bin/)?python3(?:\s+-[A-Za-z]+)*\s+([^\s;&|]+\.py)\b")
 
 
@@ -37,15 +40,25 @@ def own_test_refusal(done_cmd, section_paths):
 
 
 def mirrored_refusal(section_paths, mirrored, loop_built):
-    """A loop built section naming a file mirrored into bundle/ is refused; a session built one never is."""
+    """For a LOOP built section, the refusal for the first path under bundle/ (normalized, case folded), else "".
+
+    A mirrored SOURCE (scripts/loop/x.py with a bundle twin) is no longer refused: the landing regenerates the mirror
+    (LM1.a). `mirrored` stays in the signature for the one caller (spec_score.py) and is ignored. A session built
+    section is never refused. Only a bundle/ path blocks; an unknown shape reads as not refused (S11).
+    """
     if not loop_built:
         return ""
-    mirrored = {_norm(m) for m in (mirrored or ())}
-    for path in (section_paths or ()):
+    if isinstance(section_paths, str):
+        section_paths = [section_paths]
+    try:
+        paths = list(section_paths or ())
+    except TypeError:
+        return ""
+    for path in paths:
         p = _norm(path)
-        rel = p[len("scripts/"):] if p.startswith("scripts/") else None
-        if p.startswith("bundle/") or (rel is not None and ("bundle/runtime/" + rel) in mirrored):
-            return "MIRRORED: %s is mirrored into bundle/ (S4)" % p
+        folded = posixpath.normpath(p.lower())
+        if folded == "bundle" or folded.startswith("bundle/"):
+            return "MIRRORED: %s is under bundle/ (S4): %s" % (p, BUNDLE_REMEDY)
     return ""
 
 

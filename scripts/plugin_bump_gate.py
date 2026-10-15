@@ -68,14 +68,16 @@ MARKETPLACE_REL = ".claude-plugin/marketplace.json"
 #: The one entry the cut bumps by itself (version_source.py's "brother").
 UMBRELLA = "brother"
 RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-NETWORK_TIMEOUT_S = 300
+NETWORK_TIMEOUT_S = P.NETWORK_TIMEOUT_S
 
 
 def _git_env():
     """git exports GIT_DIR to its hooks; with it set, every git command here
     would answer for THAT repository whatever its cwd says (measured twice on
     2026-09-20, see cut_preflight.no_git_location)."""
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(P.network_bounds())
+    return env
 
 
 def previous_release_tag(root, version, remote, runner=None):
@@ -86,8 +88,12 @@ def previous_release_tag(root, version, remote, runner=None):
     if not m:
         return None, "version %r is not a release number X.Y.Z" % version
     want = tuple(int(x) for x in m.groups())
-    proc = P._run(["git", "ls-remote", "--tags", remote], root, runner,
-                  env=_git_env(), timeout=NETWORK_TIMEOUT_S)
+    def read():
+        return P._run(["git", "ls-remote", "--tags", remote], root, runner,
+                      env=_git_env(), timeout=NETWORK_TIMEOUT_S)
+    proc = read()
+    if proc.returncode == 124:  # one timeout is retried once, never a second time
+        proc = read()
     if proc.returncode != 0:
         return None, "git ls-remote --tags %s failed: %s" % (remote, P._last(proc))
     lower = set()
