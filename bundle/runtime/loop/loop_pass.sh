@@ -190,13 +190,51 @@ echo "REPROBE  retired: a silent probe goes to the landing gates"
 # DEPLOYED FROZEN CANDIDATE, ~/.claude/bin/candidate (staged from a committed revision by deploy_stamped, frozen and stamped
 # with the bin), never from the landing tree. Since f429cd159 (2026-10-03) it was skipped here, so a parked sub unit never got
 # a new fact and the pool drained to ALARM UNPRODUCTIVE. The landing tree is read only as DATA (the cwd its proving grep
-# runs in). BROTHER_CODE_ROOT is NOT set for it: night_tick and burn_guard read that variable as "this is a proof run";
-# the candidate is handed to the tool as --code-root, which the tool refuses when it sits inside the working directory.
-DIAG_ROOT="$CODE_ROOT"; DIAG_ARGS=""
-if [ -z "$CODE_ROOT" ]; then DIAG_ROOT=~/.claude/bin/candidate; DIAG_ARGS="$DIAG_ROOT"; fi
-if [ -z "$CODE_ROOT" ] && [ ! -d "$DIAG_ROOT/plugin/runtime/brother/core" ]; then echo "DIAGNOSE skipped: no frozen code root (BROTHER_CODE_ROOT) and no deployed candidate at ${DIAG_ROOT}; NO-DATA until a deploy stages one"
+# runs in). BROTHER_CODE_ROOT is NOT set for it: that variable keeps its one meaning, the code root a proof launcher names.
+# THE FROZEN ROOT HAS ITS OWN NAME (D30, L22, 2026-10-16): BROTHER_FROZEN_ROOT, default ~/.claude/bin/candidate, handed to
+# the tool as --code-root, which the tool refuses when it sits inside the working directory. It runs only when it is an
+# absolute path inside the deployed bin and every file under it matches the bin's deploy stamp (deploy_stamped.py writes
+# <bin>/.deploy-stamp.json, "files": {"bin/<path>": sha256}). Missing, relative, outside the bin, unstamped, unreadable, or
+# one byte or one file off the stamp: NO-DATA, one line saying why, and NOTHING runs; the landing tree is never the fallback.
+# The detached round runs with PYTHONDONTWRITEBYTECODE=1 so it never writes a cache file into the root it was checked from.
+FROZEN_CHECK='import hashlib, json, os, sys
+root = sys.argv[1]
+b = os.path.realpath(os.path.expanduser("~/.claude/bin"))
+r = os.path.realpath(root)
+def no(why):
+    print(why)
+    sys.exit(1)
+if not os.path.isabs(root):
+    no("is not an absolute path")
+if not r.startswith(b + os.sep):
+    no("is outside the deployed bin %s, so no deploy stamp covers it" % b)
+try:
+    files = json.load(open(os.path.join(b, ".deploy-stamp.json")))["files"]
+    pre = "bin/" + os.path.relpath(r, b) + "/"
+    want = dict((k[len(pre):], v) for k, v in files.items() if k.startswith(pre))
+    got = {}
+    for d, _, fs in os.walk(r):
+        for f in fs:
+            got[os.path.relpath(os.path.join(d, f), r)] = hashlib.sha256(open(os.path.join(d, f), "rb").read()).hexdigest()
+except Exception as exc:
+    no("has an unreadable deploy stamp or file (%s)" % type(exc).__name__)
+if not want:
+    no("has no entry in the deploy stamp %s" % os.path.join(b, ".deploy-stamp.json"))
+off = sorted((set(got) ^ set(want)) | set(k for k in got if k in want and got[k] != want[k]))
+if off:
+    no("differs from the deploy stamp at %d path(s), first %s" % (len(off), off[0]))'
+DIAG_ROOT="$CODE_ROOT"; DIAG_ARGS=""; DIAG_NODATA=""
+if [ -z "$CODE_ROOT" ]; then
+  DIAG_ROOT="${BROTHER_FROZEN_ROOT:-$HOME/.claude/bin/candidate}"; DIAG_ARGS="$DIAG_ROOT"
+  if [ ! -d "$DIAG_ROOT/plugin/runtime/brother/core" ]; then
+    DIAG_NODATA="no frozen code root (BROTHER_CODE_ROOT) and no deployed candidate at ${DIAG_ROOT}; NO-DATA until a deploy stages one"
+  elif ! DIAG_WHY=$(python3 -I -B -c "$FROZEN_CHECK" "$DIAG_ROOT" 2>&1); then   # -I: the cwd is the landing tree; a planted hashlib.py must never run inside the check
+    DIAG_NODATA="NO-DATA, the frozen root ${DIAG_ROOT} (BROTHER_FROZEN_ROOT) $(printf '%s' "${DIAG_WHY:-could not be checked}" | tail -1); the landing tree's copy never runs instead"
+  fi
+fi
+if [ -n "$DIAG_NODATA" ]; then echo "DIAGNOSE skipped: ${DIAG_NODATA}"
 elif pgrep -f "scripts/diag_round\.py" >/dev/null 2>&1; then echo "DIAGNOSE already running from an earlier pass"; else
-  python3 -c "import subprocess,sys,os; a=sys.argv[2:]; subprocess.Popen([sys.executable,'-B',sys.argv[1],'--limit','6']+(['--code-root',a[0]] if a and a[0] else []), stdout=open(os.path.expanduser('~/.claude/evidence/diag-round.log'),'a'), stderr=subprocess.STDOUT, start_new_session=True)" "$DIAG_ROOT/scripts/diag_round.py" "$DIAG_ARGS"
+  python3 -I -c "import subprocess,sys,os; a=sys.argv[2:]; subprocess.Popen([sys.executable,'-B',sys.argv[1],'--limit','6']+(['--code-root',a[0]] if a and a[0] else []), stdout=open(os.path.expanduser('~/.claude/evidence/diag-round.log'),'a'), stderr=subprocess.STDOUT, start_new_session=True, env=dict(os.environ, **({'PYTHONDONTWRITEBYTECODE': '1'} if a and a[0] else {})))" "$DIAG_ROOT/scripts/diag_round.py" "$DIAG_ARGS"
   echo "DIAGNOSE started detached from ${DIAG_ROOT}, log ~/.claude/evidence/diag-round.log"
 fi
 # SALVAGE BEFORE THE DIGEST READS WHAT IS READY (2026-09-22): a sub unit parked as EXHAUSTED or quarantined while a
@@ -339,8 +377,21 @@ CLOSED_N=$(printf '%s' "${CLOSED:-}" | grep -c '^CLOSED  [1-9]' || true)
 if [ "$LIVE" = unknown ] && [ "${STARTED:-0}" -eq 0 ] && [ "${LANDED_N:-0}" -eq 0 ] && [ "${CLOSED_N:-0}" -eq 0 ]; then
   echo "$NO_TABLE"; exit 0      # only the live count could decide this pass, and it is unknown
 fi
+# A TIMED WAIT IS NOT A PASS THAT DID NOTHING (D32, register row L28). The pool holds a sub unit for RESEAT_MIN_S after
+# a parked run and prints `COOLDOWN <unit> <sub> until <epoch>` for it; on 2026-10-14 23h11 a run whose only unit sat in
+# that hold stopped UNPRODUCTIVE on its first pass. A live (future, all digits) expiry makes the pass a wait: exit 0 with
+# a WAITING line. A missing, past or garbled expiry keeps today's alarm. scripts/loop/test_unproductive_cooldown.py runs
+# the lines between the two markers below.
+# D32 BEGIN
 if [ "${STARTED:-0}" -eq 0 ] && [ "$LIVE" = 0 ] && [ "${LANDED_N:-0}" -eq 0 ] && [ "${CLOSED_N:-0}" -eq 0 ]; then
+  COOL=$(printf '%s\n' "${POOL_ALL:-}" | grep -m1 -E '^COOLDOWN [^ ]+ [^ ]+ until [0-9]+$')
+  COOL_AT=${COOL##* }
+  if [ "$COOL_AT" -gt "$(date +%s)" ] 2>/dev/null; then   # empty or out of range: test refuses, the alarm stands
+    echo "WAITING cooldown: $(printf '%s' "$COOL" | cut -d' ' -f3) may restart after $(date -r "$COOL_AT" +%Hh%M 2>/dev/null || echo "$COOL_AT"); this pass is a wait, not UNPRODUCTIVE"
+    exit 0
+  fi
   echo "PASS DID NOTHING: nothing landed, nothing closed, nothing started, and no runner is alive."
   echo "                  Repeating this changes nothing. Something upstream is refusing; look at it."
   exit 45
 fi
+# D32 END

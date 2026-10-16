@@ -23,9 +23,10 @@ FACILITATORS, with the evidence that supports each.
 
 usage:  loop_report.py [--since-hours 24] [--plan PATH]
         loop_report.py --run DRIVER_LOG [--plan PATH]   (exactly that run: from its RUN START line to its RUN END line)
+        loop_report.py --summary DRIVER_LOG   (one state word and one next action for that run, written beside the log)
         loop_report.py --selftest
 """
-import collections, datetime, json, math, os, re, sys
+import collections, datetime, json, math, os, re, sys, tempfile
 from typing import List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_store  # noqa: E402  (the one landed test every loop reader shares: plan_store.sub_landed)
@@ -273,6 +274,137 @@ def run_window(log_path):
     if e is not None and e < s:
         return None, None, "%s ends (%s) before it starts (%s)" % (name, ends[-1], starts[0])
     return s, e, "run %s from %s to %s" % (name, starts[0], ends[-1] if ends else "now (still running)")
+
+
+# THE RUN SUMMARY (X50, 2026-10-16): one small file per run, rewritten by the driver after every pass and at its end,
+# read from the run's own log and nothing else, so a status reader never hand writes what landed (seven hand written
+# reports on 2026-10-14, and a stop unseen for 144 minutes). One state word, one next action, by a fixed precedence.
+STATES = ("RUNNING", "DELIVERED", "FINISHED_NO_WORK", "PROGRESSED_UNLANDED", "WAITING", "BLOCKED_NEEDS_HUMAN", "ABORTED", "NO-DATA")
+NEXT_ACTIONS = {
+    "NO-DATA": "read the log named here; the summary could not",
+    "RUNNING": "nothing; the loop is working",
+    "ABORTED": "the run ended without its end step: run the status check, then restart with start_run.sh",
+    "FINISHED_NO_WORK": "nothing left in scope: review and cut",
+    "BLOCKED_NEEDS_HUMAN": "read the alarm in the log: it named no reason",   # only when the alarm itself names none
+    "DELIVERED": "review the landed units",
+    "PROGRESSED_UNLANDED": "land or diagnose the READY builds",
+    "WAITING": "restart when the named wait has passed",
+}
+_REFUSED_WORDS = ("REJECTED", "QUARANTINE", "WITHHELD", "DROPPED")
+_ALARM_LINE = re.compile(r"^ALARM ([A-Z][A-Z_-]*): ?(.*)$")
+_RUN_PID_LINE = re.compile(r"^RUN PID ([0-9]+)$")
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True          # it exists, owned by someone else
+    except OSError:
+        return False
+    return True
+
+
+def run_summary(log_path, pid_alive=None):
+    """The summary of ONE driver run, from its log alone: a dict of log, window, landed (sorted unique sub unit ids
+    from LANDED lines), started, refused, alarm, state (one of STATES) and next_action. Only whole lines are read: a
+    last line with no newline is one the driver is still writing. Unreadable or startless is NO-DATA, never zero."""
+    pid_alive = _pid_alive if pid_alive is None else pid_alive
+    start, end, label = run_window(log_path)
+    s = {"log": log_path, "window": label, "landed": [], "started": 0, "refused": {}, "alarm": "",
+         "state": "NO-DATA", "next_action": NEXT_ACTIONS["NO-DATA"]}
+    if start is None:
+        return s
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().split("\n")[:-1]     # the last piece is "" or a torn line
+    except OSError as exc:
+        s["window"] = "%s (%s)" % (label, type(exc).__name__)
+        return s
+    landed, pid, ready, alarm_word, reason, seen_start = set(), None, False, "", "", False
+    for line in lines:
+        seen_start = seen_start or line.startswith("RUN START ")
+        if line.startswith("RUN END ") and not seen_start:
+            s["window"] = "%s: a RUN END line precedes the RUN START line, so this end is not this run's" % os.path.basename(log_path)
+            return s
+        if line.startswith("LANDED "):
+            for piece in line[len("LANDED "):].split("|", 1)[0].split(","):
+                if piece.split():
+                    landed.add(piece.split()[0])
+        elif line.startswith("READY "):
+            ready = True
+        words = line.split()
+        if words and words[-1] == "START":
+            s["started"] += 1
+        for w in _REFUSED_WORDS:
+            if line.startswith(w):
+                s["refused"][w] = s["refused"].get(w, 0) + 1
+        m = _ALARM_LINE.match(line)
+        if m:
+            s["alarm"], alarm_word, reason = line.strip(), m.group(1), m.group(2).strip()
+        m = _RUN_PID_LINE.match(line.strip())
+        if m:
+            pid = int(m.group(1))
+    s["landed"] = sorted(landed)
+    if end is None:
+        state = "RUNNING" if pid and pid_alive(pid) else "ABORTED"
+    elif alarm_word == "FINISHED":
+        state = "FINISHED_NO_WORK"
+    elif alarm_word in ("UNPRODUCTIVE", "STALLED", "BLOCKED"):
+        state = "BLOCKED_NEEDS_HUMAN"
+    elif landed:
+        state = "DELIVERED"
+    elif ready:
+        state = "PROGRESSED_UNLANDED"
+    else:
+        state = "WAITING"
+    s["state"] = state
+    s["next_action"] = (reason or NEXT_ACTIONS[state]) if state == "BLOCKED_NEEDS_HUMAN" else NEXT_ACTIONS[state]
+    return s
+
+
+def _summary_md(s):
+    refused = ", ".join("%s %d" % kv for kv in sorted(s["refused"].items())) or "none"
+    return "\n".join([
+        "# Run summary: %s" % os.path.basename(s["log"]),
+        "state: %s" % s["state"],
+        "next action: %s" % s["next_action"],
+        "window: %s" % s["window"],
+        "landed (%d): %s" % (len(s["landed"]), ", ".join(s["landed"]) or "none"),
+        "started: %d" % s["started"],
+        "refused: %s" % refused,
+        "alarm: %s" % (s["alarm"] or "none"),
+        "source: %s (every figure above is read from this log alone)" % s["log"],
+    ]) + "\n"
+
+
+def _replace_beside(path, text):
+    """Write text to path through a temp file in the same folder and os.replace: a reader sees the old or the new
+    file, never a torn one. A failed write removes its temp file and raises."""
+    fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass   # sbe: allow-silent the temp is already gone; the original error is raised below
+        raise
+
+
+def _write_summary_files(log_path, s):
+    stem = os.path.splitext(log_path)[0]
+    _replace_beside(stem + ".summary.json", json.dumps(s, indent=2, sort_keys=True) + "\n")
+    _replace_beside(stem + ".summary.md", _summary_md(s))
+    return stem + ".summary.json"
+
+
+def write_summary(log_path, pid_alive=None):
+    """Writes <log stem>.summary.json and <log stem>.summary.md beside the log, each atomically; answers the json path.
+    Raises OSError when the folder cannot be written."""
+    return _write_summary_files(log_path, run_summary(log_path, pid_alive))
 
 
 def wip_section(path: Optional[str], now: float) -> Tuple[List[str], int]:
@@ -739,7 +871,7 @@ def _selftest_body():
     return 1 if bad else 0
 
 
-KNOWN_FLAGS = ("--selftest", "--since-hours", "--plan", "--run")
+KNOWN_FLAGS = ("--selftest", "--since-hours", "--plan", "--run", "--summary")
 
 
 def main(argv=None):
@@ -752,6 +884,18 @@ def main(argv=None):
     sys.argv = argv
     if "--selftest" in sys.argv:
         return selftest()
+    if "--summary" in sys.argv:
+        # READS ONE LOG, WRITES TWO FILES BESIDE IT, NOTHING ELSE: never starts, resumes or stops a run.
+        try: log = sys.argv[sys.argv.index("--summary") + 1]
+        except IndexError: print("--summary needs a driver log path"); return 2
+        s = run_summary(log)
+        try:
+            _write_summary_files(log, s)
+        except OSError as exc:
+            print("SUMMARY NOT WRITTEN beside %s (%s: %s)" % (log, type(exc).__name__, exc))
+            return 2 if s["state"] == "NO-DATA" else 1
+        print(_summary_md(s), end="")
+        return 2 if s["state"] == "NO-DATA" else 0
     hours = 24
     if "--since-hours" in sys.argv:
         try: hours = int(sys.argv[sys.argv.index("--since-hours") + 1])

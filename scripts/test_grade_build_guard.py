@@ -313,7 +313,7 @@ class GradeEntryPoint(unittest.TestCase):
         self.build = os.path.join(self.d, "build.json")
         import json
         json.dump({"edits": [{"path": "pkg/m.py", "find": "return None", "replace": "return x + 1"}],
-                   "tests": [{"path": "pkg/test_m.py", "new_file_content": "import unittest\nopen('junk.txt', 'w').write('x')\nfrom pkg import m\n\nclass T(unittest.TestCase):\n    def test_f(self):\n        self.assertEqual(m.f(1), 2)\n"}],
+                   "tests": [{"path": "pkg/test_m.py", "new_file_content": "import os, unittest\nopen(os.path.join(os.environ['HOME'], 'junk.txt'), 'w').write('x')\nfrom pkg import m\n\nclass T(unittest.TestCase):\n    def test_f(self):\n        self.assertEqual(m.f(1), 2)\n"}],
                    "done_check": "python3 -B -m unittest pkg.test_m",
                    "mutations": [{"name": "off by one", "path": "pkg/m.py", "find": "return x + 1", "replace": "return x + 2"},
                                  {"name": "zero", "path": "pkg/m.py", "find": "return x + 1", "replace": "return 0"},
@@ -336,7 +336,7 @@ class GradeEntryPoint(unittest.TestCase):
         r1 = [os.path.join(self.sandboxes, s) for s in os.listdir(self.sandboxes) if s.endswith("-r1")]
         self.assertEqual(len(r1), 1, os.listdir(self.sandboxes))
         self.assertIn("return x + 1", open(os.path.join(r1[0], "pkg", "m.py")).read(), "the last mutation was not undone")
-        self.assertFalse(os.path.exists(os.path.join(r1[0], "junk.txt")), "a test's leftover survived into the next mutation")
+        self.assertFalse(os.path.exists(os.path.join(r1[0], ".grade-sandbox", "junk.txt")), "a test's leftover survived into the next mutation")
     def test_a_grade_whose_only_reason_is_a_leg_that_never_ran_is_no_data_not_a_fail(self):
         # 2026-10-03: run AS the old interpreter, only one Python version is exercised; that reason alone judged nothing,
         # so the grader exits 3 with a NO-DATA verdict, never exit 1 (a FAIL unit_runner would pay a repair round for)

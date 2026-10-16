@@ -497,6 +497,9 @@ subprocess.Popen(["bash", "-c", sys.argv[1]] + sys.argv[2:], stdin=subprocess.DE
   fi
   [ -n "$END_SIGNALLED" ] && echo "NOTE a signal arrived during the end; this end completes once" | tee -a "$LOG"
   echo "ALARM $1: $2${END_NOTE}" | tee -a "$LOG"
+  # THE RUN SUMMARY AT THE END (X50): after RUN END AND this ALARM line, so its state word reads this end's alarm. It
+  # writes two files beside the log and never the log itself (the receipt below hashes the log), and never fails the end.
+  { perl -e 'alarm shift; exec @ARGV' 5 python3 -B "$HOME/.claude/bin/loop_report.py" --summary "$LOG" </dev/null >/dev/null 2>&1; } 2>/dev/null || true
   # THE RECEIPT (AGENTS.md "The receipt contract", audit issue F23): a run that changes anything owes
   # a receipt, and 0 of 15 run directories held one on 2026-09-26. Written once, here, LAST of every
   # log write this function makes, through the one writer scripts/loop/loop_receipt.py: budget, spend,
@@ -587,6 +590,11 @@ os.execvp(sys.argv[1], sys.argv[1:])' bash ~/.claude/bin/loop_pass.sh >> "$LOG" 
   PASS_PID=$!
   wait "$PASS_PID"; RC=$?
   PASS_PID=""
+  # THE RUN SUMMARY AFTER EVERY PASS (X50): one state word and one next action beside the log, read from the log alone.
+  # It never fails the driver, and RC is already read. BOUNDED, NEVER WAITED OUT (U12): a summary normally takes well
+  # under a second; perl's alarm kills one still running after 5 s (macOS has no timeout(1)), so a slow or hung
+  # loop_report.py holds the driver 5 s at most, here and at the end. The braces keep the shell's kill notice off stderr.
+  { perl -e 'alarm shift; exec @ARGV' 5 python3 -B "$HOME/.claude/bin/loop_report.py" --summary "$LOG" </dev/null >/dev/null 2>&1; } 2>/dev/null || true
 }
 # THE STOP IS FORWARDED TO THE PASS'S WHOLE GROUP, before any end step: the pass shell alone dies at once on TERM and
 # orphans the step it runs (a landing, the pool), which then works on past the receipt. A group still alive 3 s after
@@ -666,6 +674,7 @@ python3 -B ~/.claude/bin/loop_heartbeat.py write --state STARTED --reason "runni
 announce STARTED "running passes until ${STOP_HHMM}, gap ${GAP}s"
 echo "NOTE STARTED: running until ${STOP_HHMM}" | tee -a "$LOG"
 echo "RUN START ${RUN_START_ISO}" | tee -a "$LOG"   # dated, so loop_report.py --run can bound this run (a log name holds HHMM only)
+echo "RUN PID $$" >> "$LOG"   # the summary (X50) reads a run with no RUN END and this pid dead as ABORTED, never RUNNING
 while :; do
   # THE RUN'S BUDGET AND DEADLINE MAY CHANGE MID RUN, only through the intake (owner 2026-09-22). Re-read both every pass,
   # with `status --running`: the START rules (a pair record's remaining coverage, a plain record's age) never gate this
@@ -880,6 +889,7 @@ while :; do
     "REFRESH FAILED"*) [ "${REFRESH_WARNED:-0}" = 1 ] || { REFRESH_WARNED=1; announce LOGIN "${REFRESH_SAYS}: native seats hold CONFIG_WAIT until a plain claude call succeeds"; };;
     *) REFRESH_WARNED=0;;
   esac
+  PASS_MARK="${RUN_TMP}/pass-start"; { : > "$PASS_MARK"; } 2>/dev/null   # SP5: the gap wakes only on a READY newer than this
   run_pass
   # THE PULSE, after EVERY pass including the last one. One row of counts for this run (landed, gate approvals,
   # parked sub units) and a WARN the moment a gate has never approved, READY builds are not landing, the pool is
@@ -962,15 +972,45 @@ while :; do
         fi;;
   esac
   echo "$(date '+%H:%M:%S') pass ${PASS} done (rc ${RC})" | tee -a "$LOG"
+  # PASS GAP BEGIN
   # Sleep in short slices so the deadline is honoured even mid gap. A draining run sleeps to its deadline.
   # A PAUSE OR HOLD INSIDE THE GAP IS SEEN (U11, B5-03): every slice looks for either file, and when one exists asks
   # the one reader, which records it in the run's history; a held run leaves the gap for the pause handling above.
+  # A BUILD THAT REACHES READY ENDS THE GAP (SP5, 2026-10-16): after the pause look, every slice asks whether any run
+  # STATUS under unit-runs reads exactly READY (first word, strict UTF-8) and is newer than PASS_MARK, written right
+  # before this pass; one that is ends the gap, so the build lands within one slice instead of up to GAP seconds later.
+  # A STATUS older than the mark was this pass's to land. Anything unreadable (the mark, the folder, a STATUS that is
+  # not a file or not UTF-8) never wakes: the gap then runs as it did before. Slice: BROTHER_GAP_SLICE_S, default 10.
   END=$(( $(date +%s) + GAP )); [ "$DRAIN" = 1 ] && END=$STOP_EPOCH
   EVD="$HOME/.claude/evidence"
+  GAP_SLICE=10; case "${BROTHER_GAP_SLICE_S:-}" in ''|*[!0-9]*|0*) ;; *) GAP_SLICE=$BROTHER_GAP_SLICE_S;; esac
+  GAP_READY_PY='import os, sys
+try:
+    t0, names = os.stat(sys.argv[2]).st_mtime, os.listdir(sys.argv[1])
+except OSError:
+    sys.exit(1)
+for n in sorted(names):
+    p = os.path.join(sys.argv[1], n, "STATUS")
+    try:
+        if os.stat(p).st_mtime <= t0:
+            continue
+        with open(p, "rb") as fh:
+            words = fh.read().decode("utf-8").split()
+    except (OSError, UnicodeDecodeError):
+        continue
+    if words[:1] == ["READY"]:
+        print(n)
+        sys.exit(0)
+sys.exit(1)'
   while [ "$(date +%s)" -lt "$END" ] && [ "$(date +%s)" -lt "$STOP_EPOCH" ]; do
-    nap 10
+    nap "$GAP_SLICE"
     if [ -e "$EVD/LOOP-PAUSE.txt" ] || [ -L "$EVD/LOOP-PAUSE.txt" ] || [ -e "$EVD/LOOP-HOLD.txt" ] || [ -L "$EVD/LOOP-HOLD.txt" ]; then
       control_clear || break
     fi
+    if GAP_WOKE=$(python3 -B -c "$GAP_READY_PY" "$EVD/unit-runs" "${PASS_MARK:-}" 2>/dev/null); then
+      echo "$(date '+%H:%M:%S') GAP WAKE: ${GAP_WOKE} reached READY after pass ${PASS} began; the next pass starts now to land it" | tee -a "$LOG"
+      break
+    fi
   done
+  # PASS GAP END
 done

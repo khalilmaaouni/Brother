@@ -19,6 +19,8 @@ Cases, one condition each:
      diagnosis are skipped by name, the tree's sentry runs boxed through the lander, and nothing escapes.
 Run: python3 -B scripts/test_loop_pass_code_root.py
 """
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -242,6 +244,13 @@ class PassCodeRoot(unittest.TestCase):
         cand = os.path.join(self.bin, "candidate")
         w(os.path.join(cand, "scripts", "diag_round.py"), WITNESS % "CAND", 0o755)
         w(os.path.join(cand, "plugin", "runtime", "brother", "core", "or_fanout.py"), "")
+        # D30: the frozen root runs only when it matches the bin's deploy stamp, written here as deploy_stamped writes it
+        stamp = {}
+        for d, _, fs in os.walk(cand):
+            for f in fs:
+                with open(os.path.join(d, f), "rb") as fh:
+                    stamp["bin/" + os.path.relpath(os.path.join(d, f), self.bin)] = hashlib.sha256(fh.read()).hexdigest()
+        w(os.path.join(self.bin, ".deploy-stamp.json"), json.dumps({"schema": 1, "files": stamp}))
         w(os.path.join(self.tree, "scripts", "loop", "diag_round.py"), TRIPWIRE, 0o755)   # beside scripts/diag_round.py, already planted
         git(self.tree, "add", "-A")
         git(self.tree, "commit", "-q", "-m", "planted landing tree diag_round copies")

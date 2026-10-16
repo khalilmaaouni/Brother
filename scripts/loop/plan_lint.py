@@ -13,7 +13,10 @@ import json
 import os
 import re
 import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
 from typing import Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -618,6 +621,111 @@ def _named_test_rule_findings(uid, sub, spec_text, root):
             for path in dict.fromkeys(wanted) if not exists(path)]
 
 
+# C20 (1.1.5, register rows L07, L24): two rules the loop already enforces later, after a worker is paid, asked
+# here of the loop's OWN code, never a copy of it. Each reads NO-DATA when that code cannot be loaded or raises.
+# HERMETIC-HOME (L27) was withdrawn 2026-10-16: importing scripts/hermetic_test_check.py pulled its dynamic loader into
+# the loop's frozen closure and every deploy refused. The pre-push hermetic gate still enforces the HOME rule.
+RULE_SIBLING_NEW = "SIBLING-NEW"
+RULE_BRIEF_BUDGET = "BRIEF-BUDGET"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+BRIEF_TIMEOUT_S = 120
+
+
+def _sibling_new_findings(uid, sub, unit, spec_text):
+    """SIBLING-NEW (L07): this section labels a path NEW that an EARLIER sibling of the same unit already labels NEW, so
+    the file exists by the time this sub unit builds (NEW-EXISTS then blocks it, after the earlier landing). The decision
+    is sibling_new.sibling_new_conflicts over the unit's whole sub_units list in plan order (landed siblings included:
+    they created the file). ADVISORY, not BLOCKING (decided 2026-10-16): the hold already exists where the file lands
+    (NEW-EXISTS is BLOCKING at admission, and build_brief tells the builder the file exists), and scripts/plan_gen.py
+    labels a file NEW in every sub unit that names it while it is absent, so BLOCKING here refuses every generated plan
+    that shares a file between two sub units (three test_plan_gen cases). FLIP to BLOCKING once plan_gen labels a path
+    NEW only in the first sub unit naming it. FAIL DIRECTION: a module that cannot be imported, or a call that raises,
+    is NO-DATA."""
+    try:
+        import sibling_new
+        conflicts = sibling_new.sibling_new_conflicts(spec_text, unit.get("sub_units"))
+    except Exception as exc:  # noqa: BLE001  any failure of the loop's own rule is NO-DATA, never clean
+        return [_finding(uid, sub, RULE_SIBLING_NEW, "NO-DATA",
+                         "the loop's sibling_new rule could not run (%s: %s)" % (type(exc).__name__, _short(str(exc))),
+                         "make scripts/loop/sibling_new.py importable, and the unit's sub_units a list of ids")]
+    return [_finding(uid, sub, RULE_SIBLING_NEW, "ADVISORY",
+                     "the section labels %s NEW, but the earlier sibling %s already labels it NEW, so it will exist "
+                     "when this sub unit builds" % (path, earlier),
+                     "label %s existing in this section (%s creates it), or move its creation here" % (path, earlier))
+            for later, path, earlier in conflicts if later == sub]
+
+
+_FILE_BLOCK = re.compile(r"^===== FILE: (.+?) =====\n(\[NOT SHOWN[^\n]*)", re.M)   # build_brief's own block header
+
+
+def _brief_budget_findings(uid, sub, spec_text, root):
+    """BRIEF-BUDGET (L24): build the sub unit's MINIMUM brief exactly as the loop does (unit_runner runs build_brief.py,
+    then brief_check.py, from the tree root) and refuse when the builder's own budget starves it. build_brief.py runs its
+    budget and its per file shares at module level, so it cannot be imported: the honest call is the loop's own. Minimum
+    means no lessons (an empty BROTHER_UNIT_RUNS) and no screen block (BROTHER_BRIEF_SCREEN=off); the spec text judged is
+    the one passed in, written to a scratch copy. BLOCKING when the builder cannot name every file within its budget
+    (its exit 2), when brief_check B3 refuses the size, or when B1 or B2 refuses a file whose block the builder marked
+    NOT SHOWN for its share of the brief (10-14 CF1.a: scripts/receipt_door.py, 23,327 bytes against a 19,770 share).
+    A file NOT SHOWN for any other reason (a private term, not UTF-8) is not this rule's. FAIL DIRECTION: a root that is
+    not a directory, a missing builder or checker, a timeout, or any other exit is NO-DATA, never clean."""
+    def nodata(why):
+        return [_finding(uid, sub, RULE_BRIEF_BUDGET, "NO-DATA", why,
+                         "make build_brief.py and brief_check.py runnable beside plan_lint.py, from the tree root")]
+    fix = ("split the sub unit so fewer files share its brief, or name the module's functions so the slicer can cut it; "
+           "the brief builder's minimum for this section does not fit its budget")
+    if not (isinstance(root, str) and root and os.path.isdir(root)):
+        return nodata("the repository root is not a directory, so the brief cannot be built")
+    builder, checker = os.path.join(_HERE, "build_brief.py"), os.path.join(_HERE, "brief_check.py")
+    if not (os.path.isfile(builder) and os.path.isfile(checker)):
+        return nodata("build_brief.py or brief_check.py is not beside plan_lint.py")
+    scratch = None
+    try:
+        scratch = tempfile.mkdtemp(prefix="plan-lint-brief-")
+        spec_path, brief_path, runs = (os.path.join(scratch, n) for n in ("spec.md", "brief.md", "runs"))
+        os.mkdir(runs)
+        with open(spec_path, "w", encoding="utf-8") as fh:
+            fh.write(spec_text)
+        env = dict(os.environ, BROTHER_UNIT_RUNS=runs, BROTHER_BRIEF_SCREEN="off")
+        built = subprocess.run([sys.executable, builder, uid, sub, spec_path, brief_path], cwd=root, env=env,
+                               capture_output=True, text=True, timeout=BRIEF_TIMEOUT_S)
+        said = ((built.stderr or "") + (built.stdout or "")).strip()
+        if built.returncode == 2 and "within the brief budget" in said:
+            return [_finding(uid, sub, RULE_BRIEF_BUDGET, "BLOCKING",
+                             "the loop's brief builder refuses this section: %s" % _short(said.splitlines()[-1], 200), fix)]
+        if built.returncode != 0 or not os.path.isfile(brief_path):
+            return nodata("the brief builder exited %d: %s" % (built.returncode, _short(said[-200:] or "no output", 200)))
+        checked = subprocess.run([sys.executable, checker, uid, sub, spec_path, brief_path], cwd=root, env=env,
+                                 capture_output=True, text=True, timeout=BRIEF_TIMEOUT_S)
+        if checked.returncode == 0:
+            return []
+        if checked.returncode != 1:
+            return nodata("the brief check exited %d: %s" % (checked.returncode, _short((checked.stdout or "").strip(), 200)))
+        with open(brief_path, encoding="utf-8") as fh:
+            brief = fh.read()
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return nodata("the brief could not be built and checked (%s: %s)" % (type(exc).__name__, _short(str(exc))))
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+    starved = {os.path.normpath(p): mark for p, mark in _FILE_BLOCK.findall(brief) if "share of the brief" in mark}
+    out, props = [], {}
+    for row in (checked.stdout or "").splitlines():
+        if "REFUSED" not in row:
+            continue
+        if row.startswith("B3 "):
+            out.append(_finding(uid, sub, RULE_BRIEF_BUDGET, "BLOCKING", "the loop's brief check refuses the minimum "
+                                "brief: %s" % _short(row, 200), fix))
+        elif row.startswith(("B1 ", "B2 ")):
+            for path in starved:
+                if re.search(r"(?<![\w./-])%s(?![\w./-])" % re.escape(path), row):
+                    props.setdefault(path, []).append(row.split()[0])
+    for path, refused in props.items():
+        out.append(_finding(uid, sub, RULE_BRIEF_BUDGET, "BLOCKING",
+                            "the loop's brief builder leaves %s NOT SHOWN for its share of the brief, so brief_check "
+                            "refuses it (%s): %s" % (path, ", ".join(refused), _short(starved[path], 240)), fix))
+    return out
+
+
 def _section_findings(uid, sub, unit, spec_text, root):
     """The rules for ONE open section: its check, the tests it names, and the touch set it names."""
     out = []
@@ -642,6 +750,8 @@ def _section_findings(uid, sub, unit, spec_text, root):
                             "the section names no backticked path, so its touch set is unknown",
                             "name every file the section touches, backticked"))
     out.extend(_named_test_rule_findings(uid, sub, spec_text, root))
+    out.extend(_sibling_new_findings(uid, sub, unit, spec_text))
+    out.extend(_brief_budget_findings(uid, sub, spec_text, root))
     out.extend(hard_findings(uid, sub, unit, spec_text))
     return out
 

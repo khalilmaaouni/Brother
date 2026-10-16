@@ -128,7 +128,10 @@ PRULE="$(dirname "$0")/power_rule.py"
 PWHY=$(python3 -B "$PRULE" check --deadline "$DEADLINE" 2>&1); PRC=$?
 case "$PRC" in
   0) echo "OK   power  ${PWHY:-on AC}";;
-  2) refuse power "${PWHY:-the power rule refused without a reason}";;
+  # L12 (2026-10-16): on battery the remedy is read first. The rule and its words stay power_rule.py's; its own
+  # `source` reading names the battery, so no text of the rule is matched here.
+  2) [ "$(python3 -B "$PRULE" source 2>/dev/null)" = battery ] && PWHY="plug in the charger first: $PWHY"
+     refuse power "${PWHY:-the power rule refused without a reason}";;
   *) refuse power "the power rule could not run (exit $PRC): $(printf '%s' "$PWHY" | tr '\n' ' ' | cut -c1-160)";;
 esac
 tmark power 2>/dev/null || true
@@ -162,6 +165,48 @@ for WHICH in claude codex; do
   export "$VAR=$CUR"
   echo "OK   pins   $VAR=$CUR"
 done
+# L11 (2026-10-16): whether the pinned Claude program is signed in, and which installed one is, with the remedy. REPORTING
+# ONLY: the refusal stays the intake's proof (start-real2 to 6 on 10-14 were refused there, rightly, after up to 51 s).
+# `<program> auth status` prints JSON with loggedIn; anything else is "cannot tell", never "signed in".
+python3 -B - "$BROTHER_CLAUDE_BIN" "$(dirname "$0")" <<'PY' 2>/dev/null || echo "WARN signin could not tell whether BROTHER_CLAUDE_BIN=$BROTHER_CLAUDE_BIN is signed in (the check failed); the intake's proof decides"
+import json, os, subprocess, sys
+pinned, here = sys.argv[1], os.path.abspath(sys.argv[2])
+sys.path.insert(0, here)
+import loop_switches as SW
+if SW.on("BROTHER_LOOP_TOKEN"):
+    print("OK   signin BROTHER_LOOP_TOKEN=on: seats run on the loop login, which the intake's seat probe proves")
+    sys.exit(0)
+def signed_in(prog):
+    """True or False as the program says, else the reason it cannot tell."""
+    try:
+        r = subprocess.run([prog, "auth", "status"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, universal_newlines=True, timeout=20)
+        v = json.loads(r.stdout).get("loggedIn")
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as exc:
+        return "auth status gave no answer (%s)" % type(exc).__name__
+    return v if isinstance(v, bool) else "auth status named no loggedIn (exit %d)" % r.returncode
+state = signed_in(pinned)
+if state is True:
+    print("OK   signin BROTHER_CLAUDE_BIN=%s is signed in" % pinned)
+    sys.exit(0)
+if state is not False:
+    print("WARN signin could not tell whether BROTHER_CLAUDE_BIN=%s is signed in (%s); the intake's proof decides" % (pinned, state))
+    sys.exit(0)
+other = None
+try:
+    sys.path.insert(0, os.path.dirname(here))
+    import brother_paths
+    for cand in brother_paths.claude_candidates():
+        if os.path.realpath(cand) != os.path.realpath(pinned) and signed_in(cand) is True:
+            other = cand
+            break
+except (ImportError, OSError, ValueError):
+    pass   # sbe: allow-silent which other program is signed in is a hint; the line below still names the pin and its remedy
+if other:
+    print("WARN signin BROTHER_CLAUDE_BIN=%s is not signed in; %s is: sign in to %s, or set BROTHER_CLAUDE_BIN=%s" % (pinned, other, pinned, other))
+else:
+    print("WARN signin BROTHER_CLAUDE_BIN=%s is not signed in, and no other installed claude program reads signed in: sign in to %s" % (pinned, pinned))
+PY
 tmark pins 2>/dev/null || true
 
 # 3 CONTROLS

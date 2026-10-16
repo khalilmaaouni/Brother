@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 534 |
-| Parts with a purpose written in the file | 531 |
-| Parts with a suite wired into the battery | 466 |
-| Checks in the battery | 1215 |
+| Parts | 535 |
+| Parts with a purpose written in the file | 532 |
+| Parts with a suite wired into the battery | 467 |
+| Checks in the battery | 1273 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -163,6 +163,7 @@ undocumented corners looks complete and is not.
 | `doc_numbers_check` | .py: every number a document claims is checked against | `doc_numbers_check-self` |
 | `dominance_scoreboard` | DOM-00.03: the one composite the Dominance rows (DOM-10 through DOM-50) | `dominance_scoreboard-self` |
 | `donecheck_114` | GM1: the owner's 1.1.4 mandate measured from the loop's own ledger and the cut driver's own state, never a report. | **NO-DATA**, nothing in the battery runs it |
+| `donecheck_115` | GM15: the 1.1.5 night's G1 reading (the loop finishes and is intuitive), read from the loop's own ledger. | `donecheck-115-py39`, `donecheck-115-self` |
 | `donecheck_C0` | Unit C0 done check. The subject and the verdict live in scripts/donecheck_units.py; this file is the command the plan names. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_L0` | L0 done check: the unification epic delivered what it promised. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_L1b` | Unit L1b done check. The subject and the verdict live in scripts/donecheck_units.py; this file is the command the plan names. | **NO-DATA**, nothing in the battery runs it |
@@ -514,7 +515,7 @@ undocumented corners looks complete and is not.
 | `surface_budget` | Measure the user-invocable surface and generate bundle/MANIFEST.json. | `surface-budget`, `surface-budget-self` |
 | `survivorship_lineage` | WBS-40.09 Survivorship lineage: produce the per-field winner decision | `survivorship-lineage-self` |
 | `swarm_status` | one glanceable table saying what a swarm run is doing RIGHT NOW. | `swarm-status` |
-| `system_doc` | a description of this system that cannot drift, because it is generated. | `cut-ready-self`, `l5e-6-mutations-self`, `pre-push-gate`, `pre-push-gate-self`, `regen-generated-self`, `system-doc-current`, `system-doc-self` |
+| `system_doc` | a description of this system that cannot drift, because it is generated. | `cut-ready-self`, `l5e-6-mutations-self`, `pre-push-gate`, `pre-push-gate-self`, `regen-generated-self`, `self-check-staged-self`, `system-doc-current`, `system-doc-self` |
 | `task_watchdog` | Task watchdog: per-task drift and block detection with the unlock printed. | `night-tick-selftest`, `task-watchdog-self` |
 | `temp_residue` | Report, and optionally prune, this estate's leftover temp trees. | `temp-residue-self` |
 | `throughput` | Sub units landed per hour in a window, measured the SAME WAY on both sides of a comparison. | **NO-DATA**, nothing in the battery runs it |
@@ -1415,6 +1416,64 @@ undocumented corners looks complete and is not.
 - `plan-114-py39`: `/usr/bin/python3 -B scripts/test_plan_114.py`
 - `baseline-114-self`: `python3 -B scripts/test_baseline_114.py`
 - `baseline-114-py39`: `/usr/bin/python3 -B scripts/test_baseline_114.py`
+- `plan-115-self`: `python3 -B scripts/test_plan_115.py`
+- `plan-115-py39`: `/usr/bin/python3 -B scripts/test_plan_115.py`
+- `baseline-115-self`: `python3 -B scripts/test_baseline_115.py`
+- `baseline-115-py39`: `/usr/bin/python3 -B scripts/test_baseline_115.py`
+- `land-apply-baseline-115-self`: `python3 -B scripts/loop/test_land_apply_baseline.py`
+- `land-apply-baseline-115-py39`: `/usr/bin/python3 -B scripts/loop/test_land_apply_baseline.py`
+- `whole-gate-record-115-self`: `python3 -B scripts/test_whole_gate_record.py`
+- `whole-gate-record-115-py39`: `/usr/bin/python3 -B scripts/test_whole_gate_record.py`
+- `pre-push-whole-gate-115-self`: `python3 -B scripts/test_pre_push_whole_gate.py`
+- `pre-push-whole-gate-115-py39`: `/usr/bin/python3 -B scripts/test_pre_push_whole_gate.py`
+- `cut-driver-relay-115-self`: `python3 -B scripts/test_cut_driver_relay.py`
+- `cut-driver-relay-115-py39`: `/usr/bin/python3 -B scripts/test_cut_driver_relay.py`
+- `redeploy-check-115-self`: `python3 -B scripts/loop/test_redeploy_check.py`
+- `redeploy-check-115-py39`: `/usr/bin/python3 -B scripts/loop/test_redeploy_check.py`
+- `start-run-remedy-115-self`: `python3 -B scripts/loop/test_start_run_remedy.py`
+- `start-run-remedy-115-py39`: `/usr/bin/python3 -B scripts/loop/test_start_run_remedy.py`
+- `land-batch-closure-115-self`: `python3 -B scripts/loop/test_land_batch_closure.py`
+- `land-batch-closure-115-py39`: `/usr/bin/python3 -B scripts/loop/test_land_batch_closure.py`
+- `diag-frozen-root-115-self`: `python3 -B scripts/loop/test_diag_frozen_root.py`
+- `diag-frozen-root-115-py39`: `/usr/bin/python3 -B scripts/loop/test_diag_frozen_root.py`
+- `plan-lint-rules-115-self`: `python3 -B scripts/loop/test_plan_lint_rules_115.py`
+- `plan-lint-rules-115-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_rules_115.py`
+- `plan-lint-budget-115-self`: `python3 -B scripts/loop/test_plan_lint_budget.py`
+- `plan-lint-budget-115-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_budget.py`
+- `brief-untrusted-notes-115-self`: `python3 -B scripts/loop/test_brief_untrusted_notes.py`
+- `brief-untrusted-notes-115-py39`: `/usr/bin/python3 -B scripts/loop/test_brief_untrusted_notes.py`
+- `hermetic-export-lease-115-self`: `python3 -B scripts/test_hermetic_export_lease.py`
+- `hermetic-export-lease-115-py39`: `/usr/bin/python3 -B scripts/test_hermetic_export_lease.py`
+- `self-check-system-doc-115-self`: `python3 -B scripts/test_self_check_system_doc.py`
+- `self-check-system-doc-115-py39`: `/usr/bin/python3 -B scripts/test_self_check_system_doc.py`
+- `gate-pair-115-self`: `python3 -B scripts/test_gate_pair.py`
+- `gate-pair-115-py39`: `/usr/bin/python3 -B scripts/test_gate_pair.py`
+- `grade-build-env-115-self`: `python3 -B scripts/loop/test_grade_build_env_115.py`
+- `grade-build-env-115-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_env_115.py`
+- `land-batch-env-hold-115-self`: `python3 -B scripts/loop/test_land_batch_env_hold.py`
+- `land-batch-env-hold-115-py39`: `/usr/bin/python3 -B scripts/loop/test_land_batch_env_hold.py`
+- `land-batch-whole-gate-115-self`: `python3 -B scripts/loop/test_land_batch_whole_gate.py`
+- `land-batch-whole-gate-115-py39`: `/usr/bin/python3 -B scripts/loop/test_land_batch_whole_gate.py`
+- `gate-order-child-115-self`: `python3 -B scripts/loop/test_gate_order_child.py`
+- `gate-order-child-115-py39`: `/usr/bin/python3 -B scripts/loop/test_gate_order_child.py`
+- `donecheck-115-self`: `python3 -B scripts/test_donecheck_115.py`
+- `donecheck-115-py39`: `/usr/bin/python3 -B scripts/test_donecheck_115.py`
+- `usd-plan-share-115-self`: `python3 -B scripts/loop/test_usd_plan_share.py`
+- `usd-plan-share-115-py39`: `/usr/bin/python3 -B scripts/loop/test_usd_plan_share.py`
+- `runner-pool-note-attempt-115-self`: `python3 -B scripts/loop/test_runner_pool_note_attempt.py`
+- `runner-pool-note-attempt-115-py39`: `/usr/bin/python3 -B scripts/loop/test_runner_pool_note_attempt.py`
+- `unproductive-cooldown-115-self`: `python3 -B scripts/loop/test_unproductive_cooldown.py`
+- `unproductive-cooldown-115-py39`: `/usr/bin/python3 -B scripts/loop/test_unproductive_cooldown.py`
+- `grade-build-guard-paths-115-self`: `python3 -B scripts/loop/test_grade_build_guard_paths_115.py`
+- `grade-build-guard-paths-115-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_guard_paths_115.py`
+- `run-summary-115-self`: `python3 -B scripts/loop/test_run_summary.py`
+- `run-summary-115-py39`: `/usr/bin/python3 -B scripts/loop/test_run_summary.py`
+- `run-summary-calls-115-self`: `python3 -B scripts/loop/test_run_summary_calls.py`
+- `run-summary-calls-115-py39`: `/usr/bin/python3 -B scripts/loop/test_run_summary_calls.py`
+- `loop-gap-wake-115-self`: `python3 -B scripts/loop/test_loop_gap_wake.py`
+- `loop-gap-wake-115-py39`: `/usr/bin/python3 -B scripts/loop/test_loop_gap_wake.py`
+- `loop-golden-journeys-115-self`: `python3 -B scripts/loop/test_loop_golden_journeys.py`
+- `loop-golden-journeys-115-py39`: `/usr/bin/python3 -B scripts/loop/test_loop_golden_journeys.py`
 - `plan-clock-self`: `python3 -B scripts/test_plan_clock.py`
 - `plan-clock-py39`: `/usr/bin/python3 -B scripts/test_plan_clock.py`
 - `plan-seed-self`: `python3 -B scripts/test_plan_seed.py`

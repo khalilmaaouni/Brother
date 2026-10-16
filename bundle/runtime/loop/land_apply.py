@@ -18,7 +18,15 @@ THE CHILD (FX-08, 2026-09-28): a fuzzed call given True as a file name closed th
 120 with no result line, and a READY build (L4.4) was dropped with no usable reason; another call given "x" created a
 directory in the landing tree that changed later runs' fuzz. The child is scripts/loop/land_fuzz_child.py (2026-10-15: the computed import moved out of this file; the
 BROTHER_LAND_FUZZ_INPROCESS switch, which no caller used, is retired). Switch: BROTHER_LAND_FUZZ_TIMEOUT_S a number in (0, 1800] replaces the 120 s bound
-per module (default 120; anything else is ignored with a line saying so)."""
+per module (default 120; anything else is ignored with a line saying so).
+THE UNCHANGED COPY JUDGES EVERY RED (G10, 2026-10-16; measured 2026-10-14: a no-op build of native_worker.py was refused
+with 16 failures and 36 errors that a sibling suite shows on unchanged code inside this sandbox, then parked on repeat). A
+suite red on the built copy is run again, same command, interpreter, sandbox profile and environment shape, on a second
+copy WITHOUT the build (made once, only when a red needs it; at most one base run per suite and interpreter per landing,
+so a green landing pays nothing). Green there (or absent there): the build's red, VERDICT RED as before (exit 1). Red there
+too: 'environment defect: <suite>' with both exit codes, never the build's; nothing lands; VERDICT BLOCKED-ENVIRONMENT
+(exit 3) with a remedy line. The base run could not complete (no copy, sandbox refused, cannot start, timeout, a signal):
+NO-DATA, nothing lands, VERDICT NO-DATA (exit 4). Any red of the build's own outranks both."""
 import inspect, json, math, os, re, shutil, signal, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import grade_build  # the loop's own grade_build, never scripts/grade_build.py
@@ -307,6 +315,28 @@ def cmd_for(rel, root="."):
             return [SHELLS[name]] + args + [rel]
         return ["/bin/sh", "-c", "echo 'REFUSED: shell suite %s: %s' >&2; exit 2" % (rel.replace("'", ""), why.replace("'", ""))]
     return [sys.executable, "-B", rel] if rel.startswith("scripts/") else [sys.executable, "-B", "-m", "unittest", rel[:-3].replace("/", ".")]
+SUITE_TIMEOUT_S = 1200
+#: exits that mean the run never finished: 124 timeout (run_group), 125 sandbox refused, 126 cannot execute, 127 not found
+INCOMPLETE_EXITS = (124, 125, 126, 127)
+def suite_cmd(rel, py, root):
+    """The one command a suite runs under on EITHER copy: cmd_for, a Python suite under interpreter py."""
+    c = cmd_for(rel, root)
+    if not rel.endswith(".sh"): c[0] = py
+    return c
+def base_red(root, rel, py, home, env, run=None):
+    """(red, exit) for suite rel on the UNCHANGED copy at root, run exactly as the built copy's run is (suite_cmd, the
+    sandbox, env). red is True or False, or None when the run could not complete: no copy (root None), sandbox refused,
+    cannot start, an exit in INCOMPLETE_EXITS, a signal (negative, or above 128 through a shell). A suite the copy does
+    not hold is (False, None): it is the build's own, so its red can only be the build's."""
+    if root is None: return None, None
+    if not os.path.isfile(os.path.join(root, rel)): return False, None
+    try:
+        r = (run or _LB.run_group)(grade_build.sandboxed(suite_cmd(rel, py, root), root, home), SUITE_TIMEOUT_S, env, cwd=root)
+    except (grade_build.SandboxRefused, OSError, subprocess.SubprocessError, ValueError):
+        return None, None
+    rc = r.returncode
+    if isinstance(rc, bool) or not isinstance(rc, int) or rc < 0 or rc > 128 or rc in INCOMPLETE_EXITS: return None, rc
+    return rc != 0, rc
 def apply_build(root, items):
     """Verify every item against the tree at root (the grader's one path rule, the find exactly once), THEN write them
     there: exactly the graded bytes. Exits REFUSED before writing anything when one cannot apply. Returns the paths
@@ -345,6 +375,7 @@ def main():
     except _LB.TreeUnreadable as exc:
         sys.exit("REFUSED: no disposable copy of the tree: %s" % exc)
     home = tempfile.mkdtemp(prefix="land-apply-home-"); os.makedirs(os.path.join(home, "tmp"), exist_ok=True)
+    base = base_home = None   # the unchanged copy and its HOME, made only when a red needs judging
     try:
         touched = apply_build(copy, items)
         suites = [t["path"] for t in (b.get("tests") or [])]
@@ -353,28 +384,53 @@ def main():
             if os.path.isfile(os.path.join(copy, sib)) and sib not in suites: suites.append(sib)
         suites += [s for s in extra if s not in suites]
         env = suite_env(os.environ, home); bad = 0
+        judged, envdef, nodata = {}, [], []   # judged: {(suite, interpreter): (red, exit)}, one base run each per landing
         for py in (sys.executable, "/usr/bin/python3"):
             for s in suites:
-                c = cmd_for(s, copy)
-                if s.endswith(".sh"):
-                    if py != sys.executable: continue   # a shell suite has no Python version: it runs once
-                else:
-                    c[0] = py   # a Python suite runs under BOTH interpreters
+                if s.endswith(".sh") and py != sys.executable: continue   # a shell suite has no Python version: it runs once
+                c = suite_cmd(s, py, copy)   # a Python suite runs under BOTH interpreters
                 c = grade_build.sandboxed(c, copy, home)
-                r = _LB.run_group(c, 1200, env, cwd=copy)   # its own process group, killed when it answers: nothing it started outlives it
+                r = _LB.run_group(c, SUITE_TIMEOUT_S, env, cwd=copy)   # its own process group, killed when it answers: nothing it started outlives it
                 ran = [l for l in (r.stderr + r.stdout).splitlines() if l.startswith(("Ran ", "OK", "FAILED"))]
                 label = "sh" if s.endswith(".sh") else ("py3.9" if py != sys.executable else "py3")
-                print("%-7s %-62s exit=%d %s" % (label, s[-62:], r.returncode, " ".join(ran[-2:])[:60])); bad += r.returncode != 0
-                if r.returncode: print("   " + " | ".join(l[:120] for l in (r.stderr + r.stdout).splitlines() if l.startswith(("FAIL:", "ERROR:", "ImportError", "SyntaxError", "TypeError")))[:500])
+                print("%-7s %-62s exit=%d %s" % (label, s[-62:], r.returncode, " ".join(ran[-2:])[:60]))
+                if not r.returncode: continue
+                print("   " + " | ".join(l[:120] for l in (r.stderr + r.stdout).splitlines() if l.startswith(("FAIL:", "ERROR:", "ImportError", "SyntaxError", "TypeError")))[:500])
+                if base_home is None:   # the first red: the unchanged copy, the same tree the built copy started from
+                    base_home = tempfile.mkdtemp(prefix="land-apply-base-home-"); os.makedirs(os.path.join(base_home, "tmp"), exist_ok=True)
+                    try: base = _LB.make_copy()
+                    except _LB.TreeUnreadable as exc: print("BASE    no unchanged copy, every red reads NO-DATA: %s" % str(exc)[:160])
+                if (s, py) not in judged: judged[(s, py)] = base_red(base, s, py, base_home, suite_env(os.environ, base_home))
+                was, brc = judged[(s, py)]; what = "%s on %s" % (s, label)
+                word = _LB.neighbour_verdict(True, was)   # land_batch's one rule: RED, INHERITED or NO-DATA for a red
+                if word == "INHERITED":
+                    envdef.append("%s (base exit %d, build exit %d)" % (what, brc, r.returncode))
+                    print("ENVDEF  environment defect: %s: red on the unchanged copy too, never the build's" % envdef[-1])
+                elif word == "RED":
+                    bad += 1
+                    print("BASE    %s %s on the unchanged copy: the build's red" % (what, "green" if brc is not None else "absent"))
+                else:
+                    nodata.append("%s (base exit %s, build exit %d)" % (what, brc, r.returncode))
+                    print("NO-DATA %s: the unchanged copy's run did not complete, so this red is no one's yet" % nodata[-1])
         timeout, ignored = fuzz_timeout(os.environ.get("BROTHER_LAND_FUZZ_TIMEOUT_S"))
         if ignored is not None: _say("FUZZ    timeout setting ignored: %s" % ignored[:60])
         print("FUZZ    mode child (timeout %g s)" % timeout)
         crashes, returned, x = fuzz_new_modules(copy, new_mods, env, home, timeout); bad += x
-        if not bad:
+        if not bad and not envdef and not nodata:
             apply_build(".", items)   # the landing tree receives exactly the graded bytes, only now, and only from this file
         print("FUZZ    new modules %d | crashes %d | calls that returned instead of refusing %d" % (len(new_mods), crashes, returned))
-        print("VERDICT %s | touched: %s" % ("SUITES GREEN" if not bad else "RED: %d" % bad, ", ".join(touched)))
+        if bad: verdict = "RED: %d" % bad
+        elif nodata:
+            verdict = "NO-DATA | base run did not complete: " + "; ".join(nodata)
+            print("REMEDY  land again; a base run that keeps failing to complete is the landing host's to repair, never the build's")
+        elif envdef:
+            verdict = "BLOCKED-ENVIRONMENT | environment defect: " + "; ".join(envdef)
+            print("REMEDY  repair the named suite (or what it needs) on the landing tree under the landing sandbox, then land again; the build is not charged")
+        else: verdict = "SUITES GREEN"
+        print("VERDICT %s | touched: %s" % (verdict, ", ".join(touched)))
     finally:
         _LB.drop_copy(copy); shutil.rmtree(home, ignore_errors=True)
-    return 1 if bad else 0
+        if base: _LB.drop_copy(base)
+        if base_home: shutil.rmtree(base_home, ignore_errors=True)
+    return 1 if bad else 4 if nodata else 3 if envdef else 0
 if __name__ == "__main__": sys.exit(selftest() if "--selftest" in sys.argv else main())

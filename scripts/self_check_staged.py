@@ -246,6 +246,100 @@ def run_scan(cwd=None, terms_path=None, runner=None):
     return EXIT_CLEAN, lines
 
 
+#: SP7 (2026-10-16): the command a refused commit prints, the same one the
+#: pre-push docs-current check names.
+SYSTEM_DOC_FIX = "python3 scripts/system_doc.py && git add SYSTEM.md"
+
+
+def _described(path):
+    """True for a path scripts/system_doc.py reads (read 2026-10-16 in its
+    parts() and battery_checks()): a .py file directly under scripts/, or
+    scripts/check_all.sh."""
+    return path == "scripts/check_all.sh" or (
+        os.path.dirname(path) == "scripts" and path.endswith(".py"))
+
+
+def refresh_system_doc(cwd=None):
+    """SP7 (2026-10-16): (exit_code, [lines]). When the staged change touches a
+    file system_doc.py describes, run `system_doc.py --check`; only when it says
+    stale, regenerate and `git add SYSTEM.md`, the way land_batch regenerates
+    before its own check. A regeneration that fails, a check still stale after
+    it, or a git call that cannot run REFUSES the commit with the command to
+    run. A staged change touching nothing described costs one git status call.
+    A tree with no scripts/system_doc.py has no SYSTEM.md to keep: nothing to
+    do. When a described path, or SYSTEM.md itself, differs between the working
+    tree and the index (untracked, unstaged), or the commit names its paths
+    and so stages through a temporary index, the generator would describe
+    files this commit does not carry, so nothing is regenerated and a NO-DATA
+    note says so; the commit goes on as before and pre_push_gate.py's
+    docs-current check still refuses a stale copy."""
+    def run(cmd, where):
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=where,
+                              timeout=120)
+
+    def refuse(why):
+        return EXIT_FOUND, ["BLOCK system doc: %s. Run: %s" % (why, SYSTEM_DOC_FIX)]
+
+    try:
+        top = run(["git", "rev-parse", "--show-toplevel"], cwd)
+        root = (top.stdout or "").strip()
+        if top.returncode != 0 or not root:
+            return refuse("could not find the repository root")
+        gen = os.path.join(root, "scripts", "system_doc.py")
+        if not os.path.isfile(gen):
+            return EXIT_CLEAN, []
+        st = run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                  "--no-renames", "--", "scripts", "SYSTEM.md"], root)
+        if st.returncode != 0:
+            return refuse("could not read git status: %s" % (st.stderr or "").strip()[:160])
+        staged, dirty = [], []
+        for entry in (st.stdout or "").split("\0"):
+            if len(entry) < 4:
+                continue
+            x, y, path = entry[0], entry[1], entry[3:]
+            if x not in " ?" and _described(path):
+                staged.append(path)
+            if y != " " and (_described(path) or path == "SYSTEM.md"):
+                dirty.append(path)
+        if not staged:
+            return EXIT_CLEAN, []
+        # `git commit -- <paths>` hands the hook a temporary index (probed
+        # 2026-10-16: .git/next-index-<pid>.lock; a plain commit gives
+        # .git/index, -a and --include give .git/index.lock). SYSTEM.md added
+        # there lands in the commit but never in the real index, which then
+        # carries the old copy as a staged revert. Any index name not known to
+        # be the real one is treated the same way: nothing is regenerated.
+        index = os.path.basename(os.environ.get("GIT_INDEX_FILE", "index"))
+        if index not in ("index", "index.lock"):
+            return EXIT_CLEAN, [
+                "NO-DATA: SYSTEM.md was not regenerated: this commit names its "
+                "paths, so it stages through a temporary index (%s). Run: %s, "
+                "then commit" % (index, SYSTEM_DOC_FIX)]
+        if dirty:
+            return EXIT_CLEAN, [
+                "NO-DATA: SYSTEM.md was not regenerated: %d path(s) it is built "
+                "from differ from the index (first: %s). Stage them, then run: %s"
+                % (len(dirty), sorted(dirty)[0], SYSTEM_DOC_FIX)]
+        check = [sys.executable, "-I", gen, "--check"]
+        if run(check, root).returncode == 0:
+            return EXIT_CLEAN, []
+        regen = run([sys.executable, "-I", gen], root)
+        if regen.returncode != 0:
+            return refuse("regenerating SYSTEM.md failed (exit %d): %s" % (
+                regen.returncode, (regen.stderr or regen.stdout or "").strip()[-160:]))
+        again = run(check, root)
+        if again.returncode != 0:
+            return refuse("SYSTEM.md is still stale after regenerating: %s"
+                          % (again.stderr or again.stdout or "").strip()[-160:])
+        add = run(["git", "add", "--", "SYSTEM.md"], root)
+        if add.returncode != 0:
+            return refuse("git add SYSTEM.md failed: %s" % (add.stderr or "").strip()[:160])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return refuse("could not run: %s" % exc)
+    return EXIT_CLEAN, ["SYSTEM.md regenerated and staged: the staged change "
+                        "touches what scripts/system_doc.py describes"]
+
+
 def hooks_dir(cwd=None, runner=None):
     """The real hooks directory for the repository containing cwd, resolved
     with `git rev-parse --git-path hooks` rather than a literal
@@ -343,6 +437,9 @@ def main(argv=None):
         return check_hook(args.repo)
 
     code, lines = run_scan(args.repo, args.terms)
+    if code == EXIT_CLEAN:
+        code, more = refresh_system_doc(args.repo)
+        lines += more
     stream = sys.stdout if code == EXIT_CLEAN else sys.stderr
     for line in lines:
         print(line, file=stream)
