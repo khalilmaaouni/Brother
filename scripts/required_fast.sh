@@ -121,6 +121,17 @@ fi
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_NAMESPACE GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE GIT_SHALLOW_FILE GIT_INTERNAL_SUPER_PREFIX GIT_REPLACE_REF_BASE GIT_NO_REPLACE_OBJECTS
 python3 scripts/git_location_guard.py --assert-clean --where required_fast || exit 2
 
+# G11.a (L30, "fix one thing and break three"): the tree this run judges, read
+# BEFORE any check runs. Only a clean checkout (no tracked change, no untracked
+# file) can earn the whole-gate PASS record written at the end; a dirty one
+# says why here and the checks still run with their verdicts untouched. A tree
+# without scripts/gate_ledger.py (a stub fixture) records nothing.
+whole_gate_started="$(date +%s)"
+whole_gate_tree=""
+if [ -f scripts/gate_ledger.py ]; then
+  whole_gate_tree="$(python3 scripts/gate_ledger.py --whole-gate-snapshot)" || whole_gate_tree=""
+fi
+
 # D4.d REQ-GL. Milliseconds for shell timing. POSIX sh carries no monotonic
 # clock, so this reads the wall clock at whatever resolution the platform
 # offers; the clamp in run_check, never the verdict, absorbs a backward step.
@@ -587,6 +598,12 @@ run_check "loop-owns-complete"   python3 scripts/test_bl_owns_complete.py
 run_check "loop-silent-failure"  python3 scripts/test_loop_report_run.py Lint
 run_check "loop-wiring"          python3 scripts/test_loop_wiring.py --max 4
 run_check "wiring-user-routes"  python3 scripts/wiring_audit.py --user-routes --root "$(pwd)"
+# G11.a (L30): the deploy's own proof, here and not only in check_all.sh. On
+# 2026-10-14 and 15 a small rule file move left its neighbour suites green and
+# turned 8 of 12 cases of this canary red, found only when the whole gate ran
+# later. Serial: it builds scratch HOMEs and deploys into them, and nobody has
+# audited it for running side by side.
+run_check "deploy-canary"        python3 -B scripts/test_deploy_canary.py -v
 # The one plugin submission readiness, static bars only (docs/plan/specs/OP1.md
 # 5.5, OP1.f): no host binary, about 2 s. Exit 0 only when all six bars PASS,
 # 1 on any FAIL, 2 when a bar is NO-DATA or missing. Until the 1.1.0 cut
@@ -702,6 +719,16 @@ summary_printed=1
 echo
 python3 scripts/evidence_obligation.py transition --stage merge --repo . < "$codes_file"
 obligation=$?
+# G11.a: the whole-gate PASS record that scripts/pre_push_gate.py asks for
+# before a loop change leaves this machine. gate_ledger.py is the one judge: it
+# writes the record only when EVERY row above exited 0, the obligation step
+# exited 0, and HEAD^{tree} is still the clean tree read before the first
+# check; any FAIL, NO-DATA or dirty start writes nothing. It never changes
+# this gate's own exit code.
+if [ -f scripts/gate_ledger.py ]; then
+  python3 scripts/gate_ledger.py --whole-gate-record --codes "$codes_file" --tree "$whole_gate_tree" \
+    --obligation "$obligation" --started "$whole_gate_started" --worktree-key "$worktree_key"
+fi
 rm -f "$codes_file"
 [ "$fail" -eq 0 ] || exit 1
 [ "$obligation" -eq 0 ] || exit 1

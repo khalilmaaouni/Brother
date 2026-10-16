@@ -15,8 +15,10 @@ Python 3.9, standard library only. No em or en dashes.
 """
 import argparse
 import calendar
+import codecs
 import datetime
 import glob
+import io
 import json
 import math
 import os
@@ -56,8 +58,10 @@ REHEARSAL_RE = re.compile(r"^REHEARSAL (\S+) \S+ \S+ exit (\d+) record (\S+)\s*$
 # ---------------------------------------------------------------- the runner
 
 def real_runner(cmd, cwd, stream=False):
-    """(exit code, text). stream=True inherits stdin and stderr and copies stdout to ours line by line while keeping
-    it (the cut's question is typed here). Never raises: 127 for a missing binary."""
+    """(exit code, text). stream=True inherits stdin and stderr and copies stdout to ours as each chunk arrives, a
+    partial line included, while keeping it (CR15: the cut's [y/N] question ends without a newline and is typed
+    here; a line relay held it back at the 1.1.4 cut). The kept text is UTF-8 with errors replaced, newlines
+    translated as text mode translates them. Never raises: 127 for a missing binary."""
     try:
         if not stream:
             proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
@@ -66,11 +70,21 @@ def real_runner(cmd, cwd, stream=False):
             out = proc.stdout or ""
             return proc.returncode, out if proc.returncode == 0 else out + (proc.stderr or "")
         kept = []
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, text=True, bufsize=1)
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            kept.append(line)
+        # incremental: a character, or a \r\n, split across two reads decodes whole
+        decoder = io.IncrementalNewlineDecoder(codecs.getincrementaldecoder("utf-8")("replace"), translate=True)
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, bufsize=0)
+        try:
+            while True:
+                chunk = os.read(proc.stdout.fileno(), 65536)   # what is there now; never waits for a newline
+                piece = decoder.decode(chunk, final=not chunk)
+                if piece:
+                    sys.stdout.write(piece)
+                    sys.stdout.flush()
+                    kept.append(piece)
+                if not chunk:
+                    break
+        finally:
+            proc.stdout.close()
         return proc.wait(), "".join(kept)
     except OSError as exc:
         return 127, "%s" % exc

@@ -193,6 +193,25 @@ def _dir_time(path, mtime=None):
     except OSError:
         return 0.0
 
+
+def _start_time(path, stat=None):
+    """When a run folder was CREATED, the attempt's start (D31, register row L18). _dir_time is the folder's LAST
+    write, which moves until the run writes STATUS at its end, so a diagnosis note written while the attempt ran
+    read as older than the run and never re-seated it (2026-10-14: note 13h46, start 13h44, quarantine 13h56).
+    The birth time when the platform reports a finite one above 0, else _dir_time (today's value); an unreadable
+    folder answers 0.0, which still_parked reads as unknown and parks."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non-empty string")
+    if stat is not None and not callable(stat):
+        raise ValueError("stat must be callable or None")
+    try:
+        _born = getattr((stat or os.stat)(path), "st_birthtime", None)
+    except OSError:
+        return 0.0
+    if isinstance(_born, bool) or not isinstance(_born, (int, float)) or _born != _born or _born in (float("inf"), float("-inf")) or _born <= 0:
+        return _dir_time(path)
+    return float(_born)
+
 # A PARKED SUB UNIT COMES BACK WHEN A FACT CHANGES, WITHOUT A HUMAN (2026-09-22). EXHAUSTED and WITHHELD park a sub
 # unit "until a fact", and the only way to supply one was a human with RUNNER_HINT. With one sub unit per unit that
 # is a drain with no refill: last night all 15 units in scope parked one by one and the run ended UNPRODUCTIVE at
@@ -262,6 +281,18 @@ def reseated_too_soon(word, run_at, now):
         if _v != _v or _v == float("inf") or _v == float("-inf"):
             raise ValueError("%s must be a finite number" % _name)
     return run_at > 0.0 and (now - run_at) < RESEAT_MIN_S and word in ("EXHAUSTED", "WITHHELD", "UNFUNDED", "DRAINED", "CONFIG_WAIT")
+
+
+def cooldown_line(unit_id, sub, run_at):
+    """The line loop_pass.sh reads to tell a timed wait from a pass that did nothing (D32, register row L28: on
+    2026-10-14 23h11 a run whose only unit was inside RESEAT_MIN_S stopped UNPRODUCTIVE on its first pass).
+    `COOLDOWN <unit_id> <sub> until <epoch seconds>`; a run time that is not a finite number above 0 is refused."""
+    for _name, _v in (("unit_id", unit_id), ("sub", sub)):
+        if not isinstance(_v, str) or not _v or _v != "".join(_v.split()):
+            raise ValueError("%s must be a non-empty string with no whitespace" % _name)
+    if isinstance(run_at, bool) or not isinstance(run_at, (int, float)) or run_at != run_at or run_at in (float("inf"), float("-inf")) or run_at <= 0:
+        raise ValueError("run_at must be a finite number above 0")
+    return "COOLDOWN %s %s until %d" % (unit_id, sub, int(run_at + RESEAT_MIN_S))
 
 
 def still_parked(word, run_at, fact_at):
@@ -1109,12 +1140,13 @@ def main():
     alive = alive_runners(RUNS, plan)
     alive_units = {u for u, _ in alive}
 
-    last = {}; last_at = {}
+    last = {}; last_at = {}; start_at = {}   # D31: start_at is the attempt start the parked test compares a fact with
     for d in sorted(glob.glob(os.path.join(RUNS, "*-*/")),
                    key=lambda p: (_dir_time(p), os.path.basename(p.rstrip("/")))):
         sub = re.sub(r"-\d{6}$", "", os.path.basename(d.rstrip("/")))
         last[sub] = status_word(os.path.join(d, "STATUS"))
         last_at[sub] = _dir_time(d)
+        start_at[sub] = _start_time(d)
 
     # A unit the plan moved out of this release (plan_store.release_refusal: DEFERRED, RETIRED) is LEFT OUT with its
     # reason, exactly as an out of scope one is; admissible() refuses its sub units too, for every other caller.
@@ -1241,13 +1273,17 @@ def main():
         waiting = [s for s in u["sub_units"] if waits_to_land(last.get(s, "")) and s in todo]
         claimed = builder_claim.claim_hold(RUNS, sub) if sub is not None else ""
         why = claimed or ("runner alive" if u["id"] in alive_units else "READY build of %s waits to land" % waiting[0] if waiting
-               else hold_reason(todo[0]) if sub is None else "last run of %s ended %s: needs a fact, then RUNNER_HINT" % (sub, last[sub]) if sub is not None and still_parked(last.get(sub), last_at.get(sub, 0.0), parked_fact(last.get(sub), u["id"], spec_path=u.get("spec"))) else "")
+               else hold_reason(todo[0]) if sub is None else "last run of %s ended %s: needs a fact, then RUNNER_HINT" % (sub, last[sub]) if sub is not None and still_parked(last.get(sub), start_at.get(sub, 0.0), parked_fact(last.get(sub), u["id"], spec_path=u.get("spec"))) else "")
         if not why and sub is not None and sunk(REC.get(u["id"])) and not fact_time(u["id"], spec_path=u.get("spec")) > REC[u["id"]][2]:
             _c = max(REC[u["id"]][3].items(), key=lambda kv: kv[1])[0] if REC[u["id"]][3] else "SUITE"
             why = "SUNK %d grades, %d passes, mostly %s: %s; comes back when its spec or a judging tool changes" % (
                 REC[u["id"]][0], REC[u["id"]][1], _c, ROUTE[_c])
         if not why and sub is not None and reseated_too_soon(last.get(sub, ""), last_at.get(sub, 0.0), time.time()):
             why = "skip: " + sub + " started under ten minutes ago and has not reached READY"
+            try:
+                print(cooldown_line(u["id"], sub, last_at.get(sub, 0.0)))   # D32: loop_pass.sh reads this as a wait, not UNPRODUCTIVE
+            except ValueError:
+                pass   # sbe: allow-silent an unknown time is no cooldown, so the pass keeps its alarm (the safe side)
         if not why and sub is not None and last.get(sub) == "NO-DATA":
             why = "skip: " + sub + " has an unreadable STATUS (empty or torn): unknown state is never restarted; read or remove the file"
         if not why and sub is not None and last.get(sub) in PARKED:

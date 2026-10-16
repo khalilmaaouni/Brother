@@ -174,12 +174,209 @@ def verify_chain(path):
     return True
 
 
+# G11 (L30): "fix one thing and break three". A whole required_fast run whose every row passed, on a checkout whose
+# tree is exactly HEAD^{tree}, appends ONE record here; the pre-push gate refuses a loop change whose pushed tree has
+# none. The record rides the same schema, chain and lock as every other line of this ledger.
+WHOLE_GATE = 'required-fast-whole-gate'
+DEFAULT_LEDGER = os.path.join('logs', 'gate-ledger.jsonl')
+NO_CUT = '0' * 32   # cut_id outside a cut: the schema wants 32 hex, and this says "no cut" rather than inventing one
+
+
+# The whole-gate record proves a fact about a TREE, not about a folder: one worktree runs the gate and another worktree
+# of the same repository (scripts/loop/redeploy.sh) pushes the same tree. So the record lives in ONE file in the
+# repository's common git directory, which every worktree shares and no landing tree or build sandbox can write.
+WHOLE_GATE_FILE = 'brother-whole-gate.jsonl'
+
+
+def ledger_path(root):
+    """The checkout's own ledger: GATE_LEDGER_PATH (relative to root) or the default. Whole-gate records were kept here
+    before WHOLE_GATE_FILE; the push gate still accepts one found here for the 1.1.5 release (whole_gate_pass_in_repo)."""
+    return os.path.join(root, os.environ.get('GATE_LEDGER_PATH') or DEFAULT_LEDGER)
+
+
+def whole_gate_ledger(repo):
+    """(path, '') of the one whole-gate record file every worktree of repo shares, in git's common directory, or
+    (None, why) when git cannot name that directory or it is not a readable directory. The writer and the push gate
+    both call this, so they cannot disagree about where the record is."""
+    common = (_git_out(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir') or '').strip()
+    if not common:
+        return None, 'git could not name the common git directory of %s' % repo
+    common = os.path.realpath(os.path.join(os.path.abspath(repo), common))
+    if not os.path.isdir(common) or not os.access(common, os.R_OK | os.X_OK):
+        return None, 'the common git directory %s is not a readable directory' % common
+    return os.path.join(common, WHOLE_GATE_FILE), ''
+
+
+def _git_out(repo, *args):
+    """stdout of one git call in repo, or None when git could not run or exited non zero."""
+    import subprocess
+    try:
+        proc = subprocess.run(['git', '-C', repo] + list(args), capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def tree_snapshot(repo):
+    """(HEAD^{tree}, '') for a clean checkout, else (None, why). An untracked file counts as dirty: a module nobody
+    committed can make a check pass that the committed tree alone would fail."""
+    status = _git_out(repo, 'status', '--porcelain')
+    if status is None:
+        return None, 'git status could not be read in %s' % repo
+    if status.strip():
+        return None, ('the checkout has uncommitted changes (%s), so no tree describes what ran'
+                      % status.splitlines()[0].strip())
+    tree = (_git_out(repo, 'rev-parse', 'HEAD^{tree}') or '').strip()
+    if not _is_hex(tree, 40):
+        return None, 'HEAD^{tree} could not be read in %s' % repo
+    return tree, ''
+
+
+def record_whole_gate(path, repo, codes_text, start_tree, obligation, started, worktree_key='UNKNOWN'):
+    """Append the whole-gate PASS record and return (True, sentence), or write nothing and return (False, why).
+
+    codes_text is the gate's own rows, one 'name TAB exit_code' per line. Every row must be exit 0 (a FAIL or a
+    NO-DATA row writes nothing), the evidence obligation step must have exited 0, start_tree must be the clean
+    snapshot taken before any check ran, and HEAD^{tree} must still be that tree now. Anything unknown writes nothing."""
+    rows = [line for line in (codes_text or '').splitlines() if line.strip()]
+    if not rows:
+        return False, 'the gate recorded no rows'
+    for line in rows:
+        parts = line.split('\t')
+        if len(parts) != 2 or not parts[0] or not parts[1].isdigit():
+            return False, 'a row is not "name TAB exit code": %r' % line[:80]
+        if parts[1] != '0':
+            return False, 'row %s exited %s' % (parts[0], parts[1])
+    if obligation != '0':
+        return False, 'the evidence obligation step exited %r' % (obligation,)
+    # One guard covers both: an empty start (dirty or unreadable checkout) never equals a real tree, and a start
+    # git cannot read again now is refused by the schema's own 40 hex rule below. THE CHECKOUT MUST STILL BE CLEAN
+    # (security review 2026-10-16, finding 3): HEAD^{tree} alone stayed equal while a tracked edit or an untracked
+    # file made during the run changed what ran, and the record then vouched for a tree nobody tested. The same
+    # snapshot as the start (git status, untracked included, ignored excluded); an unreadable status writes nothing.
+    end_tree, end_why = tree_snapshot(repo)
+    if end_tree != start_tree:
+        return False, ('no clean tree was read before the checks ran' if not start_tree else
+                       'at record time %s' % end_why if end_tree is None else
+                       'HEAD^{tree} moved during the run (%s, now %r)' % (start_tree, end_tree))
+    try:
+        started = float(started)
+        with open(os.path.join(repo, 'scripts', 'required_fast.sh'), 'rb') as handle:
+            code_hash = hashlib.sha256(handle.read()).hexdigest()
+    except (TypeError, ValueError, OSError) as exc:
+        return False, 'the run could not be described: %s' % exc
+    import platform
+    import time
+    ended = max(time.time(), started)
+    cut_id = os.environ.get('CUT_ID', '')
+    record = {
+        'schema': 1, 'cut_id': cut_id if _is_hex(cut_id, 32) else NO_CUT,
+        'cut_version': os.environ.get('CUT_VERSION') or 'UNKNOWN', 'gate_name': WHOLE_GATE,
+        'gate_argv': ['sh', 'scripts/required_fast.sh'], 'status': 'PASS', 'exit_code': 0,
+        'started_unix': started, 'ended_unix': ended, 'duration_s': ended - started,
+        'worktree_key': worktree_key or 'UNKNOWN', 'tree_sha': start_tree, 'inputs_hash': None,
+        'code_hash': code_hash, 'tool_versions': {'python3': 'Python ' + platform.python_version()},
+        'verdict_source': 'full', 'cache_key': None, 'deadline_unix': None,
+    }
+    try:
+        append_ledger(path, record)
+    except (OSError, ValueError) as exc:
+        return False, 'the ledger append was refused: %s' % exc
+    return True, 'PASS record for tree %s (%d rows, %s) in %s' % (
+        start_tree, len(rows), record['tool_versions']['python3'], path)
+
+
+def whole_gate_pass_for_tree(path, tree_sha):
+    """(True, sentence) only when the ledger at path chains end to end and holds a whole-gate PASS record for exactly
+    tree_sha; (False, why) otherwise. Missing or empty, unreadable, corrupt, or a record for another tree: False."""
+    if not _is_hex(tree_sha, 40):
+        return False, 'the pushed tree could not be read (%r)' % (tree_sha,)
+    if not os.path.lexists(path):
+        return False, 'no whole-gate run is on record (%s does not exist)' % path
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            text = f.read()
+    except (OSError, ValueError) as exc:
+        return False, 'the gate ledger %s could not be read: %s' % (path, exc)
+    if not text.strip():
+        return False, 'no whole-gate run is on record (%s is empty)' % path
+    if not verify_chain(path):
+        return False, 'the gate ledger %s is corrupt or does not chain, so no record in it is trusted' % path
+    try:   # a writer appending between the read and the chain check: what was read is judged, and refused if torn
+        records = [json.loads(line) for line in text.splitlines() if line.strip()]
+    except ValueError as exc:
+        return False, 'the gate ledger %s changed while it was read: %s' % (path, exc)
+    others = []
+    for record in records:
+        if isinstance(record, dict) and record.get('gate_name') == WHOLE_GATE and record.get('status') == 'PASS':
+            if record.get('tree_sha') == tree_sha:
+                return True, 'whole-gate PASS on record for tree %s (%s)' % (
+                    tree_sha, record.get('tool_versions', {}).get('python3', 'interpreter unknown'))
+            others.append(record.get('tree_sha'))
+    if others:
+        return False, 'the newest whole-gate PASS record is for tree %s, not the pushed tree %s' % (others[-1], tree_sha)
+    return False, 'no whole-gate PASS record in %s' % path
+
+
+def whole_gate_pass_in_repo(repo, tree_sha):
+    """(True, sentence naming the file the record came from) when the repository holding the checkout repo has a
+    whole-gate PASS record for exactly tree_sha; (False, why) otherwise. The shared file is asked first. For the 1.1.5
+    release only, a record in the checkout's own ledger (written before the shared file existed) is also accepted.
+    A common directory git cannot name refuses outright, and a shared file that exists but does not chain is refused,
+    never stepped over to the old ledger."""
+    shared, why = whole_gate_ledger(repo)
+    if shared is None:
+        return False, 'the shared whole-gate record cannot be read: %s' % why
+    ok, said = whole_gate_pass_for_tree(shared, tree_sha)
+    if ok:
+        return True, '%s, from %s' % (said, shared)
+    if os.path.lexists(shared) and not verify_chain(shared):
+        return False, said
+    old = ledger_path(repo)
+    ok, said_old = whole_gate_pass_for_tree(old, tree_sha)
+    if ok:
+        return True, '%s, from the checkout ledger %s (a record from before the shared file, accepted in 1.1.5 only)' % (
+            said_old, old)
+    return False, '%s; the checkout ledger: %s' % (said, said_old)
+
+
 def _main(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description="Append one gate ledger record from JSON on stdin or --json.")
     parser.add_argument('--path', default=os.environ.get('GATE_LEDGER_PATH', 'logs/gate-ledger.jsonl'))
     parser.add_argument('--json', help='JSON record text')
+    # G11: the two calls scripts/required_fast.sh makes, run from the checkout root.
+    parser.add_argument('--whole-gate-snapshot', action='store_true',
+                        help='print HEAD^{tree} of a clean checkout (exit 0), or say why not (exit 2)')
+    parser.add_argument('--whole-gate-record', action='store_true',
+                        help='append the whole-gate PASS record when every row in --codes passed (exit 0), else exit 2')
+    parser.add_argument('--codes', help='the gate rows file, one "name TAB exit code" per line')
+    parser.add_argument('--tree', default='', help='the snapshot taken before any check ran')
+    parser.add_argument('--obligation', default='', help='the evidence obligation step exit code')
+    parser.add_argument('--started', default='', help='unix seconds the run started')
+    parser.add_argument('--worktree-key', default='UNKNOWN')
     args = parser.parse_args(argv)
+    if args.whole_gate_snapshot:
+        tree, why = tree_snapshot('.')
+        if tree is None:
+            sys.stderr.write('NO-DATA: whole-gate: this run cannot earn a PASS record: %s\n' % why)
+            return 2
+        print(tree)
+        return 0
+    if args.whole_gate_record:
+        try:
+            with open(args.codes or '', 'r', encoding='utf-8') as handle:
+                codes_text = handle.read()
+        except (OSError, ValueError) as exc:
+            codes_text, why = None, 'the gate rows could not be read: %s' % exc
+        written = False
+        if codes_text is not None:
+            shared, why = whole_gate_ledger('.')
+            if shared is not None:
+                written, why = record_whole_gate(shared, '.', codes_text, args.tree, args.obligation,
+                                                 args.started, args.worktree_key)
+        print('whole-gate: %s%s' % ('' if written else 'no PASS record: ', why))
+        return 0 if written else 2
     if args.json:
         record = json.loads(args.json)
     else:

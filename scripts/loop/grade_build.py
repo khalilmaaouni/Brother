@@ -749,10 +749,17 @@ def restore_tree(root, before):
 #: which the next landing or push then executes). Owner and session changes to them land through a reviewed branch
 #: (land_branch.sh is a git merge and never reads this rule). Compared case folded: this volume is case insensitive.
 PROTECTED_FIRST = (".github", ".claude")
-PROTECTED_DIRS = ("docs/plan/specs/",)   # case folded prefixes
+PROTECTED_DIRS = ("docs/plan/specs/",   # case folded prefixes
+                  # the gate ledger (logs/gate-ledger.jsonl) and every other log the gates and the push gate read: a build
+                  # that wrote the ledger could forge the whole-gate PASS record its own push is judged by (security
+                  # review 2026-10-16, finding 2: dest accepted logs/gate-ledger.jsonl)
+                  "logs/")
 PROTECTED_ANY = {".gitattributes", ".gitmodules", ".gitignore"}   # .gitignore: ignored paths are invisible to every landing check (eleventh review)
 PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/hermetic_test_check.py",
                    "scripts/loop/sandbox.sb",
+                   # the whole gate and the pair that runs it, which write the whole-gate PASS record the push gate reads
+                   # for a loop change (security review 2026-10-16, finding 2: a build could rewrite its own gate)
+                   "scripts/required_fast.sh", "scripts/gate_pair.sh",
                    # the landing gates and the push gate run from the tree with no sandbox (land_batch GATES, the hook)
                    "scripts/test_battery_registration.py", "scripts/system_doc.py", "scripts/bundle_runtime.py",
                    "scripts/pre_push_gate.py",
@@ -813,7 +820,7 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # the one reader of the loop's stop controls, which land_batch.main asks first (D13 hold, 2026-10-03)
                    "scripts/loop/loop_hold.py",
                    "plugin/runtime/brother/core/dream_gate.py", "plugin/runtime/brother/core/dream_gate_policy.py",
-                   "scripts/failure_ledger.py", "scripts/gate_order.py", "scripts/grade_build.py", "scripts/prediction_ledger.py",
+                   "scripts/failure_ledger.py", "scripts/gate_order.py", "scripts/gate_ledger.py", "scripts/loop/deploy_stamped.py", "scripts/loop/tool_stamp.py", "scripts/test_loop_tool_parity.py", "scripts/install_loop_tools.py", "scripts/loop/sibling_new.py", "scripts/evidence_obligation.py", "scripts/loop/brother_login.py", "scripts/loop/diag_notes.py", "scripts/loop/land_apply.py", "scripts/loop/native_adapter.py", "scripts/loop/native_worker.py", "scripts/grade_build.py", "scripts/prediction_ledger.py",
                    "scripts/loop/brief_check.py", "scripts/loop/ev_gate.py", "scripts/loop/freeze_manifest.py", "scripts/loop/land_batch.py",
                    "scripts/loop/loop_receipt.py", "scripts/loop/plan_lint.py", "scripts/loop/plan_store.py",
                    "scripts/loop/proof_accept.py", "scripts/loop/proof_launch.py", "scripts/loop/provenance.py",
@@ -1275,21 +1282,66 @@ def failure_tail(out):
 COMMAND_TIMEOUT_S = 600
 
 
-def run(root, cmds, python=None, guard=None):
+#: THE NEIGHBOUR LOAD PIN (C21, register row L17, measured 2026-10-14): a build's load admission read the HOST's real load
+#: (runner_pool's BROTHER_LOAD_CAP seam, "auto", through load_rule.load_reading), so its neighbour suites passed here on a
+#: quiet sandbox and the landing quarantined the unit twice on the busy host. Every NEIGHBOUR command (one not in `own`)
+#: runs with the seam pinned to a fake load far above any core count, the base run and the code run alike, so a suite
+#: that only passes on a quiet machine is red HERE. Production pools never see this: it is set only in run()'s child env.
+LOAD_PIN_ENV = "BROTHER_LOAD_CAP"
+FAKE_HIGH_LOAD = "1000"
+FAKE_LOW_LOAD = "0"      # the rerun that names the cause: red under the high pin, green under this one
+
+#: THE SCRATCH ROOT (C21, register row L16, landing 100253): run() gives every command HOME=<sandbox>/.grade-sandbox and
+#: TMPDIR=<sandbox>/.grade-sandbox/tmp (suite_env). A test writes ONLY there; brief_head.md says so to every builder.
+#: The sandbox profile lets a command write anywhere in ROOT, so a write elsewhere in the tree is caught by outside_scratch
+#: after the code run, here, before landing (the landing keeps its own later refusal).
+SCRATCH_DIR = ".grade-sandbox"
+
+
+def tree_writes(root):
+    """The sandbox's git status lines INCLUDING ignored paths (a test that writes an ignored file still wrote into the
+    tree), or None when git cannot read the tree."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}   # a GIT_DIR from a hook would read another repo
+    r = subprocess.run(["git", "-C", root, "status", "--porcelain", "--untracked-files=all", "--ignored"],
+                       capture_output=True, text=True, env=env)
+    return set(r.stdout.splitlines()) if r.returncode == 0 else None
+
+
+def outside_scratch(before, now):
+    """Sorted paths a run created, modified or deleted outside SCRATCH_DIR/: the status lines of `now` that `before`
+    lacks, minus the scratch root (case folded: this volume is case insensitive). Either state None (git could not read
+    the tree) answers ["<tree state unreadable>"]: an unread tree is never a clean one. A path git reports only as a
+    changed status of an already changed file (the build's own bytes) is the fingerprint guard's, not this scan's."""
+    if not isinstance(before, (set, frozenset)) or not isinstance(now, (set, frozenset)):
+        return ["<tree state unreadable>"]
+    out = set()
+    for line in now - before:
+        rel = line[3:].strip().strip('"') if isinstance(line, str) else ""
+        top = rel.replace("\\", "/").split("/", 1)[0].casefold()
+        if top != SCRATCH_DIR:
+            out.add(rel or repr(line))
+    return sorted(out)
+
+
+def run(root, cmds, python=None, guard=None, own=None, load=FAKE_HIGH_LOAD):
     """(worst exit, tail, [(cmd, exit, output)], moved) over cmds, each run sandboxed with its own HOME and TMPDIR.
 
     `guard`: the fingerprint of the build's own files. It is compared after EVERY command, not once per call: a test
     that rewrote the code in one command and put it back in the next graded other bytes in between, and a check after
-    the whole call saw the file as submitted. `moved` names what changed; the commands after it are not run."""
-    sandbox = os.path.join(root, ".grade-sandbox"); os.makedirs(sandbox, exist_ok=True)
+    the whole call saw the file as submitted. `moved` names what changed; the commands after it are not run.
+    `own`: the build's own commands; when given, every OTHER command is a neighbour and runs with LOAD_PIN_ENV set to
+    `load` (C21). None pins nothing, exactly the behaviour before C21."""
+    sandbox = os.path.join(root, SCRATCH_DIR); os.makedirs(sandbox, exist_ok=True)
     os.makedirs(os.path.join(sandbox, "tmp"), exist_ok=True)   # test temp stays in the sandbox (332 modules leaked to the global temp folder)
     # the landing rerun's ONE definition (2026-10-03: this copy kept the run's BROTHER_TRANSPORTS=claude, so a bridge
     # selftest refused itself here while the same suite passed at landing; L5a-7 graded red 7 of 241 on it)
     env = suite_env(os.environ, sandbox)
+    pinned = dict(env, **{LOAD_PIN_ENV: load})
     worst, tail, each, moved = 0, "", [], []
     for cmd in cmds:
         try:
-            r = subprocess.run(sandboxed(cmd.replace("python3", python or sys.executable, 1).split(), root, os.path.join(sandbox, "tmp")), cwd=root, env=env,
+            r = subprocess.run(sandboxed(cmd.replace("python3", python or sys.executable, 1).split(), root, os.path.join(sandbox, "tmp")), cwd=root,
+                               env=pinned if own is not None and cmd not in own else env,
                                capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S)
             code, out = r.returncode, (r.stderr + r.stdout)
         except SandboxRefused as exc:
@@ -1563,11 +1615,11 @@ def _main():
         # a neighbour suite may only count against the build if it is GREEN on the base: a suite already red proves nothing
         own = set(test_cmds({"tests": build.get("tests"), "done_check": build.get("done_check")}))
         for c in [c for c in cmds if c not in own]:
-            code, _, _, moved = run(r0, [c], guard=fp0)
+            code, _, _, moved = run(r0, [c], guard=fp0, own=own)
             tampered += moved
             if code != 0:
-                cmds.remove(c); say("NEIGHBOUR          red at base, dropped: %s" % c)
-        _, _, each, moved = run(r0, [c for c in cmds if c in own], guard=fp0)
+                cmds.remove(c); say("NEIGHBOUR          red at base (under %s=%s), dropped: %s" % (LOAD_PIN_ENV, FAKE_HIGH_LOAD, c))
+        _, _, each, moved = run(r0, [c for c in cmds if c in own], guard=fp0, own=own)
         tampered += moved
         red = next((r for r in (red_reason(code, out, mods) for _, code, out in each) if r), "")
         vacuous = all(code == 0 for _, code, _ in each)
@@ -1590,11 +1642,24 @@ def _main():
         if p1:
             reasons.append("%d patch problems" % len(p1))
         green_state = tree_state(r1)   # what the build itself put in the tree, before any run: every mutation is undone to this
+        pre_writes = tree_writes(r1)   # C21: the scratch scan's before, ignored paths included
         fp1 = fingerprint(r1, own_paths(r1, (build.get("edits") or []) + (build.get("tests") or [])))
         green = 1
         if not tampered:
-            green, tail, each, moved = run(r1, cmds, guard=fp1)
+            green, tail, each, moved = run(r1, cmds, guard=fp1, own=own)
             tampered += moved
+            # C21 (L17): a neighbour red under the fake high load is rerun under a fake low one; green there names the
+            # cause, a suite that passes only on a quiet machine, which the busy landing host would quarantine
+            for c in [c for c, code, _ in each if code != 0 and c not in own]:
+                if tampered:
+                    break
+                lcode, _, _, moved = run(r1, [c], guard=fp1, own=set(), load=FAKE_LOW_LOAD)
+                tampered += moved
+                if lcode == 0:
+                    say("LOAD               %s is red under %s=%s and green under %s: it passes only on a quiet machine"
+                        % (c, LOAD_PIN_ENV, FAKE_HIGH_LOAD, FAKE_LOW_LOAD))
+                    reasons.append("neighbour suite %s depends on the host load: red under a fake high load (%s=%s), "
+                                   "green under a low one" % (c, LOAD_PIN_ENV, FAKE_HIGH_LOAD))
             short = "" if green else unproven(each, own)
             if short:
                 green = 5   # unittest's own code for a run that executed no test
@@ -1621,7 +1686,7 @@ def _main():
                     % (OLD_PYTHON, other))
                 reasons.append("grader runs Python %s and so does %s: one version was exercised, not two" % (mine, OLD_PYTHON)); nodata.append(reasons[-1])
             else:
-                old, otail, oeach, moved = run(r1, cmds, python=OLD_PYTHON, guard=fp1)
+                old, otail, oeach, moved = run(r1, cmds, python=OLD_PYTHON, guard=fp1, own=own)
                 tampered += moved
                 oshort = "" if old else unproven(oeach, own)
                 if oshort:
@@ -1629,6 +1694,18 @@ def _main():
                 say("GREEN-ON-PY%-6s %s" % (other, "yes (this grader proved %s)" % mine if old == 0 else "NO exit %s: %s" % (old, otail)))
                 if old != 0:
                     reasons.append("suite not green on %s" % OLD_PYTHON)
+        # C21 (L16): the code legs may write only under the scratch root; a path created, modified or deleted anywhere
+        # else in the tree is refused here, named, before landing. An unreadable tree blocks (NO-DATA), never reads clean.
+        if not tampered:
+            strays = outside_scratch(pre_writes, tree_writes(r1))
+            if strays == ["<tree state unreadable>"]:
+                say("SCRATCH            NO-DATA: git could not read the sandbox, so writes outside %s/ were not checked" % SCRATCH_DIR)
+                reasons.append("cannot prove the run wrote only under %s/: the sandbox tree was unreadable" % SCRATCH_DIR)
+                nodata.append(reasons[-1])
+            elif strays:
+                say("SCRATCH            wrote outside %s/: %s" % (SCRATCH_DIR, ", ".join(strays[:10])))
+                reasons.append("a test run wrote outside the scratch root %s/ (its HOME and TMPDIR): %s"
+                               % (SCRATCH_DIR, ", ".join(strays[:10])))
         # 3. each mutation on top of the patched tree must turn it red.
         #
         # SHORT CIRCUITED WHEN THE TESTS ALREADY PASS WITHOUT THE CODE, and the argument is about MEANING before
@@ -1679,7 +1756,7 @@ def _main():
             applied += 1
             expect = dict(fp1)
             expect.update(fingerprint(r1, [os.path.normpath(m["path"])]))   # the mutated bytes, as this grader wrote them
-            code, _, each, moved = run(r1, cmds, guard=expect)
+            code, _, each, moved = run(r1, cmds, guard=expect, own=own)
             tampered += moved
             if tampered:
                 break   # never write back through what the run left: the sandbox is reset at its next use

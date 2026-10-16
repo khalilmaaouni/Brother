@@ -604,5 +604,25 @@ class TestEveryTestFileRunsWhatItDefines(unittest.TestCase):
         self.assertEqual(_defined_after_main(src), [])
 
 
+class TestNoTrackedTestResidue(unittest.TestCase):
+    """F01 (1.1.5, register row L14): no tracked path under x/.
+
+    A test once wrote its lease and ledger files into x/ inside the tree and
+    they were committed with landing 33d09e7ae, before the landing dropped
+    undeclared paths. A file a test leaves behind is not product; this pins
+    the tree so it can never ship one again.
+    """
+
+    def test_no_tracked_path_under_x(self):
+        result = subprocess.run(["git", "-C", ROOT, "ls-files", "-z", "--", "x/"],
+                                capture_output=True)
+        # A population that cannot be listed is not a clean one.
+        self.assertEqual(result.returncode, 0,
+                         "git ls-files failed, so nothing was checked: %s"
+                         % result.stderr.decode("utf-8", "replace"))
+        tracked = [p for p in result.stdout.decode("utf-8").split("\0") if p]
+        self.assertEqual(tracked, [], "tracked test residue under x/: %s" % tracked)
+
+
 if __name__ == "__main__":
     unittest.main()

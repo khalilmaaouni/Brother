@@ -10,7 +10,7 @@ disposable copy under the sandbox, the registered neighbour tests there too, pla
 every changed path attributed to a step or REFUSED, commit_scan gate, the pre-commit check and the push gate run by this command
 from a frozen copy of the base commit (git runs no hook), templated commit, push to hub only, parity, shared git config
 unchanged. Exit 0 only when parity holds."""
-import datetime, fcntl, hashlib, json, os, re, shutil, signal, stat, subprocess, sys, tempfile, time
+import calendar, datetime, fcntl, hashlib, json, os, re, shutil, signal, stat, subprocess, sys, tempfile, time
 BIN = os.path.dirname(os.path.abspath(__file__)); EV = os.path.expanduser("~/.claude/evidence")
 REMOTE = "hub"   # fixture default for the pure helpers; main() replaces it from upstream()
 BRANCH = "refactor/brother-unified-1.1"   # fixture default, one statement so a module level string constant reader (test_land_batch_callsites) finds it
@@ -326,9 +326,17 @@ def after_build(returncode, stdout, status_text, stderr=""):
     after opening it "w", so it had already been truncated and every quarantine recorded "previous: ".
     The crash count is read from the lander's own FUZZ summary line only, the last one, never from worker text; the
     verdict only from a line that STARTS with it (FX-08.3, 2026-09-28: an exception message reading "crashes 0" made
-    the first unanchored match, and a build with a crash landed)."""
+    the first unanchored match, and a build with a crash landed).
+    A THIRD VERDICT, HOLD (G14, 2026-10-16): ("hold", land_apply's verdict, 0, None) exactly when land_apply's one VERDICT
+    line says BLOCKED-ENVIRONMENT with exit 3 or NO-DATA with exit 4 and its FUZZ summary counts no crash: a red that is
+    red on the unchanged copy too, or a base run that never finished, is not the build's. main() rolls it back like a drop
+    and writes hold_status, never reject_status: no note, no count, no park. Any other pairing stays a drop."""
     counted = FUZZ_SUMMARY_RE.findall(stdout)
     crashes = int(counted[-1]) if counted else 99   # sentinel: keeps the drop fail closed, never printed as a count
+    verdicts = re.findall(r"^VERDICT (\S+) ", stdout, re.M)
+    if not crashes and len(verdicts) == 1 and LAND_HOLD.get(returncode) == verdicts[0]:
+        said = next(l for l in stdout.splitlines() if l.startswith("VERDICT "))
+        return ("hold", one_line(said[len("VERDICT "):], REJECTION_BODY_MAX), crashes, None)
     if returncode or crashes or not re.search(r"^VERDICT SUITES GREEN", stdout, re.M):
         # THE REASON IS READ FROM WHERE LAND_APPLY WROTE IT (2026-09-27 15:06): its refusals go to stderr, so a stdout only
         # reader briefed the next runner "fuzz crashes 99: no output" for a patch whose anchor was not unique.
@@ -342,6 +350,32 @@ def after_build(returncode, stdout, status_text, stderr=""):
         return ("drop", why, crashes, "QUARANTINE dropped at landing, %s | previous: %s\n" % (why, (status_text or "").strip() or "none"))
     suites = ["%s %s" % (m[0].strip(), m[1]) for m in re.findall(r"^py3\s+(\S+)\s+exit=0 (?:Ran )?(\d+ tests?)", stdout, re.M)]
     return ("land", suites, crashes, None)
+
+
+#: land_apply's exit code for each verdict word that holds a build (G10): the pair is read together, never one alone
+LAND_HOLD = {3: "BLOCKED-ENVIRONMENT", 4: "NO-DATA"}
+HOLD_MARK = " | HELD at landing on tree "
+HOLD_RE = re.compile(r" \| HELD at landing on tree ([0-9a-f]{40}): (.*)$", re.M)
+
+
+def hold_status(status_text, tree, why):
+    """The STATUS of a held build (G14): its READY line as the runner wrote it (an older hold cut off), the landing tree
+    it was judged on, and why. The first word stays READY, so the pool spends no attempt on the unit (runner_pool
+    waits_to_land) and the digest keeps listing it; held_on keeps it away from land_apply while that tree is unchanged.
+    after_build's livelock is answered by the STATUS again, but keyed by the tree: a READY left bare was re-applied every
+    pass, a hold is re-applied only once the tree it failed on is gone."""
+    kept = (status_text or "").split(HOLD_MARK)[0].strip()
+    return "%s%s%s: %s\n" % (kept, HOLD_MARK, tree, one_line(why, REJECTION_BODY_MAX))
+
+
+def held_on(status_text, tree):
+    """'' when the build may go to land_apply, else why it stays held: its STATUS holds it on exactly `tree`, the landing
+    tree now. A hold on another tree is stale and the build is offered again. FAIL DIRECTION: a tree this run could not
+    read (not 40 hex) keeps every hold; a hold mark whose tree is not 40 hex is no hold, so land_apply judges it again."""
+    m = HOLD_RE.search(status_text or "")
+    if not m: return ""
+    if re.fullmatch(r"[0-9a-f]{40}", tree or "") and m.group(1) != tree: return ""
+    return "held on the unchanged landing tree %s (%s); offered again when the tree changes" % (m.group(1)[:12], m.group(2)[:160])
 
 #: (name, check argv, regenerate argv or None, the output set the generator may write: exact paths and directory prefixes
 #: ending in /, compared case folded). A regenerate step that writes anything else is a red gate and the batch is refused
@@ -421,7 +455,7 @@ sys.path.append(root)
 from plugin.runtime.brother.core import dream_gate, dream_gate_policy as P
 tmp, translated = tempfile.mkdtemp(prefix="gate-history-"), []
 for i, lg in enumerate(logs):
-    rows = dream_gate.read_gates(lg) or []
+    rows = [r for r in (dream_gate.read_gates(lg) or []) if not r["check_name"].startswith("landing.neighbour.")]
     lines = ["%s exit %d %s %ds recorded" % (dream_gate.gate_verdict(int(r["exit_code"])), int(r["exit_code"]), r["check_name"], max(0, int(r["duration_ms"])) // 1000) for r in rows]
     if lines:
         with open(os.path.join(tmp, "log-%d.txt" % i), "w", encoding="utf-8") as fh: fh.write("\n".join(lines) + "\n")
@@ -491,8 +525,66 @@ def record_gate(run_dir, name, returncode, ms):
         sys.stderr.write("land_batch: gate not recorded (%s)\n" % str(exc)[:160]); return False
 
 
-def usd_text(sub, runs_root=None, ledger_path=None, claude_path=None):
-    '''One short field for the LANDED line: usd N.NN or usd NO-DATA.'''
+CLAUDE_PLAN_USD_MONTH = 220.0   # the owner's 20x plan (2026-10-14 23h3x); BROTHER_CLAUDE_PLAN_USD_MONTH overrides it
+LANDED_AT = re.compile(r'LANDED .* at (\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2} commit \S+')   # mark_landed's own line
+
+
+def plan_share(sub, batch, runs_root, now=None, env=None):
+    '''(usd or None, why) (P60): this landing's part of the Claude plan, the monthly price over the days of this month
+    (local time) split evenly over this day's landings: every run folder under runs_root whose STATUS mark_landed wrote
+    LANDED today, plus every sub unit of the batch being landed now (mark_landed runs after the LANDED line, so the
+    landing counts itself and the day's first landing carries the whole daily share). Split evenly: the Claude call
+    ledger carries a cost per call, no tokens, so there is nothing to weight by. A price that is not a positive finite
+    number, a sub unit outside its batch, an unreadable runs folder or STATUS, or a LANDED line with no readable date
+    is None with the reason, never a default and never zero.'''
+    raw = (os.environ if env is None else env).get('BROTHER_CLAUDE_PLAN_USD_MONTH')
+    try:
+        month = CLAUDE_PLAN_USD_MONTH if raw is None else float(raw)
+    except (TypeError, ValueError):
+        month = None
+    if month is None or not (0 < month < float('inf')):   # NaN fails both comparisons
+        return None, 'BROTHER_CLAUDE_PLAN_USD_MONTH %r is not a positive number' % str(raw)[:20]
+    if not isinstance(sub, str) or not sub or not isinstance(batch, (list, tuple)) or sub not in batch:
+        return None, 'no landing batch names %r' % (sub,)
+    now = now or datetime.datetime.now()
+    today = now.strftime('%Y-%m-%d')
+    try:
+        names = os.listdir(runs_root)
+    except (OSError, TypeError) as exc:
+        return None, 'the runs folder could not be read (%s)' % type(exc).__name__
+    earlier = 0
+    for name in names:
+        try:
+            with open(os.path.join(runs_root, name, 'STATUS'), encoding='utf-8') as fh:
+                line = fh.readline()
+        except (FileNotFoundError, NotADirectoryError):
+            continue   # a lock, a log, or a run with no STATUS yet: not a landing
+        except (OSError, ValueError) as exc:
+            return None, 'STATUS of %s could not be read (%s)' % (name, type(exc).__name__)
+        if not line.startswith('LANDED'):
+            continue
+        m = LANDED_AT.match(line)
+        if not m:
+            return None, 'STATUS of %s says LANDED with no readable date' % name
+        earlier += m.group(1) == today
+    days = calendar.monthrange(now.year, now.month)[1]
+    return month / days / (earlier + len(set(batch))), ''
+
+
+def landings_root(status_paths):
+    '''The one runs folder the landed builds' STATUS files sit in (write_status's own runs folder), '' when they name none
+    or more than one, which plan_share reads as unreadable (NO-DATA), never as some other folder.'''
+    roots = {os.path.dirname(os.path.dirname(os.path.abspath(p))) for p in status_paths if isinstance(p, str) and p} \
+        if isinstance(status_paths, (list, tuple)) else set()
+    return roots.pop() if len(roots) == 1 else ''
+
+
+def usd_text(sub, runs_root=None, ledger_path=None, claude_path=None, batch=None, now=None, env=None, landings=None):
+    '''One short field for the LANDED line: usd N.NN or usd NO-DATA. Given batch (the sub units landing together, P60):
+    usd TOTAL (openrouter N.NN, claude plan N.NN), the OpenRouter cash exactly as before plus plan_share over landings (the
+    runs folder whose STATUS lines mark_landed writes, runs_root when not named); the Claude
+    calls' API priced cost is not added, since Claude is paid by the plan (owner 2026-10-05). A part that is NO-DATA
+    is named with its reason and the total reads NO-DATA, never a guessed number.'''
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     try:
         import unit_ledger
@@ -500,6 +592,13 @@ def usd_text(sub, runs_root=None, ledger_path=None, claude_path=None):
         return 'usd NO-DATA (unit_ledger not importable)'
     runs_root = runs_root if runs_root is not None else unit_ledger.RUNS
     usd, skipped = unit_ledger.blended_usd_detail(sub, runs_root, ledger_path if ledger_path is not None else unit_ledger.LEDGER)
+    if batch is not None:
+        plan, why = plan_share(sub, batch, runs_root if landings is None else landings, now, env)
+        o_text = 'NO-DATA' if usd is None else '%.2f' % usd
+        p_text = 'NO-DATA: %s' % why if plan is None else '%.2f' % plan
+        total = 'NO-DATA' if usd is None or plan is None else '%.2f' % (usd + plan)
+        out = 'usd %s (openrouter %s, claude plan %s)' % (total, o_text, p_text)
+        return out + (' (%d corrupt row(s) skipped)' % skipped if skipped > 0 else '')
     # THE NATIVE CLAUDE PART, BY IDENTITY (2026-10-04): the provider ledger alone read NO-DATA for every native build
     if claude_path is None:
         import claude_ledger
@@ -714,6 +813,128 @@ def landing_facts(files, checks, cmds, done_checks, log):
     or None} and log the land log path."""
     return {"files": list(files), "checks": [{"label": l, "command": c, "exit_code": rc} for (l, rc), c in zip(checks, cmds)],
             "done_check": dict(done_checks), "log": log}
+
+
+#: G12 (L20, L21, 2026-10-16): THE LANDING RUNS THE DEPLOY'S OWN CHECKS. On 2026-10-14 three green landings were refused
+#: one at a time by the deploy, after the loop had been stopped for it: a computed loader (deploy8), a file that pulled the
+#: release tooling into the frozen closure (deploy9), two readers of one rule read as ambiguous (deploy10). The landing now
+#: calls the deploy's functions themselves, never a copy of their rules, on a scratch stage of the candidate shaped as the
+#: deploy shapes its own: deploy_stamped.stage_candidate over a copy of the two roots it archives (its freeze closure), and
+#: the candidate's scripts/test_loop_tool_parity.py against a bin staged from scripts/loop by tool_stamp.copy_tools. The bin
+#: is never the live one: drift between this machine's bin and the repository is not the build's doing.
+DEPLOY_ARCHIVE = ("scripts", "plugin/runtime")   # deploy_stamped.deploy: git archive <rev> -- scripts plugin/runtime
+DEPLOY_TOOL = "scripts/loop/deploy_stamped.py"   # a tree whose HEAD holds no deploy has none that could refuse
+DEPLOY_PARITY = os.path.join("scripts", "test_loop_tool_parity.py")
+DEPLOY_REFUSALS = (OSError, ValueError, RuntimeError, subprocess.SubprocessError)   # what deploy_stamped.main prints as its refusal
+#: THE PARITY CHECKER IS THE BASE'S, NEVER THE CANDIDATE'S (G12 follow up, security review 2026-10-16): the parity ran as the
+#: candidate's own file, so a build could rewrite it to print PASS. A batch that edits either file is refused, and the
+#: checker that runs must be byte identical to HEAD's (the landing base), launched isolated so the standard library wins
+#: every name it has over a module the candidate planted beside it.
+DEPLOY_TRUSTED = (DEPLOY_PARITY, os.path.join("scripts", "install_loop_tools.py"))
+
+
+def unstageable(copy):
+    """The first path under the archived roots of COPY that is a symlink or not a regular file or directory, relative to
+    COPY, else ''. Read with os.lstat, never through a link: a build's link to a file outside the tree is refused before
+    staging, so its target's bytes never reach a stage, a refusal line, a diagnosis note or a brief (G12 follow up)."""
+    for rel in DEPLOY_ARCHIVE:
+        top = os.path.join(copy, rel)
+        if not os.path.lexists(top): continue
+        for d, dirs, files in os.walk(top, followlinks=False):
+            for name in sorted(dirs + files):
+                q = os.path.join(d, name)
+                mode = os.lstat(q).st_mode
+                if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):   # a link's own mode is neither
+                    return os.path.relpath(q, copy)
+    return ""
+
+
+def deploy_touched(paths):
+    """The edited paths a deploy ships, sorted: everything deployable under scripts/loop/ (the bin) and every .py under the
+    roots the deploy archives (its closure reads them, and its parity reads every reader in scripts/: deploy10's ambiguous
+    import was scripts/cut_driver.py). Tests, caches and backups ship nowhere (tool_stamp._skip), so a batch of only those,
+    or of docs, is not slowed. A tool_stamp that cannot be imported skips nothing: the gate then reads NO-DATA."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import tool_stamp
+        skip = tool_stamp._skip
+    except Exception:   # sbe: allow-silent fail closed: every path is then touched and deploy_gate refuses NO-DATA
+        skip = lambda name: False
+    return sorted(p for p in paths if isinstance(p, str) and not skip(os.path.basename(p)) and (
+        p.startswith("scripts/loop/") or (p.endswith(".py") and any(p.startswith(r + "/") for r in DEPLOY_ARCHIVE))))
+
+
+def deploy_gate(copy, paths, log, env, runner=None):
+    """The deploy's own freeze closure and tool parity over COPY (the disposable copy holding the batch's applied state),
+    before anything commits. Returns (red, ran): red [(gate name, refusal line)], the line the deploy itself prints (its
+    exception text, or the parity's FAIL lines), or NO-DATA naming why a check could not run, which refuses the same way;
+    ran [(label, argv, exit code)] for note_check. ([], []) when the batch ships nothing (deploy_touched); ([], None) when
+    the tree's HEAD holds no deploy (nothing could refuse there), which main() prints as not applicable. runner(argv, env)
+    runs the parity, default boxed in the copy. The scratch stage is one temp directory, removed whatever happened."""
+    guarded = sorted(p for p in paths if p in DEPLOY_TRUSTED)
+    if guarded:
+        return [("deploy parity", "REFUSED: the batch edits the deploy parity checker (%s), which only the base may supply" % ", ".join(guarded))], []
+    if not deploy_touched(paths): return [], []
+    held = subprocess.run(LAND_GIT + ["ls-tree", "HEAD", "--", DEPLOY_TOOL], capture_output=True, text=True)
+    if held.returncode != 0:
+        return [("deploy closure", "NO-DATA: the tree's HEAD could not be read for %s (git exit %d)" % (DEPLOY_TOOL, held.returncode))], []
+    if not held.stdout.strip(): return [], None
+    try:
+        scratch = tempfile.mkdtemp(prefix="land-deploy-")
+    except OSError as exc:
+        return [("deploy closure", "NO-DATA: no scratch stage could be made (%s)" % exc)], []
+    try:
+        return _deploy_checks(copy, scratch, log, env, runner or (lambda argv, renv: boxed(argv, log, 1800, renv, cwd=copy)))
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)   # rmtree unlinks a link, never walks it
+        if os.path.lexists(scratch): sys.stderr.write("deploy_gate: the scratch stage %s was not removed\n" % scratch)
+
+
+def _deploy_checks(copy, scratch, log, env, runner):
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import deploy_stamped, tool_stamp
+    except Exception as exc:
+        return [("deploy closure", "NO-DATA: the deploy's checks could not be imported (%s: %s)" % (type(exc).__name__, exc))], []
+    source, stage = os.path.join(scratch, "source"), os.path.join(scratch, "bin")
+    try:
+        odd = unstageable(copy)
+    except OSError as exc:
+        return [("deploy closure", "NO-DATA: the candidate could not be walked before staging (%s)" % type(exc).__name__)], []
+    if odd:
+        return [("deploy closure", "NO-DATA: %s is a symlink or not a regular file; nothing is staged through it" % odd)], []
+    for rel in DEPLOY_TRUSTED:   # the checker that runs is the base's bytes or nothing
+        base = subprocess.run(LAND_GIT + ["show", "HEAD:" + rel], capture_output=True, cwd=copy)
+        try:
+            with open(os.path.join(copy, rel), "rb") as fh: now = fh.read()
+        except OSError:
+            now = None
+        if base.returncode != 0 or now != base.stdout:
+            return [("deploy parity", "NO-DATA: %s in the candidate is not the landing base's, so the parity is not run from it" % rel)], []
+    try:
+        for rel in DEPLOY_ARCHIVE:   # what the deploy archives, links kept as links, no cache: its own candidate source
+            if os.path.isdir(os.path.join(copy, rel)):
+                shutil.copytree(os.path.join(copy, rel), os.path.join(source, rel), symlinks=True,
+                                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        os.makedirs(stage); tool_stamp.copy_tools(os.path.join(copy, "scripts", "loop"), stage)
+    except Exception as exc:
+        return [("deploy closure", "NO-DATA: the scratch stage could not be built (%s: %s)" % (type(exc).__name__, exc))], []
+    red, ran = [], []
+    try:
+        staged = deploy_stamped.stage_candidate(source, os.path.join(stage, "candidate"))
+        log.write("\nDEPLOY closure: %d file(s) staged\n" % len(staged)); log.flush()
+    except DEPLOY_REFUSALS as exc:
+        red.append(("deploy closure", str(exc)))
+    except Exception as exc:
+        red.append(("deploy closure", "NO-DATA: the closure could not run (%s: %s)" % (type(exc).__name__, exc)))
+    ran.append(("deploy closure", ["deploy_stamped.stage_candidate", source], 1 if red else 0))
+    r = runner(isolated(os.path.join(copy, DEPLOY_PARITY)), dict(env if env is not None else os.environ, BROTHER_DEPLOY_TARGET=stage))
+    ran.append(("deploy parity", list(r.args), r.returncode))
+    lines = [l.strip() for l in ((r.stdout or "") + "\n" + (r.stderr or "")).splitlines() if l.strip()]
+    fails = [l for l in lines if l.startswith("FAIL")]
+    if r.returncode != 0 and fails:
+        red.append(("deploy parity", "; ".join(fails[:3])))
+    elif r.returncode != 0 or not any(l.startswith("PASS:") for l in lines):   # NOT APPLICABLE or silence is no verdict
+        red.append(("deploy parity", "NO-DATA: the tool parity check exit %d gave no verdict: %s" % (r.returncode, (lines or ["no output"])[-1][:160])))
+    return red, ran
 
 
 def refusal_reason(red, stray):
@@ -1125,15 +1346,70 @@ def unwind(started_from, why, status_paths, log, rev, run=None, changed=None):
     run(["git", "update-ref", "refs/brother/unlanded/%s" % sha, "HEAD"], log)
     if run(["git", "reset", "--hard", started_from], log).returncode != 0 or rev("HEAD") != started_from:
         return "UNWIND FAILED: the reset to %s did not take; commit %s is kept as refs/brother/unlanded/%s and a human must look" % (started_from, sha, sha)
+    held = quarantine_unlanded(status_paths, why, sha)
+    return "UNWOUND: branch back on hub %s, commit %s kept as refs/brother/unlanded/%s, %d build(s) quarantined, so later landings are not blocked" % (started_from, sha, sha, held)
+
+
+def quarantine_unlanded(status_paths, why, sha, kind="push"):
+    """Quarantine every build in status_paths after its landing commit was unwound (kept as refs/brother/unlanded/<sha>),
+    through reject_status, the one rejection writer. Returns how many were quarantined."""
     held = 0
     for st in status_paths:
         try:
             with open(st, encoding="utf-8") as fh: prev = fh.read().strip()
-            reject_status(st, "QUARANTINE refused after the commit, %s; the commit is kept as refs/brother/unlanded/%s | previous: %s\n" % (why, sha, prev), "push", why)
+            reject_status(st, "QUARANTINE refused after the commit, %s; the commit is kept as refs/brother/unlanded/%s | previous: %s\n" % (why, sha, prev), kind, why)
             held += 1
         except (OSError, ValueError) as exc:
             print("        note: could not quarantine %s (%s), it may be offered again" % (st, exc))
-    return "UNWOUND: branch back on hub %s, commit %s kept as refs/brother/unlanded/%s, %d build(s) quarantined, so later landings are not blocked" % (started_from, sha, sha, held)
+    return held
+
+
+#: THE LOOP NEVER CERTIFIES A CHANGE TO ITS OWN GOVERNANCE (security review 2026-10-16, replacing G15's whole gate run).
+#: Since G11 the pre-push gate refuses a push changing a loop file unless the checkout's gate ledger holds a whole-gate PASS
+#: record for exactly the pushed tree. G15 answered that by running sh scripts/required_fast.sh here, in the landing
+#: checkout with the real HOME and the network: the build's own code run unboxed (what reviews 8 and 11 forbade, see
+#: boxed) under a gate the build could rewrite, writing the record that cleared its own push. Executed: a gate command
+#: that only appended a PASS record returned 'pass' and wrote outside the tree. Now a batch the push gate's own rule calls
+#: a loop change is HELD before its push (G14's hold) and lands only after the session's whole gate on the landing tree.
+#: Which batch that is comes from the FROZEN pre_push_gate.check_whole_gate (the push gate's own set, scripts/loop/ plus
+#: the deploy list's named files, never a copy of it) with its record lookup answered "never on file", so no record on
+#: disk, whoever wrote it, lets a loop change through this run.
+LOOP_HELD = ("HELD: this batch changes the loop's own tools; a loop tool change lands only after the session's whole gate "
+             "on the landing tree (sh scripts/gate_pair.sh), never the loop's own run")
+WHOLE_LEDGER = os.path.join("scripts", "gate_ledger.py")   # a frozen copy without it predates the rule (required_fast's own rule)
+LOOP_ASK = "exec(%r)" % r"""import json, sys, types
+sys.path.append(sys.argv[1])
+never = types.ModuleType("gate_ledger")
+never.ledger_path = lambda cwd: ""
+never.whole_gate_pass_for_tree = lambda path, tree: (False, "the loop never reads a whole-gate record")
+sys.modules["gate_ledger"] = never
+import pre_push_gate as g
+print(json.dumps([[a, b, c] for a, b, c in g.check_whole_gate(sys.argv[2], None, sys.stdin.read())]))
+"""
+
+
+def loop_change(frozen, log, lines):
+    """('n/a' | 'clear' | 'loop' | 'unknown', detail) for the committed landing, from the frozen push gate's own rule over
+    git's ref line, run isolated with its imports from the frozen copy after the standard library. 'loop': the push
+    changes a loop file (check_whole_gate's BLOCK, reached only through its loop branch, since no record is ever on file
+    here). 'clear': every finding OK, no loop file. 'unknown': a NO-DATA, a verdict word it does not know, a launcher that
+    fails or output that is not the expected JSON; held, never clear. 'n/a': the frozen copy has no gate_ledger.py, a
+    base older than the rule, whose push gate asks nothing."""
+    if not frozen or not os.path.isfile(os.path.join(frozen, WHOLE_LEDGER)):
+        return "n/a", "the frozen copy holds no %s, so its push gate asks no loop question" % WHOLE_LEDGER
+    argv = [sys.executable, "-I", "-B", "-c", LOOP_ASK, os.path.join(frozen, "scripts"), os.getcwd()]
+    r = sh(argv, log, 300, None, None, lines)
+    try:
+        said = json.loads((r.stdout or "").strip().splitlines()[-1]) if r.returncode == 0 else None
+    except (ValueError, IndexError):
+        said = None
+    if isinstance(said, list) and said and all(isinstance(f, list) and len(f) == 3 for f in said):
+        words = set(f[0] for f in said)
+        if words == {"OK"}: return "clear", "; ".join(str(f[2]) for f in said)[:300]
+        if words <= {"OK", "BLOCK"}: return "loop", str([f for f in said if f[0] == "BLOCK"][0][2])[:300]
+        return "unknown", str([f for f in said if f[0] != "OK"][0][2])[:300]
+    return "unknown", "whether this push changes a loop file could not be answered (exit %d): %s" % (
+        r.returncode, one_line((((r.stderr or "") + (r.stdout or "")).strip().splitlines() or ["no output"])[-1], 160))
 
 
 def env_line(env=None):
@@ -2144,6 +2420,8 @@ def main():
             print("CATCH-UP local %s was behind hub %s, fast forwarded" % (head, hub_head)); head = rev("HEAD")
     why = preflight(branch, changed_paths(), head, hub_head, plan)
     if why: print("REFUSED: " + why); return 1
+    # the landing tree every build of this batch is judged on: a build held on it (G14) waits until it is another one
+    tree_now = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], capture_output=True, text=True).stdout.strip()
     cfg0 = shared_config_digest()
     # THE FROZEN COPY (D13): HEAD's files, read now while HEAD is the base commit and the tree is clean, so the pre-commit
     # check and the push gate run reviewed code over whatever this batch lands. No copy, no landing: nothing falls back
@@ -2160,7 +2438,7 @@ def main():
     for b in builds:
         st = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(b))), "STATUS")
         status_text = open(st, encoding="utf-8").read() if os.path.isfile(st) else ""
-        why = gate(b, status_text, council, scores, plan)   # the checker is gone (owner decision 2026-10-02)
+        why = gate(b, status_text, council, scores, plan) or held_on(status_text, tree_now)   # the checker is gone (owner decision 2026-10-02)
         if why:
             print("HELD    %-10s %s" % (sub_of(b) or os.path.basename(b), why))
             continue
@@ -2177,20 +2455,29 @@ def main():
             # the sandbox's ROOT, and every changed path was committed as the build's; only what it declared may land
             verdict, payload = "drop", "wrote %d path(s) it never declared: %s" % (len(undeclared), undeclared[:3])
             note = "DROPPED at landing: " + payload
-        if verdict == "drop":
-            print("DROPPED %-10s %s" % (sub_of(b), payload))
-            # A dropped build must never be offered again, or every later pass re-applies and re-reverts it and the
-            # loop livelocks on it (seen 2026-09-21: two builds offered three passes running). The reason is kept in
-            # the STATUS so the next runner knows what to fix rather than rediscovering it.
-            try:
-                reject_status(st, note, "dropped", payload, sub=sub_of(b), plan=plan)
-            except (OSError, ValueError) as exc:
-                print("        note: could not quarantine %s (%s), it may be offered again" % (st, exc))
+        if verdict in ("drop", "hold"):
+            if verdict == "hold":
+                # G14: a red the build did not cause (red on the unchanged copy too) or a base run that never finished.
+                # Rolled back like a drop, but no reject_status: no diagnosis note, no repeat count, no park.
+                print("HOLD    %-10s %s" % (sub_of(b), payload))
+                try:
+                    write_status(st, hold_status(status_text, tree_now, payload))
+                except (OSError, ValueError) as exc:
+                    print("        note: could not hold %s (%s), it may be offered again" % (st, exc))
+            else:
+                print("DROPPED %-10s %s" % (sub_of(b), payload))
+                # A dropped build must never be offered again, or every later pass re-applies and re-reverts it and the
+                # loop livelocks on it (seen 2026-09-21: two builds offered three passes running). The reason is kept in
+                # the STATUS so the next runner knows what to fix rather than rediscovering it.
+                try:
+                    reject_status(st, note, "dropped", payload, sub=sub_of(b), plan=plan)
+                except (OSError, ValueError) as exc:
+                    print("        note: could not quarantine %s (%s), it may be offered again" % (st, exc))
             left = rollback(before, changed_paths(), log)
             if left:   # a rejected build's bytes never land: the whole batch is refused rather than committed over them
                 t, c = revert((set(before) | changed_paths()) - {PLAN}, log)
-                print("REFUSED: the dropped build %s could not be rolled back (%s); nothing committed, reverted %d tracked and "
-                      "removed %d created path(s); the other builds stay READY | log %s" % (sub_of(b), left, t, c, logp))
+                print("REFUSED: the %s build %s could not be rolled back (%s); nothing committed, reverted %d tracked and "
+                      "removed %d created path(s); the other builds stay READY | log %s" % ("held" if verdict == "hold" else "dropped", sub_of(b), left, t, c, logp))
                 return 1
             continue
         note_check(checks, cmds, "land_apply " + sub_of(b), apply_argv, r.returncode); done_checks[sub_of(b)] = build_done_check(b)
@@ -2258,6 +2545,14 @@ def main():
                 r = boxed(argv, log, 2400, env, cwd=copy); note_check(checks, cmds, name, list(r.args), r.returncode)
             record_gate(os.environ.get("BROTHER_RUN_DIR", ""), "landing." + name, r.returncode, (time.time() - t0) * 1000)
             if r.returncode: red.append(name); faults[name] = first_failure((r.stdout or "") + "\n" + (r.stderr or ""))
+        # G12 (L20, L21): the deploy's own freeze closure and tool parity on a scratch stage of this candidate; a refusal is
+        # a red gate, so it takes the gates' refusal path below (revert, quarantine, diagnosis note, bisect)
+        deploy_red, deploy_ran = deploy_gate(copy, attributed & changed_paths(), log, env)
+        if deploy_ran is None: print("DEPLOY  not applicable: HEAD holds no %s, so no deploy could refuse this tree" % DEPLOY_TOOL)
+        for label, argv, rc in deploy_ran or (): note_check(checks, cmds, label, argv, rc)
+        for name, line in deploy_red:
+            print("DEPLOY  %s REFUSED: %s" % (name, line)); red.append(name); faults[name] = line
+        if deploy_ran and not deploy_red: print("DEPLOY  closure and parity pass on a scratch stage of the candidate")
         # THE FIFTH GATE: the registered tests named after every module this landing edited, on both Pythons.
         try:
             with open(CHECK_ALL, encoding="utf-8") as fh: _reg = fh.read()
@@ -2391,6 +2686,27 @@ def main():
     # HEAD is somebody else's commit. Both mark_landed calls and the landing record name this one.
     landing = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     facts_row = landing_facts(landed_files, checks, cmds, done_checks, logp)   # what the landing ran, named per file in the run's receipt
+    # A LOOP CHANGE IS HELD BEFORE ITS PUSH, NEVER CERTIFIED BY THIS RUN (security review 2026-10-16, see LOOP_HELD): the
+    # commit is unwound and the push never attempted. A batch of several is retried alone, so a build touching no loop
+    # file still lands and the tree moves on; one build is held with G14's hold on the landing tree, no note, no count,
+    # not offered again until that tree changes. An unanswerable question holds the same way: it is never clear.
+    lstate, lwhy = loop_change(frozen, log, ref_lines(REMOTE, BRANCH))
+    print("LOOP    %s | %s" % (lstate, lwhy[:200]))
+    if lstate in ("loop", "unknown"):
+        why = LOOP_HELD if lstate == "loop" else (
+            "HELD: whether this batch changes the loop's own tools could not be told (%s), so it is never pushed by this run" % one_line(lwhy, 160))
+        line = unwind(head, why, [], log, rev); print(line)
+        if not line.startswith("UNWOUND"): return 1
+        if bisect_plan(landed, builds, "--no-bisect" in sys.argv): return retry_alone(landed, builds)
+        for st in status_paths:
+            try:
+                with open(st, encoding="utf-8") as fh: prev = fh.read()
+                write_status(st, hold_status(prev, tree_now, why))
+            except (OSError, ValueError) as exc:
+                print("        note: could not hold %s (%s), it may be offered again" % (st, exc))
+        print(why)
+        print("nothing landed: %d build(s) held on the landing tree %s until it changes | log %s" % (len(status_paths), tree_now[:12], logp))
+        return 1
     # THE PRE-PUSH HOOK'S GATE (its hermetic check over the pushed range included), AFTER the commit, run by this command from
     # the frozen copy with git's own ref line (D13): the export tree is built from git, so a test file that is new and
     # uncommitted is "not shipped" there and passes vacuously (found 2026-09-20 when the pre-push refused what this step had
@@ -2427,7 +2743,7 @@ def main():
         print(unwind(head, "push exit %d, %s" % (r.returncode, verdict), blame_paths(landed, status_paths), log, rev)); return retry_alone(landed, builds)
     full_sha = lambda: subprocess.run(["git", "rev-parse", REMOTE + "/" + BRANCH], capture_output=True, text=True).stdout.strip() or None
     remote_sha = full_sha()
-    print(landed_line(landed, closed, logp, {s: usd_text(s) for s in landed}))
+    print(landed_line(landed, closed, logp, {s: usd_text(s, batch=landed, landings=landings_root(status_paths)) for s in landed}))
     mark_landed(status_paths, landed_builds, rev(landing) if landing else "NO-DATA")
     closing = closing_pass(closed, sh, log, REMOTE, BRANCH, frozen=frozen)
     for line in closing: print(line)

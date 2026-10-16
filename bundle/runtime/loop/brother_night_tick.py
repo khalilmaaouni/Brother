@@ -215,10 +215,20 @@ def live_sessions():
         return None
 
 
+def _in_proof():
+    """The one proof signal, read as loop_until.sh, model_router.code_root()
+    and burn_guard.proof_funding read it: BROTHER_PROOF_PHASE. A code root is
+    not a proof (D30, 2026-10-16)."""
+    return bool(os.environ.get("BROTHER_PROOF_PHASE"))
+
+
 def _frozen_code():
-    """True when a code root or a proof phase is set: loop code then runs from
-    the frozen candidate, never from the watched checkout (U3)."""
-    return bool(os.environ.get("BROTHER_CODE_ROOT") or os.environ.get("BROTHER_PROOF_PHASE"))
+    """True when loop code runs from the frozen candidate, never from the
+    watched checkout (U3): in a proof (_in_proof), or when BROTHER_CODE_ROOT
+    names WHERE that code lives. BROTHER_FROZEN_ROOT, the diagnostician's
+    deployed copy (loop_pass.sh), is deliberately not read: it is neither a
+    proof nor this tick's code root."""
+    return bool(os.environ.get("BROTHER_CODE_ROOT")) or _in_proof()
 
 
 def _task_watchdog():

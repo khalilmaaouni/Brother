@@ -46,6 +46,20 @@ Brother connects scoped execution, verification, delivery evidence, and local me
 
 **Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
 
+## What changed in 1.1.5
+
+1.1.5 is the Brother.loop release: an unattended night should end with what landed, what is stuck and the one thing to do next, without anyone relaying it.
+
+A check that is red on both the unchanged copy and the built copy is named as an environment defect and the build is held, never charged or parked for it. Tests: `python3 -B scripts/loop/test_land_apply_baseline.py`, `python3 -B scripts/loop/test_land_batch_env_hold.py`.
+
+A landing that changes the loop's own tools runs the deploy's own freeze closure and tool parity before it commits, and is then held for the session's whole gate: the loop never certifies a change to its own governance. A push that changes a loop file needs a whole-gate PASS record for exactly the pushed tree. Tests: `python3 -B scripts/loop/test_land_batch_closure.py`, `python3 -B scripts/loop/test_land_batch_whole_gate.py`, `python3 -B scripts/test_whole_gate_record.py`, `python3 -B scripts/test_pre_push_whole_gate.py`.
+
+Stuck units come back on their own: the diagnostician runs from a stamp verified frozen copy, a diagnosis note written during an attempt counts for the next one, and a pass that is only waiting on a cooldown waits instead of stopping the run. Refusal text reaches the next worker only as fenced, untrusted data. Tests: `python3 -B scripts/loop/test_diag_frozen_root.py`, `python3 -B scripts/loop/test_runner_pool_note_attempt.py`, `python3 -B scripts/loop/test_unproductive_cooldown.py`, `python3 -B scripts/loop/test_brief_untrusted_notes.py`.
+
+One redeploy command checks every deploy and launch refusal before anything is stopped, and the launcher names its remedy (which program is signed in, plug in the charger). Each run writes a summary with one state word and one next action after every pass and at its end, and every landing line shows OpenRouter cash and the Claude plan share. Tests: `python3 -B scripts/loop/test_redeploy_check.py`, `python3 -B scripts/loop/test_start_run_remedy.py`, `python3 -B scripts/loop/test_run_summary.py`, `python3 -B scripts/loop/test_usd_plan_share.py`, `python3 -B scripts/loop/test_loop_golden_journeys.py`.
+
+Not verified in this release: a 24 hour qualifying run, and the night's own loop run, which could not start because the Claude sign in had expired.
+
 ## What changed in 1.1.3
 
 Fast cut reuses each row receipt only when its bytes match, and one resumable driver prints a line for each phase, never pushes, and leaves the release question unanswered. A stopped cut leaves the release branch at the candidate; step 2b runs in parallel clones, and the Linux verdict checks the exact export tree before the question. Tests: `python3 -B scripts/test_cut_receipts.py`, `python3 -B scripts/test_cut_driver.py`, `python3 -B scripts/test_cut_preflight.py`, `python3 -B scripts/test_perturb_pool.py`, `python3 -B scripts/test_linux_canary.py`.
@@ -174,13 +188,22 @@ For existing work, resume from a Brother checkout with:
 python3 scripts/brother_run.py --continue --cwd "$TARGET_REPO"
 ```
 
-**What Brother does:** Each run can be resumed from its recorded work. The receipt shows what changed and what checks ran. The Brother.loop release tooling is for Brother's own release plan; it is not a general-purpose overnight runner for other repositories.
+**What Brother does:** Each run can be resumed from its recorded work. The receipt shows what changed and what checks ran. The Brother.loop release tooling is for Brother's own release plan; it is not a general-purpose overnight runner for other repositories. In 1.1.5 its landing tells an environment failure from a build failure, and every run writes a summary with a next action. Tests: `python3 -B scripts/loop/test_land_apply_baseline.py`, `python3 -B scripts/loop/test_run_summary.py`.
 
 **Evidence left:** A receipt for completed work and the run state used to resume. Cost fields that the worker did not return are `NO-DATA`.
 
 **Limit:** A cash budget for Claude seats is not established. A prior eight-hour run does not guarantee unattended operation.
 
 More: [Headless sign-in lapses silently](docs/pain-points/headless-sign-in-lapses.md).
+
+### Leaving it running overnight
+
+People who leave a coding agent running report that it stops for reasons nobody sees until morning. Four public reports, each with what Brother.loop does about the same kind of failure:
+
+- [Scheduled tasks need human intervention to run](https://github.com/anthropics/claude-code/issues/46312) (Claude Code issue 46312). Brother.loop's redeploy check prints every deploy and launch refusal before the drain, with the remedy: `python3 -B scripts/loop/test_redeploy_check.py`, `python3 -B scripts/loop/test_start_run_remedy.py`.
+- [Scheduled tasks stop executing while the next run time keeps advancing](https://github.com/anthropics/claude-code/issues/85474) (Claude Code issue 85474). Each Brother.loop run writes a summary with one state word after every pass, and a run that died without its end step reads ABORTED: `python3 -B scripts/loop/test_run_summary.py`.
+- [Long running tasks that are hard to trust and inspect](https://github.com/openai/codex/issues/45264) (Codex issue 45264). The summary sits in one file beside the run's log and names what landed, what is stuck and the next action: `python3 -B scripts/loop/test_run_summary_calls.py`.
+- [Background agents that spend tokens without producing output](https://github.com/anthropics/claude-code/issues/69915) (Claude Code issue 69915). Every Brother.loop landing line shows both cost parts, OpenRouter cash and the Claude plan share: `python3 -B scripts/loop/test_usd_plan_share.py`.
 
 ### A scheduled run cannot answer a prompt
 

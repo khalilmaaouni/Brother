@@ -595,7 +595,11 @@ def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S):
         raise ValueError("check: timeout must be a positive number of seconds")
     if not tests:
         return [(OK, "hermetic-tests", "no scripts/ test is touched by this change")]
-    build = build or P.export_tree_builder(root)
+    # SP4 (1.1.5): no caller build means the tree is LEASED from export_tree_cache (one build per HEAD tree, exporter and
+    # allowlist; a dirty root, an unreadable key or an entry that fails verification builds as before). The bytes are
+    # cached, never a verdict: each test below still runs, in this worktree, under the sandbox (which cannot write into
+    # the cache entry, outside `tree` and `home`). A caller's own build is used exactly as passed.
+    build = build or P.export_tree_builder(root, cache=True)
     tree = tempfile.mkdtemp(prefix="hermetic-export-")
     home = tempfile.mkdtemp(prefix="hermetic-home-")
     try:
@@ -825,7 +829,7 @@ def slow_host(root, files, n, repeats=SLOW_REPEATS, runner=None, build=None, hel
         return [(OK, "timing-slow-host", "no flagged test in the inventory")]
     clock = clock or time.monotonic
     hog_starter = hog_starter or start_hogs
-    build = build or P.export_tree_builder(root)
+    build = build or P.export_tree_builder(root, cache=True)   # SP4: leased like check()'s, the same rules
     tree = tempfile.mkdtemp(prefix="hermetic-slow-export-")
     home = tempfile.mkdtemp(prefix="hermetic-slow-home-")
     try:

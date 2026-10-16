@@ -855,10 +855,150 @@ def check_hermetic_tests(cwd=ROOT, runner=None, stdin_text=None):
     except Exception as exc:  # noqa: BLE001  the gate never crashes on a check it carries
         timing = [(NODATA, "timing", "the timing hunt could not run (%s: %s), so no changed test was judged for "
                                      "timing. That is not a pass" % (type(exc).__name__, exc))]
-    return timing + [(level[v], "hermetic", "%s: %s" % (name, detail))
-            # sorted: a list in a stable order (2026-09-28: R1.4's tests_for accepts only a list or tuple, so the set
-            # this built crashed the gate and refused a whole landing batch, innocent builds included)
-            for v, name, detail in hermetic.check(cwd, hermetic.tests_for(sorted(paths), cwd))]
+    # sorted: a list in a stable order (2026-09-28: R1.4's tests_for accepts only a list or tuple, so the set
+    # this built crashed the gate and refused a whole landing batch, innocent builds included)
+    tests = hermetic.tests_for(sorted(paths), cwd)
+    # A4, a reader only: the same export builder check() uses by default, timed, so every push says where its
+    # hermetic wait went. A missing builder leaves check() on its own default and the line says NO-DATA.
+    make = getattr(getattr(hermetic, "P", None), "export_tree_builder", None)
+    spent = [0.0]
+
+    def timed_build(tree):
+        began = time.monotonic()
+        try:
+            return make(cwd)(tree)
+        finally:
+            spent[0] += time.monotonic() - began
+    began = time.monotonic()
+    results = hermetic.check(cwd, tests, build=timed_build if make else None)
+    total = time.monotonic() - began
+    if make:
+        print("hermetic: export %.1f s, suites %.1f s" % (spent[0], max(0.0, total - spent[0])), file=sys.stderr)
+    else:
+        print("hermetic: export NO-DATA (no export builder to time), total %.1f s" % total, file=sys.stderr)
+    return timing + [(level[v], "hermetic", "%s: %s" % (name, detail)) for v, name, detail in results]
+
+
+#: G11.b: what counts as a loop change. scripts/loop/ is the whole bin deploy; the named entries and data are the
+#: files the loop runs by path from outside bin, read from scripts/loop/deploy_stamped.py in the PUSHED tree rather
+#: than copied here. The transitive import closure deploy_stamped.stage_candidate computes is NOT covered: it walks
+#: a checkout on disk (about 3 s and a staging copy, measured 2026-10-16), not the pushed tree, so it stays there.
+_LOOP_PREFIX = "scripts/loop/"
+_LOOP_LISTS = ("CANDIDATE_ENTRIES", "CANDIDATE_DATA")
+
+
+def _loop_named_files(tip, cwd=ROOT, runner=None):
+    """The set CANDIDATE_ENTRIES | CANDIDATE_DATA in the tip's scripts/loop/deploy_stamped.py, or None with a reason
+    when that file is there but cannot be read as those two literal tuples. A tip without the file has no loop
+    deploy, so it names no file (an empty set)."""
+    import ast
+    exists = _git(["cat-file", "-e", "%s:scripts/loop/deploy_stamped.py" % tip], cwd, runner)
+    if exists is not None and exists.returncode != 0:
+        return set(), ""
+    shown = _git(["show", "%s:scripts/loop/deploy_stamped.py" % tip], cwd, runner)
+    if shown is None or shown.returncode != 0:
+        return None, "scripts/loop/deploy_stamped.py could not be read from the pushed tree"
+    found = {}
+    try:
+        for node in ast.parse(shown.stdout or "").body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and getattr(node.targets[0], "id", None) in _LOOP_LISTS:
+                found[node.targets[0].id] = ast.literal_eval(node.value)
+    except (SyntaxError, ValueError) as exc:
+        return None, "scripts/loop/deploy_stamped.py could not be parsed: %s" % exc
+    if set(found) != set(_LOOP_LISTS) or not all(
+            isinstance(v, tuple) and all(isinstance(p, str) for p in v) for v in found.values()):
+        return None, "scripts/loop/deploy_stamped.py no longer carries %s as literal tuples" % " and ".join(_LOOP_LISTS)
+    return set(found["CANDIDATE_ENTRIES"]) | set(found["CANDIDATE_DATA"]), ""
+
+
+def _whole_gate_base(local_sha, remote_sha, remote_name, cwd=ROOT, runner=None):
+    """G11.b, adversarial review 2026-10-16: the commit whose TREE the pushed tip is compared with, or None when no base
+    can be read. An existing remote ref: its current sha. A new ref: the merge base with the remote's default branch
+    (refs/remotes/<remote>/HEAD, read locally, no network). The commit RANGE is not used: a rewind and a new ref at a
+    commit another remote ref carries both have an empty range while the pushed tree differs in a loop file."""
+    if not _is_zero(remote_sha):
+        probe = _git(["cat-file", "-e", remote_sha + "^{commit}"], cwd, runner)
+        return remote_sha if probe is not None and probe.returncode == 0 else None
+    found = _git(["merge-base", local_sha, "refs/remotes/%s/HEAD" % (remote_name or "origin")], cwd, runner)
+    sha = (found.stdout or "").strip() if found is not None and found.returncode == 0 else ""
+    return sha or None
+
+
+def check_whole_gate(cwd=ROOT, runner=None, stdin_text=None, remote_name=None):
+    """G11.b (L30): a push whose pushed tree differs from the remote's in a loop file must carry a whole-gate PASS
+    record for EXACTLY the pushed tip's tree, written by sh scripts/required_fast.sh through scripts/gate_ledger.py.
+    Measured 2026-10-14 and 15: a small rule file move left its neighbour suites green and turned 8 of 12 deploy canary
+    cases red, found only when the whole gate ran later. A push touching no loop file reads one git diff and is
+    neither slowed nor refused. No record, a record for another tree, a corrupt or unreadable ledger: BLOCK.
+    Per pushed ref the tip's tree is compared with the remote ref's tree (_whole_gate_base); with no base to read,
+    every loop file in the tip counts (fail closed). A deletion needs nothing. remote_name is git's pre-push $1."""
+    verdict = _hostile_input("whole-gate", cwd, stdin_text)
+    if verdict is not None:
+        return verdict
+    try:
+        import gate_ledger
+    except ImportError as exc:
+        return [(NODATA, "whole-gate", "gate_ledger.py not loadable: %s" % exc)]
+    updates = _pushed_updates(stdin_text)
+    jobs = []
+    if updates:
+        for _, local_sha, _, remote_sha in updates:
+            if _is_zero(local_sha):
+                continue          # a deletion sends no tree, so nothing to gate
+            probe = _git(["cat-file", "-e", local_sha + "^{commit}"], cwd, runner)
+            if probe is None or probe.returncode != 0:
+                return [(NODATA, "whole-gate", "a pushed sha does not resolve here, so whether it changes a loop "
+                                               "file is unknown. That is not a pass")]
+            base = _whole_gate_base(local_sha, remote_sha, remote_name, cwd, runner)
+            if base is None:
+                jobs.append((["ls-tree", "-r", "-z", "--name-only", local_sha], local_sha, False))
+            else:
+                jobs.append((["diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", base, local_sha],
+                             local_sha, True))
+    else:
+        ranges = _outgoing_ranges(cwd, runner, stdin_text)
+        if ranges is None:
+            return [(OK, "whole-gate", "no outgoing range, so no loop change to judge")]
+        jobs = [(["log", "--format=", "--name-only", "-z", "--no-renames", "-m"] + list(rng), "HEAD", True)
+                for rng in ranges]
+    out = []
+    for args, tip, based in jobs:
+        proc = _git(args, cwd, runner)
+        if proc is None or proc.returncode != 0:
+            return [(NODATA, "whole-gate", "the outgoing file list could not be read, so whether this push "
+                                           "changes a loop file is unknown. That is not a pass")]
+        paths = {p.strip() for p in (proc.stdout or "").split("\0") if p.strip()}
+        loop = sorted(p for p in paths if p.startswith(_LOOP_PREFIX))
+        if not loop and paths:
+            named, why = _loop_named_files(tip, cwd, runner)
+            if named is None:
+                return [(NODATA, "whole-gate", "%s, so whether this push changes a loop file is unknown. "
+                                               "That is not a pass" % why)]
+            loop = sorted(paths & named)
+        if not loop:
+            out.append((OK, "whole-gate", "no loop file in this push, so no whole-gate record is needed"))
+            continue
+        tree = _git(["rev-parse", "%s^{tree}" % tip], cwd, runner)
+        tree_sha = (tree.stdout or "").strip() if tree is not None and tree.returncode == 0 else ""
+        lookup = getattr(gate_ledger, "whole_gate_pass_in_repo", None)
+        if lookup is None:
+            # ponytail: land_batch.py's LOOP_ASK stands in a gate_ledger carrying only ledger_path and
+            # whole_gate_pass_for_tree (answering "never on file"); it is asked the old way. Can only refuse more.
+            # Delete this branch once that stub carries whole_gate_pass_in_repo too.
+            ok, why = gate_ledger.whole_gate_pass_for_tree(gate_ledger.ledger_path(cwd), tree_sha)
+        else:
+            ok, why = lookup(cwd, tree_sha)
+        if ok:
+            out.append((OK, "whole-gate", "%d loop file(s) pushed; %s" % (len(loop), why)))
+        else:
+            out.append((BLOCK, "whole-gate",
+                        "this push changes %d loop file(s) (%s)%s and %s. Run the whole gate on exactly this "
+                        "tree, commit nothing after it, then push again: sh scripts/required_fast.sh"
+                        % (len(loop), ", ".join(loop[:3]) + (", ..." if len(loop) > 3 else ""),
+                           "" if based else ", counted from the whole pushed tree because no base to compare it "
+                                            "with could be read", why)))
+    return out or [(OK, "whole-gate", "nothing pushed, so no loop change to judge")]
 
 
 def check_remote_rules(cwd=ROOT, runner=None):
@@ -985,7 +1125,7 @@ def check_hermetic_tests(*args, **kwargs):
     return _check_hermetic_tests_unguarded(*args, **kwargs)
 
 
-def gate(cwd=ROOT, runner=None, stdin_text=None, remote_url=None, env=None):
+def gate(cwd=ROOT, runner=None, stdin_text=None, remote_url=None, env=None, remote_name=None):
     """Every finding, worst first.
 
     Hostile input is REFUSED here too, as NO-DATA, before any check runs: a
@@ -1000,7 +1140,8 @@ def gate(cwd=ROOT, runner=None, stdin_text=None, remote_url=None, env=None):
              + check_edition(cwd, remote_url, env)
              + check_remote_rules(cwd, runner) + check_drift(cwd, runner)
              + check_docs_current(cwd, runner)
-             + check_hermetic_tests(cwd, runner, stdin_text))
+             + check_hermetic_tests(cwd, runner, stdin_text)
+             + check_whole_gate(cwd, runner, stdin_text, remote_name))
     rank = {BLOCK: 0, NODATA: 1, WARN: 2, OK: 3}
     found.sort(key=lambda f: rank.get(f[0], 9))
     return found
@@ -1011,9 +1152,9 @@ def main(argv=None):
     ap.add_argument("--cwd", default=ROOT)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--remote-name", default="",
-                     help="git's pre-push $1: the remote's short name "
-                          "(unused directly; kept for parity with the "
-                          "hook's own argv)")
+                     help="git's pre-push $1: the remote's short name, "
+                          "whose default branch is the base a new ref's "
+                          "tree is compared with (whole-gate)")
     ap.add_argument("--remote-url", default="",
                      help="git's pre-push $2: the remote URL this push "
                           "targets, fed to the edition guard")
@@ -1040,7 +1181,8 @@ def main(argv=None):
     stdin_text = "" if sys.stdin.isatty() else sys.stdin.read()
 
     found = gate(args.cwd, stdin_text=stdin_text,
-                 remote_url=args.remote_url or None)
+                 remote_url=args.remote_url or None,
+                 remote_name=args.remote_name or None)
     if args.json:
         print(json.dumps([{"level": a, "family": b, "detail": c}
                           for a, b, c in found], indent=2))
