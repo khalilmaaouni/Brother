@@ -182,6 +182,16 @@ DEFAULT_LEDGER = os.path.join('logs', 'gate-ledger.jsonl')
 NO_CUT = '0' * 32   # cut_id outside a cut: the schema wants 32 hex, and this says "no cut" rather than inventing one
 
 
+def cut_id_or_none(env):
+    """env['CUT_ID'] when it is 32 lowercase hex, else NO_CUT. Both ledger writers (record_whole_gate and the per row
+    block in required_fast.sh) route through here: outside a cut CUT_ID is unset or empty, and the raw value used to be
+    refused on every row. A bad id reads NO_CUT, never a cut it is not. A non mapping env raises ValueError."""
+    if not hasattr(env, 'get') or not hasattr(env, 'keys'):
+        raise ValueError("env must be a mapping, got %s" % type(env).__name__)
+    cut_id = env.get('CUT_ID', '')
+    return cut_id if _is_hex(cut_id, 32) else NO_CUT
+
+
 # The whole-gate record proves a fact about a TREE, not about a folder: one worktree runs the gate and another worktree
 # of the same repository (scripts/loop/redeploy.sh) pushes the same tree. So the record lives in ONE file in the
 # repository's common git directory, which every worktree shares and no landing tree or build sandbox can write.
@@ -268,9 +278,8 @@ def record_whole_gate(path, repo, codes_text, start_tree, obligation, started, w
     import platform
     import time
     ended = max(time.time(), started)
-    cut_id = os.environ.get('CUT_ID', '')
     record = {
-        'schema': 1, 'cut_id': cut_id if _is_hex(cut_id, 32) else NO_CUT,
+        'schema': 1, 'cut_id': cut_id_or_none(os.environ),
         'cut_version': os.environ.get('CUT_VERSION') or 'UNKNOWN', 'gate_name': WHOLE_GATE,
         'gate_argv': ['sh', 'scripts/required_fast.sh'], 'status': 'PASS', 'exit_code': 0,
         'started_unix': started, 'ended_unix': ended, 'duration_s': ended - started,
@@ -318,12 +327,82 @@ def whole_gate_pass_for_tree(path, tree_sha):
     return False, 'no whole-gate PASS record in %s' % path
 
 
+# C8 (1.1.6): the only delta that reuses a whole-gate record. Two markdown prefixes, never docs/plan whole: its JSON
+# files (BATTERY-EXPECTATIONS.json, KEY-COMPONENTS.json, loop-roles.json) are read by gate rows. No gate row reads these
+# two, and scripts/test_whole_gate_docs_delta.py greps required_fast.sh and every script it names to keep it so.
+DOCS_DELTA_PREFIXES = ('docs/plan/specs/', 'docs/plan/seeds/')
+_REGULAR_MODES = ('000000', '100644', '100755')     # absent, file, executable file: never a symlink or a submodule
+
+
+def docs_only_delta(changed):
+    """True only when changed is a non empty list of normalised relative paths, each under DOCS_DELTA_PREFIXES with a
+    .md suffix (case sensitive) and no control character. Anything else, including an empty list, is False."""
+    if not isinstance(changed, list) or not changed:
+        return False
+    for p in changed:
+        if not isinstance(p, str) or not p.startswith(DOCS_DELTA_PREFIXES) or not p.endswith('.md'):
+            return False
+        if os.path.normpath(p) != p or any(ord(c) < 32 or ord(c) == 127 for c in p):
+            return False
+    return True
+
+
+def whole_gate_pass_for_delta(path, tree_sha, recorded_tree, changed):
+    """(True, sentence) only when the ledger at path holds a whole-gate PASS for recorded_tree (whole_gate_pass_for_tree:
+    the chain is checked, a tampered or unreadable ledger refuses) and changed, the delta from recorded_tree to tree_sha,
+    is docs_only_delta. (False, why) otherwise."""
+    if not docs_only_delta(changed):
+        shown = [p for p in changed if not docs_only_delta([p])] if isinstance(changed, list) else []
+        return False, 'the delta from recorded tree %s is not only %s markdown (%s)' % (
+            recorded_tree, ' or '.join(DOCS_DELTA_PREFIXES), ', '.join(repr(p) for p in shown[:3]) or 'empty')
+    ok, why = whole_gate_pass_for_tree(path, recorded_tree)
+    if not ok:
+        return False, why
+    return True, '%s; the pushed tree %s differs from it in %d file(s), a docs only delta' % (why, tree_sha, len(changed))
+
+
+def _newest_pass_tree(path):
+    """tree_sha of the newest whole-gate PASS record at path, or None when there is none or the file cannot be read."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            records = [json.loads(line) for line in f if line.strip()]
+    except (OSError, ValueError):
+        return None
+    trees = [r.get('tree_sha') for r in records if isinstance(r, dict)
+             and r.get('gate_name') == WHOLE_GATE and r.get('status') == 'PASS']
+    return trees[-1] if trees and _is_hex(trees[-1], 40) else None
+
+
+def _delta_paths(repo, old_tree, new_tree):
+    """Paths that differ between two trees (git diff --raw -z, renames off), or None when git cannot say, the output
+    does not parse, or an entry's new side is not a regular file (a symlink or a submodule is never a docs delta)."""
+    try:
+        out = _git_out(repo, 'diff', '--raw', '-z', '--no-renames', '--no-ext-diff', old_tree, new_tree)
+    except ValueError:      # a name git printed that does not decode: not a delta anyone can judge
+        return None
+    if out is None:
+        return None
+    fields = out.split('\0')
+    if fields and fields[-1] == '':
+        fields.pop()
+    if len(fields) % 2:
+        return None
+    paths = []
+    for meta, name in zip(fields[0::2], fields[1::2]):
+        parts = meta.split(' ')
+        if len(parts) != 5 or not parts[0].startswith(':') or parts[1] not in _REGULAR_MODES:
+            return None
+        paths.append(name)
+    return paths
+
+
 def whole_gate_pass_in_repo(repo, tree_sha):
     """(True, sentence naming the file the record came from) when the repository holding the checkout repo has a
     whole-gate PASS record for exactly tree_sha; (False, why) otherwise. The shared file is asked first. For the 1.1.5
     release only, a record in the checkout's own ledger (written before the shared file existed) is also accepted.
     A common directory git cannot name refuses outright, and a shared file that exists but does not chain is refused,
-    never stepped over to the old ledger."""
+    never stepped over to the old ledger. C8: with no exact record anywhere, the newest PASS in the shared file still
+    counts when the delta from its tree to tree_sha is docs_only_delta (whole_gate_pass_for_delta)."""
     shared, why = whole_gate_ledger(repo)
     if shared is None:
         return False, 'the shared whole-gate record cannot be read: %s' % why
@@ -337,6 +416,16 @@ def whole_gate_pass_in_repo(repo, tree_sha):
     if ok:
         return True, '%s, from the checkout ledger %s (a record from before the shared file, accepted in 1.1.5 only)' % (
             said_old, old)
+    recorded = _newest_pass_tree(shared)        # C8: no exact record, so ask the docs delta rule of the newest PASS
+    if recorded is not None and _is_hex(tree_sha, 40):     # never an option or junk handed to git diff
+        changed = _delta_paths(repo, recorded, tree_sha)
+        if changed is None:
+            said = '%s; the delta from recorded tree %s could not be read as regular files' % (said, recorded)
+        else:
+            ok, said_delta = whole_gate_pass_for_delta(shared, tree_sha, recorded, changed)
+            if ok:
+                return True, '%s, from %s' % (said_delta, shared)
+            said = '%s; %s' % (said, said_delta)
     return False, '%s; the checkout ledger: %s' % (said, said_old)
 
 

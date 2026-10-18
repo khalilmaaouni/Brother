@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Brother turns a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-    "version": "1.1.5"
+    "version": "1.1.6"
   },
   "plugins": [
     {
@@ -14,10 +14,10 @@
         "source": "git-subdir",
         "url": "https://github.com/khalilmaaouni/Brother",
         "path": "bundle",
-        "ref": "v1.1.5"
+        "ref": "v1.1.6"
       },
       "description": "Turn a plain-language outcome into checked work, a rerunnable receipt, useful local memory, and a human acceptance decision.",
-      "version": "1.1.5",
+      "version": "1.1.6",
       "author": {
         "name": "Khalil Maaouni"
       },

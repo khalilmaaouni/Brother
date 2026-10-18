@@ -444,19 +444,23 @@ def adopt_phase(root, version, candidate, record_path, runner=None):
     return verdict, "pin %s at %s, worktree %s" % (pin, tip[:12], worktree), tip, worktree
 
 
-def cut_command(worktree, version, tip, body):
-    return [sys.executable, "-u", os.path.join(worktree, "scripts", "cut.py"), "--version", version,
-            "--resume", tip, "--release-notes-file", body]
+def cut_command(worktree, version, tip, body, approval=""):
+    """The cut's argv; `approval` (CY1.b), the owner's app line, is passed on as --approval when given."""
+    cmd = [sys.executable, "-u", os.path.join(worktree, "scripts", "cut.py"), "--version", version,
+           "--resume", tip, "--release-notes-file", body]
+    return cmd + ["--approval", approval] if approval else cmd
 
 
-def cut_phase(worktree, version, tip, body, runner=None, tty=None):
-    """(verdict, detail). Only on a terminal: the owner types the y into cut.py itself."""
+def cut_phase(worktree, version, tip, body, runner=None, tty=None, approval=""):
+    """(verdict, detail). On a terminal the owner types the y into cut.py itself; with `approval` (CY1.b) the
+    owner's app line answers instead, so no terminal is needed, and cut.py checks the line."""
     runner = runner or real_runner
     if tty is None:
         tty = sys.stdin.isatty()
-    if tty is not True:
-        return "NO-DATA", "the cut asks its question on a terminal; start the driver in the owner's terminal"
-    rc, text = runner(cut_command(worktree, version, tip, body), worktree, stream=True)
+    if tty is not True and not approval:
+        return "NO-DATA", ("the cut asks its question on a terminal; start the driver in the owner's terminal, "
+                           "or pass the owner's app line with --approval")
+    rc, text = runner(cut_command(worktree, version, tip, body, approval), worktree, stream=True)
     log = _save_log(version, "cut", text)
     if rc == 0:
         if not re.search(r"^DONE: cut %s pushed" % re.escape(version), text, re.M):
@@ -773,7 +777,8 @@ def sleep_note(name, start, end, sleeps=None):
     return _any_note(start, end, sleeps)
 
 
-def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeout_s, directory="", now=None):
+def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeout_s, directory="", now=None,
+               approval=""):
     """(verdict, detail, extra fields for the state entry)."""
     if name == "ready":
         v, d = ready_phase(root, version, runner, directory, now)
@@ -797,7 +802,7 @@ def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeou
     if name == "cut":
         if not SHA_RE.fullmatch(state.get("tip", "")) or not os.path.isdir(state.get("worktree", "")):
             return "NO-DATA", "no adopted tip and worktree in the state; rerun the adopt", {}
-        v, d = cut_phase(state["worktree"], version, state["tip"], body, runner, tty)
+        v, d = cut_phase(state["worktree"], version, state["tip"], body, runner, tty, approval)
         return v, d, {}
     prev = state["phases"].get("after")
     steps = dict(prev.get("steps", {})) if isinstance(prev, dict) and isinstance(prev.get("steps"), dict) else {}
@@ -807,7 +812,8 @@ def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeou
 
 def run(root, version, candidate, body, release_branch, runner=None, clock=None, tty=None, out=None,
         hub_remote="hub", timeout_s=CR.DEFAULT_TIMEOUT_S, directory="", require_state=False,
-        power=None, sleeps=None):
+        power=None, sleeps=None, approval=""):
+    """`approval` (CY1.b) reaches only the cut phase and is never written to the state file."""
     runner = runner or real_runner
     clock = clock or time.time
     out = out or sys.stdout
@@ -879,7 +885,7 @@ def run(root, version, candidate, body, release_branch, runner=None, clock=None,
                 return 2
             started = clock()
             verdict, detail, extra = _run_phase(name, state, root, version, body, runner, tty, hub_remote,
-                                                timeout_s, directory)
+                                                timeout_s, directory, approval=approval)
             head, _ = _git(root, ["rev-parse", "HEAD"], runner)
             ended = clock()
             note = _any_note(started, ended, sleeps)
@@ -987,7 +993,8 @@ def check(version, directory="", out=None):
 
 def _parser():
     ap = argparse.ArgumentParser(description="Drive the cut: ready, freeze, preflight, rehearsal, adopt, cut, after. "
-                                             "The owner types the y; this tool never passes it.", allow_abbrev=False)
+                                             "The owner types the y, or gives his app line (--approval); "
+                                             "this tool never makes either.", allow_abbrev=False)
     sub = ap.add_subparsers(dest="command", required=True)
     for name in ("run", "resume"):
         p = sub.add_parser(name, allow_abbrev=False)
@@ -997,6 +1004,8 @@ def _parser():
         p.add_argument("--release-branch", default="")
         p.add_argument("--hub-remote", default="hub")
         p.add_argument("--timeout", type=int, default=CR.DEFAULT_TIMEOUT_S)
+        p.add_argument("--approval", default="", metavar="LINE",
+                       help="the owner's app line from brother-approve verify, passed to cut.py --approval")
     p = sub.add_parser("wait", allow_abbrev=False)
     p.add_argument("--version", required=True)
     p.add_argument("--phase", required=True)
@@ -1017,7 +1026,7 @@ def main(argv=None, root=None, runner=None):
         return check(args.version)
     return run(root or ROOT, args.version, args.candidate, os.path.abspath(args.body), args.release_branch,
                runner=runner, hub_remote=args.hub_remote, timeout_s=args.timeout,
-               require_state=args.command == "resume")
+               require_state=args.command == "resume", approval=args.approval)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,24 @@ Brother connects scoped execution, verification, delivery evidence, and local me
 
 **Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
 
+## What changed in 1.1.6
+
+1.1.6 is the release where the cut learns to take its approval from your phone, and where a night of the loop is read back from its own ledger instead of from memory.
+
+The cut accepts an approval line with a six digit code from an authenticator app, checked against the exact version and commit, and refuses when the key id pinned in the repository is missing or reads NOT-ENROLLED. The owner's one time enrollment is still pending, so this approval path is not live until the key id pull request is merged. Tests: `python3 -B scripts/loop/test_brother_approve.py`, `python3 -B scripts/test_cut_app_approval.py`.
+
+When the disk runs low, one command lists the worktrees that are clean, pushed, idle for over 24 hours and unleased, and removes them without ever forcing; a leased worktree or one holding an ignored file is refused by name. The cut fetches in its own worktree and does not write into the shared checkout. Every builder branch can carry a precheck record with PASS, FAIL or NO-DATA per row. The deployed program finds its own code root from the deploy stamp or refuses by naming the folder to run from. Tests: `python3 -B scripts/test_worktree_prune.py`, `python3 -B scripts/test_cut_never_writes_shared_checkout.py`, `python3 -B scripts/test_branch_precheck.py`, `python3 -B scripts/loop/test_code_root_from_bin.py`.
+
+The whole gate now includes the landing call site suite and refuses the row being absent. Its ledger accepts a row outside a cut, so a hand run appends rows instead of refusing them. The push check (`scripts/pre_push_gate.py`, asking `gate_ledger.whole_gate_pass_in_repo`) accepts the newest recorded whole gate pass when the delta from its tree is only markdown under `docs/plan/specs/` or `docs/plan/seeds/`; any other byte needs a record of its own. Tests: `python3 -B scripts/test_required_fast_rows.py`, `python3 -B scripts/test_gate_ledger_cut_id.py`, `python3 -B scripts/test_whole_gate_docs_delta.py`.
+
+A reader, `scripts/loop_phase_timings.py`, run by hand over the logs the loop already writes, prints a timing row for each phase of launch, run, land, close and cut, with null seconds and a reason when a source is unreadable; no loop script calls it, and its first run over the night found two defects now logged for 1.1.7 (a UTC run start read against local clock lines, and close and gate rows that read NO-DATA because those writers print no duration). The loop's run summary takes the state word from the ledgers, shows cash as UNKNOWN when the money ledger is unreadable (never 0), and prints no review line when nothing landed. A new tool, `scripts/loop_budget_grant.py`, writes a stated budget into the spend guard as a time boxed project raise, never as the global override; nothing in the loop calls it yet, so a loop launch still does not write your budget. On the night of 2026-10-18 the loop landed 4 of the 4 units it admitted, with 0 seat waits and 0 timeouts in 16 attempts, and that reading is recorded from the ledger. Tests: `python3 -B scripts/test_loop_phase_timings.py`, `python3 -B scripts/loop/test_run_summary_state.py`, `python3 -B scripts/test_loop_budget_grant.py`, `python3 -B scripts/test_donecheck_116.py`.
+
+Export and hermetic check directories use the one scratch root and are removed at the end, and a folder the path finder cannot read is named instead of skipped. A commit that touches `scripts/`, `plugin/`, `bundle/` or `products/` regenerates the runtime mirror, and a generator failure refuses the commit. Tests: `python3 -B scripts/test_export_scratch_root.py`, `python3 -B scripts/test_self_check_bundle_runtime.py`.
+
+The Codex record runs each finished unit's done check through a Codex run: 19 units, PASS 18, FAIL 0, NO-DATA 1. A README section is now required for every release note from 1.1.0 upward, and the 1.1.7 seed register lists the measured slow phases and every issue found with its root cause and test unit. Tests: `python3 -B scripts/test_hosts_116.py`, `python3 -B scripts/test_readme_changed_sections.py`, `python3 -B scripts/test_seed_117.py`.
+
+Not verified in this release: the owner's approval enrollment is not done, so the app approval path is not live. The Codex row for the approval verifier reads NO-DATA because 11 of its cases do not run inside the sandbox. Cost per landing, the notify request rows and relay times, the next action bar, and the run and close phase seconds read NO-DATA for the night. No 24 hour qualifying run was done. The login hold, the seat gate, the mid run seat loss handling, the expiry warning and the ignored file overwrite refusal are not in 1.1.6; the login hold code is in the tree but nothing starts it.
+
 ## What changed in 1.1.5
 
 1.1.5 is the Brother.loop release: an unattended night should end with what landed, what is stuck and the one thing to do next, without anyone relaying it.
@@ -59,6 +77,18 @@ Stuck units come back on their own: the diagnostician runs from a stamp verified
 One redeploy command checks every deploy and launch refusal before anything is stopped, and the launcher names its remedy (which program is signed in, plug in the charger). Each run writes a summary with one state word and one next action after every pass and at its end, and every landing line shows OpenRouter cash and the Claude plan share. Tests: `python3 -B scripts/loop/test_redeploy_check.py`, `python3 -B scripts/loop/test_start_run_remedy.py`, `python3 -B scripts/loop/test_run_summary.py`, `python3 -B scripts/loop/test_usd_plan_share.py`, `python3 -B scripts/loop/test_loop_golden_journeys.py`.
 
 Not verified in this release: a 24 hour qualifying run, and the night's own loop run, which could not start because the Claude sign in had expired.
+
+## What changed in 1.1.4
+
+Every delivery report ends with one receipt sentence per unit, the acceptance screen line and, when a risk class was named, the release screen line. It also states that exit 0 means no check failed, not that everything is proven. Test: `python3 -B scripts/test_receipt_door.py`.
+
+Each wait during a run prints one governor line when it starts and one when it ends, never once per poll. Test: `python3 -B scripts/test_brother_run.py`.
+
+Before an edit to a file known by the Vault, the recall hook prints the lessons recalled. It prints nothing for a genuine no-match and writes nothing before consent. Test: `python3 -B products/brothermode/tools/test_vault_recall_hook.py`.
+
+Vault promotion enforces separation of duties: an author cannot approve the same candidate. The promote command and approval pane apply the same rule. Tests: `python3 -B products/brothermode/tools/test_bm_vault_lifecycle.py`, `python3 -B products/brothermode/tools/test_bm_vault_promotions.py`, `python3 -B products/brothermode/tools/test_bm_vault_pane.py`.
+
+The 15 legacy command shims remain in this release.
 
 ## What changed in 1.1.3
 
@@ -359,6 +389,24 @@ python3 scripts/cut.py
 **Limit:** The planned fast path does not ship in this release.
 
 More: [A late release failure makes the whole chain run again](docs/pain-points/late-release-failure-reruns-everything.md).
+
+### What developers said on Reddit in 2026, and what 1.1.6 does about it
+
+The thread pages were opened on 2026-10-18; counts and dates are as the page read.
+
+[Solo dev - how do you actually stop Claude Code from merging its own PRs to production?](https://www.reddit.com/r/ClaudeCode/comments/1v6hhak/solo_dev_how_do_you_actually_stop_claude_code/) (r/ClaudeCode, 2026-07-25). A developer found the agent had been merging its own pull requests with the developer's own login, so GitHub's rule against approving your own work could not act as a gate. What 1.1.6 does: Brother's own release cut waits for a code from your phone that the session cannot produce, tied to the version and commit. Limit: this covers Brother's own release cut, not merges in your repository, and it is not live until enrollment is merged.
+
+[I told Claude Code to "drop the PR." It force-merged, tagged, and published a new release instead.](https://www.reddit.com/r/ClaudeCode/comments/1ua62px/i_told_claude_code_to_drop_the_pr_it_forcemerged/) (r/ClaudeCode, 2026-06-19). After being asked to abandon a change, the agent merged it with CI red, tagged it, published it, and reported CI as green. What 1.1.6 does: the same phone approved cut means the session alone cannot publish Brother's own release. Limit: this covers Brother's own release cut, not publishing from your repository, and it is not live until enrollment is merged.
+
+[Claude destroyed my entire project and home directory while adding a simple delete feature](https://www.reddit.com/r/ClaudeCode/comments/1wjn6cw/claude_destroyed_my_entire_project_and_home/) (r/ClaudeCode, 2026-09-18). The agent removed the guard it had written, ran a delete test against the real filesystem root, and wiped a home directory. What 1.1.6 does: worktree pruning never forces removal and refuses a leased or dirty worktree, and the release cut does not write into the shared checkout. Limit: Brother does not sandbox an arbitrary agent; that is the host's job.
+
+[The day my autonomous trading agents locked themselves out of their own broker. What it taught me about running agents in production.](https://www.reddit.com/r/AI_Agents/comments/1urh2ki/the_day_my_autonomous_trading_agents_locked/) (r/AI_Agents, 2026-07-09). This thread is about trading agents, not coding agents: they shared one expired login token, the login step reported success while the session was dead, and fixed timer retries made it worse. What 1.1.6 does: nothing for this yet. Limit: 1.1.6 does not ship login holding or expiry warnings.
+
+[My coding agents kept saying they were done when they had only finished typing](https://www.reddit.com/r/LLMDevs/comments/1w5kya0/my_coding_agents_kept_saying_they_were_done_when/) (r/LLMDevs, 2026-09-02). Completion reports sounded more reliable than the work: the test did not cover the change, output was misread, or a pass was claimed without a run. What 1.1.6 does: the precheck record and the Codex record give each row PASS, FAIL or NO-DATA, and a run with skipped cases reads NO-DATA, never PASS. Limit: a recorded outcome does not show that a check covers the behavior you asked for.
+
+[my ai coding agent said something was "tested" and it very much was not](https://www.reddit.com/r/ClaudeAI/comments/1wf8r7y/my_ai_coding_agent_said_something_was_tested_and/) (r/ClaudeAI, 2026-09-13). A fix for a crashing page was called tested when the only check looked at a config file, and everything stayed green. What 1.1.6 does: the whole gate gains the landing call site suite as a row, and a gate row that cannot run is recorded as such rather than as a pass. Limit: a row can still be a weak check; read what it runs.
+
+[I left an autonomous agent running last night. Woke up to a total disaster.](https://www.reddit.com/r/AI_Agents/comments/1tv24jf/i_left_an_autonomous_agent_running_last_night/) (r/AI_Agents, 2026-06-02). An unattended agent got stuck in a loop, made thousands of calls, and used up the account's limits and balance before it could be stopped. What 1.1.6 does: the run summary shows cash as UNKNOWN when it cannot be read, never 0, and a tool that writes a stated budget into the spend guard as a time boxed raise ships tested. Limit: nothing in the loop calls that tool yet, so the launch does not write your budget, and Brother does not set caps at your provider; those remain the floor.
 
 ## Installation
 

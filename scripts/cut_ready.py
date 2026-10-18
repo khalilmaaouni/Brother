@@ -316,7 +316,8 @@ def disk_row(path, floor_gib=15, free=None):
         return make_row("premise", "disk-floor", NODATA, 0.0, "the disk reading is not a finite number")
     if value < floor_gib:
         return make_row("premise", "disk-floor", FAIL, 0.0,
-                        "free %.2f GiB under the floor of %.2f GiB" % (float(value), float(floor_gib)))
+                        "free %.2f GiB under the floor of %.2f GiB; run python3 scripts/worktree_prune.py --dry"
+                        % (float(value), float(floor_gib)))
     return make_row("premise", "disk-floor", PASS, 0.0,
                     "free %.2f GiB at or above the floor of %.2f GiB" % (float(value), float(floor_gib)))
 

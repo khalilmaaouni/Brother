@@ -7,7 +7,8 @@ Measured 2026-09-22 18:49 to 18:59: the dispatcher's daily cap was spent, every 
 rounds "ran" in seconds, ten sub units were marked EXHAUSTED and the pool parked them until a human fact. A refused round is
 not a failed round: the runner ends UNFUNDED instead, which the pool re-seats once money is back. Unknown, unreadable or
 partial results are None (never "refused"), so a real failure is never excused as a money outage."""
-import json, sys
+import json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # THIS directory's copy (login_class imports breaker)
 
 REFUSAL = "BudgetExceeded"
 DRAIN = "DrainRefused"
@@ -95,6 +96,72 @@ def all_unseated(path):
         if r.get("seat_wait") is True: waited = True
         elif r.get("claude_error") is not True: return False
     return waited
+
+
+#: THE LOGIN CLASS (1.1.6 S3; moved here from runner_pool in S2 round 3, so the unit runner and the pool read one rule).
+#: runner_pool imports these three names, so `runner_pool.login_class` and `runner_pool.LOGIN_HINTS` are unchanged.
+LOGIN_SCAN = 1 << 16   # the characters of a STATUS or of a round's results a login cause is read from
+LOGIN_HINTS = ("cannot refresh an expired Claude login", "this machine's Codex login", "codex login could not be probed",
+               "run brother-login",   # native_worker.refresh_hint and loop_intake's seat remedies
+               "The run's login holder", "the loop login cannot be used",   # brother_login.ask_holder and model_call's role session (S2)
+               # S2 round 2 (review claim 7): the rest of brother_login's refusals of the login itself (with_login and its
+               # reader), matched without case like every hint, so MISSING's "Run brother-login" parks as a lost login
+               "The held login is not a Claude token", "could not hand over its login", "Keychain did not respond")
+
+
+def login_class(status_text):
+    """True for a CONFIG_WAIT whose cause names the login: breaker's seat "login" refusal (the 401 and token texts)
+    or a login remedy (LOGIN_HINTS, matched without case). Only the first LOGIN_SCAN characters are read; a non string
+    is False."""
+    if not isinstance(status_text, str):
+        return False
+    text = status_text[:LOGIN_SCAN]
+    if text.split(None, 1)[:1] != ["CONFIG_WAIT"]:
+        return False
+    low = text.lower()
+    if any(h.lower() in low for h in LOGIN_HINTS):
+        return True
+    try:
+        import breaker
+    except ImportError:
+        return False   # sbe: allow-silent no breaker reads no login cause, so the wait parks only itself, as before S3
+    return breaker.seat_cause(text) == "login"
+
+
+def login_error(error):
+    """True for one fan out record's error that is a login class CONFIG_WAIT ("CONFIG_WAIT: <cause>", the record's own
+    shape, read by login_class as a status would be)."""
+    error = error if isinstance(error, str) else ""
+    return error.startswith(CONFIG) and login_class(CONFIG + " " + error[len(CONFIG):].lstrip(": "))
+
+
+def logins_lost(path, transport_of):
+    """S2 round 3 (finding 4): True when no record answered, at least one record failed with a login class error
+    (login_error), and every record of an arm on the claude transport is one of those: a round
+    whose Claude arms all lost the login, whatever its other arms did, so the runner ends CONFIG_WAIT and the pool parks
+    the unit once and tells the owner once, never spending attempts to EXHAUSTED. transport_of(model) names a record's
+    transport (its "model" field); an arm it cannot name is not counted as Claude, and a login failure counts on any
+    transport (an unknown never reads as "the login is fine"). False when any record answered or a Claude arm failed
+    otherwise; None for a missing, unreadable, empty or non list file, or a record that is not a dict."""
+    try:
+        with open(path, encoding="utf-8") as f: rows = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rows, list) or not rows: return None
+    lost = False
+    for r in rows:
+        if not isinstance(r, dict): return None
+        if r.get("ok") is True: return False
+        if login_error(r.get("error")):
+            lost = True
+            continue
+        try:
+            claude = transport_of(r.get("model")) == "claude"
+        except Exception:   # sbe: allow-silent an arm whose transport cannot be named is not counted as Claude (docstring)
+            claude = False
+        if claude:
+            return False   # a Claude arm that failed for another reason: the login is not shown lost
+    return lost
 
 
 def selftest():

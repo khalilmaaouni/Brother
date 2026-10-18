@@ -172,6 +172,26 @@ EXIT_OK = 0
 EXIT_REFUSED = 1
 EXIT_NODATA = 2
 
+
+def scratch_root():
+    """The one scratch root (the resource footprint law), absolute and made 0700 when missing: BROTHER_SCRATCH when set
+    and non empty, else ~/.claude/brother-scratch, the rule hermetic_test_check._scratch_root reads. C9 (1.1.6): every
+    export folder lived in the system temp folder. Raises OSError for a root that is a file, cannot be made or cannot be
+    written; nothing falls back to the system temp folder (macOS mktemp -t ignores TMPDIR, so nothing relies on it)."""
+    root = os.path.abspath(os.path.expanduser((os.environ.get("BROTHER_SCRATCH") or "").strip()
+                                              or "~/.claude/brother-scratch"))
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    if not os.access(root, os.W_OK | os.X_OK):
+        raise PermissionError(13, "the scratch root cannot be written", root)
+    return root
+
+
+def scratch_dir(prefix):
+    """A fresh 0700 folder under scratch_root(), named run-<prefix>..., so the scratch age pass (scripts/loop/
+    scratch_prune.py, run-* only) removes one a killed run left behind. The caller removes it at the end."""
+    return tempfile.mkdtemp(prefix="run-" + prefix, dir=scratch_root())
+
+
 #: E6.1a: an external release-integrity reviewer confirmed the exporter's
 #: reproducibility claim (scripts/reproduce_export.py rebuilds the export
 #: byte for byte from a hub revision) but found that revision shipped
@@ -2145,7 +2165,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
     lines = []
     # FX4.a: one announcement per run, before whichever write comes first
     write_state = {} if write_state is None else write_state
-    with tempfile.TemporaryDirectory(prefix="brother-export-push-") as d:
+    with tempfile.TemporaryDirectory(prefix="run-brother-export-push-", dir=scratch_root()) as d:
         run(["git", "init", "-q"], d)
         run(["git", "config", "user.name", AUTHOR_NAME], d)
         run(["git", "config", "user.email", AUTHOR_EMAIL], d)
@@ -2248,7 +2268,7 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
         _stage_all_from_disk(d, run)
         if tag:
             with tempfile.TemporaryDirectory(
-                    prefix="brother-export-staged-") as staged:
+                    prefix="run-brother-export-staged-", dir=scratch_root()) as staged:
                 # tag_time_checks must prove the COMMITTED bytes clear each
                 # product's own verifier, not merely whatever sits on disk
                 # in `d`: checkout-index reads the just-staged INDEX, so the
@@ -3175,9 +3195,15 @@ def _main(argv, state):
               % (args.allowlist or DEFAULT_ALLOWLIST))
         return EXIT_NODATA
 
-    with tempfile.TemporaryDirectory(prefix="brother-export-") as export_dir, \
-         tempfile.TemporaryDirectory(prefix="brother-export-identity-") as identity_dir, \
-         tempfile.TemporaryDirectory(prefix="brother-export-baseline-") as baseline_tmp:
+    try:
+        scratch = scratch_root()
+    except OSError as exc:
+        print("REFUSED: no scratch root for the export folders (%s); nothing falls back to the system temp folder"
+              % exc)
+        return EXIT_REFUSED
+    with tempfile.TemporaryDirectory(prefix="run-brother-export-", dir=scratch) as export_dir, \
+         tempfile.TemporaryDirectory(prefix="run-brother-export-identity-", dir=scratch) as identity_dir, \
+         tempfile.TemporaryDirectory(prefix="run-brother-export-baseline-", dir=scratch) as baseline_tmp:
         # T1.3: both gate worlds carry GATE_WORLD_MARKER while they are
         # built and lose it only once whole, so a racing export refuses
         # rather than reading them half built, and a crash mid build leaves

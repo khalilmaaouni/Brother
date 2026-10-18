@@ -54,9 +54,10 @@ def roles_with(**chains):
 
 class Att(object):
     """A stand in for model_call.Attempt: the fields the four call sites read."""
-    def __init__(self, model, ok, answer="", detail="", status=None):
+    def __init__(self, model, ok, answer="", detail="", status=None, failure=None):
         self.model, self.ok, self.answer, self.detail, self.seconds = model, ok, answer, detail, 0.5
         self.status = status or ("ANSWERED" if ok else "MALFORMED")
+        self.failure = failure
 
 
 def _row():
@@ -88,17 +89,21 @@ class FakeMC(object):
         return Att(name, True, BUILD)
 
     def call(self, prompt, kind, sensitivity, timeout=300, expect=None, chain=None, **kw):
+        """model_call.call's own contract (S2 round 2, side finding 5): (the answering Attempt, every attempt), or
+        (None, every attempt) when no member answered. It returned a bare Attempt, which is why three callers that
+        read the pair as an Attempt stayed green here."""
         self.walks.append({"kind": kind, "sensitivity": sensitivity, "timeout": timeout, "expect": expect,
                            "chain": list(chain or [])})
-        last = Att("nobody", False, detail="empty chain", status="REFUSED_BY_GATE")
+        tried = []
         for name in chain or []:
             if name in self.shut:
-                last = Att(name, False, detail="capacity: claude:default:%s open until 10:00 (LIMIT)" % name, status="REFUSED_BY_GATE")
+                tried.append(Att(name, False, detail="capacity: claude:default:%s open until 10:00 (LIMIT)" % name, status="REFUSED_BY_GATE"))
             elif name in self.limited:
-                last = Att(name, False, detail="usage limit reached", status="LIMIT")
+                tried.append(Att(name, False, detail="usage limit reached", status="LIMIT"))
             else:
-                return Att(name, True, BUILD)
-        return last
+                tried.append(Att(name, True, BUILD))
+                return tried[-1], tried
+        return None, tried
 
 
 class RoleChainsTest(unittest.TestCase):
@@ -135,7 +140,8 @@ class RoleChainsTest(unittest.TestCase):
 
         def walk(prompt, kind, sensitivity, timeout=300, chain=None, **kw):
             seen["chain"].append(list(chain or []))
-            return Att((chain or ["nobody"])[-1], True, answer)
+            a = Att((chain or ["nobody"])[-1], True, answer)
+            return a, [a]   # model_call.call's contract: (winner, every attempt)
 
         self.modules(model_call=types.SimpleNamespace(call_one=call_one, call=walk))
         return seen
@@ -278,6 +284,7 @@ class RoleChainsTest(unittest.TestCase):
         a = finish_run.finisher_attempt("opus55", "the brief", mc)
         self.assertFalse(a.ok)
         self.assertTrue(a.detail.startswith("capacity:"), a.detail)
+        self.assertIn("usage limit reached", a.detail, "the last attempt's own reason, never 'no attempt came back'")
 
     def test_fable_chain_sends_nothing_and_says_roles(self):
         self.scene("on", roles_with(finisher=["sonnet", "fable"]))
@@ -333,6 +340,70 @@ class RoleChainsTest(unittest.TestCase):
         self.assertIsNone(build_plan.plan("spec", "files"))
         self.assertIsNone(repair_advisor.advise("FAIL x", "build", "spec"))
         self.assertEqual(seen, {"one": [], "chain": []})
+
+    # S2 ROUND 2 (review claim 3 part c): A ROLE REFUSED ITS LOGIN SAYS WHY. plan() and advise() swallow every failure
+    # into None; the login refusal of the role's attempts is kept in LAST_REFUSAL for the unit runner to tell.
+    LOGIN = ("CONFIG_WAIT: BROTHER_LOOP_TOKEN is on but the loop login cannot be used (The run's login holder has "
+             "ended, so this run no longer has its login. Restart the run (start_run.sh) to read it again.); restart "
+             "the run (start_run.sh) to read it again")
+
+    def refused(self, detail):
+        def call_one(name, prompt, kind, sensitivity, timeout=300, **kw):
+            return Att(name, False, detail=detail, status="CONFIG", failure="CONFIG")
+
+        def walk(prompt, kind, sensitivity, timeout=300, chain=None, **kw):
+            return None, [Att(n, False, detail=detail, status="CONFIG", failure="CONFIG") for n in chain or []]
+        self.modules(model_call=types.SimpleNamespace(call_one=call_one, call=walk))
+
+    def test_a_role_refused_its_login_says_why(self):
+        """Red at d98550631: no LAST_REFUSAL, so the unit runner printed only PLAN NO-DATA and nobody was told."""
+        for breaker in ("on", None):
+            with self.subTest(breaker=breaker):
+                self.scene(breaker)
+                self.refused(self.LOGIN)
+                self.assertIsNone(build_plan.plan("spec", "files"))
+                self.assertEqual(getattr(build_plan, "LAST_REFUSAL", None), self.LOGIN)
+                self.assertIsNone(repair_advisor.advise("FAIL x", "build", "spec"))
+                self.assertEqual(getattr(repair_advisor, "LAST_REFUSAL", None), self.LOGIN)
+
+    def test_another_refusal_or_an_answer_names_no_login(self):
+        """A configuration fault that is not the login, and a later answer, leave LAST_REFUSAL empty."""
+        self.scene("on")
+        self.refused("CONFIG_WAIT: the program does not know this model: [claude-code:unrecognized_model]")
+        self.assertIsNone(build_plan.plan("spec", "files"))
+        self.assertEqual(getattr(build_plan, "LAST_REFUSAL", None), "")
+        self.assertIsNone(repair_advisor.advise("FAIL x", "build", "spec"))
+        self.assertEqual(getattr(repair_advisor, "LAST_REFUSAL", None), "")
+        self.refused(self.LOGIN)
+        build_plan.plan("spec", "files")
+        repair_advisor.advise("FAIL x", "build", "spec")
+        build_plan.plan("spec", "files", runner=lambda p: None)   # a call that never reaches the model: nothing stale
+        self.assertEqual(build_plan.LAST_REFUSAL, "", "every call starts with no refusal")
+        repair_advisor.advise("FAIL x", "build", "spec", runner=lambda p: None)
+        self.assertEqual(repair_advisor.LAST_REFUSAL, "", "every call starts with no refusal")
+        self.refused(self.LOGIN)
+        build_plan.plan("spec", "files")
+        repair_advisor.advise("FAIL x", "build", "spec")
+        self.callers(PLAN)
+        self.assertTrue((build_plan.plan("spec", "files") or "").startswith("BUILD PLAN ("))
+        self.assertEqual(build_plan.LAST_REFUSAL, "", "an answer clears the last refusal")
+        self.callers(ADVICE)
+        self.assertTrue((repair_advisor.advise("FAIL x", "build", "spec") or "").startswith("REPAIR ADVISOR ("))
+        self.assertEqual(repair_advisor.LAST_REFUSAL, "", "an answer clears the last refusal")
+
+    def test_a_member_that_answers_after_a_refused_one_clears_it(self):
+        """The chain falls over from a member refused the login to one that answers: the plan stands and nothing is
+        told, because the role was served (survivor M-S2R2-BP-KEEP-ON-ANSWER, round 2 sweep)."""
+        self.scene("on")
+        for mod, answer, call in ((build_plan, PLAN, lambda: build_plan.plan("spec", "files")),
+                                  (repair_advisor, ADVICE, lambda: repair_advisor.advise("FAIL x", "build", "spec"))):
+            with self.subTest(role=mod.__name__):
+                def walk(prompt, kind, sensitivity, timeout=300, chain=None, **kw):
+                    won = Att("haiku", True, answer)
+                    return won, [Att("sonnet", False, detail=self.LOGIN, status="CONFIG", failure="CONFIG"), won]
+                self.modules(model_call=types.SimpleNamespace(call_one=None, call=walk))
+                self.assertTrue(call())
+                self.assertEqual(mod.LAST_REFUSAL, "")
 
     def test_model_default_and_strip(self):
         for mod, key in ((repair_advisor, "BROTHER_REPAIR_ADVISOR_MODEL"), (build_plan, "BROTHER_BUILD_PLAN_MODEL")):

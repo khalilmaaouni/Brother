@@ -62,7 +62,7 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAM
 
 
 class Run(object):
-    def __init__(self, env_extra, rounds=1, spec=SPEC, stubs=None):
+    def __init__(self, env_extra, rounds=1, spec=SPEC, stubs=None, pass_fds=()):
         os.makedirs(TRS.SCRATCH, exist_ok=True)
         self.d = tempfile.mkdtemp(prefix="native-runner-", dir=TRS.SCRATCH)
         self.code, self.wt, self.bin = (os.path.join(self.d, n) for n in ("code", "wt", "bin"))
@@ -93,7 +93,7 @@ class Run(object):
         env.update(env_extra)
         try:
             r = subprocess.run([sys.executable, "-B", os.path.join(self.bin, "unit_runner.py"), "Z9", "Z9.1", str(rounds)],
-                               cwd=self.wt, env=env, capture_output=True, text=True, timeout=200)
+                               cwd=self.wt, env=env, capture_output=True, text=True, timeout=200, pass_fds=pass_fds)
         except BaseException:
             shutil.rmtree(self.d, ignore_errors=True)
             raise

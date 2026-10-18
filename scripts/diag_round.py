@@ -89,6 +89,25 @@ def main(argv=None):
         except MR.Refused as exc:
             print("NO-DATA: the code root is refused (%s); no lane is diagnosed" % str(exc)[:160])
             return 2
+    # A HELD RUN'S DIAGNOSIS ASKS NO CLAUDE MODEL (S2 round 3, finding 1; decided: refuse, not served). The pass starts
+    # this round detached, from the candidate tree, with neither the run's login holder nor its name; handing it one
+    # would add a third holder bearing child of the pass, running candidate code past the pass's own life. So on a held
+    # run (brother_login.HELD_RUN_VAR) a BROTHER_DIAG_MODEL on the claude transport, or one the registry cannot place,
+    # is refused here, by name, before the brief marks any run asked and before any fan out starts. Unset, the brief's
+    # default model (a bridge model, no login) runs as before; the fan out's own login_child refuses any Claude arm too.
+    diag_model = os.environ.get("BROTHER_DIAG_MODEL", "")
+    if not args.dry and diag_model and os.environ.get("BROTHER_LOGIN_HELD_RUN"):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
+        try:
+            import model_router as MR
+            transport = (MR.registry().get(diag_model) or {}).get("transport")
+        except Exception:   # sbe: allow-silent an unreadable registry places no model, which refuses below
+            transport = None
+        if transport not in ("bridge", "codex"):
+            print("NO-DATA: BROTHER_DIAG_MODEL=%s needs a Claude login (transport %s), and this run's login holder is not "
+                  "handed to the diagnosis; no lane is diagnosed (name a bridge model, or run it off the token lane)"
+                  % (diag_model[:60], transport or "unknown"))
+            return 2
     os.makedirs(out, exist_ok=True)
 
     r = subprocess.run(brief_cmd(out, args.subs, args.dry, args.limit), capture_output=True, text=True, timeout=1200)

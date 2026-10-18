@@ -20,6 +20,7 @@ reported as such, never counted as a mismatch.
   --source-rev REV   the hub revision the release was cut from (default HEAD)
   --tag TAG          the public tag to compare against (e.g. v0.9.7)
   --public CHECKOUT  a local checkout of the public repo that has the tag
+                     (default: the checkout this script runs from, C11)
   --expect-commit SHA  R2: the commit the caller knows it just pushed;
                      refuse (NO-DATA) if --tag resolves to anything else
 
@@ -83,7 +84,25 @@ sys.path.insert(0, HERE)
 import cut_preflight as CP  # noqa: E402
 import export_public as EP  # noqa: E402
 
+#: C11: the shared checkout other sessions work in. Named so the test can
+#: guard it; never a default. The 1.1.5 cut fetched its tag in here because
+#: main() fell back to it when --public was not given (cut.py never gives it).
 PUBLIC_CHECKOUT = os.path.expanduser("~/Brother")
+
+
+def default_public(args_public, here):
+    """C11: the checkout the tag is fetched into and read from. An explicit
+    --public wins (an empty one counts as not given); otherwise `here`, the
+    checkout this script runs from (the cut's own worktree), never the
+    shared PUBLIC_CHECKOUT. A `here` that is not an absolute directory is
+    refused with ValueError, which main() reads as NO-DATA."""
+    if args_public:
+        return args_public
+    if not (isinstance(here, str) and os.path.isabs(here)
+            and os.path.isdir(here)):
+        raise ValueError("the checkout this script runs from (%r) is not an "
+                         "absolute directory; pass --public" % (here,))
+    return here
 
 
 def _run(cmd, cwd=None):
@@ -101,7 +120,8 @@ FETCH_TIMEOUT_S = 120
 def fetch_and_resolve_tag(public, tag, remote, runner=None,
                           timeout=FETCH_TIMEOUT_S, expect_commit=None):
     """R1 (found on the 1.0.20 cut, closed for 1.0.21): the non-verify-tree
-    mode below reads a pushed tag out of `public` (~/Brother by default), and
+    mode below reads a pushed tag out of `public` (the cut's own worktree
+    by default since C11, ~/Brother before it), and
     cut.py's own chain runs this script right after export_public.py pushes
     a BRAND NEW tag. When ~/Brother had never fetched it, every comparison
     read None and this fell through to the generic "is the tag on this
@@ -213,7 +233,7 @@ def source_tree(source_rev, root=EP.ROOT):
     return tmp
 
 
-def tag_file_bytes(tag, relpath, public=PUBLIC_CHECKOUT):
+def tag_file_bytes(tag, relpath, public):
     """The bytes the tag carries for one path, or None when absent/unreadable."""
     proc = _run(["git", "-C", public, "show",
                  "%s:%s" % (tag, relpath.replace(os.sep, "/"))])
@@ -569,8 +589,9 @@ def main(argv=None):
     ap.add_argument("--source-rev", default="HEAD")
     ap.add_argument("--tag", required=True)
     ap.add_argument("--public", default=None,
-                    help="checkout holding the tag (default: this checkout "
-                         "under --verify-tree, %s otherwise)" % PUBLIC_CHECKOUT)
+                    help="checkout holding the tag (default: this checkout, "
+                         "the cut's own worktree; never the shared %s)"
+                         % PUBLIC_CHECKOUT)
     ap.add_argument("--allowlist", default=None)
     ap.add_argument("--remote", default=None,
                     help="R1: fetch --tag from here into --public before "
@@ -613,7 +634,11 @@ def main(argv=None):
             print(line)
         return code
 
-    public = args.public or PUBLIC_CHECKOUT
+    try:
+        public = default_public(args.public, EP.ROOT)
+    except ValueError as exc:
+        print("NO-DATA: %s" % exc)
+        return 2
 
     src = source_tree(args.source_rev)
     if src is None:
@@ -648,7 +673,7 @@ def main(argv=None):
 
     # R1: fetch the pushed tag into `public` BEFORE anything below compares
     # against it. A cut that just pushed v<X> has no reason to already carry
-    # it in a long-lived checkout like ~/Brother; fetching here is what makes
+    # it in its own worktree; fetching here is what makes
     # "is the tag on this checkout?" (below) an honest question instead of a
     # foregone NO-DATA.
     ok, line = fetch_and_resolve_tag(

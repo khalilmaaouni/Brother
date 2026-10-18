@@ -139,7 +139,7 @@ def _finish(p, seconds=90):
     return p.returncode, out or ""
 
 
-END = ["proof-ending", "proof-settle", "stop_loop --runners-only", "clock", "proof-end", "write"]
+END = ["end-claim", "proof-ending", "proof-settle", "stop_loop --runners-only", "clock", "proof-end", "write"]
 
 
 class Ends(unittest.TestCase):
@@ -378,7 +378,10 @@ class Ends(unittest.TestCase):
 
     def _reap(self, pid):
         """Only this fixture's own stage, identified by its command, is ever signalled here."""
-        r = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
+        try:
+            r = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
+        except OSError:  # sbe: allow-silent ps is refused here (a sandbox), so the stage cannot be identified and is left alone rather than signalled unverified
+            return
         if "stage.pid" in r.stdout:
             os.kill(pid, signal.SIGKILL)
 

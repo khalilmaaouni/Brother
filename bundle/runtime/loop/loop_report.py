@@ -305,14 +305,109 @@ def _pid_alive(pid):
     return True
 
 
-def run_summary(log_path, pid_alive=None):
-    """The summary of ONE driver run, from its log alone: a dict of log, window, landed (sorted unique sub unit ids
-    from LANDED lines), started, refused, alarm, state (one of STATES) and next_action. Only whole lines are read: a
-    last line with no newline is one the driver is still writing. Unreadable or startless is NO-DATA, never zero."""
+# A TRUTHFUL SUMMARY (R33, 2026-10-18): the summary carried no money at all, so an unreadable ledger could not be told
+# from a free night, and a FINISHED run that landed nothing still said "review". Unknown money is the word UNKNOWN,
+# never 0; a role whose cost was not reported is NOT_MEASURED, never 0.0; no landing, no review line.
+UNKNOWN = "UNKNOWN"
+NO_LANDING_ACTION = "nothing landed in this run, so there is nothing to look over: read the alarm and the log"
+MONEY_LEDGER_NAME = "openrouter-ledger.jsonl"     # <run dir>/money/<this>, the name proof_ledger.run_ledger_paths reads
+_MONEY_ROOT_LINE = re.compile(r"^MONEY ROOT (/.+?): ")
+
+
+def cash_line(money_path):
+    """"cash <usd> USD", the RECONCILE spend of one money ledger (money() above), or "cash UNKNOWN: <why>" when the
+    ledger is not named, absent, unreadable, not UTF-8, ends in a torn line, holds a line that is not a row, a cost
+    that is not a number, or an abandoned hold. Only a readable ledger answers a figure, and an empty one answers 0."""
+    def unknown(why):
+        return "cash %s: %s (source: %s)" % (UNKNOWN, why, money_path or "none")
+    if not isinstance(money_path, str) or not money_path:
+        return unknown("no money ledger is named for this run")
+    try:
+        with open(money_path, "rb") as fh:
+            lines = fh.read().decode("utf-8").split("\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        return unknown("the money ledger cannot be read (%s)" % type(exc).__name__)
+    if lines[-1].strip():
+        return unknown("the money ledger ends in a torn line")
+    found = []
+    for n, line in enumerate(lines[:-1], 1):
+        if not line.strip():
+            continue
+        try:
+            r = proof_ledger.loads(line)
+        except (ValueError, RecursionError):
+            return unknown("line %d of the money ledger does not parse" % n)
+        if not isinstance(r, dict):
+            return unknown("line %d of the money ledger is not a row" % n)
+        found.append(r)
+    mo = money(found)
+    if mo["unreadable"]:
+        return unknown("%d reconciled row(s) carry a cost that is not a number" % mo["unreadable"])
+    if mo["abandoned_calls"]:
+        return unknown("%d hold(s) were abandoned, so their real cost is not known" % mo["abandoned_calls"])
+    if not math.isfinite(mo["actual"]):
+        return unknown("the reconciled costs do not sum to a finite amount")
+    return "cash %.4f USD" % mo["actual"]
+
+
+def _adapter_cost(transport, result):
+    """One call's cost through its own transport adapter's cost(): a float, or NOT_MEASURED (None). Imported here, not
+    at the top: the bundled copy of this file ships without the adapters package, and only this reader needs it."""
+    import adapters as A
+    from adapters.bridge import BridgeAdapter
+    from adapters.claude import ClaudeAdapter
+    from adapters.codex import CodexAdapter
+    kind = A.adapter_for(transport).transport            # an unknown transport is refused here, by name
+    return {"bridge": BridgeAdapter, "claude": ClaudeAdapter, "codex": CodexAdapter}[kind]().cost(result)
+
+
+def role_costs(rows):
+    """One row per role, sorted by role: {role, calls, not_measured, cost_usd}. Each input row is {role, transport,
+    result}, costed by that transport's adapter (Claude and Codex alike). cost_usd is the sum when every call of the
+    role was measured, a priced zero staying 0.0, and None (NOT_MEASURED) when any call was not: an unreported, NaN,
+    malformed or unknown transport cost is never folded into 0.0."""
+    by = {}
+    for r in rows or []:
+        role = r.get("role") if isinstance(r, dict) else None
+        role = role if isinstance(role, str) and role.strip() else "(unnamed)"
+        try:
+            c = _adapter_cost(r.get("transport"), r.get("result"))
+        except Exception:  # noqa: BLE001  sbe: allow-silent a cost that cannot be read is counted NOT_MEASURED below, never 0.0
+            c = None
+        row = by.setdefault(role, {"role": role, "calls": 0, "not_measured": 0, "cost_usd": 0.0})
+        row["calls"] += 1
+        if c is None:
+            row["not_measured"] += 1
+        else:
+            row["cost_usd"] += c
+    out = [by[k] for k in sorted(by)]
+    for row in out:
+        if row["not_measured"]:
+            row["cost_usd"] = None
+    return out
+
+
+def next_action(state, landed):
+    """NEXT_ACTIONS[state] (an unknown state reads NO-DATA's), except that a run with no landed sub unit is never asked
+    for a review: there is nothing landed to look over."""
+    action = NEXT_ACTIONS.get(state, NEXT_ACTIONS["NO-DATA"])
+    if not landed and "review" in action.lower():
+        return NO_LANDING_ACTION
+    return action
+
+
+def run_summary(log_path, pid_alive=None, role_rows=None):
+    """The summary of ONE driver run: a dict of log, window, landed (sorted unique sub unit ids from LANDED lines),
+    started, refused, alarm, state (one of STATES) and next_action, all from the log alone; plus cash, read from the
+    money ledger under the one MONEY ROOT the log names (cash_line), and role_costs from role_rows (role_costs). Only
+    whole lines are read: a last line with no newline is one the driver is still writing. Unreadable or startless is
+    NO-DATA, never zero, and money never decides the state."""
     pid_alive = _pid_alive if pid_alive is None else pid_alive
     start, end, label = run_window(log_path)
     s = {"log": log_path, "window": label, "landed": [], "started": 0, "refused": {}, "alarm": "",
-         "state": "NO-DATA", "next_action": NEXT_ACTIONS["NO-DATA"]}
+         "state": "NO-DATA", "next_action": NEXT_ACTIONS["NO-DATA"], "money_ledger": None,
+         "cash": "cash %s: the run's log could not be read, so its money root is not known" % UNKNOWN,
+         "role_costs": role_costs(role_rows)}
     if start is None:
         return s
     try:
@@ -322,7 +417,11 @@ def run_summary(log_path, pid_alive=None):
         s["window"] = "%s (%s)" % (label, type(exc).__name__)
         return s
     landed, pid, ready, alarm_word, reason, seen_start = set(), None, False, "", "", False
+    roots = set()
     for line in lines:
+        m = _MONEY_ROOT_LINE.match(line)
+        if m:
+            roots.add(m.group(1))
         seen_start = seen_start or line.startswith("RUN START ")
         if line.startswith("RUN END ") and not seen_start:
             s["window"] = "%s: a RUN END line precedes the RUN START line, so this end is not this run's" % os.path.basename(log_path)
@@ -359,12 +458,22 @@ def run_summary(log_path, pid_alive=None):
     else:
         state = "WAITING"
     s["state"] = state
-    s["next_action"] = (reason or NEXT_ACTIONS[state]) if state == "BLOCKED_NEEDS_HUMAN" else NEXT_ACTIONS[state]
+    s["next_action"] = (reason or next_action(state, s["landed"])) if state == "BLOCKED_NEEDS_HUMAN" \
+        else next_action(state, s["landed"])
+    if len(roots) == 1:
+        s["money_ledger"] = os.path.join(roots.pop(), MONEY_LEDGER_NAME)
+        s["cash"] = cash_line(s["money_ledger"])
+    else:   # none: whose money is not said; several: the log mixes runs. Either way the spend is not known
+        s["cash"] = "cash %s: the log names %d money roots, not one (source: %s)" % (UNKNOWN, len(roots), log_path)
     return s
 
 
 def _summary_md(s):
     refused = ", ".join("%s %d" % kv for kv in sorted(s["refused"].items())) or "none"
+    cash = s["cash"] if s["cash"].startswith("cash %s" % UNKNOWN) else "%s (source: %s)" % (s["cash"], s["money_ledger"])
+    roles = "; ".join("%s %s over %d call(s)" % (r["role"], "NOT_MEASURED" if r["cost_usd"] is None
+                                                 else "%.4f USD" % r["cost_usd"], r["calls"]) for r in s["role_costs"]) \
+        or "NO-DATA: no per role cost rows reached this summary"
     return "\n".join([
         "# Run summary: %s" % os.path.basename(s["log"]),
         "state: %s" % s["state"],
@@ -374,7 +483,9 @@ def _summary_md(s):
         "started: %d" % s["started"],
         "refused: %s" % refused,
         "alarm: %s" % (s["alarm"] or "none"),
-        "source: %s (every figure above is read from this log alone)" % s["log"],
+        cash,
+        "role costs: %s" % roles,
+        "source: %s (every line above but cash and role costs is read from this log alone)" % s["log"],
     ]) + "\n"
 
 

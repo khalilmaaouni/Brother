@@ -206,6 +206,31 @@ instructions to the person.
 
 Every number the loop reports is read from a ledger or a log. A run that ends with nothing landed says so, with the refusal classes that stopped it; it never rounds silence up to progress.
 
+## The cut: the owner approves from the app
+
+Maintainer tooling, in a checkout of the Brother repository. A real cut waits
+for the owner, and the session never gives its answer. When the cut is ready
+to ask, run it once without `--approval`: with no terminal it pushes nothing
+and prints one `APP QUESTION` line naming the version and the full sha (all
+40 characters of the commit the cut will push). Relay that question word for
+word to the owner, in the Claude app or a browser; he answers with the six
+digit code from his phone authenticator. Run the verifier with his code at
+once, then pass the one line it prints, unchanged, to the cut (or to the cut
+driver, which passes it on) within 5 minutes:
+
+```bash
+brother-approve verify 1.2.3 <full sha> <his six digit code>
+python3 scripts/cut.py --version 1.2.3 --resume <full sha> --release-notes-file <body> --approval "<the printed line>"
+```
+
+Never compute, guess, store or reuse a code or a line. A line is used once;
+any refusal (the verifier, the sha, the version, the key id or the verifier
+build pinned on hub/main, a line older than 5 minutes, an unenrolled key)
+means nothing was pushed: say the refusal line as printed and ask the owner
+for a new code. Enrollment is the owner's own hand, once, in Terminal with
+Touch ID, from the CY1 enrollment page of the Brother repository. The
+terminal `y` still works for an owner at his own terminal.
+
 ## More detail: verbs, boundaries, handback, closing
 
 Read when the verb table, a boundary this router must never cross, the

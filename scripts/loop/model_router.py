@@ -47,7 +47,7 @@ usage:
   model_router.py --available                                probe what is reachable right now
   model_router.py --selftest
 """
-import json, os, re, shutil, subprocess, sys, tempfile, time
+import json, os, re, shlex, shutil, subprocess, sys, tempfile, time
 
 # ---------------------------------------------------------------- the registry
 # Each model advertises a machine readable contract. The router matches a task envelope against
@@ -206,7 +206,8 @@ def code_root():
     into, so code run from it is not the frozen candidate. BROTHER_CODE_ROOT names the frozen one.
     FAIL DIRECTION: a value that is set and is not an absolute directory is corrupt and refuses in
     every phase; in a proof phase an unset value refuses too, never a quiet fall back to the
-    landing tree. Only outside a proof, with nothing set, is the checkout the code root."""
+    landing tree. Outside a proof, with nothing set, a program loaded from a stamped bin runs from
+    the stamp's tree or refuses (stamp_root, C13); only an unstamped folder's code root is the checkout."""
     env = os.environ.get("BROTHER_CODE_ROOT")
     if env:
         if not (os.path.isabs(env) and os.path.isdir(env)):
@@ -214,7 +215,49 @@ def code_root():
         return env
     if os.environ.get("BROTHER_PROOF_PHASE"):
         raise Refused("a proof phase runs frozen code only: BROTHER_CODE_ROOT is not set")
-    return repo_root()
+    return stamp_root(os.path.dirname(os.path.abspath(__file__))) or repo_root()
+
+
+#: The file deploy_stamped.py writes beside the programs it deploys; its "source" key is the checkout they came from.
+DEPLOY_STAMP = ".deploy-stamp.json"
+
+
+def stamp_root(bin_dir):
+    """The source tree the deploy stamp in bin_dir records, or "" when bin_dir holds no stamp at all (C13).
+
+    A DEPLOYED PROGRAM RUNS FROM ITS OWN TREE, NEVER FROM THE CWD'S. Run by hand from another folder, the bin's code
+    root used to be the cwd's checkout (repo_root), so `python3 ~/.claude/bin/native_worker.py refresh` from an old
+    branch failed "no-answer (AttributeError)" on that branch's brother_paths (REGISTER C13). FAIL DIRECTION: a stamp
+    that is present and cannot be read (empty, torn, not JSON, not a mapping, no tree, a tree that is not an existing
+    absolute directory) refuses naming the folder to run from; it never falls back to the cwd. One read, so a stamp a
+    redeploy is rewriting reads whole or refuses. Keys other than "source" are ignored."""
+    path = os.path.join(bin_dir, DEPLOY_STAMP)
+    if not os.path.lexists(path):
+        return ""
+    redo = "run it from the checkout it was deployed from, or redeploy"
+    try:
+        with open(path, "rb") as fh:
+            doc = json.loads(fh.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise Refused("the deploy stamp %s cannot be read (%s): %s" % (path, type(exc).__name__, redo))
+    tree = doc.get("source") if isinstance(doc, dict) else None
+    if not isinstance(tree, str) or not tree:
+        raise Refused("the deploy stamp %s records no source tree: %s" % (path, redo))
+    if not os.path.isabs(tree) or not os.path.isdir(tree):   # isdir answers False for a NUL, a loop, a file
+        raise Refused("the deploy stamp %s names %r, not an existing absolute directory: run it from %s" % (path, tree, tree))
+    return tree
+
+
+def refresh_remedy(transport, folder):
+    """The one command that refreshes a pin's login, naming the folder it runs from: a claude pin runs the tree's own
+    native_worker refresh, a codex pin runs `codex login`. Refused for another transport or a relative folder."""
+    if not (isinstance(folder, str) and os.path.isabs(folder)):
+        raise Refused("a remedy names an absolute folder, got %r" % (folder,))
+    if transport == "claude":
+        return "python3 %s refresh" % shlex.quote(os.path.join(folder, "scripts", "loop", "native_worker.py"))
+    if transport == "codex":
+        return "codex login (then prepare again from %s)" % folder
+    raise Refused("no login refresh is known for the %r transport" % (transport,))
 
 
 def _registry_candidates():

@@ -53,8 +53,14 @@ def model(env=None):
     return value.strip() or "sonnet"
 
 
+LAST_REFUSAL = ""   # S2 round 2: the last plan() call's login refusal (loop_roles.login_refusal), "" when none
+
+
 def plan(spec_excerpt, files_excerpt, runners="none for this unit", runner=None, timeout=300, env=None):
-    """The plan headed 'BUILD PLAN (<model>, effort high):', or None. Never raises."""
+    """The plan headed 'BUILD PLAN (<model>, effort high):', or None. Never raises. A call refused the loop login also
+    leaves that refusal in LAST_REFUSAL (S2 round 2), so the unit runner can say why there is no plan."""
+    global LAST_REFUSAL
+    LAST_REFUSAL = ""
     try:
         try:
             screen = grade_build.brief_screen_mode() == "on"
@@ -74,7 +80,10 @@ def plan(spec_excerpt, files_excerpt, runners="none for this unit", runner=None,
                 on = loop_roles._breaker_on(dict(os.environ) if env is None else env)
                 chain = loop_roles.call_chain("planner", choice=who, env=env)[0] if on else [who]
                 if not chain: return None   # a refused roles file makes no call
-                a = M.call(prompt, "grade", R.PRIVATE, timeout=timeout, chain=chain) if on else M.call_one(who, prompt, "grade", R.PRIVATE, timeout=timeout)
+                # model_call.call answers (Attempt or None, every attempt); call_one one Attempt (side finding 5: the
+                # pair was read as an Attempt, so under BROTHER_BREAKER=on every paid plan was discarded)
+                a, tried = M.call(prompt, "grade", R.PRIVATE, timeout=timeout, chain=chain) if on else (lambda x: (x, [x]))(M.call_one(who, prompt, "grade", R.PRIVATE, timeout=timeout))
+                LAST_REFUSAL = "" if a is not None and a.ok else loop_roles.login_refusal(tried)
                 text = a.answer if a is not None else None
                 if a is not None: who = a.model   # the header names the model that answered
             finally:

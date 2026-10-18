@@ -201,9 +201,15 @@ class TestLedgerShape(unittest.TestCase):
         on the check's own summary line; the verdict and exit code stay."""
         out = tempfile.mkdtemp(prefix="required-fast-stdout-")
         stdout_path = os.path.join(out, "stdout.txt")
+        # The ledger's parent is a regular FILE, so the append itself is refused (append_ledger makes a missing
+        # parent since 2026-10, so a missing directory no longer refuses; until GL1 the refusal seen here was the
+        # cut_id one, which outside a cut no longer happens either).
+        blocker = os.path.join(out, "a-file-not-a-dir")
+        with open(blocker, "w") as handle:
+            handle.write("x")
         codes, _ = _run_harness(_script_text(), ["run_check probe-zero sh -c 'exit 0'"], preamble=[
             'ln -s "%s" scripts' % HERE,
-            'export GATE_LEDGER_PATH="%s"' % os.path.join(out, "no-such-dir", "gate-ledger.jsonl"),
+            'export GATE_LEDGER_PATH="%s"' % os.path.join(blocker, "gate-ledger.jsonl"),
         ], stdout_path=stdout_path)
         text = _read_bytes(stdout_path).decode("utf-8")
         self.assertIn("NO-DATA: gate ledger append refused", text)

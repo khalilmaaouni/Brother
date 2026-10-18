@@ -116,8 +116,20 @@ class Base(unittest.TestCase):
             json.dump({"value": value}, fh)
 
     def run_main(self, argv=(), code=b"123456\n", deadline_s=20, close_tty_after=None):
-        """main() at its entry point, the person's terminal a pty pair; code is typed in after the prompt appears."""
-        master, slave = pty.openpty()
+        """main() at its entry point, the person's terminal a pty pair; code is typed in after the prompt appears.
+        A host that refuses a pty (the closer's sandbox, "out of pty devices", 2026-10-18): main() hands the terminal
+        only to the sign in, so the sign in skips by name as NO-DATA and every other command runs for real, no tty."""
+        try:
+            master, slave = pty.openpty()
+        except OSError as exc:
+            if list(argv) == []:
+                self.skipTest("NO-DATA: host refuses a pseudo terminal, the sign in cannot run: %s" % exc)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = BL.main(list(argv), tty=None, deadline_s=deadline_s)
+            self.out, self.err = out.getvalue(), err.getvalue()
+            self.assertNoLeak()
+            return rc
         before = termios.tcgetattr(slave)
         out, err = io.StringIO(), io.StringIO()
 
@@ -165,7 +177,9 @@ class SignIn(Base):
     def test_a_good_sign_in_saves_the_exact_token_and_verifies_it(self):
         self.assertEqual(self.run_main(), 0)
         self.assertIn("saved and verified", self.out)
-        self.assertEqual(self.stored(), CANARY)
+        # the item is the exact token, then the time it was saved (1.1.6 S4): read_saved hands every caller the token
+        self.assertRegex(self.stored(), "^" + CANARY + r"\nsaved_at=[1-9][0-9]*$")
+        self.assertEqual(BL.read_saved(), CANARY.encode())
         with open(self.stdin_log, "rb") as fh:
             self.assertIn(CANARY.encode(), fh.read(), "the token travels to the reader on stdin")
         with open(self.argv_log) as fh:
@@ -271,9 +285,10 @@ class Status(Base):
     PRESENT = "Brother login is present and well formed in your login Keychain."
 
     def test_a_saved_login_reads_present_and_prints_nothing_else(self):
-        self.seed(CANARY)
+        self.seed(CANARY)   # an item saved before 1.1.6 S4: no saved_at, so its age is NO-DATA (test_login_expiry_ahead)
         self.assertEqual(self.run_main(argv=["status"]), 0)
-        self.assertEqual(self.out, self.PRESENT + "\n")
+        self.assertEqual(self.out, self.PRESENT + "\nBrother login age: NO-DATA (saved without a usable time). "
+                                                  "Run brother-login to record one.\n")
         self.assertEqual(self.err, "")
 
     def test_a_missing_item_names_the_one_line_fix(self):
@@ -374,7 +389,9 @@ class RealReader(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.root = tempfile.mkdtemp(prefix="brother-reader-", dir=os.path.expanduser("~/.claude/brother-scratch"))
+        scratch = os.path.expanduser("~/.claude/brother-scratch")
+        os.makedirs(scratch, exist_ok=True)   # an empty HOME (the closer's box) has none yet: build there, never ERROR
+        cls.root = tempfile.mkdtemp(prefix="brother-reader-", dir=scratch)
         cls.reader = os.path.join(cls.root, "bin", "brother-keychain")
         try:
             BL.build_reader(cls.reader)

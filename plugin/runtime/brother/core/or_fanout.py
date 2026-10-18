@@ -1076,7 +1076,36 @@ def _defer_term(signum, frame):
     openrouter_dispatch.STOPPED.set()
 
 
+def _take_hold():
+    """THE RUN'S LOGIN HOLDER (1.1.6 S2 round 2). A fan out given the holder (the unit runner's round with a Claude arm,
+    the probe stage) keeps it for its own Claude role calls (model_call._TokenLane, native_worker.login_child) and tells
+    no child: brother_login.take_hold takes the name from this process's environment and makes the descriptor close on
+    exec. brother_login is the pinned loop directory's copy, the one model_call is loaded from (_model_call), or
+    nothing: a foreign or missing copy leaves the environment as it came (the role call then asks by the name, and
+    Python spawns close the descriptor) and says so on stderr. Nothing happens when no holder is named."""
+    if not os.environ.get("BROTHER_LOGIN_HOLD_FD"):
+        return
+    import importlib
+    R = _router()
+    loop = os.path.dirname(os.path.realpath(R.__file__)) if R is not None else ""
+    want = os.path.realpath(os.path.join(loop, "brother_login.py")) if loop else ""
+    BL = sys.modules.get("brother_login")
+    with _MODEL_CALL_LOCK:
+        if BL is None and want and os.path.isfile(want):
+            sys.path.insert(0, loop)
+            try:
+                BL = importlib.import_module("brother_login")
+            finally:
+                sys.path.remove(loop)
+    if BL is None or not want or os.path.realpath(getattr(BL, "__file__", None) or "") != want:
+        print("or_fanout: the run's login holder is named, but the pinned brother_login could not be loaded; "
+              "its name is left as it came", file=sys.stderr)
+        return
+    BL.take_hold()
+
+
 def main(argv=None, workspace_root: str = None):
+    _take_hold()
     previous = signal.signal(signal.SIGTERM, _defer_term)
     try:
         code = _main(argv, workspace_root)

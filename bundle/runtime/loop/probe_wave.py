@@ -11,6 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop_hold as _LH  # noqa: E402
 if "--selftest" not in sys.argv: _LH.gate(where="probe_wave")
 BIN = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, BIN)
+# THE RUN'S LOGIN HOLDER (1.1.6 S2 round 2): taken before anything is started, so only the adversaries' fan out, whose
+# Claude seats (BROTHER_ADVERSARY_MODEL) ask it, is told it, with the descriptor (brother_login.take_hold); probe_brief
+# and the model written probes probe_build runs are never told a number they do not hold. Nothing when none is named.
+_HOLD_ENV, _HOLD_FDS = {}, ()
+if os.environ.get("BROTHER_LOGIN_HOLD_FD"):
+    import brother_login as _BL
+    _HOLD_ENV, _HOLD_FDS = _BL.take_hold()
 
 
 # PROBES ARE A PROPERTY OF THE SPEC, NOT OF THE ROUND (unit E2, owner approved 2026-09-22 03:07). Measured that night: the
@@ -197,7 +204,7 @@ if jobs:
     per_call = int(os.environ.get("PROBE_TIMEOUT", "600")) if str(os.environ.get("PROBE_TIMEOUT", "600")).isdigit() else 600
     proc = subprocess.Popen([sys.executable, "-m", "plugin.runtime.brother.core.or_fanout", jf, "--workers", "80", "--timeout", str(per_call), "--retries", "0",
                              "--results", jf.replace(".json", ".results.json")], stdout=open(jf.replace(".json", ".log"), "w"), stderr=subprocess.STDOUT,
-                            cwd=CODE_ROOT)
+                            cwd=CODE_ROOT, env=dict(os.environ, **_HOLD_ENV) if _HOLD_ENV else None, pass_fds=_HOLD_FDS)
     # WAIT FOR AN ANSWER PER LANE, NOT FOR EVERY CALL (A/B/C 2026-09-23: the probe stage was a median 605 s of a 15 minute
     # round; 24 of 56 calls stalled to 600 s while every success finished within 408 s). wave_wait ends the wave once each
     # lane has an answer and PROBE_ENOUGH seconds passed; a lane with none still holds it to the cap.

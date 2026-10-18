@@ -27,6 +27,25 @@ esac
 # tool run without -B wrote __pycache__ into the frozen bin, which the end freeze reads as drift, and the user site's
 # startup files ran before any tool. The pair launcher (proof_pair.sh) freezes the same two values.
 export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1
+# THE LOGIN HOLDER'S DESCRIPTOR REACHES TWO CHILDREN AND NO OTHER (1.1.6 S2 round 2, review claim 8). On the token lane
+# the run's holder (brother_login.py hold) starts this driver with one inherited socket, named by BROTHER_LOGIN_HOLD_FD.
+# bash hands every inherited descriptor to every child, so the worktree sentry and the ledger import, code run from the
+# landing tree, could ask the holder for the login. The name is taken here; every program that can run code (python3,
+# python, perl, bash, sh, git, osascript) starts through a function of its own name with the descriptor closed; only the
+# pass (run_pass) and the login refresh get both, through hold_give. bash 3.2 has no close on exec, and its `command`
+# builtin keeps a saved copy of a descriptor it closes, so each function runs its program by path. loop_pass.sh carries
+# the same lines for its one child that needs it (runner_pool.py). Off the token lane nothing is named and nothing changes.
+HOLD_N="${BROTHER_LOGIN_HOLD_FD:-}"
+unset BROTHER_LOGIN_HOLD_FD
+case "$HOLD_N" in
+  ''|*[!0-9]*) ;;   # none named, or a name that is not a number: handed on as it came, and the asker refuses it loudly
+  *) for _c in python3 python perl bash sh git osascript; do
+       _p=$(type -P "$_c") && eval "$_c() { \"$_p\" \"\$@\" $HOLD_N<&-; }"
+     done;;
+esac
+hold_give() {   # hold_give PROGRAM ARGS...: PROGRAM is told the holder and keeps its descriptor; plain when none is named
+  if [ -n "$HOLD_N" ]; then BROTHER_LOGIN_HOLD_FD="$HOLD_N" command "$@"; else command "$@"; fi
+}
 STOP_HHMM="${1:-18:00}"
 GAP="${2:-240}"
 # THE WORKTREE IS THE ONE THE DRIVER IS STARTED IN, or the one named in BROTHER_LAUNCH_WORKTREE; never a literal path.
@@ -551,11 +570,16 @@ subprocess.Popen(["bash", "-c", sys.argv[1]] + sys.argv[2:], stdin=subprocess.DE
   [ -n "${BROTHER_FINISHER_MODEL:-}" ] || FIN_SKIP="no finisher was chosen at intake"
   if [ -z "$FIN_SKIP" ]; then
     FIN_LOG="${LOG%.log}-finisher.log"
-    FIN_JOB='while kill -0 "$1" 2>/dev/null; do sleep 2; done; cd "$4" || exit 1; exec python3 -B "$3/finish_run.py" --model "$2" >> "$5" 2>&1'
+    # 1.1.6 S2: the finisher starts after this driver, and so the run's login holder, has ended, and this Popen closes
+    # the holder's descriptor: told its number it would refuse every Claude role, so it is never told (a fresh read).
+    # S2 round 1: on the token lane a login that cannot be read then refuses the finisher once (finish_run.py, exit 4)
+    # and any refusal or failure puts one line on the alarm ($6), so it is never news only in the finisher's own log.
+    # S2 round 3: the held run's mark (BROTHER_LOGIN_HELD_RUN) goes with the name, so the finisher's fresh read stands.
+    FIN_JOB='unset BROTHER_LOGIN_HOLD_FD BROTHER_LOGIN_HELD_RUN; while kill -0 "$1" 2>/dev/null; do sleep 2; done; cd "$4" || exit 1; python3 -B "$3/finish_run.py" --model "$2" >> "$5" 2>&1 || echo "finisher: refused or failed (exit $?); see $5" >> "$6"'
     if python3 -B -c 'import subprocess, sys
 subprocess.Popen(["bash", "-c", sys.argv[1]] + sys.argv[2:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                  stderr=subprocess.DEVNULL, start_new_session=True)' "$FIN_JOB" finisher "$$" "$BROTHER_FINISHER_MODEL" \
-         "$HOME/.claude/bin" "$WT" "$FIN_LOG" >/dev/null 2>&1; then
+         "$HOME/.claude/bin" "$WT" "$FIN_LOG" "$ALARM" >/dev/null 2>&1; then
       echo "finisher: scheduled with ${BROTHER_FINISHER_MODEL} once this driver exits, log ${FIN_LOG}" >> "$ALARM"
       echo "FINISHER scheduled: ${BROTHER_FINISHER_MODEL}, log ${FIN_LOG}"
     else
@@ -583,7 +607,7 @@ STOP_REQ=~/.claude/evidence/LOOP-STOP-REQUEST.txt
 # on as it did on every stop before this.
 PASS_PID=""
 run_pass() {                    # sets RC to the pass's exit code, read exactly as a foreground pass's
-  python3 -B -c 'import os, signal, sys
+  hold_give python3 -B -c 'import os, signal, sys
 os.setpgid(0, 0)
 signal.signal(signal.SIGINT, signal.SIG_DFL); signal.signal(signal.SIGQUIT, signal.SIG_DFL)
 os.execvp(sys.argv[1], sys.argv[1:])' bash ~/.claude/bin/loop_pass.sh >> "$LOG" 2>&1 &
@@ -879,7 +903,7 @@ while :; do
   # hold a pipe open and the wait would last as long as it does.
   REFRESH_OUT="${RUN_TMP}/refresh.out"
   REFRESH_BOUND=150; case "${BROTHER_REFRESH_BOUND_S:-}" in ''|*[!0-9]*|0*) ;; *) REFRESH_BOUND=$BROTHER_REFRESH_BOUND_S;; esac   # all digits and above 0, else 150: alarm 0 would cancel the bound
-  { perl -e 'alarm shift; exec @ARGV' "$REFRESH_BOUND" python3 -B ~/.claude/bin/native_worker.py refresh </dev/null >"$REFRESH_OUT" 2>/dev/null; } 2>/dev/null
+  { hold_give perl -e 'alarm shift; exec @ARGV' "$REFRESH_BOUND" python3 -B ~/.claude/bin/native_worker.py refresh </dev/null >"$REFRESH_OUT" 2>/dev/null; } 2>/dev/null
   REFRESH_RC=$?
   REFRESH_SAYS=$(grep -m1 '^REFRESH ' "$REFRESH_OUT" 2>/dev/null)
   [ "$REFRESH_RC" = 142 ] && REFRESH_SAYS="REFRESH FAILED timeout: no answer within ${REFRESH_BOUND} s"

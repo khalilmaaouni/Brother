@@ -162,6 +162,13 @@ def main(argv=None):
     ap.add_argument("--timeout", type=int, default=600)
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     args.out = os.path.abspath(args.out)   # the fan out runs in the code root, so every path it is handed is absolute
+    # THE RUN'S LOGIN HOLDER (1.1.6 S2 round 2): taken before anything is started, so only the adversaries' fan out is
+    # told it, with the descriptor when this process holds one (brother_login.take_hold); the brief writer and the model
+    # written probes probe_build runs never are. Nothing changes when no holder is named.
+    hold_env, hold_fds = {}, ()
+    if os.environ.get("BROTHER_LOGIN_HOLD_FD"):
+        import brother_login
+        hold_env, hold_fds = brother_login.take_hold()
     try:
         with open(PLAN, encoding="utf-8") as fh:
             plan = json.load(fh)
@@ -232,7 +239,8 @@ def main(argv=None):
     r = subprocess.run([sys.executable, "-m", "plugin.runtime.brother.core.or_fanout", jf,
                         "--workers", "40", "--retries", "1", "--timeout", str(args.timeout),
                         "--results", os.path.join(args.out, "results.json")],
-                       capture_output=True, text=True, timeout=args.timeout * 3, cwd=code_root)
+                       capture_output=True, text=True, timeout=args.timeout * 3, cwd=code_root,
+                       env=dict(os.environ, **hold_env) if hold_env else None, pass_fds=hold_fds)
     answered = round_answered(jobs)
     if not answered:
         # ZERO answers is NO-DATA for the round; a partial fan out is judged lane by lane on whoever answered (measured

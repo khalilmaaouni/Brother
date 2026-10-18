@@ -51,7 +51,7 @@ The generated `install_command_plugin` fact comes from the product-local compati
 For a pinned source copy, the clone sequence from `bm_project_facts.py` is:
 
 ```bash
-git clone --branch v1.1.5 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.6 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 python3 scripts/install.py
 ```

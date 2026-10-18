@@ -350,6 +350,7 @@ run_check "gen-board-self" python3 scripts/test_gen_command_center.py -v
 run_check "repeat-guard"   python3 tools/repeat-guard/test_repeat_guard.py
 run_check "l5b-audit-scanner" python3 -B -m unittest tools.l5b_audit.test_scanner
 run_check "c0-gate-ledger-order" python3 scripts/test_c0_gate_ledger_order.py
+run_check "gate-ledger-cut-id" python3 -B scripts/test_gate_ledger_cut_id.py
 run_check "supply-chain-gate-l5fb" python3 scripts/test_supply_chain_gate_l5fb.py
 run_check "l5b-audit-lint-rules" python3 -B -m unittest tools.l5b_audit.test_lint_rules
 run_check "l2-spec-self" python3 scripts/test_L2_spec.py
@@ -1139,6 +1140,13 @@ run_check "readme-honesty" python3 scripts/test_readme_honesty.py -v
 run_check "readme-commands-self" python3 scripts/test_readme_commands.py
 run_check "readme-commands-self-py39" /usr/bin/python3 -B scripts/test_readme_commands.py
 
+# C12.a, 1.1.6: every docs/releases/1.1.*.md from 1.1.0 upward has its
+# "## What changed in <version>" section in README.md (0.9.x and 1.0.x out
+# of scope by name), and the 1.1.4 section carries no dash, credit or
+# private term.
+run_check "readme-changed-sections-self" python3 -B scripts/test_readme_changed_sections.py
+run_check "readme-changed-sections-self-py39" /usr/bin/python3 -B scripts/test_readme_changed_sections.py
+
 # S23: docs/how-to/install-claude-code.md's real done_check, the guide's
 # commands run verbatim on a throwaway home against the published plugin,
 # each exit code quoted. Drives the parser and the NO-DATA path (the
@@ -1429,6 +1437,9 @@ fi
 # the live check needs a --tag and a public checkout, so it is self-test only
 # in the battery (the reproduce run is a release-time, argument-bearing act).
 run_check "reproduce-export-self"  python3 scripts/test_reproduce_export.py -v
+# C11: without --public the cut fetches its tag in its own worktree, and a
+# sentinel shared checkout under a fixture HOME sees no write.
+run_check "cut-never-writes-shared-checkout"  python3 -B scripts/test_cut_never_writes_shared_checkout.py
 # The japanese-threshold gate item's own evidence: runs BrotherModeUp's
 # bm_vault_jbench.py (VB2-03, PR 176) as a black-box subprocess and asserts
 # per-class floors plus an overall threshold. Exit 2 (NO-DATA) when the
@@ -1760,6 +1771,8 @@ run_check "verdict-matches-exit" python3 scripts/test_verdict_matches_exit.py
 run_check "provenance-self" python3 scripts/test_provenance.py
 run_check "land-batch-loop-guard-self" python3 scripts/test_land_batch_loop_guard.py
 run_check "land-batch-callsites-self" python3 scripts/test_land_batch_callsites.py
+run_check "required-fast-rows-self" python3 -B scripts/test_required_fast_rows.py
+run_check "hosts-116-self" python3 -B scripts/test_hosts_116.py
 run_check "status-word-readers-self" python3 scripts/test_status_word_readers.py
 run_check "loop-until-lifecycle-self" python3 scripts/test_loop_until_lifecycle.py
 run_check "brother-night-tick-self" python3 scripts/loop/brother_night_tick.py --selftest
@@ -1825,6 +1838,8 @@ run_check "cut-preflight-run-self" python3 -B scripts/test_cut_preflight_run.py
 run_check "cut-preflight-run-py39" /usr/bin/python3 -B scripts/test_cut_preflight_run.py
 run_check "export-tree-cache-self" python3 -B scripts/test_export_tree_cache.py
 run_check "export-tree-cache-py39" /usr/bin/python3 -B scripts/test_export_tree_cache.py
+run_check "export-scratch-root-self" python3 -B scripts/test_export_scratch_root.py
+run_check "export-scratch-root-py39" /usr/bin/python3 -B scripts/test_export_scratch_root.py
 run_check "cut-preflight-reuse-self" python3 -B scripts/test_cut_preflight_reuse.py
 run_check "cut-preflight-reuse-py39" /usr/bin/python3 -B scripts/test_cut_preflight_reuse.py
 run_check "cut-heartbeat-self" python3 -B scripts/test_cut_heartbeat.py
@@ -2508,12 +2523,20 @@ run_check "plan-115-self" python3 -B scripts/test_plan_115.py
 run_check "plan-115-py39" /usr/bin/python3 -B scripts/test_plan_115.py
 run_check "baseline-115-self" python3 -B scripts/test_baseline_115.py
 run_check "baseline-115-py39" /usr/bin/python3 -B scripts/test_baseline_115.py
+run_check "plan-116-self" python3 -B scripts/test_plan_116.py
+run_check "plan-116-py39" /usr/bin/python3 -B scripts/test_plan_116.py
+run_check "seed-117-self" python3 -B scripts/test_seed_117.py
+run_check "seed-117-py39" /usr/bin/python3 -B scripts/test_seed_117.py
+run_check "cut-app-approval-116-self" python3 -B scripts/test_cut_app_approval.py
+run_check "cut-app-approval-116-py39" /usr/bin/python3 -B scripts/test_cut_app_approval.py
 run_check "land-apply-baseline-115-self" python3 -B scripts/loop/test_land_apply_baseline.py
 run_check "land-apply-baseline-115-py39" /usr/bin/python3 -B scripts/loop/test_land_apply_baseline.py
 run_check "whole-gate-record-115-self" python3 -B scripts/test_whole_gate_record.py
 run_check "whole-gate-record-115-py39" /usr/bin/python3 -B scripts/test_whole_gate_record.py
 run_check "pre-push-whole-gate-115-self" python3 -B scripts/test_pre_push_whole_gate.py
 run_check "pre-push-whole-gate-115-py39" /usr/bin/python3 -B scripts/test_pre_push_whole_gate.py
+run_check "whole-gate-docs-delta-116-self" python3 -B scripts/test_whole_gate_docs_delta.py
+run_check "whole-gate-docs-delta-116-py39" /usr/bin/python3 -B scripts/test_whole_gate_docs_delta.py
 run_check "cut-driver-relay-115-self" python3 -B scripts/test_cut_driver_relay.py
 run_check "cut-driver-relay-115-py39" /usr/bin/python3 -B scripts/test_cut_driver_relay.py
 run_check "redeploy-check-115-self" python3 -B scripts/loop/test_redeploy_check.py
@@ -2534,6 +2557,8 @@ run_check "hermetic-export-lease-115-self" python3 -B scripts/test_hermetic_expo
 run_check "hermetic-export-lease-115-py39" /usr/bin/python3 -B scripts/test_hermetic_export_lease.py
 run_check "self-check-system-doc-115-self" python3 -B scripts/test_self_check_system_doc.py
 run_check "self-check-system-doc-115-py39" /usr/bin/python3 -B scripts/test_self_check_system_doc.py
+run_check "self-check-bundle-runtime-116-self" python3 -B scripts/test_self_check_bundle_runtime.py
+run_check "self-check-bundle-runtime-116-py39" /usr/bin/python3 -B scripts/test_self_check_bundle_runtime.py
 run_check "gate-pair-115-self" python3 -B scripts/test_gate_pair.py
 run_check "gate-pair-115-py39" /usr/bin/python3 -B scripts/test_gate_pair.py
 run_check "grade-build-env-115-self" python3 -B scripts/loop/test_grade_build_env_115.py
@@ -2546,6 +2571,8 @@ run_check "gate-order-child-115-self" python3 -B scripts/loop/test_gate_order_ch
 run_check "gate-order-child-115-py39" /usr/bin/python3 -B scripts/loop/test_gate_order_child.py
 run_check "donecheck-115-self" python3 -B scripts/test_donecheck_115.py
 run_check "donecheck-115-py39" /usr/bin/python3 -B scripts/test_donecheck_115.py
+run_check "donecheck-116-self" python3 -B scripts/test_donecheck_116.py
+run_check "donecheck-116-py39" /usr/bin/python3 -B scripts/test_donecheck_116.py
 run_check "usd-plan-share-115-self" python3 -B scripts/loop/test_usd_plan_share.py
 run_check "usd-plan-share-115-py39" /usr/bin/python3 -B scripts/loop/test_usd_plan_share.py
 run_check "runner-pool-note-attempt-115-self" python3 -B scripts/loop/test_runner_pool_note_attempt.py
@@ -2558,6 +2585,10 @@ run_check "run-summary-115-self" python3 -B scripts/loop/test_run_summary.py
 run_check "run-summary-115-py39" /usr/bin/python3 -B scripts/loop/test_run_summary.py
 run_check "run-summary-calls-115-self" python3 -B scripts/loop/test_run_summary_calls.py
 run_check "run-summary-calls-115-py39" /usr/bin/python3 -B scripts/loop/test_run_summary_calls.py
+run_check "run-summary-state-116-self" python3 -B scripts/loop/test_run_summary_state.py
+run_check "run-summary-state-116-py39" /usr/bin/python3 -B scripts/loop/test_run_summary_state.py
+run_check "grade-build-ignored-overwrite-116-self" python3 -B scripts/loop/test_grade_build_ignored_overwrite.py
+run_check "grade-build-ignored-overwrite-116-py39" /usr/bin/python3 -B scripts/loop/test_grade_build_ignored_overwrite.py
 run_check "loop-gap-wake-115-self" python3 -B scripts/loop/test_loop_gap_wake.py
 run_check "loop-gap-wake-115-py39" /usr/bin/python3 -B scripts/loop/test_loop_gap_wake.py
 run_check "loop-golden-journeys-115-self" python3 -B scripts/loop/test_loop_golden_journeys.py
@@ -2743,6 +2774,21 @@ run_check "native-worker" python3 -B scripts/loop/test_native_worker.py
 run_check "seat-fuzz" python3 -B scripts/loop/test_seat_fuzz.py
 run_check "seat-login-refresh" python3 -B scripts/loop/test_seat_login_refresh.py
 run_check "brother-login" python3 -B scripts/loop/test_brother_login.py
+run_check "brother-approve" python3 -B scripts/loop/test_brother_approve.py
+# the run holds its login once at launch, so a Keychain that locks after launch stops no seat (1.1.6 S1)
+run_check "login-hold" python3 -B scripts/loop/test_login_hold.py
+# status prints the saved login's age and warns ahead of its one year lifetime; Codex expiry reads NO-DATA (1.1.6 S4)
+run_check "login-expiry-ahead" python3 -B scripts/loop/test_login_expiry_ahead.py
+# the deployed bin resolves its own code root from the deploy stamp, or refuses naming the folder (1.1.6 C13)
+run_check "code-root-from-bin" python3 -B scripts/loop/test_code_root_from_bin.py
+# a signed out seat of either host refuses the arm with one notify row; a reboot is named at the next launch (1.1.6 S2)
+run_check "seat-gate-both-hosts" python3 -B scripts/loop/test_seat_gate_both_hosts.py
+# a seat lost mid run parks only its transport's units, notifies once, and an open codex role takes one (1.1.6 S3)
+run_check "seat-lost-parks-once" python3 -B scripts/loop/test_seat_lost_parks_once.py
+run_check "seat-gate-both-hosts-py39" /usr/bin/python3 -B scripts/loop/test_seat_gate_both_hosts.py
+# the token lane launch hands the login to a seat through every hop, and to nothing outside the chain (1.1.6 S2)
+run_check "login-hold-wired" python3 -B scripts/loop/test_login_hold_wired.py
+run_check "login-hold-wired-py39" /usr/bin/python3 -B scripts/loop/test_login_hold_wired.py
 run_check "unit-runner-native" python3 -B scripts/test_unit_runner_native.py
 run_check "grade-build-exact-apply" python3 -B scripts/loop/test_grade_build_exact_apply.py
 run_check "land-apply-self" python3 -B scripts/loop/test_land_apply.py
@@ -2964,6 +3010,10 @@ run_check "diag-notes-sources-self" python3 scripts/loop/test_diag_notes_sources
 run_check "loop-canary-fixtures-self" python3 scripts/loop/test_loop_canary_fixtures.py
 run_check "native-worker-profile-static-self" python3 scripts/loop/test_native_worker_profile_static.py
 run_check "sibling-new-self" python3 scripts/loop/test_sibling_new.py
+run_check "loop-phase-timings-self" python3 scripts/test_loop_phase_timings.py
+run_check "loop-budget-grant-self" python3 scripts/test_loop_budget_grant.py
+run_check "branch-precheck-self" python3 scripts/test_branch_precheck.py
+run_check "worktree-prune-self" python3 scripts/test_worktree_prune.py
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook
 # suites) is caught. See the snapshot comment above.

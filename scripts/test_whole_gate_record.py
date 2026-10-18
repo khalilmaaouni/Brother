@@ -103,11 +103,12 @@ class WholeGateRecord(unittest.TestCase):
 
     def test_every_row_passes_on_a_clean_tree_writes_one_record_keyed_by_tree_and_interpreter(self):
         repo = self.build(['run_check "a" true', 'run_check "b" true', 'run_check "c" true'])
-        # The real environment outside a cut: CUT_ID empty, which the per-row ledger append refuses on every row
-        # ("cut_id must be 32 hex"). The whole-gate record must still be written, and G11.b's reader must accept it.
+        # The real environment outside a cut: CUT_ID empty. Until GL1 the per-row ledger append refused it on every
+        # row ("cut_id must be 32 hex"); both writers now read it through gate_ledger.cut_id_or_none, so no row is
+        # refused. The whole-gate record must be written, and G11.b's reader must accept it.
         self.env["CUT_ID"] = ""
         code, out = self.run_gate(repo)
-        self.assertIn("cut_id must be 32 hex", out)          # the per-row refusal really happened in this run
+        self.assertNotIn("gate ledger append refused", out)  # GL1: a row outside a cut appends
         self.assertEqual(code, 0, out)
         self.assertIn("whole-gate: PASS record for tree", out)
         recs = self.records(repo)

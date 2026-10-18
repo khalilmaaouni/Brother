@@ -11,15 +11,17 @@ so the runner's own round logic treats it as a rejected round and moves on."""
 import os, signal, subprocess, sys, time
 
 
-def run_bounded(argv, stdout_path, timeout, env=None):
-    """Exit code of argv, 124 on timeout (group killed), 125 when it could not start. stdout+stderr go to the file."""
+def run_bounded(argv, stdout_path, timeout, env=None, pass_fds=()):
+    """Exit code of argv, 124 on timeout (group killed), 125 when it could not start. stdout+stderr go to the file.
+    pass_fds: descriptors the child keeps (the run's login holder for a Claude role host, S2 round 2); none by default."""
     try:
         out = open(stdout_path, "a")
     except OSError:
         return 125                                   # a log that cannot be opened is reported, never raised (audit 2026-09-22)
     try:
         with out:
-            proc = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, start_new_session=True, env=env)
+            proc = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, start_new_session=True, env=env,
+                                    pass_fds=tuple(pass_fds))
     except OSError as exc:
         try:
             with open(stdout_path, "a") as out2: out2.write("FAIL stage could not start: %s\n" % exc)

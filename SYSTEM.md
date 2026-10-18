@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 535 |
-| Parts with a purpose written in the file | 532 |
-| Parts with a suite wired into the battery | 467 |
-| Checks in the battery | 1273 |
+| Parts | 539 |
+| Parts with a purpose written in the file | 536 |
+| Parts with a suite wired into the battery | 470 |
+| Checks in the battery | 1310 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -72,6 +72,7 @@ undocumented corners looks complete and is not.
 | `brief_lint` | ORCH-26: an advisory linter over a dispatch brief, demoted on purpose. | `brief_lint-self` |
 | `brief_optimizer_score` | Mechanically score baseline + candidate_a + candidate_b of gen_briefs.py | **NO-DATA**, nothing in the battery runs it |
 | `brother_antigravity_hook` | Brother Antigravity hook adapter: translate Antigravity protojson | `brother-antigravity-hook-self`, `bundle-runtime-self` |
+| `brother_approve_build` | brother-approve build: compile the cut's approval verifier, sign it hardened, install it, and enroll once. | **NO-DATA**, nothing in the battery runs it |
 | `brother_install` | A2: one tool that takes a Codex home from an unknown state to Brother's | `adapter-conformance-self`, `brother-install-self`, `host-live-proof-self`, `keep-current-self`, `provider-adapter-self` |
 | `brother_pass` | One command a session with NO history can run: read the whole loop's state from disk and name the ONE next action. | `brother-pass-self` |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | `brother-paths-self` |
@@ -82,7 +83,7 @@ undocumented corners looks complete and is not.
 | `budget_floor` | the minimum token budget for one model call, split into the | `budget_floor-self` |
 | `build_pipeline` | M5.2 per lane pipeline. | `build-pipeline-self` |
 | `bundle_mirror` | check that bundle/runtime mirrors plugin/runtime byte for byte. | `bundle-mirror-self` |
-| `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `cut-ready-self`, `regen-generated-self` |
+| `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `cut-ready-self`, `regen-generated-self`, `self-check-staged-self` |
 | `burn_guard` | How many unit runners the REMAINING OpenRouter money funds until the stop hour, measured from the ledger. | `burn-guard-self` |
 | `c01_failfast_runner` | run ONE suite file exactly as `python3 <suite>` would, | `release-note-perturb`, `release-note-perturb-self` |
 | `canary_pipeline_smoke` | WBS-30.10 Canary Pipeline Smoke: prove the ten sibling mobile-path modules | `canary-pipeline-smoke-self` |
@@ -339,6 +340,8 @@ undocumented corners looks complete and is not.
 | `load_solpi_baseline` | Load and validate the pinned SoL-Pi baseline (unit L4.1, baseline lock). | **NO-DATA**, nothing in the battery runs it |
 | `loom` | the interaction layer above the receipt door. | `brother-run-self`, `loom-self` |
 | `loop_bridge` | the scheduler's ready set becomes real dispatches. | `acceptance-11-disk-reading`, `loop-bridge-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
+| `loop_budget_grant` | SG1.a: a loop launch writes its own time boxed spend guard project raise. | `loop-budget-grant-self` |
+| `loop_phase_timings` | PH1.a (docs/plan/specs/PH1.md): one row per phase of a loop night, read from the logs the tools already write. | `loop-phase-timings-self` |
 | `loop_preflight_lint` | Three failure classes that cost a whole day, each mechanically detectable in source before it can bite. | `preflight-lint` |
 | `machine_reservation` | ONE reservation for the whole machine, with a dead-holder expiry. | `machine_reservation-self` |
 | `make_benchmark_bundle` | Assembles a self-contained, reproducible bundle for the vault memory-ab / | `benchmark-bundle-self` |
@@ -557,6 +560,7 @@ undocumented corners looks complete and is not.
 | `wisdom_capture` | Turn a session's recorded lessons into vault notes the archive can search. | `wisdom-capture` |
 | `work_record` | an outcome somebody typed becomes units the scheduler can read. | `mutation-gate`, `mutation-gate-self`, `work-record-self` |
 | `worktree_lane` | one isolated tree per concurrent writer, or no concurrency at all. | `worktree-lane-self` |
+| `worktree_prune` | C1.a: list, and on --apply remove, the worktrees under ~/brother-wt that nobody needs any more. | `worktree-prune-self` |
 | `worktree_sentry` | Who owns this worktree, and did anything change that we did not do. | `worktree-sentry` |
 | `writable_root_lease` | one exclusive lease per writable root, and one more | `writable_root_lease-self` |
 | `write_ledger` | W1 of the readiness board: attribution at write time, and rescue before removal. | `write-ledger-self` |
@@ -596,6 +600,7 @@ undocumented corners looks complete and is not.
 - `repeat-guard`: `python3 tools/repeat-guard/test_repeat_guard.py`
 - `l5b-audit-scanner`: `python3 -B -m unittest tools.l5b_audit.test_scanner`
 - `c0-gate-ledger-order`: `python3 scripts/test_c0_gate_ledger_order.py`
+- `gate-ledger-cut-id`: `python3 -B scripts/test_gate_ledger_cut_id.py`
 - `supply-chain-gate-l5fb`: `python3 scripts/test_supply_chain_gate_l5fb.py`
 - `l5b-audit-lint-rules`: `python3 -B -m unittest tools.l5b_audit.test_lint_rules`
 - `l2-spec-self`: `python3 scripts/test_L2_spec.py`
@@ -822,6 +827,8 @@ undocumented corners looks complete and is not.
 - `readme-honesty`: `python3 scripts/test_readme_honesty.py -v`
 - `readme-commands-self`: `python3 scripts/test_readme_commands.py`
 - `readme-commands-self-py39`: `/usr/bin/python3 -B scripts/test_readme_commands.py`
+- `readme-changed-sections-self`: `python3 -B scripts/test_readme_changed_sections.py`
+- `readme-changed-sections-self-py39`: `/usr/bin/python3 -B scripts/test_readme_changed_sections.py`
 - `prove-guide-claude-self`: `python3 scripts/test_prove_guide_claude.py -v`
 - `edition-guard-self`: `python3 scripts/test_edition_guard.py -v`
 - `export-public-self`: `python3 scripts/test_export_public.py -v`
@@ -864,6 +871,7 @@ undocumented corners looks complete and is not.
 - `c01-k-guard-self`: `python3 -B -m unittest scripts.test_c01_k_guard.TestC01KGuard -v`
 - `release-note-perturb`: `python3 scripts/release_note_perturb.py`
 - `reproduce-export-self`: `python3 scripts/test_reproduce_export.py -v`
+- `cut-never-writes-shared-checkout`: `python3 -B scripts/test_cut_never_writes_shared_checkout.py`
 - `japanese-threshold`: `python3 scripts/test_japanese_threshold.py`
 - `japanese-threshold-self`: `python3 -m unittest -v scripts/test_test_japanese_threshold.py`
 - `japanese-mutations`: `python3 scripts/test_ja_mutations.py`
@@ -1020,6 +1028,8 @@ undocumented corners looks complete and is not.
 - `provenance-self`: `python3 scripts/test_provenance.py`
 - `land-batch-loop-guard-self`: `python3 scripts/test_land_batch_loop_guard.py`
 - `land-batch-callsites-self`: `python3 scripts/test_land_batch_callsites.py`
+- `required-fast-rows-self`: `python3 -B scripts/test_required_fast_rows.py`
+- `hosts-116-self`: `python3 -B scripts/test_hosts_116.py`
 - `status-word-readers-self`: `python3 scripts/test_status_word_readers.py`
 - `loop-until-lifecycle-self`: `python3 scripts/test_loop_until_lifecycle.py`
 - `brother-night-tick-self`: `python3 scripts/loop/brother_night_tick.py --selftest`
@@ -1085,6 +1095,8 @@ undocumented corners looks complete and is not.
 - `cut-preflight-run-py39`: `/usr/bin/python3 -B scripts/test_cut_preflight_run.py`
 - `export-tree-cache-self`: `python3 -B scripts/test_export_tree_cache.py`
 - `export-tree-cache-py39`: `/usr/bin/python3 -B scripts/test_export_tree_cache.py`
+- `export-scratch-root-self`: `python3 -B scripts/test_export_scratch_root.py`
+- `export-scratch-root-py39`: `/usr/bin/python3 -B scripts/test_export_scratch_root.py`
 - `cut-preflight-reuse-self`: `python3 -B scripts/test_cut_preflight_reuse.py`
 - `cut-preflight-reuse-py39`: `/usr/bin/python3 -B scripts/test_cut_preflight_reuse.py`
 - `cut-heartbeat-self`: `python3 -B scripts/test_cut_heartbeat.py`
@@ -1420,12 +1432,20 @@ undocumented corners looks complete and is not.
 - `plan-115-py39`: `/usr/bin/python3 -B scripts/test_plan_115.py`
 - `baseline-115-self`: `python3 -B scripts/test_baseline_115.py`
 - `baseline-115-py39`: `/usr/bin/python3 -B scripts/test_baseline_115.py`
+- `plan-116-self`: `python3 -B scripts/test_plan_116.py`
+- `plan-116-py39`: `/usr/bin/python3 -B scripts/test_plan_116.py`
+- `seed-117-self`: `python3 -B scripts/test_seed_117.py`
+- `seed-117-py39`: `/usr/bin/python3 -B scripts/test_seed_117.py`
+- `cut-app-approval-116-self`: `python3 -B scripts/test_cut_app_approval.py`
+- `cut-app-approval-116-py39`: `/usr/bin/python3 -B scripts/test_cut_app_approval.py`
 - `land-apply-baseline-115-self`: `python3 -B scripts/loop/test_land_apply_baseline.py`
 - `land-apply-baseline-115-py39`: `/usr/bin/python3 -B scripts/loop/test_land_apply_baseline.py`
 - `whole-gate-record-115-self`: `python3 -B scripts/test_whole_gate_record.py`
 - `whole-gate-record-115-py39`: `/usr/bin/python3 -B scripts/test_whole_gate_record.py`
 - `pre-push-whole-gate-115-self`: `python3 -B scripts/test_pre_push_whole_gate.py`
 - `pre-push-whole-gate-115-py39`: `/usr/bin/python3 -B scripts/test_pre_push_whole_gate.py`
+- `whole-gate-docs-delta-116-self`: `python3 -B scripts/test_whole_gate_docs_delta.py`
+- `whole-gate-docs-delta-116-py39`: `/usr/bin/python3 -B scripts/test_whole_gate_docs_delta.py`
 - `cut-driver-relay-115-self`: `python3 -B scripts/test_cut_driver_relay.py`
 - `cut-driver-relay-115-py39`: `/usr/bin/python3 -B scripts/test_cut_driver_relay.py`
 - `redeploy-check-115-self`: `python3 -B scripts/loop/test_redeploy_check.py`
@@ -1446,6 +1466,8 @@ undocumented corners looks complete and is not.
 - `hermetic-export-lease-115-py39`: `/usr/bin/python3 -B scripts/test_hermetic_export_lease.py`
 - `self-check-system-doc-115-self`: `python3 -B scripts/test_self_check_system_doc.py`
 - `self-check-system-doc-115-py39`: `/usr/bin/python3 -B scripts/test_self_check_system_doc.py`
+- `self-check-bundle-runtime-116-self`: `python3 -B scripts/test_self_check_bundle_runtime.py`
+- `self-check-bundle-runtime-116-py39`: `/usr/bin/python3 -B scripts/test_self_check_bundle_runtime.py`
 - `gate-pair-115-self`: `python3 -B scripts/test_gate_pair.py`
 - `gate-pair-115-py39`: `/usr/bin/python3 -B scripts/test_gate_pair.py`
 - `grade-build-env-115-self`: `python3 -B scripts/loop/test_grade_build_env_115.py`
@@ -1458,6 +1480,8 @@ undocumented corners looks complete and is not.
 - `gate-order-child-115-py39`: `/usr/bin/python3 -B scripts/loop/test_gate_order_child.py`
 - `donecheck-115-self`: `python3 -B scripts/test_donecheck_115.py`
 - `donecheck-115-py39`: `/usr/bin/python3 -B scripts/test_donecheck_115.py`
+- `donecheck-116-self`: `python3 -B scripts/test_donecheck_116.py`
+- `donecheck-116-py39`: `/usr/bin/python3 -B scripts/test_donecheck_116.py`
 - `usd-plan-share-115-self`: `python3 -B scripts/loop/test_usd_plan_share.py`
 - `usd-plan-share-115-py39`: `/usr/bin/python3 -B scripts/loop/test_usd_plan_share.py`
 - `runner-pool-note-attempt-115-self`: `python3 -B scripts/loop/test_runner_pool_note_attempt.py`
@@ -1470,6 +1494,10 @@ undocumented corners looks complete and is not.
 - `run-summary-115-py39`: `/usr/bin/python3 -B scripts/loop/test_run_summary.py`
 - `run-summary-calls-115-self`: `python3 -B scripts/loop/test_run_summary_calls.py`
 - `run-summary-calls-115-py39`: `/usr/bin/python3 -B scripts/loop/test_run_summary_calls.py`
+- `run-summary-state-116-self`: `python3 -B scripts/loop/test_run_summary_state.py`
+- `run-summary-state-116-py39`: `/usr/bin/python3 -B scripts/loop/test_run_summary_state.py`
+- `grade-build-ignored-overwrite-116-self`: `python3 -B scripts/loop/test_grade_build_ignored_overwrite.py`
+- `grade-build-ignored-overwrite-116-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_ignored_overwrite.py`
 - `loop-gap-wake-115-self`: `python3 -B scripts/loop/test_loop_gap_wake.py`
 - `loop-gap-wake-115-py39`: `/usr/bin/python3 -B scripts/loop/test_loop_gap_wake.py`
 - `loop-golden-journeys-115-self`: `python3 -B scripts/loop/test_loop_golden_journeys.py`
@@ -1643,6 +1671,15 @@ undocumented corners looks complete and is not.
 - `seat-fuzz`: `python3 -B scripts/loop/test_seat_fuzz.py`
 - `seat-login-refresh`: `python3 -B scripts/loop/test_seat_login_refresh.py`
 - `brother-login`: `python3 -B scripts/loop/test_brother_login.py`
+- `brother-approve`: `python3 -B scripts/loop/test_brother_approve.py`
+- `login-hold`: `python3 -B scripts/loop/test_login_hold.py`
+- `login-expiry-ahead`: `python3 -B scripts/loop/test_login_expiry_ahead.py`
+- `code-root-from-bin`: `python3 -B scripts/loop/test_code_root_from_bin.py`
+- `seat-gate-both-hosts`: `python3 -B scripts/loop/test_seat_gate_both_hosts.py`
+- `seat-lost-parks-once`: `python3 -B scripts/loop/test_seat_lost_parks_once.py`
+- `seat-gate-both-hosts-py39`: `/usr/bin/python3 -B scripts/loop/test_seat_gate_both_hosts.py`
+- `login-hold-wired`: `python3 -B scripts/loop/test_login_hold_wired.py`
+- `login-hold-wired-py39`: `/usr/bin/python3 -B scripts/loop/test_login_hold_wired.py`
 - `unit-runner-native`: `python3 -B scripts/test_unit_runner_native.py`
 - `grade-build-exact-apply`: `python3 -B scripts/loop/test_grade_build_exact_apply.py`
 - `land-apply-self`: `python3 -B scripts/loop/test_land_apply.py`
@@ -1836,5 +1873,9 @@ undocumented corners looks complete and is not.
 - `loop-canary-fixtures-self`: `python3 scripts/loop/test_loop_canary_fixtures.py`
 - `native-worker-profile-static-self`: `python3 scripts/loop/test_native_worker_profile_static.py`
 - `sibling-new-self`: `python3 scripts/loop/test_sibling_new.py`
+- `loop-phase-timings-self`: `python3 scripts/test_loop_phase_timings.py`
+- `loop-budget-grant-self`: `python3 scripts/test_loop_budget_grant.py`
+- `branch-precheck-self`: `python3 scripts/test_branch_precheck.py`
+- `worktree-prune-self`: `python3 scripts/test_worktree_prune.py`
 - `real-logs-unchanged`: `python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"`
 

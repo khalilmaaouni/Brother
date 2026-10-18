@@ -256,12 +256,17 @@ def main():
     #     the push each hand a refused batch to retry_alone, and both unwinds quarantine only blame_paths. A batch left
     #     unretried came back every pass and ended run B UNPRODUCTIVE; a batch quarantined whole lost innocent builds.
     n_retry = sum(1 for n in ast.walk(main_fn) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "retry_alone")
-    # six since D13 (2026-10-02): the pre-commit hook's check runs from the frozen copy as its own refusal point
-    case("retry_alone is called at all six refusal points in main()", n_retry == 6, "calls=%d" % n_retry)
+    # six since D13 (2026-10-02): the pre-commit hook's check runs from the frozen copy as its own refusal point;
+    # eight since 1.1.5 (2026-10-16): the unowned loop file refusal and the loop change hold (LOOP_HELD) each retry alone
+    case("retry_alone is called at all eight refusal points in main()", n_retry == 8, "calls=%d" % n_retry)
     unwinds = [n for n in ast.walk(main_fn) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "unwind"]
-    case("every unwind in main() quarantines only blame_paths(...)",
-         len(unwinds) == 2 and all(len(u.args) > 2 and getattr(getattr(u.args[2], "func", None), "id", "") == "blame_paths"
-                                   for u in unwinds), "unwinds=%d" % len(unwinds))
+    quarantine = [u.args[2] if len(u.args) > 2 else None for u in unwinds]
+    blamed = sum(1 for q in quarantine if getattr(getattr(q, "func", None), "id", "") == "blame_paths")
+    held = sum(1 for q in quarantine if isinstance(q, ast.List) and not q.elts)
+    # the loop change hold unwinds and quarantines NOTHING: a held build is not guilty, it waits for the session's gate
+    case("every unwind in main() quarantines only blame_paths(...), the loop hold quarantines nothing",
+         len(unwinds) == 3 and blamed == 2 and held == 1,
+         "unwinds=%d blame_paths=%d empty=%d" % (len(unwinds), blamed, held))
 
     # 3. BEHAVIOURAL, step_refusal at the fetch call site. The remote url is broken so `git fetch hub`
     #    exits non zero; everything preflight looks at is good, so this fixture can only be refused here.

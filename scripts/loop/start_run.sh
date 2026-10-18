@@ -24,6 +24,24 @@
 #   5 DRIVER   started detached in its own session with the intake's launch-env.sh sourced (the plain driver does not
 #              source it), BROTHER_LAUNCH_WORKTREE set to this checkout, and its first line awaited: LOOP UNTIL, or the
 #              refusal it printed instead.
+# 1.1.6 S2, BOTH HOSTS AND THE NIGHT'S REBOOT:
+#   3d BOOT    kern.boottime (seam START_RUN_BOOTTIME) is compared with the newest earlier launch record
+#              ($STARTS/launch-<stamp>.json, written at STARTED): a different one prints "the last run <stamp> was
+#              killed by a reboot at <boot>" and marks that record delivered=false. Reporting: it never refuses.
+#   4b SEAT    a SEAT line from the intake (a signed out claude or codex, loop_intake.seat_gate) refuses the arm after
+#              one row per transport in notify-request.jsonl (loop_intake.notify_once) under $BROTHER_RUN_DIR when the
+#              launch names one, else $STARTS/notify-<day>.
+#   4c GRANT   with --grant-tokens N only: scripts/loop_budget_grant.py (seam START_RUN_GRANT) writes the spend guard
+#              project raise for this checkout's slug until the deadline, with the intake record's owner_words; a
+#              refused grant refuses the start.
+#   5b HOLDER  on the loop token lane (BROTHER_LOOP_TOKEN=on) only, the holder STARTS the driver (S1.b): step 5 runs
+#              brother_login.py hold --run $STARTS/hold-<stamp> -- <the driver command> (seam START_RUN_HOLDER), which
+#              reads the login once and hands the driver the one end of an unnamed socket pair (pass_fds); runner_pool
+#              and unit_runner hand it on to native_worker, whose seats ask it (brother_login.take_hold). The holder's pid
+#              goes in <the driver's run folder>/login-holder.pid, which stop_loop.sh reaps. A holder that cannot read
+#              the login starts nothing and the launch refuses [holder]. Off the token lane step 5 is unchanged.
+#              The driver leads its own process group on both lanes (the holder starts it in its own session,
+#              S2 round 1), so stop_loop.sh signals the driver's whole group, a foreground refresh included.
 # The run's money is its own: the driver writes <run dir>/money/run-budget.json from the intake's budget and deadline,
 # and nothing carries over from another run. Seams for tests: START_RUN_INTAKE, START_RUN_DRIVER, START_RUN_EVIDENCE.
 # TIMING (LA1.a, reporting only): one `TIME <step> <seconds>` line per step, then, after STARTED, the wait for the
@@ -31,6 +49,7 @@
 # past START_RUN_SLOW_S (default 180), with $STARTS/timing-<stamp>.json. A timer or writer failure prints a
 # `TIME NO-DATA` line and never changes a verdict or an exit code; no timing line starts with REFUSED or NO-DATA.
 set -u
+LDIR=$(cd "$(dirname "$0")" && pwd)   # this file's own folder, absolute before the cd into the checkout (1.1.6 S2)
 clock_now() { local n; n=$(date +%s 2>/dev/null) || n=""; case "$n" in ''|*[!0-9]*) n="";; esac; echo "$n"; }
 T0=$(clock_now); TPREV=$T0; TSTEPS=""
 tmark() {
@@ -73,10 +92,10 @@ on_signal() {
 }
 release_lock() { [ -z "$LOCK" ] || { rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null; }; }
 trap 'exec >/dev/null 2>&1' PIPE
-DEADLINE=""; BUDGET=""; SCOPE="."; PLAN=""; GAP=240; FIN=opus55; DOC=astra; CHK=sonnet; WRK=""; ADV=""; WORDS=""; DRY=0
+DEADLINE=""; BUDGET=""; SCOPE="."; PLAN=""; GAP=240; FIN=opus55; DOC=astra; CHK=sonnet; WRK=""; ADV=""; WORDS=""; DRY=0; GRANT=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --deadline|--budget-usd|--gap|--scope|--plan|--finisher|--documenter|--checker|--worker|--adversary|--lift-hold)
+    --deadline|--budget-usd|--gap|--scope|--plan|--finisher|--documenter|--checker|--worker|--adversary|--lift-hold|--grant-tokens)
       [ $# -ge 2 ] || refuse args "$1 needs a value"
       # 2026-10-11: an empty value, or one that is itself an option, is not a value: `--lift-hold --dry` used to store
       # "--dry" as the owner's words, lift the hold and start a REAL run, and an unquoted empty variable did the same.
@@ -98,6 +117,7 @@ while [ $# -gt 0 ]; do
     --worker) WRK=$2; shift 2;;        # 2026-09-30: the worker pin (BROTHER_PIN_MODEL) as an intake choice, e.g. opus55 for a Claude only run
     --adversary) ADV=$2; shift 2;;     # 2026-09-30: the adversary seats (BROTHER_ADVERSARY_MODEL) as an intake choice
     --lift-hold) WORDS=$2; shift 2;;
+    --grant-tokens) GRANT=$2; shift 2;;   # 1.1.6 S2: the spend guard raise, in tokens; loop_budget_grant.py validates it
     --dry) DRY=1; shift;;
     *) refuse args "unknown argument $1 (see the usage at the top of this file)";;
   esac
@@ -268,6 +288,26 @@ esac
 tmark live 2>/dev/null || true
 if [ "$DRY" = 1 ]; then echo "DRY  would prepare the intake and start: loop_until.sh $DEADLINE $GAP"; exit 0; fi
 
+# 3d BOOT (1.1.6 S2): a reboot kills the driver and nothing relaunches it, so the next launch is where it is seen.
+BOOT=${START_RUN_BOOTTIME-$(sysctl -n kern.boottime 2>/dev/null)}
+BOOT=$(printf '%s' "$BOOT" | tr -d '\n' | cut -c1-200)
+[ -n "$BOOT" ] || echo "NO-DATA boot: kern.boottime could not be read; this launch's record carries no boot time"
+python3 -B - "$LDIR" "$STARTS" "$BOOT" <<'PY' 2>/dev/null || echo "NO-DATA reboot: the earlier launch records could not be compared"
+import sys
+sys.path.insert(0, sys.argv[1])
+import loop_intake as LI
+note = LI.reboot_note(sys.argv[2], sys.argv[3])
+if note:
+    print("NOTE reboot: %s" % note)
+if "killed by a reboot" in note:
+    try:
+        path = LI.mark_not_delivered(sys.argv[2], sys.argv[3])
+        if path:
+            print("NOTE reboot: that run is not counted delivered (%s)" % path)
+    except OSError as exc:
+        print("WARN reboot: that run could not be marked not delivered (%s)" % type(exc).__name__)
+PY
+
 # 3c LIFT, the last step before the intake (which reads a hold as HELD); every later refusal moves both back.
 if [ "$LIFT" = 1 ]; then
   # 2026-10-11 review F5: the record is written with noclobber, so a launch in the same second refuses here instead of
@@ -303,8 +343,63 @@ tmark intake 2>/dev/null || true
 # READY is printed before the record is written and can still be overturned (loop_intake.py appends INTAKE NOT READY
 # or INTAKE NO-DATA after it), so the verdict is the exit code AND the last INTAKE line, never the first READY.
 ILAST=$(grep '^INTAKE ' "$ILOG" | tail -1)
+# 4b SEAT (1.1.6 S2): a signed out seat of either host refuses the arm, after one notify row per transport.
+SEATS=$(grep '^SEAT ' "$ILOG")
+if [ -n "$SEATS" ]; then
+  NDIR=${BROTHER_RUN_DIR:-$STARTS/notify-$(date +%Y%m%d)}
+  NOTE=$(python3 -B - "$LDIR" "$NDIR" "$SEATS" <<'PY' 2>&1
+import os, sys, time
+sys.path.insert(0, sys.argv[1])
+import loop_intake as LI
+d = sys.argv[2]
+try:
+    os.makedirs(d, exist_ok=True)
+    said = []
+    for line in sys.argv[3].splitlines():
+        parts = line.split()
+        if len(parts) > 1:
+            wrote = LI.notify_once(d, "seat-signed-out:" + parts[1], "seat", time.time())
+            said.append("%s %s" % (parts[1], "row written" if wrote else "row already there"))
+    print("notify %s: %s" % (os.path.join(d, LI.NOTIFY_FILE), ", ".join(said)))
+except OSError as exc:
+    print("the notify row could not be written under %s (%s)" % (d, type(exc).__name__))
+PY
+)
+  refuse seat "$(printf '%s' "$SEATS" | sed 's/^SEAT *//' | tr '\n' ' ' | cut -c1-400)(${NOTE:-the notify step gave no answer}; full: $ILOG)"
+fi
 [ "$IRC" = 0 ] && [ "$ILAST" = "INTAKE READY" ] || refuse intake "not READY (exit $IRC, last verdict: ${ILAST:-none}); the refusing rows: $(grep -E '^(REFUSED|NO-DATA)' "$ILOG" | head -3 | cut -c1-160 | tr '\n' ' ') (full: $ILOG)"
 echo "OK   intake READY ($ILOG)"
+
+# 4c GRANT (1.1.6 S2, SG1): only when asked. The words are the intake record's own owner_words; the seats are new
+# sessions, so the spend at grant is zero; the slug is the spend guard's project_slug rule for this checkout.
+if [ -n "$GRANT" ]; then
+  GOUT=$(python3 -B - "$EVD/loop-intake/CURRENT.json" "$DEADLINE" "$REPO" "$GRANT" "${START_RUN_GRANT:-$LDIR/../loop_budget_grant.py}" <<'PY' 2>&1
+import datetime, json, subprocess, sys
+rec_path, deadline, repo, tokens, tool = sys.argv[1:6]
+try:
+    with open(rec_path, encoding="utf-8") as fh:
+        words = json.load(fh).get("owner_words")
+except (OSError, ValueError, AttributeError) as exc:
+    print("the intake record %s cannot be read (%s)" % (rec_path, type(exc).__name__))
+    sys.exit(2)
+if not isinstance(words, str) or not words.strip():
+    print("the intake record %s carries no owner_words" % rec_path)
+    sys.exit(2)
+until = datetime.datetime.strptime(deadline, "%Y-%m-%d %H:%M").astimezone().isoformat(timespec="seconds")
+slug = repo.replace("/", "-").replace(".", "-")
+try:
+    r = subprocess.run([sys.executable, "-B", tool, "--words", words, "--tokens", tokens, "--until", until,
+                        "--project-slug", slug, "--spent", "0"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, universal_newlines=True, timeout=120)
+except (OSError, subprocess.SubprocessError) as exc:
+    print("%s could not run (%s)" % (tool, type(exc).__name__))
+    sys.exit(2)
+print(" ".join(r.stdout.split())[-400:])
+sys.exit(r.returncode)
+PY
+  ) || refuse grant "loop_budget_grant did not write the raise: $(printf '%s' "$GOUT" | tr '\n' ' ' | cut -c1-300)"
+  echo "OK   grant  $GOUT"
+fi
 
 # THE FIRST CLAIMED UNIT AND THE TIMING RECORD (LA1.a). The loop log's name carries only %Y%m%d-%H%M, so a relaunch in
 # the same minute appends to an older run's log: only a START row after the LAST `RUN START` line is this launch's.
@@ -369,35 +464,103 @@ except Exception as exc:   # sbe: allow-silent reporting only: a timer that brea
 PY
 }
 
+# 5b HOLDER (1.1.6 S2): the driver's run folder is found by the DRIVER's pid, DPID (loop_until.sh names it
+# run-<stamp>-<its pid>, and the spawner execs the driver). Off the token lane DPID is PID; on it PID is the holder,
+# which started the driver as its one child. Prints the folder and returns 0, or prints why and returns 1.
+run_folder() {
+  local runs="${BROTHER_RUNS_ROOT:-$HOME/.claude/evidence/loop-runs}" run="" d
+  for d in "$runs"/run-*-"$DPID"; do
+    [ -d "$d" ] || continue
+    [ -z "$run" ] || { echo "two run folders end in the driver pid $DPID under $runs"; return 1; }
+    run=$d
+  done
+  [ -n "$run" ] || { echo "no run folder of the driver pid $DPID under $runs"; return 1; }
+  echo "$run"
+}
+# The holder is already serving: it read the login before it started the driver, DPID (its one child, named by the
+# caller in this shell, since start_holder runs in a command substitution). This writes the holder's pid and run folder
+# into the driver's run folder for stop_loop.sh. Prints the OK line and returns 0, or prints why and returns 1 (the
+# caller stops the holder's whole group and refuses).
+start_holder() {
+  if [ -z "$HOLDER" ]; then echo "OK   holder not started: BROTHER_LOOP_TOKEN is not on, so no seat reads the saved login"; return 0; fi
+  local run
+  case "$DPID" in ''|*[!0-9]*|"$PID") echo "the login holder pid $PID names no one driver it started ('$(echo $DPID)')"; return 1;; esac
+  run=$(run_folder) || { echo "$run"; return 1; }
+  { printf '%s %s\n' "$PID" "$HDIR" > "$run/login-holder.pid.tmp" && mv -f "$run/login-holder.pid.tmp" "$run/login-holder.pid"; } 2>/dev/null \
+    || { echo "the holder's pid file under $run could not be written"; return 1; }
+  kill -0 "$PID" 2>/dev/null || { echo "the login holder pid $PID ended before its pid file was written"; return 1; }
+  echo "OK   holder pid $PID serves the run's login for $run (it started the driver pid $DPID)"
+}
+# The launch record (1.1.6 S2): written at STARTED, read by the next launch's boot step. Reporting only.
+launch_record() {
+  local run
+  run=$(run_folder 2>/dev/null) || run=""
+  python3 -B - "$STARTS/launch-$STAMP.json" "$STAMP" "$BOOT" "$DPID" "$run" <<'PY' || echo "WARN boot: the launch record could not be written; the next launch cannot tell a reboot"
+import json, os, sys, time
+path, stamp, boot, pid, run = sys.argv[1:6]
+rec = {"schema": "launch-v1", "stamp": stamp, "boot": boot or None, "driver_pid": int(pid), "run_dir": run or None,
+       "at": time.time()}
+tmp = "%s.tmp-%d" % (path, os.getpid())
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(rec, fh, indent=1)
+os.replace(tmp, path)
+PY
+}
+
 # 5 DRIVER, detached, with the intake's launch settings
 DRIVER=${START_RUN_DRIVER:-$HOME/.claude/bin/loop_until.sh}
 ENVF="$EVD/loop-intake/launch-env.sh"
 [ -f "$ENVF" ] || refuse driver "no $ENVF: the intake did not write its launch settings"
 DLOG="$STARTS/driver-$STAMP.log"
-PID=$(python3 - "$DRIVER" "$ENVF" "$DEADLINE" "$GAP" "$DLOG" "$REPO" <<'PY'
+HOLDER=""; HDIR=""
+if [ "${BROTHER_LOOP_TOKEN:-}" = on ]; then   # 5b: the holder starts the driver; its run folder is this launch's own
+  HOLDER=${START_RUN_HOLDER:-$LDIR/brother_login.py}
+  HDIR="$STARTS/hold-$STAMP"
+  [ -f "$HOLDER" ] || refuse holder "no login holder $HOLDER"
+  mkdir "$HDIR" 2>/dev/null || refuse holder "cannot create the holder's run folder $HDIR"
+fi
+PID=$(python3 - "$DRIVER" "$ENVF" "$DEADLINE" "$GAP" "$DLOG" "$REPO" "$HOLDER" "$HDIR" <<'PY'
 import os, subprocess, sys
-driver, envf, deadline, gap, log, repo = sys.argv[1:7]
+driver, envf, deadline, gap, log, repo, holder, hdir = sys.argv[1:9]
 out = open(log, "ab")
-cmd = ["bash", "-c", 'source "$1" && exec bash "$2" "$3" "$4"', "start_run", envf, driver, deadline, gap]
+run = ["bash", driver, deadline, gap]
+if holder:   # 1.1.6 S2: the holder reads the login once, then starts the driver with the descriptor (S1.b)
+    run = [sys.executable, "-B", holder, "hold", "--run", hdir, "--"] + run
+# S2 round 3 (DeepSeek lane L4): the launch settings are sourced BEFORE the holder starts, so no child of that prelude
+# ever holds its descriptor; the prelude's bash then becomes the holder (or the driver) by exec, the same pid.
+cmd = ["bash", "-c", 'source "$1" && shift && exec "$@"', "start_run", envf] + run
 p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=repo,
                      start_new_session=True, env=dict(os.environ, BROTHER_LAUNCH_WORKTREE=repo))
 print(p.pid)
 PY
 ) || refuse driver "the driver could not be spawned"
+DPID=$PID
 for _ in $(seq 1 120); do
   if grep -q '^LOOP UNTIL' "$DLOG" 2>/dev/null; then
     tmark driver 2>/dev/null || true
-    echo "OK   driver pid $PID: $(grep -m1 '^LOOP UNTIL' "$DLOG")"
+    [ -z "$HOLDER" ] || DPID=$(pgrep -P "$PID" 2>/dev/null)   # the holder's one child is the driver
+    if ! HOUT=$(start_holder); then
+      kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null
+      # S2 round 1: the holder starts the driver in the driver's own group, so that group is stopped too
+      case "$DPID" in ''|*[!0-9]*|"$PID") ;; *) kill -TERM -- "-$DPID" 2>/dev/null || kill -TERM "$DPID" 2>/dev/null;; esac
+      refuse holder "$HOUT; the run's process group $PID was stopped"
+    fi
+    echo "$HOUT"
+    echo "OK   driver pid $DPID: $(grep -m1 '^LOOP UNTIL' "$DLOG")"
     echo "STARTED: watch with: tail -f $(grep -m1 '^LOOP UNTIL' "$DLOG" | sed -n 's/.*| log //p')"
     trap - INT TERM HUP ALRM QUIT
     # the held copies stay on purpose after a successful start; the mark tells the next launch they are not leftovers
     if [ -n "$SAVED" ]; then
       { : > "$SAVED/.started"; } 2>/dev/null || echo "WARN controls: could not mark $SAVED as a successful start; the next start refuses on it until $SAVED/.started exists"
     fi
+    launch_record
     launch_timing "$(grep -m1 '^LOOP UNTIL' "$DLOG" | sed -n 's/.*| log //p')" || true
     exit 0
   fi
-  if ! kill -0 "$PID" 2>/dev/null; then refuse driver "the driver exited before it started: $(tail -3 "$DLOG" | tr '\n' ' ' | cut -c1-240)"; fi
+  if ! kill -0 "$PID" 2>/dev/null; then
+    [ -z "$HOLDER" ] || refuse holder "the login holder (which starts the driver) exited before LOOP UNTIL: $(tail -3 "$DLOG" | tr '\n' ' ' | cut -c1-240)"
+    refuse driver "the driver exited before it started: $(tail -3 "$DLOG" | tr '\n' ' ' | cut -c1-240)"
+  fi
   sleep 1
 done
 refuse driver "no LOOP UNTIL line within 120 s; the driver pid $PID is still alive and honours the restored hold, stop it with scripts/loop/stop_loop.sh --reason (log $DLOG)"

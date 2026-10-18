@@ -10,7 +10,7 @@ The target is one installable plugin tree and one plugin on each host: Claude Co
 
 ## Version numbers
 
-Current version: 1.1.5.
+Current version: 1.1.6.
 
 Copy any version figure in this document from the updated version source manifests in the same change that updates those manifests. The manifests are the source of truth for version numbers.
 

@@ -344,6 +344,22 @@ class AnUnusableLoginRefusesBeforeAnythingRuns(_Fixture, unittest.TestCase):
         self.assertRefusedBeforeAnything(a, "brother_login.py")
         self.assertNotIn("not-a-token", a.detail)
 
+    def test_G_HOLDER_an_ended_holder_names_a_restart_never_a_sign_in(self):
+        """S2 round 2 (review claim 3 part c): the run's login holder has ended, so the role's refusal names the
+        holder's remedy (restart the run) and never tells the owner to sign in again, which would not help. The words
+        loop_roles.login_refusal lifts out of a role's attempts are in it. Red at d98550631: "sign in once"."""
+        import socket
+        import loop_roles
+        mine, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.addCleanup(theirs.close)
+        mine.close()
+        os.environ[BL.HOLD_FD_VAR] = str(theirs.fileno())
+        a = self.call()
+        self.assertRefusedBeforeAnything(a, BL.HOLDER_ENDED, "Restart the run", loop_roles.ROLE_LOGIN_REFUSED)
+        self.assertNotIn("sign in once", a.detail)
+        self.assertEqual(loop_roles.login_refusal([a]), a.detail)
+        self.assertEqual(self.reader_asks(), 0, "the Keychain is never read behind an ended holder")
+
     def test_G_READER_a_refusal_never_runs_the_call_on_the_interactive_login(self):
         """Running on the interactive login would be a plain call: some runner would see an argv that is not sandboxed."""
         BL.READER = os.path.join(self.tmp, "no-such-reader")

@@ -290,7 +290,8 @@ def deploy(source, target):
         raise RuntimeError("staged canary refused; target unchanged")
     deployed = {"bin/" + name: sha for name, sha in hashes(stage).items()}
     deployed.update(hashes(plan))
-    write_json(stage / STAMP, {"schema": 1, "revision": revision, "source_dirty": dirty,
+    # "source" is the checkout the bin's programs resolve their code root from (model_router.stamp_root, C13)
+    write_json(stage / STAMP, {"schema": 1, "revision": revision, "source_dirty": dirty, "source": str(source),
                               "files": deployed, "rollback": str(backup)})
     work = run / "publish"
     work.mkdir()

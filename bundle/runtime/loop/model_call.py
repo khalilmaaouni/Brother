@@ -847,8 +847,12 @@ class _TokenLane(object):
             try:
                 env, self.fd = NW.login_child()
             except NW.BL.Failure as exc:
-                raise R.Refused("BROTHER_LOOP_TOKEN is on but the loop login cannot be used (%s); sign in once with "
-                                "python3 scripts/loop/brother_login.py" % exc)
+                # the remedy matches the refusal (S2 round 2): a refusal of the run's login holder (it ended, refused or
+                # broke off) is cured by restarting the run, as HOLDER_ENDED says; anything else by signing in once
+                why = str(exc)
+                fix = ("restart the run (start_run.sh) to read it again" if "login holder" in why or "held login" in why
+                       else "sign in once with python3 scripts/loop/brother_login.py")
+                raise R.Refused("BROTHER_LOOP_TOKEN is on but the loop login cannot be used (%s); %s" % (why, fix))
             self.argv = NW.role_argv(argv, self.wt, env)
         except BaseException:
             self.close()

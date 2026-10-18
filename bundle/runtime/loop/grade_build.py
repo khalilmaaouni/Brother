@@ -1323,6 +1323,63 @@ def outside_scratch(before, now):
     return sorted(out)
 
 
+IGNORED_UNREADABLE = "<ignored state unreadable>"
+UNREADABLE_FILE = "<unreadable>"
+
+
+def ignored_hashes(root: str, runner=None) -> dict:
+    """{path: sha256} of every ignored regular file in root outside SCRATCH_DIR/ (S22): git status never shows an ignored
+    file as modified, so outside_scratch cannot see one rewritten. A symlink is recorded by its target text, never
+    followed; a file that cannot be read is UNREADABLE_FILE; a git call that fails answers None."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        r = (runner or subprocess.run)(["git", "-C", root, "status", "--porcelain", "-z", "--untracked-files=all",
+                                        "--ignored"], capture_output=True, env=env)
+    except OSError:  # sbe: allow-silent a git that cannot start answers None, which ignored_overwrites reads as IGNORED_UNREADABLE and holds the build: an unread tree is never a clean one
+        return None
+    if r.returncode != 0:
+        return None
+    paths, skip = [], False
+    for entry in r.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if skip:
+            skip = False; continue
+        skip = entry[:2].strip()[:1] in ("R", "C")   # a rename or copy carries its source path as the next field
+        if entry.startswith("!! "):
+            paths.append(entry[3:])
+    out = {}
+    for rel in paths:
+        if rel.split("/", 1)[0].casefold() == SCRATCH_DIR:
+            continue
+        full = os.path.join(root, rel)
+        rels = [rel]
+        if rel.endswith("/") and not os.path.islink(full.rstrip("/")):   # a collapsed directory: its files, links unfollowed
+            rels = [os.path.relpath(os.path.join(d, f), root) for d, _, fs in os.walk(full) for f in fs]
+        for one in rels:
+            p = os.path.join(root, one)
+            try:
+                if os.path.islink(p):
+                    out[one] = "symlink:" + os.readlink(p)
+                elif os.path.isfile(p):
+                    h = hashlib.sha256()
+                    with open(p, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(1 << 20), b""):   # a 2 GB file is hashed in chunks
+                            h.update(chunk)
+                    out[one] = h.hexdigest()
+            except OSError:
+                out[one] = UNREADABLE_FILE
+    return out
+
+
+def ignored_overwrites(before: dict, after: dict, declared: set) -> list:
+    """Sorted paths present in both whose hash differs (or could not be read) and that the build does not declare. Either
+    side not a dict answers [IGNORED_UNREADABLE]: an unread tree is never a clean one. A created or deleted ignored file
+    is outside this scan (outside_scratch names a created one)."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return [IGNORED_UNREADABLE]
+    return sorted(p for p in set(before) & set(after) if p not in declared
+                  and (before[p] != after[p] or UNREADABLE_FILE in (before[p], after[p])))
+
+
 def run(root, cmds, python=None, guard=None, own=None, load=FAKE_HIGH_LOAD):
     """(worst exit, tail, [(cmd, exit, output)], moved) over cmds, each run sandboxed with its own HOME and TMPDIR.
 
@@ -1643,6 +1700,7 @@ def _main():
             reasons.append("%d patch problems" % len(p1))
         green_state = tree_state(r1)   # what the build itself put in the tree, before any run: every mutation is undone to this
         pre_writes = tree_writes(r1)   # C21: the scratch scan's before, ignored paths included
+        pre_ignored = ignored_hashes(r1)   # S22: the bytes of every ignored file already there, which status cannot see change
         fp1 = fingerprint(r1, own_paths(r1, (build.get("edits") or []) + (build.get("tests") or [])))
         green = 1
         if not tampered:
@@ -1706,6 +1764,16 @@ def _main():
                 say("SCRATCH            wrote outside %s/: %s" % (SCRATCH_DIR, ", ".join(strays[:10])))
                 reasons.append("a test run wrote outside the scratch root %s/ (its HOME and TMPDIR): %s"
                                % (SCRATCH_DIR, ", ".join(strays[:10])))
+            # S22: a rewrite of an ignored file that was already there is invisible to status; its bytes are compared
+            over = ignored_overwrites(pre_ignored, ignored_hashes(r1), set(fp1))
+            if over == [IGNORED_UNREADABLE]:
+                say("IGNORED            NO-DATA: git could not list the sandbox's ignored files, so rewrites of them were not checked")
+                reasons.append("cannot prove the run left pre existing ignored files alone: ignored files were not checked")
+                nodata.append(reasons[-1])
+            elif over:
+                say("IGNORED            rewrote a pre existing ignored file: %s" % ", ".join(over[:10]))
+                reasons.append("a test run rewrote a pre existing ignored file the build does not declare: %s"
+                               % ", ".join(over[:10]))
         # 3. each mutation on top of the patched tree must turn it red.
         #
         # SHORT CIRCUITED WHEN THE TESTS ALREADY PASS WITHOUT THE CODE, and the argument is about MEANING before

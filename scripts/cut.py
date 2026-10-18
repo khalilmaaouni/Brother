@@ -2076,12 +2076,14 @@ def _remote_tag_exists(tag, remote=None, root=None, runner=None,
 
 def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
               own_uuid=None, resume_sha=None, heartbeat=None,
-              notes_file=None, notes_sha256=None):
+              notes_file=None, notes_sha256=None, approved_sha=""):
     """Everything between the claim and the release of the fence. Returns
     (exit_code, evidence_or_None, park_note): evidence only when the tag
     was pushed and reproduced. `heartbeat` (R3) is threaded through every
     long step so the fence's own liveness evidence stays fresh for as long
-    as this process actually runs."""
+    as this process actually runs. `approved_sha` (CY1.b) is the commit an
+    already checked --approval line names: it answers the question only
+    when it is the commit the chain left, and is never asked."""
     # RC1.b2: a --resume cut covered by a rehearsal record reuses its rows
     reuse, reuse_path, why = reuse_record(root, version, resume_sha, runner)
     print("REUSE: %s" % reuse_path if reuse is not None
@@ -2145,7 +2147,19 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         print("refused before the question, nothing pushed: %s" % reason)
         return EXIT_REFUSED, None, (
             "refused before the question: %s" % reason)
-    if not yes:
+    if approved_sha:
+        # CY1.b: the owner's app line was checked before the fence; it
+        # approves exactly one commit, and a chain that moved HEAD (a cut
+        # without --resume commits its bump) is not that commit.
+        if approved_sha != cut_head:
+            print("refused before the push, nothing pushed: the approval "
+                  "names %s, the chain left %s" % (approved_sha, cut_head))
+            return EXIT_REFUSED, None, (
+                "refused at the question: the approval names %s, not %s"
+                % (approved_sha, cut_head))
+        print("approved from the app for v%s at %s, rehearsed by %s; %s"
+              % (version, cut_head, record, APPROVAL_RESIDUAL))
+    elif not yes:
         try:
             answer = ask(question_text(version, cut_head, record,
                                        release_clause))
@@ -2333,6 +2347,8 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
                       "<sha256 of that body>"))))
         print(gh_note)
     evidence = "cut %s pushed: %s" % (version, ", ".join(passed))
+    if approved_sha:
+        evidence += "; approved from the app (%s)" % APPROVAL_RESIDUAL
     if force is not None:
         evidence += "; forced over live fences: %s" % force
     if gh_note:
@@ -2550,6 +2566,181 @@ def question_text(version, head, rehearsal, release_clause):
     return ("Approve cut v%s at commit %s, rehearsed by %s: push tag v%s, "
             "%s? [y/N] " % (version, head, rehearsal, version,
                             release_clause))
+
+
+# CY1.b: the owner approves from the Claude app or a browser with a code from
+# his phone; `brother-approve verify VERSION SHA CODE` prints one line and
+# `--approval LINE` hands it to the cut. The verifier is found under the
+# account's own home from the password database, never $HOME, so a session
+# cannot point the cut at a verifier of its own by changing one variable.
+# Residual, stated: the same user can still replace the file itself.
+def _account_home():
+    try:
+        import pwd  # inside: a host without it still imports cut.py
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except Exception:  # noqa: BLE001 - no account home: a path that is absent
+        return "/nonexistent"
+
+
+APPROVE_BIN = os.path.join(_account_home(), ".claude", "bin", "brother-approve")
+APPROVE_TIMEOUT_S = 30
+# CY1.c F6: the pin is read from the owner merged copy on hub/main, never from
+# the tree a session edits; a tree copy that differs is refused by name.
+APPROVER_KEY_REL = "docs/plan/APPROVER-KEY.json"
+APPROVER_KEY_REF = "hub/main"
+# CY1.c F3: a line is good for five minutes from the start of its code's 30 s
+# step; the residual every receipt of an app approved cut states.
+APPROVAL_STEP_S = 30
+APPROVAL_MAX_AGE_S = 300
+APPROVAL_RESIDUAL = ("residual: the owner's code is a relayed 30 second single "
+                     "use code; the session that relays it could spend it only "
+                     "on this version and this commit, within 5 minutes")
+APPROVAL_RE = re.compile(r"cy1\.approval\.1 ([0-9]+\.[0-9]+\.[0-9]+) "
+                         r"([0-9a-f]{40}) ([0-9]{1,12}) ([0-9a-f]{16,64}) "
+                         r"([0-9a-f]{32,128})")
+KEY_ID_RE = re.compile(r"[0-9a-f]{16,64}")
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def app_question_text(version, sha):
+    """The one question the session relays to the owner in the app or a
+    browser: the version and the full commit, or what it needs to name them."""
+    if not (isinstance(version, str) and CUT_VERSION_RE.fullmatch(version)
+            and isinstance(sha, str) and CR.SHA_RE.fullmatch(sha)):
+        return ("APP QUESTION: needs --version X.Y.Z and --resume with the "
+                "full 40 hex commit; nothing is asked without both")
+    return ("APP QUESTION (relay it word for word): Approve cut v%s at commit "
+            "%s? Reply with the six digit code from your authenticator app. "
+            "It approves this version and this commit only, once, for 5 "
+            "minutes." % (version, sha))
+
+
+def parse_pin(text):
+    """(key_id, verifier_sha256) from an APPROVER-KEY.json text, each '' when
+    absent, not text, not hex or NOT-ENROLLED (the cut refuses either)."""
+    try:
+        data = json.loads(text)
+    except Exception:  # noqa: BLE001 - anything unparseable pins nothing
+        return "", ""
+    if not isinstance(data, dict):
+        return "", ""
+    key, sha = data.get("key_id"), data.get("verifier_sha256")
+    key = key if isinstance(key, str) and KEY_ID_RE.fullmatch(key) else ""
+    sha = sha if isinstance(sha, str) and SHA256_RE.fullmatch(sha) else ""
+    return key, sha
+
+
+def approver_pin(root, runner=None):
+    """(key_id, verifier_sha256, refusal) read from hub/main's
+    APPROVER-KEY.json by `git show`. No copy there is NO-DATA naming the one
+    owner step that fixes it; a tree copy that differs from it, a missing key
+    id or a missing verifier sha256 refuses."""
+    proc = _run(["git", "show", "%s:%s" % (APPROVER_KEY_REF, APPROVER_KEY_REL)],
+                root, runner)
+    hub = proc.stdout if proc.returncode == 0 else ""
+    if not isinstance(hub, str) or not hub.strip():
+        return "", "", (
+            "NO-DATA: %s carries no %s yet (git show exit %s): the owner "
+            "merges the pull request that carries his enrolled key, then "
+            "gives a new code" % (APPROVER_KEY_REF, APPROVER_KEY_REL,
+                                  proc.returncode))
+    try:
+        with open(os.path.join(root, APPROVER_KEY_REL), encoding="utf-8") as fh:
+            here = fh.read()
+    except Exception:  # noqa: BLE001 - an unreadable copy is not hub's copy
+        here = None
+    if here != hub:
+        return "", "", (
+            "NO-DATA: %s in this tree differs from %s's (or is missing); the "
+            "pin is read from the owner merged copy only: git checkout %s -- "
+            "%s" % (APPROVER_KEY_REL, APPROVER_KEY_REF, APPROVER_KEY_REF,
+                    APPROVER_KEY_REL))
+    key, sha = parse_pin(hub)
+    if not key or not sha:
+        return "", "", (
+            "NO-DATA: no enrolled key id and verifier sha256 are pinned in "
+            "%s:%s (NOT-ENROLLED or unreadable); the owner enrolls "
+            "(docs/plan/specs/1.1.6/CY1-ENROLL.md) and merges the pin"
+            % (APPROVER_KEY_REF, APPROVER_KEY_REL))
+    return key, sha, ""
+
+
+def _sha256_file(path):
+    """The sha256 of the file's bytes, or '' when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except Exception:  # noqa: BLE001 - unreadable is no identity
+        return ""
+
+
+def _approve_check(line):
+    """The verifier's exit code for `brother-approve check`: the line on
+    stdin (never argv, which every process can read), no shell,
+    APPROVE_TIMEOUT_S at most (read at call time)."""
+    return subprocess.run([APPROVE_BIN, "check"], input=line, text=True,
+                          capture_output=True,
+                          timeout=APPROVE_TIMEOUT_S).returncode
+
+
+def approval_refusal(line, version, head, root, runner=None, check=None,
+                     now=None):
+    """'' only when `line` is `cy1.approval.1 VERSION SHA STEP KEYID HMAC`
+    with VERSION the cut version, SHA equal to `head` (40 hex), STEP no more
+    than APPROVAL_MAX_AGE_S old and not in the future, KEYID equal to the key
+    id pinned on hub/main, the verifier file's sha256 equal to the one pinned
+    there, and `check(line)` (default: the verifier, which spends the line,
+    so it runs last) answers the int 0. Anything else, a raising or silent
+    verifier included, is the refusal in words, which never carries the line
+    or an exception's text."""
+    if not isinstance(line, str) or not line.strip():
+        return "NO-DATA: --approval needs the one line brother-approve printed"
+    m = APPROVAL_RE.fullmatch(line)
+    if not m:
+        return ("NO-DATA: the approval line is not cy1.approval.1 VERSION SHA "
+                "STEP KEYID HMAC; ask the owner for a new code")
+    l_version, l_sha, l_step, l_key, _hmac = m.groups()
+    if l_version != version:
+        return ("NO-DATA: the approval names v%s, this cut is v%s"
+                % (l_version, version))
+    if not isinstance(head, str) or not CR.SHA_RE.fullmatch(head) \
+            or l_sha != head:
+        return ("NO-DATA: the approval names commit %s, HEAD is %s"
+                % (l_sha, head if isinstance(head, str) and head
+                   else "unreadable"))
+    started = int(l_step) * APPROVAL_STEP_S
+    now = time.time() if now is None else now
+    if started > now:
+        return ("NO-DATA: the approval's code step starts in the future; ask "
+                "the owner for a new code")
+    if now - started > APPROVAL_MAX_AGE_S:
+        return ("NO-DATA: the approval is older than %d minutes; ask the owner "
+                "for a new code" % (APPROVAL_MAX_AGE_S // 60))
+    pinned, pinned_sha, why = approver_pin(root, runner)
+    if why:
+        return why
+    if l_key != pinned:
+        return ("NO-DATA: the approval was made by key %s, the pinned key is "
+                "%s" % (l_key, pinned))
+    actual = _sha256_file(APPROVE_BIN)
+    if actual != pinned_sha:
+        return ("NO-DATA: the verifier %s is not the build pinned on %s "
+                "(sha256 %s, pinned %s); nothing pushed"
+                % (APPROVE_BIN, APPROVER_KEY_REF, actual or "unreadable",
+                   pinned_sha))
+    try:
+        rc = (check or _approve_check)(line)
+    except Exception as exc:  # noqa: BLE001 - a silent verifier refuses
+        # the type only: an exception's text can carry the line (CY1.c F4)
+        return ("NO-DATA: the approval could not be checked (%s); the line "
+                "counts as spent: ask the owner for a new code; nothing "
+                "pushed" % type(exc).__name__)
+    if type(rc) is not int or rc != 0:
+        return ("NO-DATA: the approval line was refused by the verifier "
+                "(exit %s): never issued, already used, or for another "
+                "commit; ask the owner for a new code"
+                % (rc if type(rc) is int else type(rc).__name__))
+    return ""
 
 
 def remote_write_tail(text):
@@ -2784,7 +2975,8 @@ def cut_gates(root, version, resume_sha=None, remote="", runner=None,
 
 
 def cut_mode(root, version, bm, paths, force, yes, ask, runner=None,
-             resume_sha=None, notes_file=None, notes_sha256=None):
+             resume_sha=None, notes_file=None, notes_sha256=None,
+             approved_sha=""):
     refusal = cut_gates(root, version, resume_sha=resume_sha, runner=runner)
     if refusal:
         # CV1.a: refused before anything is claimed, parked or written.
@@ -2850,7 +3042,8 @@ def cut_mode(root, version, bm, paths, force, yes, ask, runner=None,
                                          resume_sha=resume_sha,
                                          heartbeat=heartbeat,
                                          notes_file=notes_file,
-                                         notes_sha256=notes_sha256)
+                                         notes_sha256=notes_sha256,
+                                         approved_sha=approved_sha)
     except KeyboardInterrupt:
         code, evidence, note = 130, None, "interrupted mid-chain"
         print("interrupted")
@@ -3759,6 +3952,16 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
                           "one answer is typed on the owner's terminal; "
                           "accepted and unused with --check or --shadow, "
                           "which push nothing and never ask")
+    ap.add_argument("--approval", metavar="LINE", action="append",
+                     default=None,
+                     help="CY1.b: a real cut's answer from the app: the one "
+                          "line `brother-approve verify VERSION SHA CODE` "
+                          "printed for the owner's six digit code; checked "
+                          "by `brother-approve check`, bound to this "
+                          "version, HEAD and the key id pinned in "
+                          "docs/plan/APPROVER-KEY.json; replaces the "
+                          "terminal question, never with --check, --shadow, "
+                          "--finish-release, --yes or --answer-file")
     ap.add_argument("--release-notes-file", metavar="PATH", default=None,
                      help="R4: the body file for `gh release create "
                           "--notes-file`, run only after a successful push. "
@@ -3814,6 +4017,19 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     if refusal:
         print(refusal)
         return EXIT_NODATA
+    # CY1.b: one app line, for a real cut only, and never beside another
+    # answer: a dry run would spend the line, --yes and an answer file are
+    # other answers.
+    if args.approval is not None:
+        if len(args.approval) != 1:
+            print("NO-DATA: one --approval line, not %d" % len(args.approval))
+            return EXIT_NODATA
+        if args.check or args.shadow or args.finish_release is not None \
+                or args.yes or args.answer_file is not None:
+            print("NO-DATA: --approval answers a real cut only, and alone: "
+                  "not with --check, --shadow, --finish-release, --yes or "
+                  "--answer-file")
+            return EXIT_NODATA
     if args.local and (not args.check or args.resume is not None):
         print("NO-DATA: --local only means something with --check, and not "
               "with --resume")
@@ -3839,10 +4055,14 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     # CV1.e: a real cut takes no answer file and reads its one answer from
     # the owner's terminal; --check (the dry run) pushes nothing and never
     # asks, so the rehearsal's own --check without a terminal still runs.
-    refusal = answer_file_refusal(args.answer_file, args.check,
-                                  _stdin_is_tty())
+    refusal = "" if args.approval is not None else answer_file_refusal(
+        args.answer_file, args.check, _stdin_is_tty())
     if refusal:
         print(refusal)
+        if args.answer_file is None:
+            # CY1.c F3: no terminal, so the owner answers from the app; the
+            # question names the version and the exact commit
+            print(app_question_text(args.version, args.resume))
         return EXIT_NODATA
     notes_file = args.release_notes_file
     notes_sha256 = None
@@ -3941,9 +4161,24 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
         return check_mode(root, version, bm, paths, args.force_conflicts,
                           runner, notes_file=notes_file,
                           full_chain=args.full_chain, local=args.local)
+    approved_sha = ""
+    if args.approval is not None:
+        # CY1.b: checked before the fence, so a refused line claims nothing;
+        # the verifier spends it, and run_chain still requires the commit it
+        # names to be the one the chain leaves and the rehearsal covers.
+        proc = _run(["git", "rev-parse", "HEAD"], root, runner)
+        head = (proc.stdout or "").strip() if proc.returncode == 0 else ""
+        refusal = approval_refusal(args.approval[0], version, head, root,
+                                   runner)
+        if refusal:
+            print(refusal)
+            return EXIT_NODATA
+        approved_sha = head
+        print("approval line checked for v%s at %s" % (version, head))
     return cut_mode(root, version, bm, paths, args.force_conflicts,
                     args.yes, ask, runner, resume_sha=args.resume,
-                    notes_file=notes_file, notes_sha256=notes_sha256)
+                    notes_file=notes_file, notes_sha256=notes_sha256,
+                    approved_sha=approved_sha)
 
 
 if __name__ == "__main__":

@@ -320,6 +320,132 @@ def parked_fact(word, unit_id, spec_path=None):
     return fact
 
 
+# A SEAT LOST MID RUN PARKS ONLY ITS TRANSPORT'S UNITS, AND SAYS SO ONCE (1.1.6 S3). Until S3 a lost Claude login parked
+# every unit one CONFIG_WAIT at a time, whatever host would build it, and nobody was told. A sub unit's transport is its
+# building role's: the role in loop-roles.json whose optional "builds" list names the sub unit or its unit, else
+# "worker"; that role's setting (else its default) names a registry model, whose row names the transport. Anything
+# unreadable answers "", and "" PARKS whenever any seat is lost: an unknown transport never runs (fail direction).
+KNOWN_TRANSPORTS = ("bridge", "codex", "claude")   # model_router.KNOWN_TRANSPORTS; the S3 suite holds the two equal
+CONTENT_ORDER = {"public": 0, "internal": 1, "private": 2}   # model_router.ORDER
+from fanout_verdict import LOGIN_SCAN, LOGIN_HINTS, login_class  # noqa: E402,F401  (one login class rule, S2 round 3)
+
+
+def sub_role(sub, roles):
+    """The name of the role that builds `sub`: the first role (by name) whose "builds" list names the sub unit or its
+    unit, else "worker"; "" when sub or roles is not the expected shape."""
+    if not isinstance(sub, str) or not sub or not isinstance(roles, dict):
+        return ""
+    unit = sub.rsplit(".", 1)[0]
+    for name in sorted(k for k in roles if isinstance(k, str)):
+        builds = roles[name].get("builds") if isinstance(roles[name], dict) else None
+        if isinstance(builds, list) and (sub in builds or unit in builds):
+            return name
+    return "worker"
+
+
+def role_model(spec, env=None):
+    """The registry name a role resolves to: its setting's value in env when non blank, else its default; ''."""
+    if not isinstance(spec, dict):
+        return ""
+    e = os.environ if env is None else env
+    setting = spec.get("setting")
+    chosen = e.get(setting, "") if isinstance(setting, str) and setting else ""
+    name = chosen.strip() if isinstance(chosen, str) and chosen.strip() else spec.get("default")
+    return name.strip() if isinstance(name, str) and name.strip() else ""
+
+
+def _row_transport(name, reg):
+    row = reg.get(name) if isinstance(reg, dict) and name else None
+    t = row.get("transport") if isinstance(row, dict) else None
+    return t if isinstance(t, str) and t in KNOWN_TRANSPORTS else ""
+
+
+def sub_transport(sub: str, roles: dict, reg: dict) -> str:
+    """The transport of the model the role building `sub` resolves to, or "" when the role, its model or the
+    registry row cannot be read. "" parks as today."""
+    role = sub_role(sub, roles)
+    return _row_transport(role_model(roles.get(role)), reg) if role else ""
+
+
+def transport_parked(subs: list, lost: set, roles: dict, reg: dict) -> set:
+    """The sub units of `subs` whose transport is in `lost`, plus every one whose transport is unknown ("") once
+    any seat is lost. Nothing lost, nothing parks. Units of another known transport stay admissible."""
+    if not isinstance(subs, list):
+        raise ValueError("subs must be a list, not %s" % type(subs).__name__)
+    if not isinstance(lost, (set, frozenset)):
+        raise ValueError("lost must be a set, not %s" % type(lost).__name__)
+    if not lost:
+        return set()
+    return {s for s in subs if sub_transport(s, roles, reg) in lost | {""}}
+
+
+def role_inputs():
+    """(roles, registry, note) for sub_transport, read once per pass: loop_roles.load_roles() and
+    model_router.load_registry(). An unreadable one is {} and the note names it ('' when both read)."""
+    notes, roles, reg = [], {}, {}
+    try:
+        import loop_roles
+        roles = loop_roles.load_roles() or {}
+    except Exception as exc:   # sbe: allow-silent an unreadable roles file knows no transport: every unit parks on a loss, named in the note
+        notes.append("the loop roles cannot be read (%s)" % type(exc).__name__)
+    if not roles and not notes:
+        notes.append("the loop roles cannot be read")
+    try:
+        import model_router
+        reg = model_router.load_registry()
+    except Exception as exc:   # sbe: allow-silent an unreadable registry knows no transport: every unit parks on a loss, named in the note
+        notes.append("the model registry cannot be read (%s)" % str(exc)[:120])
+    return roles, reg, "; ".join(notes)
+
+
+def wait_cause(run_dir):
+    """A run's STATUS text (its first 4096 bytes) plus the errors its newest round's results.json carries (read to
+    LOGIN_SCAN): the status names the word, the round names the cause (unit_runner's CONFIG_WAIT sentence does not)."""
+    parts = []
+    try:
+        with open(os.path.join(run_dir, "STATUS"), "rb") as fh:
+            parts.append(fh.read(4096).decode("utf-8", "replace"))   # the word and its sentence; a huge STATUS never hides the round's cause
+        rounds = sorted(glob.glob(os.path.join(run_dir, "round*", "results.json")), key=_dir_time)
+        if rounds:
+            with open(rounds[-1], "rb") as fh:
+                rows = json.loads(fh.read(LOGIN_SCAN).decode("utf-8", "replace"))
+            for r in (rows if isinstance(rows, list) else []):
+                if isinstance(r, dict):
+                    parts.append(str(r.get("error") or "")[:2000])
+    except (OSError, ValueError):
+        pass   # sbe: allow-silent an unreadable round names no cause; the status alone decides, the wait parks itself as before
+    return "\n".join(parts)
+
+
+def seat_proof_at(transport):
+    """The epoch of the intake record (loop-intake/CURRENT.json, written by prepare after the seat gate) when its reach
+    holds an OK binding on `transport`; 0.0 when none or unreadable, which clears no loss (the safe side)."""
+    path = os.path.join(os.environ.get("INTAKE_EVIDENCE") or os.path.expanduser("~/.claude/evidence"), "loop-intake", "CURRENT.json")
+    try:
+        if os.path.getsize(path) > (1 << 20):
+            return 0.0
+        with open(path, encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        return 0.0
+    at = rec.get("epoch") if isinstance(rec, dict) else None
+    reach = rec.get("reach") if isinstance(rec, dict) else None
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or at != at or not isinstance(reach, list):
+        return 0.0
+    return float(at) if any(isinstance(b, dict) and b.get("transport") == transport for b in reach) else 0.0
+
+
+def codex_role(roles, reg):
+    """(name, model) of the first inside build role (by name) resolving to a codex model, else ("", "")."""
+    for name in sorted(k for k in (roles if isinstance(roles, dict) else {}) if isinstance(k, str)):
+        spec = roles[name]
+        if isinstance(spec, dict) and spec.get("when") == "inside" and spec.get("kind") == "build":
+            model = role_model(spec)
+            if _row_transport(model, reg) == "codex":
+                return name, model
+    return "", ""
+
+
 def status_word(path):
     """The first word of a STATUS file: RUNNING when there is no file yet (unit_runner writes STATUS at its end),
     NO-DATA when the file is empty, torn or unreadable. H3 (2026-09-24, backend review finding 6): an empty STATUS
@@ -1120,6 +1246,12 @@ def room_of(burn_free: int, wip_free: int, seat_free: Optional[int] = None, busy
 def main():
     os.makedirs(RUNS, exist_ok=True)
     dry = "--dry" in sys.argv
+    # THE RUN'S LOGIN HOLDER (1.1.6 S2): taken from this process's environment, so only the unit runners it starts are
+    # told it, each with the descriptor itself (brother_login.take_hold). Nothing changes when no holder is named.
+    hold_env, hold_fds = {}, ()
+    if os.environ.get("BROTHER_LOGIN_HOLD_FD"):
+        import brother_login
+        hold_env, hold_fds = brother_login.take_hold()
     plan = json.load(open(_PP.selected(), encoding="utf-8"))
 
     for _d in sorted(glob.glob(os.path.join(RUNS, "*-*/"))):
@@ -1140,13 +1272,14 @@ def main():
     alive = alive_runners(RUNS, plan)
     alive_units = {u for u, _ in alive}
 
-    last = {}; last_at = {}; start_at = {}   # D31: start_at is the attempt start the parked test compares a fact with
+    last = {}; last_at = {}; start_at = {}; last_dir = {}   # D31: start_at is the attempt start the parked test compares a fact with
     for d in sorted(glob.glob(os.path.join(RUNS, "*-*/")),
                    key=lambda p: (_dir_time(p), os.path.basename(p.rstrip("/")))):
         sub = re.sub(r"-\d{6}$", "", os.path.basename(d.rstrip("/")))
         last[sub] = status_word(os.path.join(d, "STATUS"))
         last_at[sub] = _dir_time(d)
         start_at[sub] = _start_time(d)
+        last_dir[sub] = d
 
     # A unit the plan moved out of this release (plan_store.release_refusal: DEFERRED, RETIRED) is LEFT OUT with its
     # reason, exactly as an out of scope one is; admissible() refuses its sub units too, for every other caller.
@@ -1264,6 +1397,58 @@ def main():
                 and COUNCIL_STATE.get(u["id"], {}).get("state") != "DO-NOT-BUILD")
     units = ranked(units, REC, in_progress, int(os.environ.get("BROTHER_EXPLORE", "2")), _buildable)
     print("ORDER   %s" % " ".join("%s(%s)" % (u["id"], "%d/%d" % tuple(REC[u["id"]][:2]) if u["id"] in REC else "new") for u in units[:12]))
+    # 1.1.6 S3: A SEAT LOST MID RUN. A transport is lost when the newest run of an open sub unit ended in a login class
+    # CONFIG_WAIT; the loss is cleared by a seat proof newer than it (prepare again after signing in), which is also the
+    # fact that re-seats the sub unit that waited. One NOTIFY-REQUEST row per (cause, run), never one per pass.
+    _roles, _reg, _role_note = role_inputs()
+    _lost, _refact = {}, {}   # transport -> when its login was seen lost; sub unit -> the seat proof that re-seats it
+    for _s in [s for u in units for s in u["sub_units"] if not plan_store.sub_landed(s, u.get("evidence") or "")]:
+        if last.get(_s) == "CONFIG_WAIT" and login_class(wait_cause(last_dir[_s])):
+            _t = sub_transport(_s, _roles, _reg)
+            _proved = seat_proof_at(_t) if _t else 0.0
+            _seen = _dir_time(os.path.join(last_dir[_s], "STATUS")) or time.time()
+            if _proved > _seen:
+                _refact[_s] = _proved
+                print("SEATS   %s re-seated: a seat proof at %s is newer than the loss on %s" % (_t, time.strftime("%Hh%M", time.localtime(_proved)), _s))
+            else:
+                _lost[_t] = max(_lost.get(_t, 0.0), _seen)
+    if _lost and _role_note:
+        print("SEATS   NO-DATA: %s, so no unit's transport is known and every unit parks, as before S3" % _role_note)
+    for _t in sorted(_lost):
+        _key = "seat-lost:login:%s" % (_t or "unknown")
+        if dry:
+            _said = "a run would write the row %s" % _key
+        elif not os.environ.get("BROTHER_RUN_DIR"):
+            _said = "NO-DATA: BROTHER_RUN_DIR is unset, so no row was written; this line is the only notice"
+        else:
+            try:
+                import loop_intake
+                _said = "row written" if loop_intake.notify_once(os.environ["BROTHER_RUN_DIR"], _key, "seat", time.time()) else "row already there"
+            except (ImportError, OSError) as exc:
+                _said = "NO-DATA: the notify row could not be written (%s)" % type(exc).__name__
+        print("SEATS   %s lost its login at %s: its units park until a newer seat proof (sign in, then prepare again); notify %s"
+              % (_t or "an unknown transport", time.strftime("%Hh%M", time.localtime(_lost[_t])), _said))
+    _lost_set = set(_lost)
+    _cx_role, _cx_model = codex_role(_roles, _reg)
+    _cx_busy = any(sub_transport(_s, _roles, _reg) == "codex" for _u, _s in alive)
+    _handover = []   # (unit, sub) parked by a lost claude seat, in pass order: the codex role may take the first
+
+    def _launch(u, sub, env=None):
+        """True when a runner for sub started (or would, on a dry pass); a refusal at startup is printed."""
+        if not dry:
+            log = os.path.join(RUNS, sub + ".log")
+            proc = subprocess.Popen([sys.executable, os.path.expanduser("~/.claude/bin/unit_runner.py"), u["id"], sub],   # sbe: allow-silent detached by design; its outcome is its STATUS file, read by the next pass
+                                    stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True,
+                                    env=dict(env or os.environ, **hold_env) if hold_env else env, pass_fds=hold_fds)
+            refused = spawned(proc, sub)
+            if refused:
+                try:
+                    with open(log, encoding="utf-8", errors="replace") as fh: said = (fh.read().strip().splitlines() or ["no output"])[-1]
+                except OSError as exc:
+                    said = "its log cannot be read (%s)" % exc
+                print("%-5s %-8s REFUSED AT STARTUP: %s: %s" % (u["id"], sub, refused, said[:160])); return False
+        print("%-5s %-8s START" % (u["id"], sub))
+        return True
     for u in units:
         ev = u.get("evidence") or ""
         todo = [s for s in u["sub_units"] if not plan_store.sub_landed(s, ev)]
@@ -1273,7 +1458,12 @@ def main():
         waiting = [s for s in u["sub_units"] if waits_to_land(last.get(s, "")) and s in todo]
         claimed = builder_claim.claim_hold(RUNS, sub) if sub is not None else ""
         why = claimed or ("runner alive" if u["id"] in alive_units else "READY build of %s waits to land" % waiting[0] if waiting
-               else hold_reason(todo[0]) if sub is None else "last run of %s ended %s: needs a fact, then RUNNER_HINT" % (sub, last[sub]) if sub is not None and still_parked(last.get(sub), start_at.get(sub, 0.0), parked_fact(last.get(sub), u["id"], spec_path=u.get("spec"))) else "")
+               else hold_reason(todo[0]) if sub is None else "last run of %s ended %s: needs a fact, then RUNNER_HINT" % (sub, last[sub]) if sub is not None and still_parked(last.get(sub), start_at.get(sub, 0.0), max(parked_fact(last.get(sub), u["id"], spec_path=u.get("spec")), _refact.get(sub, 0.0))) else "")
+        if not why and sub is not None and transport_parked([sub], _lost_set, _roles, _reg):
+            _t = sub_transport(sub, _roles, _reg)
+            why = "parked: the %s seat lost its login; comes back on a newer seat proof (sign in, then prepare again)" % (_t or "unknown transport's")
+            if _t == "claude":   # a claimed sub unit never gets here: its claim is its `why` above
+                _handover.append((u, sub))
         if not why and sub is not None and sunk(REC.get(u["id"])) and not fact_time(u["id"], spec_path=u.get("spec")) > REC[u["id"]][2]:
             _c = max(REC[u["id"]][3].items(), key=lambda kv: kv[1])[0] if REC[u["id"]][3] else "SUITE"
             why = "SUNK %d grades, %d passes, mostly %s: %s; comes back when its spec or a judging tool changes" % (
@@ -1327,18 +1517,27 @@ def main():
                 print("%-5s %-8s skip: budget cap reached (%d new this pass)" % (u["id"], sub, room))
             continue
         busy.update({p: sub for p in ts})
-        if not dry:
-            log = os.path.join(RUNS, sub + ".log")
-            proc = subprocess.Popen([sys.executable, os.path.expanduser("~/.claude/bin/unit_runner.py"), u["id"], sub],   # sbe: allow-silent detached by design; its outcome is its STATUS file, read by the next pass
-                                    stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
-            refused = spawned(proc, sub)
-            if refused:
-                try:
-                    with open(log, encoding="utf-8", errors="replace") as fh: said = (fh.read().strip().splitlines() or ["no output"])[-1]
-                except OSError as exc:
-                    said = "its log cannot be read (%s)" % exc
-                print("%-5s %-8s REFUSED AT STARTUP: %s: %s" % (u["id"], sub, refused, said[:160])); continue
-        print("%-5s %-8s START" % (u["id"], sub)); started += 1
+        if not _launch(u, sub):
+            continue
+        started += 1
+        _cx_busy = _cx_busy or sub_transport(sub, _roles, _reg) == "codex"
+    # 1.1.6 S3.b, D-S5 ("Codex takes any role"): an open codex role (none of its own sub units alive or started this
+    # pass, its seat not lost) takes ONE sub unit parked by a lost claude seat, with that unit's role setting pinned to
+    # the codex model in the child's environment. Content the codex model may not receive is never handed over.
+    if _handover and _cx_role and "codex" not in _lost_set and not _cx_busy and started < room:
+        u, sub = _handover[0]
+        _spec = _roles.get(sub_role(sub, _roles)) or {}
+        _row = _reg.get(_cx_model) or {}
+        _setting = _spec.get("setting")
+        _content = _spec.get("content") if isinstance(_spec.get("content"), str) else ""   # a list or a number is unhashable: unknown, never handed
+        if CONTENT_ORDER.get(_content, 99) > CONTENT_ORDER.get(_row.get("privacy"), -1):
+            print("%-5s %-8s HANDOVER refused: its role's content is %s and the codex model %s may carry only %s" % (u["id"], sub, _spec.get("content"), _cx_model, _row.get("privacy")))
+        elif not isinstance(_setting, str) or not _setting:
+            print("%-5s %-8s HANDOVER refused: its role has no setting to pin the codex model %s through" % (u["id"], sub, _cx_model))
+        else:
+            print("%-5s %-8s HANDOVER %s to the codex role %s (%s=%s)" % (u["id"], sub, sub, _cx_role, _setting, _cx_model))
+            if _launch(u, sub, env=dict(os.environ, **{_setting: _cx_model})):
+                started += 1
     nospec = [u["id"] for u in plan["units"] if u["state"] != "DONE" and not plan_store.release_refusal(u["state"]) and SCOPE.match(u["id"]) and not u.get("sub_units")]
     print("started %d | runners alive before this pass %d | in scope units with no sub units yet (need a spec lane): %s" % (started, len(alive), nospec))
 

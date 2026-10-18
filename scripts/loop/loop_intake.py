@@ -536,13 +536,20 @@ def breaker_events(since, path=None):
     return rows
 
 
-def seat_gate(proofs, probe=None, native=None):
+def seat_gate(proofs, probe=None, native=None, codex_probe=None):
     """THE SEAT IS PROVEN, NOT ONLY THE PROGRAM (owner ruling A, 2026-10-05). The reach proof runs the program OUTSIDE
     the native sandbox, so it read OK while every seat of proof pair RB answered 401 (a seat may read the login but not
     refresh it) and the run ended UNPRODUCTIVE in 4.5 minutes. When native seats will run and a Claude proof reads OK,
     one real minimal call goes through a seat (native_worker.seat_probe, the seat's own command line, the proven
     program); a seat that does not answer turns every OK Claude proof into FAIL with no binding, so the run never
-    starts, and the HINT names the refresh. probe(program=) and native stand in for tests. Returns the proofs."""
+    starts, and the HINT names the refresh (brother-login first on the loop token lane, whose login the seat ran on).
+    BOTH HOSTS (1.1.6 S2): the Codex proofs then go through codex_seat. probe(program=), native and codex_probe stand
+    in for tests. Returns the proofs."""
+    return codex_seat(_claude_seat(proofs, probe, native), codex_probe)
+
+
+def _claude_seat(proofs, probe, native):
+    """seat_gate's Claude half, unchanged since 2026-10-05 except the seat field and the token lane's remedy."""
     claude = [i for i, p in enumerate(proofs or []) if isinstance(p, dict) and p.get("transport") == "claude" and p.get("status") == "OK"]
     if not claude:
         return proofs
@@ -551,12 +558,145 @@ def seat_gate(proofs, probe=None, native=None):
     if not (SW.native_on() if native is None else native):
         return proofs   # no seat will run: the plain proof is the whole truth
     state, why = (probe or NW.seat_probe)(program=proofs[claude[0]]["program"])
+    remedy = NW.refresh_hint()
+    if SW.on("BROTHER_LOOP_TOKEN"):
+        remedy = "run brother-login (the seats run on the login it saved), then prepare again; else " + remedy
     out = list(proofs)
     for i in claude:
         out[i] = (dict(out[i], cause="%s; a sandboxed native seat answered" % out[i].get("cause", "")) if state == "OK" else
-                  dict(out[i], status="FAIL", binding=None, cached=False, remedy=NW.REFRESH_HINT,
+                  dict(out[i], status="FAIL", binding=None, cached=False, remedy=remedy, seat="claude",
                        cause="the plain call answered but a sandboxed native seat did not (%s)" % why))
     return out
+
+
+def codex_seat(proofs, probe=None):
+    """A SIGNED OUT CODEX STOPS THE ARM (1.1.6 S2). seat_gate kept only Claude proofs, so a Codex whose login file was
+    gone read OK and every codex seat of the night failed. When a Codex proof reads OK, probe() (default
+    CodexAdapter.login_probe, which names the auth file and copies nothing) answers for its login; anything but OK, a
+    probe that raises included, turns every OK Codex proof into FAIL with no binding and the remedy "codex login"."""
+    codex = [i for i, p in enumerate(proofs or []) if isinstance(p, dict) and p.get("transport") == "codex" and p.get("status") == "OK"]
+    if not codex:
+        return proofs
+    try:
+        if probe is None:
+            from adapters import codex as CX   # an install without the adapters reads FAIL below, never OK
+            probe = CX.login_probe
+        state, why = probe()
+    except Exception as exc:   # sbe: allow-silent an unreadable seat state refuses the arm, named below
+        state, why = "FAIL", "the codex login could not be probed (%s)" % type(exc).__name__
+    if state == "OK":
+        return proofs
+    out = list(proofs)
+    for i in codex:
+        out[i] = dict(out[i], status="FAIL", binding=None, cached=False, seat="codex",
+                      remedy="codex login, then prepare again", cause="the program answered but its login does not (%s)" % why)
+    return out
+
+
+def seat_lines(proofs):
+    """One "SEAT     <transport> signed out: <remedy>" line per transport whose seat gate failed, in proof order. The
+    launcher (start_run.sh) reads these lines to refuse the arm with one notify row per transport."""
+    seen, lines = set(), []
+    for p in proofs or []:
+        if isinstance(p, dict) and p.get("status") == "FAIL" and p.get("seat") and p["seat"] not in seen:
+            seen.add(p["seat"])
+            lines.append("SEAT     %s signed out: %s" % (p["seat"], p.get("remedy") or "sign in again"))
+    return lines
+
+
+NOTIFY_FILE = "notify-request.jsonl"
+
+
+def notify_once(run_dir, key, step, now):
+    """Append {key, step, at} to <run_dir>/notify-request.jsonl only when no row there carries `key`; True when it
+    wrote. A line that does not parse is skipped (never read as the key), a file that cannot be read is read as having
+    no row (a second relay beats a silent one), and a write that fails raises OSError for the caller to name."""
+    path = os.path.join(run_dir, NOTIFY_FILE)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue   # sbe: allow-silent a line that does not parse is never read as the key; a second relay beats none
+                if isinstance(row, dict) and row.get("key") == key:
+                    return False
+    except FileNotFoundError:
+        pass   # sbe: allow-silent no file yet is no row yet
+    except OSError:
+        pass   # sbe: allow-silent unreadable: the append below either writes or raises
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"key": key, "step": step, "at": now}) + "\n")
+    return True
+
+
+LAUNCH_RECORD_MAX = 1 << 20   # a launch record bigger than this is skipped as corrupt
+
+
+def _launch_records(records_dir):
+    """([(path, record)] newest first by mtime, [skip notes]) for the launch-*.json records in records_dir; a folder
+    that is absent answers ([], []); one that cannot be listed answers ([], [why])."""
+    try:
+        names = [n for n in os.listdir(records_dir) if n.startswith("launch-") and n.endswith(".json")]
+    except FileNotFoundError:
+        return [], []
+    except OSError as exc:
+        return [], ["the launch records cannot be read (%s)" % type(exc).__name__]
+    paths = []
+    for n in names:
+        p = os.path.join(records_dir, n)
+        try:
+            paths.append((os.stat(p).st_mtime, n, p))
+        except OSError:
+            continue   # sbe: allow-silent a record that vanished between the listing and the stat is no earlier launch
+    out, notes = [], []
+    for _m, n, p in sorted(paths, reverse=True):
+        try:
+            if os.path.getsize(p) > LAUNCH_RECORD_MAX:
+                notes.append("%s is over 1 MiB, skipped" % n)
+                continue
+            with open(p, encoding="utf-8") as fh:
+                rec = json.load(fh)
+            if not isinstance(rec, dict):
+                raise ValueError("not an object")
+        except (OSError, ValueError):
+            notes.append("%s does not parse, skipped" % n)
+            continue
+        out.append((p, rec))
+    return out, notes
+
+
+def reboot_note(records_dir, boot_now):
+    """'' when the newest launch record's boot field equals boot_now, else the note: "the last run <stamp> was killed
+    by a reboot at <boot_now>" when they differ, "boot not recorded" when the record has none (never a reboot), or why
+    it cannot be told (the boot now unreadable, the records unreadable). Records that do not parse are skipped, named."""
+    recs, notes = _launch_records(records_dir)
+    note = ""
+    if recs:
+        rec = recs[0][1]
+        stamp, boot = str(rec.get("stamp") or "(no stamp)")[:80], rec.get("boot")
+        if not isinstance(boot_now, str) or not boot_now.strip():
+            note = "the boot time cannot be read now, so whether the last run %s was killed by a reboot cannot be told" % stamp
+        elif not isinstance(boot, str) or not boot.strip():
+            note = "the last run %s has its boot not recorded, so a reboot since it cannot be told" % stamp
+        elif boot != boot_now:
+            note = "the last run %s was killed by a reboot at %s" % (stamp, boot_now[:200])
+    return "; ".join(notes + ([note] if note else []))
+
+
+def mark_not_delivered(records_dir, boot_now):
+    """The newest launch record, named killed by a reboot, gets delivered=false and killed_by_reboot=boot_now, written
+    through a temporary file; the path, or "" when there was nothing to mark."""
+    recs, _notes = _launch_records(records_dir)
+    if not recs or "killed by a reboot" not in reboot_note(records_dir, boot_now):
+        return ""
+    path, rec = recs[0]
+    rec.update(delivered=False, killed_by_reboot=boot_now[:200])
+    tmp = "%s.tmp-%d" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(rec, fh, indent=1)
+    os.replace(tmp, path)
+    return path
 
 
 FETCH_FRESH_S = 120   # LA3.b: a launcher fetch younger than this, of the sha the upstream still names, is not repeated
@@ -1008,6 +1148,7 @@ def prepare(choices, deadline, budget, scope, roles, reg, probes, accept=(), acc
         for pr in proofs:
             states.append("OK" if pr.get("status") == "OK" else "REFUSED" if pr.get("status") == "FAIL" else "NO-DATA")
             lines.append(MR.line(pr))
+        lines.extend(seat_lines(proofs))   # 1.1.6 S2: the launcher refuses the arm on these, one notify row each
         _said = set()
         for pr in proofs:   # every candidate passed over, once, with its reason: the record of why this program was chosen
             for cand in pr.get("rejected") or []:

@@ -259,6 +259,102 @@ def _described(path):
         os.path.dirname(path) == "scripts" and path.endswith(".py"))
 
 
+#: C3 (1.1.6): the command a refused bundle refresh prints, and where the bundle generator reads and writes. The four
+#: prefixes are the trigger the spec names (the closure is computed from scripts/brother_run.py over scripts/*.py and
+#: bundle/skills, products/ carries the hook and MCP sources, plugin/ the manifests), so a narrower one misses edges.
+BUNDLE_FIX = "python3 scripts/bundle_runtime.py && git add -A bundle"
+BUNDLE_PREFIXES = ("scripts", "plugin", "bundle", "products")
+
+#: Seconds a generator's check or write may take before the commit is refused (a hung generator never passes).
+GEN_TIMEOUT = 120
+
+
+def bundle_trigger(staged):
+    """C3: True when any staged path is under scripts/, plugin/, bundle/ or products/ (the whole first component, so
+    scriptsx/ or x/scripts/ never trigger). Empty: False."""
+    return any(p.split("/", 1)[0] in BUNDLE_PREFIXES and "/" in p for p in staged)
+
+
+def _refresh_generated(cwd, gen_rel, scope, triggers, watched, add, thing, label, fix, done):
+    """(exit_code, [lines]), the one shape refresh_system_doc and refresh_bundle_runtime share. When the staged change
+    triggers, run `<gen> --check`; only when it says stale, regenerate and `git add -A -- <add>`, then confirm nothing in
+    scope still differs from the index. A regeneration that fails, a check still stale after it, an add that fails, a
+    tree still differing after the add, or a git call that cannot run REFUSES the commit with the command to run. A
+    tree with no generator has nothing to keep. When a watched path differs between the working tree and the index
+    (untracked, unstaged), or the commit names its paths and so stages through a temporary index, the generator would
+    describe files this commit does not carry, so nothing is regenerated and a NO-DATA note says so."""
+    def run(cmd, where):
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=where,
+                              timeout=GEN_TIMEOUT)
+
+    def refuse(why):
+        return EXIT_FOUND, ["BLOCK %s: %s. Run: %s" % (label, why, fix)]
+
+    def status(root):
+        st = run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                  "--no-renames", "--"] + list(scope), root)
+        if st.returncode != 0:
+            return None
+        return [(e[0], e[1], e[3:]) for e in (st.stdout or "").split("\0") if len(e) >= 4]
+
+    try:
+        top = run(["git", "rev-parse", "--show-toplevel"], cwd)
+        root = (top.stdout or "").strip()
+        if top.returncode != 0 or not root:
+            return refuse("could not find the repository root")
+        gen = os.path.join(root, gen_rel)
+        if not os.path.isfile(gen):
+            return EXIT_CLEAN, []
+        entries = status(root)
+        if entries is None:
+            return refuse("could not read git status")
+        staged = [path for x, _, path in entries if x not in " ?"]
+        dirty = [path for _, y, path in entries if y != " " and watched(path)]
+        if not triggers(staged):
+            return EXIT_CLEAN, []
+        # `git commit -- <paths>` hands the hook a temporary index (probed
+        # 2026-10-16: .git/next-index-<pid>.lock; a plain commit gives
+        # .git/index, -a and --include give .git/index.lock). A file added
+        # there lands in the commit but never in the real index, which then
+        # carries the old copy as a staged revert. Any index name not known to
+        # be the real one is treated the same way: nothing is regenerated.
+        index = os.path.basename(os.environ.get("GIT_INDEX_FILE", "index"))
+        if index not in ("index", "index.lock"):
+            return EXIT_CLEAN, [
+                "NO-DATA: %s was not regenerated: this commit names its "
+                "paths, so it stages through a temporary index (%s). Run: %s, "
+                "then commit" % (thing, index, fix)]
+        if dirty:
+            return EXIT_CLEAN, [
+                "NO-DATA: %s was not regenerated: %d path(s) it is built "
+                "from differ from the index (first: %s). Stage them, then run: %s"
+                % (thing, len(dirty), sorted(dirty)[0], fix)]
+        check = [sys.executable, "-I", gen, "--check"]
+        if run(check, root).returncode == 0:
+            return EXIT_CLEAN, []
+        regen = run([sys.executable, "-I", gen], root)
+        if regen.returncode != 0:
+            return refuse("regenerating %s failed (exit %d): %s" % (
+                thing, regen.returncode, (regen.stderr or regen.stdout or "").strip()[-160:]))
+        again = run(check, root)
+        if again.returncode != 0:
+            return refuse("%s is still stale after regenerating: %s"
+                          % (thing, (again.stderr or again.stdout or "").strip()[-160:]))
+        added = run(["git", "add", "-A", "--", add], root)
+        if added.returncode != 0:
+            return refuse("git add %s failed: %s" % (thing, (added.stderr or "").strip()[:160]))
+        after = status(root)
+        if after is None:
+            return refuse("could not read git status after staging")
+        left = sorted(path for _, y, path in after if y != " " and watched(path))
+        if left:
+            return refuse("%d path(s) still differ from the index after staging %s (first: %s)"
+                          % (len(left), thing, left[0]))
+    except (OSError, subprocess.SubprocessError) as exc:
+        return refuse("could not run: %s" % exc)
+    return EXIT_CLEAN, [done]
+
+
 def refresh_system_doc(cwd=None):
     """SP7 (2026-10-16): (exit_code, [lines]). When the staged change touches a
     file system_doc.py describes, run `system_doc.py --check`; only when it says
@@ -272,72 +368,29 @@ def refresh_system_doc(cwd=None):
     and so stages through a temporary index, the generator would describe
     files this commit does not carry, so nothing is regenerated and a NO-DATA
     note says so; the commit goes on as before and pre_push_gate.py's
-    docs-current check still refuses a stale copy."""
-    def run(cmd, where):
-        return subprocess.run(cmd, capture_output=True, text=True, cwd=where,
-                              timeout=120)
+    docs-current check still refuses a stale copy. The work is
+    _refresh_generated's, shared with refresh_bundle_runtime."""
+    return _refresh_generated(
+        cwd, os.path.join("scripts", "system_doc.py"), ("scripts", "SYSTEM.md"),
+        lambda staged: any(_described(p) for p in staged),
+        lambda p: _described(p) or p == "SYSTEM.md", "SYSTEM.md", "SYSTEM.md", "system doc",
+        SYSTEM_DOC_FIX, "SYSTEM.md regenerated and staged: the staged change "
+        "touches what scripts/system_doc.py describes")
 
-    def refuse(why):
-        return EXIT_FOUND, ["BLOCK system doc: %s. Run: %s" % (why, SYSTEM_DOC_FIX)]
 
-    try:
-        top = run(["git", "rev-parse", "--show-toplevel"], cwd)
-        root = (top.stdout or "").strip()
-        if top.returncode != 0 or not root:
-            return refuse("could not find the repository root")
-        gen = os.path.join(root, "scripts", "system_doc.py")
-        if not os.path.isfile(gen):
-            return EXIT_CLEAN, []
-        st = run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all",
-                  "--no-renames", "--", "scripts", "SYSTEM.md"], root)
-        if st.returncode != 0:
-            return refuse("could not read git status: %s" % (st.stderr or "").strip()[:160])
-        staged, dirty = [], []
-        for entry in (st.stdout or "").split("\0"):
-            if len(entry) < 4:
-                continue
-            x, y, path = entry[0], entry[1], entry[3:]
-            if x not in " ?" and _described(path):
-                staged.append(path)
-            if y != " " and (_described(path) or path == "SYSTEM.md"):
-                dirty.append(path)
-        if not staged:
-            return EXIT_CLEAN, []
-        # `git commit -- <paths>` hands the hook a temporary index (probed
-        # 2026-10-16: .git/next-index-<pid>.lock; a plain commit gives
-        # .git/index, -a and --include give .git/index.lock). SYSTEM.md added
-        # there lands in the commit but never in the real index, which then
-        # carries the old copy as a staged revert. Any index name not known to
-        # be the real one is treated the same way: nothing is regenerated.
-        index = os.path.basename(os.environ.get("GIT_INDEX_FILE", "index"))
-        if index not in ("index", "index.lock"):
-            return EXIT_CLEAN, [
-                "NO-DATA: SYSTEM.md was not regenerated: this commit names its "
-                "paths, so it stages through a temporary index (%s). Run: %s, "
-                "then commit" % (index, SYSTEM_DOC_FIX)]
-        if dirty:
-            return EXIT_CLEAN, [
-                "NO-DATA: SYSTEM.md was not regenerated: %d path(s) it is built "
-                "from differ from the index (first: %s). Stage them, then run: %s"
-                % (len(dirty), sorted(dirty)[0], SYSTEM_DOC_FIX)]
-        check = [sys.executable, "-I", gen, "--check"]
-        if run(check, root).returncode == 0:
-            return EXIT_CLEAN, []
-        regen = run([sys.executable, "-I", gen], root)
-        if regen.returncode != 0:
-            return refuse("regenerating SYSTEM.md failed (exit %d): %s" % (
-                regen.returncode, (regen.stderr or regen.stdout or "").strip()[-160:]))
-        again = run(check, root)
-        if again.returncode != 0:
-            return refuse("SYSTEM.md is still stale after regenerating: %s"
-                          % (again.stderr or again.stdout or "").strip()[-160:])
-        add = run(["git", "add", "--", "SYSTEM.md"], root)
-        if add.returncode != 0:
-            return refuse("git add SYSTEM.md failed: %s" % (add.stderr or "").strip()[:160])
-    except (OSError, subprocess.SubprocessError) as exc:
-        return refuse("could not run: %s" % exc)
-    return EXIT_CLEAN, ["SYSTEM.md regenerated and staged: the staged change "
-                        "touches what scripts/system_doc.py describes"]
+def refresh_bundle_runtime(cwd=None):
+    """C3 (1.1.6): (exit_code, [lines]). When any staged path is under scripts/, plugin/, bundle/ or products/
+    (bundle_trigger), run `bundle_runtime.py --check`; only when it says stale, regenerate both mirrors it keeps
+    (bundle/runtime and the Codex one, bundle/codex-skills, plus the hooks, MCP and antigravity copies it writes under
+    bundle/) and `git add -A -- bundle`. Every path in those four prefixes must match the index before the generator
+    runs (else NO-DATA, nothing regenerated), so what the add stages is the generator's own output; a tree still
+    differing after the add (a generator writing outside bundle/, a partial stage) refuses. A failing or still stale
+    generator refuses with the command. A tree without scripts/bundle_runtime.py has nothing to keep."""
+    return _refresh_generated(
+        cwd, os.path.join("scripts", "bundle_runtime.py"), BUNDLE_PREFIXES, bundle_trigger,
+        lambda p: True, "bundle", "the bundle mirror", "bundle mirror", BUNDLE_FIX,
+        "bundle mirror regenerated and staged: the staged change touches what "
+        "scripts/bundle_runtime.py mirrors")
 
 
 def hooks_dir(cwd=None, runner=None):
@@ -439,6 +492,9 @@ def main(argv=None):
     code, lines = run_scan(args.repo, args.terms)
     if code == EXIT_CLEAN:
         code, more = refresh_system_doc(args.repo)
+        lines += more
+    if code == EXIT_CLEAN:
+        code, more = refresh_bundle_runtime(args.repo)
         lines += more
     stream = sys.stdout if code == EXIT_CLEAN else sys.stderr
     for line in lines:
