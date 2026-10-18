@@ -306,9 +306,15 @@ def program_candidates(name, first=(), env=None):
     return out
 
 
-def desktop_bundles(root):
+def unreadable_note(path, exc):
+    """The one line naming a folder the path finder could not read, and why (C9, 1.1.6: it was skipped in silence)."""
+    return "unreadable: %s (%s: %s)" % (path, type(exc).__name__, getattr(exc, "strerror", None) or exc)
+
+
+def desktop_bundles(root, notes=None):
     """Every Claude Code binary the desktop app keeps under root, in both layouts it has used: <version>/claude.app/...
-    and, since 2.1.286 (2026-10-03), <version>/<build hash>/claude.app/.... Missing ones are filtered by the caller."""
+    and, since 2.1.286 (2026-10-03), <version>/<build hash>/claude.app/.... Missing ones are filtered by the caller. A
+    version folder that cannot be listed is still skipped, and named in `notes` (a list the caller prints) when given."""
     tail = ("claude.app", "Contents", "MacOS", "claude")
     out = []
     try:
@@ -319,15 +325,17 @@ def desktop_bundles(root):
         out.append(os.path.join(root, v, *tail))
         try:
             subs = sorted(os.listdir(os.path.join(root, v)))
-        except OSError:
+        except OSError as exc:
+            if notes is not None:
+                notes.append(unreadable_note(os.path.join(root, v), exc))
             continue
         out += [os.path.join(root, v, sub, *tail) for sub in subs if sub != "claude.app"]
     return out
 
 
-def claude_candidates(env=None):
+def claude_candidates(env=None, notes=None):
     """Every installed Claude Code CLI: each version the desktop app ships, then PATH and the package directories."""
-    return program_candidates("claude", desktop_bundles(_home_path(env, CLAUDE_DESKTOP_ROOT)), env)
+    return program_candidates("claude", desktop_bundles(_home_path(env, CLAUDE_DESKTOP_ROOT), notes), env)
 
 
 def codex_candidates(env=None):
@@ -381,11 +389,12 @@ def claude_for_check(env=None):
     proven = recorded_program("claude", env)
     if proven:
         return proven, None
-    for path in claude_candidates(env):
+    notes = []
+    for path in claude_candidates(env, notes):
         if _executable(path):
             return path, None
     return None, ("no Claude Code CLI: %s is unset, no program is proven, and none is on PATH, in the package "
-                  "directories or in the desktop app" % CLAUDE_BIN_ENV)
+                  "directories or in the desktop app%s" % (CLAUDE_BIN_ENV, "".join("; " + n for n in notes)))
 
 
 def decision_sentinel_path(env=None):

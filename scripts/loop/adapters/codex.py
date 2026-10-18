@@ -6,6 +6,11 @@
          2026-09-21). The timeout is checked here and enforced by the runner's wall; codex exec takes no flag for it.
   judge  the contract's one judge (adapters.judge): a non zero exit, an EMPTY stdout at exit zero and a provider
          refusal all fail, never an answer; the verdict carries the call's cost.
+  login_probe  whether the Codex login file is there and readable (1.1.6 S1): ("OK", path), or ("FAIL", "codex login:
+         <path> <reason>") for a missing, unreadable or malformed one, named by path. The file is parsed in memory only:
+         never copied, printed or returned.
+  expiry_claim  when a Codex re-login falls due (1.1.6 S4): ("NO-DATA", reason) always, because no claim in the
+         auth file bounds a re-login (NO_RELOGIN_CLAIM, measured). Never a guessed exp, never a value of the file.
   cost   codex exec prints no bill, so its stdout and stderr are never read for one. A cost_usd the result carries is
          the contract's normalize_cost (a priced zero stays 0.0); an absent one is NOT_MEASURED, never 0.0.
 
@@ -14,6 +19,7 @@ the trusted directory (its _codex_root) and hands both in. Run from a directory 
 "Not inside a trusted directory" (measured 2026-09-21), so an absent, relative or missing root REFUSES the call: this
 adapter never falls back to the child's cwd. Nothing here starts a process.
 """
+import json
 import os
 
 import adapters as A
@@ -33,6 +39,42 @@ def _directory(path):
     return isinstance(path, str) and "\0" not in path and os.path.isabs(path) and os.path.isdir(path)
 
 
+def login_probe(auth_path=""):
+    """("OK", path) when the Codex auth file (default $CODEX_HOME/auth.json, else ~/.codex/auth.json) exists and parses
+    as a JSON object; else ("FAIL", "codex login: <path> <reason>"). Nothing of the file leaves this function."""
+    path = auth_path or os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "auth.json")
+    if not os.path.isfile(path):
+        return "FAIL", "codex login: %s %s" % (path, "is not a file" if os.path.lexists(path) else "is missing")
+    try:
+        with open(path, "rb") as fh:
+            data = json.loads(fh.read().decode("utf-8"))
+    except OSError:
+        return "FAIL", "codex login: %s is unreadable" % path
+    except ValueError:   # a UnicodeDecodeError included: the reason is named, the content never is
+        return "FAIL", "codex login: %s is not JSON" % path
+    if not isinstance(data, dict):
+        return "FAIL", "codex login: %s is not a JSON object" % path
+    return "OK", path
+
+
+#: What bounds a Codex re-login, measured 2026-10-18 on a signed in auth file, key names and window lengths only, no
+#: value read out (docs/plan/specs/S4.md build record): tokens.id_token and tokens.access_token are JWTs whose exp
+#: closes a 1 hour and a 240 hour window, both renewed through tokens.refresh_token, an opaque string with no expiry in
+#: it. Those exp claims bound a refresh, not a re-login, so the Codex expiry ahead stays NO-DATA by measurement.
+NO_RELOGIN_CLAIM = ("carries no claim that bounds a re-login: its exp claims bound a token refresh, and the refresh "
+                    "token states no expiry (measured 2026-10-18)")
+
+
+def expiry_claim(auth_path=""):
+    """("NO-DATA", reason) for when a Codex re-login falls due. The file is checked by login_probe, so a missing,
+    unreadable or malformed one is named by its path; a readable one answers NO_RELOGIN_CLAIM. Nothing of the file
+    leaves this function."""
+    verdict, detail = login_probe(auth_path)
+    if verdict != "OK":
+        return "NO-DATA", "codex login expiry: " + detail
+    return "NO-DATA", "codex login expiry: %s %s" % (detail, NO_RELOGIN_CLAIM)
+
+
 class CodexAdapter(object):
     """The codex transport's argv, judge and cost.
 
@@ -42,6 +84,7 @@ class CodexAdapter(object):
     """
 
     transport = "codex"
+    login_probe = staticmethod(login_probe)
 
     def __init__(self, program=None, root=None):
         self.program, self.root = program, root

@@ -219,9 +219,13 @@ class TheRun(Base):
 
     def test_no_empty_home_for_the_rerun_says_unknown_and_still_refuses(self):
         from unittest import mock
-        open(self.scratch, "w").close()  # a file where the scratch root should be
+        # a file where the rerun's scratch root should be (C9, 1.1.6: the export tree itself now lives under the scratch
+        # root and refuses up front when it is a file, so only the rerun's reading of the root is pointed at one here)
+        blocked = self.scratch + "-file"
+        open(blocked, "w").close()
         r = Runner({"test_door.py": (1, "FAILED\n")})
-        with mock.patch.object(H, "_keep", return_value="unused"):
+        with mock.patch.object(H, "_keep", return_value="unused"), \
+                mock.patch.object(H, "_scratch_root", return_value=blocked):
             res = H.check(self.root, ["scripts/test_door.py"], r,
                           build=self.ships("test_door.py"))
         self.assertEqual(res[0][0], H.REFUSED)
@@ -292,10 +296,14 @@ class TheRun(Base):
 
     def test_a_refusal_that_cannot_save_output_still_refuses(self):
         from unittest import mock
-        open(self.scratch, "w").close()  # only saving fails, the rerun succeeds
+        # only saving fails, the rerun succeeds (C9, 1.1.6: the export tree lives under the scratch root, so the file is
+        # put where the saver reads the root, not where the export folders are made)
+        blocked = self.scratch + "-file"
+        open(blocked, "w").close()
         r = Runner({"test_door.py": (1, "FAILED\n")})
         again = subprocess.CompletedProcess([], 0, "OK\n", "")
-        with mock.patch.object(H, "_checkout_rerun", return_value=(again, None)):
+        with mock.patch.object(H, "_checkout_rerun", return_value=(again, None)), \
+                mock.patch.object(H, "_scratch_root", return_value=blocked):
             res = H.check(self.root, ["scripts/test_door.py"], r,
                           build=self.ships("test_door.py"))
         self.assertEqual(res[0][0], H.REFUSED)

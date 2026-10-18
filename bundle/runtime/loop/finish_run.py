@@ -153,9 +153,10 @@ def finisher_attempt(m, prompt, mc, env=None):
     chain, why = loop_roles.call_chain("finisher", choice=m, env=env)
     if not chain:
         return _NoAnswer(m, why)
-    a = mc.call(prompt, "build", "public", timeout=900, expect="json", chain=chain)
+    a, tried = mc.call(prompt, "build", "public", timeout=900, expect="json", chain=chain)   # (Attempt or None, every attempt)
     if a is not None and a.ok:
         return a
+    a = a if a is not None else (tried[-1] if tried else None)   # no member answered: the last attempt says why
     detail = str(a.detail) if a is not None else "no attempt came back"
     if not detail.startswith("capacity:"):
         detail = "capacity: no member of %s answered (%s)" % ("/".join(chain), detail[:300])
@@ -288,6 +289,20 @@ def main():
     if not dry:
         import loop_hold as _LH; _LH.gate(where="finish_run")   # the hold reaches this paid route too; --dry buys nothing
     opt = lambda n, d=None: a[a.index(n) + 1] if n in a and a.index(n) + 1 < len(a) else d
+    # THE LOGIN AFTER THE RUN (1.1.6 S2 round 1): the finisher starts once its run, and so the run's login holder, has
+    # ended, so on the loop token lane every Claude role here reads the Keychain fresh. One that cannot be read now
+    # refuses the finisher once, before any call, instead of answering every candidate NOT SAVED in this log only;
+    # loop_until.sh's finisher job puts the refusal on the alarm.
+    if not dry and opt("--model"):
+        import loop_switches, brother_login
+        if loop_switches.on("BROTHER_LOOP_TOKEN"):
+            try:
+                brother_login.read_saved()
+            except brother_login.Failure as exc:
+                print("FINISH REFUSED: the loop token lane is on, the run's login holder ended with the run, and the "
+                      "login cannot be read now (%s); unlock the Keychain, then run finish_run.py --model %s by hand"
+                      % (exc, opt("--model")))
+                return 4
     if subprocess.run(["bash", os.path.join(HERE, "stop_loop.sh"), "--dry"], capture_output=True).returncode != 0:
         print("FINISH REFUSED: something of the loop is alive; the finisher runs only after the loop has exited"); return 1
     try:

@@ -48,8 +48,11 @@ NAMED LIMITS OF THE RUN IDENTITY (adversarial review 2026-09-30, ~/.claude/evide
 import os, re, subprocess, sys
 
 DRIVER_RX = re.compile(r"bin/loop_until\.sh")
+# bin/native_worker.py (S2 round 1, review C): the driver's foreground login refresh and every runner's seat worker. A
+# refresh outlived a full stop while the STOPPED line, which counts only what this set names, said nothing was alive.
 RUNNERS_RX = re.compile(r"bin/unit_runner\.py|bin/grade_lane\.sh|bin/probe_wave\.py|bin/check_wave\.py|bin/probe_build\.py"
-                        r"|bin/grade_build\.py|(bin|scripts)/probe_round\.py|(bin|scripts)/diag_round\.py|bin/repair_wave\.py")
+                        r"|bin/grade_build\.py|(bin|scripts)/probe_round\.py|(bin|scripts)/diag_round\.py|bin/repair_wave\.py"
+                        r"|bin/native_worker\.py")
 # THE LIVE RUNNER COUNT (X2 finding 7, 2026-09-27): loop_done.py and loop_pass.sh count unit runners by this same rule,
 # the program position, never an argument; they read it through live_runner_count() and the `unit-runners` verb.
 UNIT_RUNNER_RX = re.compile(r"bin/unit_runner\.py")

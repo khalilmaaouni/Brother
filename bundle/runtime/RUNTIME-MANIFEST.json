@@ -19,7 +19,7 @@
   },
   {
    "path": "brother_paths.py",
-   "sha256": "205d58b5f033b14e0125374091a8d8804bc45ba2ab0d0d1af5c78cd5b117ccab"
+   "sha256": "adaeaa53dc746c064196d01dd257b8486232a0612b6a6a92050c9e20fe997a11"
   },
   {
    "path": "brother_run.py",
@@ -327,6 +327,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "preflight/20260926-182529-2241-gf85afbd37-dirty",
- "source_revision": "f85afbd3719ce329453b0a4c759c6d854aa21f15"
+ "source_describe": "preflight/20260926-182529-2335-ga512dd54e-dirty",
+ "source_revision": "a512dd54e93af22abfa7dcb7b3c797d553595988"
 }

@@ -13,6 +13,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop_hold as _LH  # noqa: E402
 _LH.gate(where="unit_runner start")
 BIN = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, BIN)
+# THE RUN'S LOGIN HOLDER (1.1.6 S2): taken from this process's environment before anything is started, so only the
+# Claude role hosts this runner starts are told it, one at a time, with the descriptor itself (brother_login.take_hold):
+# the native worker, the blind fan out of a round with a Claude arm, and the probe stage (S2 round 2); its grader,
+# checks and model written probes are never told a number they do not hold. Nothing changes when no holder is named.
+_HOLD_ENV, _HOLD_FDS = {}, ()
+if os.environ.get("BROTHER_LOGIN_HOLD_FD"):
+    import brother_login as _BL
+    _HOLD_ENV, _HOLD_FDS = _BL.take_hold()
 import probe_build as P
 import brief_fit
 import stage_log, fanout_verdict as FV, repair_advisor as RA, self_check as SC, build_plan as BP, worker_mix as WM, ev_gate as EV
@@ -666,12 +674,31 @@ for _side, _owner, _env, _model in (("plan", _plan_owner, _plan_env, _plan_model
         print("NOTE    %s side OFF: the roles file names no %s (%s)" % (_side, "planner" if _side == "plan" else "repair_advisor", _role_why), flush=True)
     else:
         print("NOTE    %s side OFF: the advice line names no valid cheapest model" % _side, flush=True)
+def told_refusal(role, mod):
+    """S2 round 2 (review claim 3 part c): a role that came back empty because its Claude call was refused the loop
+    login (build_plan or repair_advisor LAST_REFUSAL: a locked Keychain, or the run's login holder ended) is said in the
+    run log by name and told to the owner once per run (loop_intake.notify_once, the S3 channel). The build goes on
+    without the advice, as before; only the silence ends."""
+    why = getattr(mod, "LAST_REFUSAL", "")
+    if not why or not isinstance(why, str):
+        return
+    print("LOGIN   the %s was refused its login: %s" % (role, why[:600]), flush=True)
+    run_dir = os.environ.get("BROTHER_RUN_DIR")
+    if not run_dir:
+        print("LOGIN   NO-DATA: BROTHER_RUN_DIR is unset, so no notify row was written; this line is the only notice", flush=True)
+        return
+    try:
+        import loop_intake
+        wrote = loop_intake.notify_once(run_dir, "role-login:%s" % role, "seat", time.time())
+        print("LOGIN   notify %s" % ("row written" if wrote else "row already there"), flush=True)
+    except (ImportError, OSError) as exc:
+        print("LOGIN   NO-DATA: the notify row could not be written (%s); this line is the only notice" % type(exc).__name__, flush=True)
 # THE PLAN BEFORE THE BUILD (owner 2026-09-22, piece 1): a Claude model writes the plan from the spec and the real files;
 # it heads the round 0 brief so the worker executes instead of guessing. Advisory; None adds nothing.
 if BP.enabled(sub) and _plan_model != "off":
     _plan = BP.plan(brief[:30000], brief[30000:110000], runners=", ".join(next((u.get("command_runners") or []) for u in plan["units"] if u["id"] == unit)) or "none for this unit")
     if _plan: brief = _plan + "\n" + brief; print("PLAN    %s" % _plan.splitlines()[0][:80], flush=True)
-    else: print("PLAN    NO-DATA: no complete plan; the worker builds from the spec alone", flush=True)
+    else: print("PLAN    NO-DATA: no complete plan; the worker builds from the spec alone", flush=True); told_refusal("planner", BP)
 if hint:
     brief += "\n\nLEARNED FROM REJECTED BUILDS OF THIS SUB UNIT, read before writing anything:\n" + hint + "\n"
 def bridge_models(n):
@@ -962,8 +989,20 @@ for rnd in range(max_rounds):
                      "--timeout", str(_native_s)]
     else:
         _fan_argv = [sys.executable, "-m", "plugin.runtime.brother.core.or_fanout", jff, "--workers", "99", "--timeout", str(_call_timeout), "--retries", "0"] + _wave_argv
+    # THE HOLDER GOES WHERE A CLAUDE CALL MAY BE MADE (S2 round 2, review claim 3 part b): the native worker, and the
+    # blind fan out whenever an arm is on the claude transport (its model_call._TokenLane asks the holder), or the
+    # registry cannot say. A round of bridge arms only is given nothing. or_fanout.main takes the hold itself, so its
+    # own children are never told it.
+    _give = False
+    if _HOLD_ENV:
+        try:
+            _give = _native or any(_MR0.registry().get(j["model"], {}).get("transport") == "claude" for j in jobs)
+        except Exception as _exc:   # sbe: allow-silent unknown: given to the trusted fan out, which tells no child; a Claude arm is never left unserved
+            _give = True
     proc = subprocess.Popen(_fan_argv + ["--results", os.path.abspath(os.path.join(wd, "results.json"))], stdout=open(os.path.join(wd, "fanout.log"), "w"), stderr=subprocess.STDOUT,
-                            start_new_session=True, cwd=code_root)
+                            start_new_session=True, cwd=code_root,
+                            env=dict(os.environ, **_HOLD_ENV) if _give else None,
+                            pass_fds=_HOLD_FDS if _give else ())
     t0 = time.time()
     _fanouts.append((proc, t0 + _reap))
     while proc.poll() is None and time.time() - t0 < _hard and len(glob.glob(os.path.join(wd, "fanout", "*.json"))) < 3:
@@ -999,6 +1038,19 @@ for rnd in range(max_rounds):
     if not glob.glob(os.path.join(wd, "out", "*.json")) and FV.all_config_wait(os.path.join(wd, "results.json")) is True:
         status("CONFIG_WAIT round %d: every worker call was refused because the program does not know its model; no build was made "
                "and no attempt was spent; re-seated when the resolved program changes (loop_intake.py prepare proves it)" % rnd); sys.exit(6)
+    # A LOST LOGIN IS NOT A ROUND EITHER (S2 round 3, finding 4): every Claude arm was refused its login (the run's holder
+    # ended, a locked Keychain) while the other arms failed otherwise, so all_config_wait answered False and the round
+    # spent attempts to EXHAUSTED with nobody told. It ends CONFIG_WAIT with the login cause in its STATUS, which
+    # runner_pool.login_class reads, so S3 parks the unit once and writes one notify row. An unreadable registry names no
+    # arm as Claude, and any login refusal still counts (fanout_verdict.logins_lost), so unknown parks.
+    def _transport(model):
+        return _MR0.registry().get(model, {}).get("transport")
+    if not glob.glob(os.path.join(wd, "out", "*.json")) and FV.logins_lost(os.path.join(wd, "results.json"), _transport) is True:
+        with open(os.path.join(wd, "results.json"), encoding="utf-8") as _fh:
+            _cause = next((str(r.get("error")) for r in json.load(_fh) if isinstance(r, dict) and FV.login_error(r.get("error"))), "")
+        status("CONFIG_WAIT round %d: every Claude arm was refused its login (%s); no build was made and no attempt was "
+               "spent; re-seated after a newer seat proof (restart the run, or sign in, then prepare again)" % (rnd, _cause[:300]))
+        sys.exit(6)
     # A DRAINED ROUND IS NOT A ROUND (objection 10): every call was refused at registration because the proof run is
     # ending or near its deadline, so nothing was registered or spent; no grade, no lesson, and the pool re-seats it.
     if not glob.glob(os.path.join(wd, "out", "*.json")) and FV.all_refused_by_drain(os.path.join(wd, "results.json")) is True:
@@ -1066,6 +1118,7 @@ for rnd in range(max_rounds):
         prev = open(base, encoding="utf-8").read() if base else ""
         advice = RA.advise("\n".join(lines), prev, brief[:8000]) if RA.enabled(sub) and _repair_model != "off" else None
         if advice: print("ADVISOR %s" % advice.splitlines()[0][:80], flush=True)
+        elif RA.enabled(sub) and _repair_model != "off": told_refusal("repair_advisor", RA)
         note = (("\n\n" + advice) if advice else "") + ("\n\nROUND %d WAS REJECTED BY THE SANDBOX GRADER. Its own lines:\n" % rnd + "\n".join(lines) +
                 ("\nRead the FIRST failing line. THE BUILD BELOW PASSED THE GRADER EARLIER THIS RUN: start from it, apply the smallest change that answers the lines above, change nothing else.\n" if from_best else
                  "\nRead the FIRST failing line, fix its cause, and check every mutation against your own tests. One of the rejected builds, to start from or discard:\n") + prev[:60000] + "\n")
@@ -1082,8 +1135,11 @@ for rnd in range(max_rounds):
     table = os.path.join(wd, "probes.table")
     if not probes_off:
         hold_gate("round %d probes" % rnd)
+        # the probe stage's adversaries may be Claude models (BROTHER_ADVERSARY_MODEL): probe_wave gets the holder (S2
+        # round 2) and hands it to its fan out alone, never to the model written probes it runs
         B.run_bounded([sys.executable, os.path.join(BIN, "probe_wave.py"), wd, os.path.join(wd, "probes"), "^%s$" % re.escape(sub)],
-                      table, B.knob("PROBE_TIMEOUT", 600) + 180)
+                      table, B.knob("PROBE_TIMEOUT", 600) + 180,
+                      env=dict(os.environ, **_HOLD_ENV) if _HOLD_ENV else None, pass_fds=_HOLD_FDS)
     # FAIL DIRECTION AT THE READ ITSELF. No verdict file at all reads as "NO-DATA" (UNKNOWN). An EMPTY verdict
     # file strips to "", which is not a key in PROBE_VERDICT and is therefore UNKNOWN too. A half written file
     # holding a truncated word is UNKNOWN for the same reason. None of the three can reach the READY exit.
@@ -1150,6 +1206,8 @@ try:
         if _pre:
             with open(os.path.join(run, "FINISHER-BRIEF.md"), "w", encoding="utf-8") as _f: _f.write(_pre)
             print("PREBRIEF written for the finisher: %s" % _pre.splitlines()[0][:80], flush=True)
+        else:
+            told_refusal("repair_advisor", RA)
 except Exception as _exc: print("PREBRIEF NO-DATA: %s" % type(_exc).__name__, flush=True)   # sbe: allow-silent advisory cache, never a gate
 teach("EXHAUSTED after %d rounds; best grader pass: %s" % (max_rounds, best))
 status("EXHAUSTED after %d rounds; best grader pass: %s" % (max_rounds, best)); sys.exit(1)

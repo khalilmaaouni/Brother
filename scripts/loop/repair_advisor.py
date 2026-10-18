@@ -49,8 +49,14 @@ def model(env=None):
     return value.strip() or "sonnet"
 
 
+LAST_REFUSAL = ""   # S2 round 2: the last advise() call's login refusal (loop_roles.login_refusal), "" when none
+
+
 def advise(lines, build_excerpt, spec_excerpt, runner=None, timeout=240, env=None):
-    """The advisor's text, headed 'REPAIR ADVISOR (<model>):', or None. Never raises."""
+    """The advisor's text, headed 'REPAIR ADVISOR (<model>):', or None. Never raises. A call refused the loop login also
+    leaves that refusal in LAST_REFUSAL (S2 round 2), so the unit runner can say why there is no advice."""
+    global LAST_REFUSAL
+    LAST_REFUSAL = ""
     _eff = effort_for_call(os.environ.get("BROTHER_CLAUDE_EFFORT"))
     try:
         import model_call as M, model_router as R
@@ -64,7 +70,9 @@ def advise(lines, build_excerpt, spec_excerpt, runner=None, timeout=240, env=Non
                 on = loop_roles._breaker_on(dict(os.environ) if env is None else env)
                 chain = loop_roles.call_chain("repair_advisor", choice=who, env=env)[0] if on else [who]
                 if not chain: return None   # a refused roles file makes no call
-                a = M.call(prompt, "grade", R.PRIVATE, timeout=timeout, chain=chain) if on else M.call_one(who, prompt, "grade", R.PRIVATE, timeout=timeout)
+                # model_call.call answers (Attempt or None, every attempt); call_one one Attempt (side finding 5)
+                a, tried = M.call(prompt, "grade", R.PRIVATE, timeout=timeout, chain=chain) if on else (lambda x: (x, [x]))(M.call_one(who, prompt, "grade", R.PRIVATE, timeout=timeout))
+                LAST_REFUSAL = "" if a is not None and a.ok else loop_roles.login_refusal(tried)
             finally:
                 if before is None: os.environ.pop("BROTHER_CLAUDE_EFFORT", None)
                 else: os.environ["BROTHER_CLAUDE_EFFORT"] = before

@@ -232,7 +232,7 @@ import gate_ledger
 name, code, start_ns, end_ns, duration_s = sys.argv[1:6]
 record = {
     "schema": 1,
-    "cut_id": os.environ.get("CUT_ID", ""),
+    "cut_id": gate_ledger.cut_id_or_none(os.environ),
     "cut_version": os.environ.get("CUT_VERSION", "UNKNOWN"),
     "gate_name": name,
     "gate_argv": [],
@@ -597,6 +597,10 @@ run_check "loop-tool-parity"     python3 scripts/test_loop_tool_parity.py
 run_check "loop-owns-complete"   python3 scripts/test_bl_owns_complete.py
 run_check "loop-silent-failure"  python3 scripts/test_loop_report_run.py Lint
 run_check "loop-wiring"          python3 scripts/test_loop_wiring.py --max 4
+# C5 (1.1.6): land_batch main() acts on every decision function's answer. It ran
+# in check_all.sh only, so the whole gate never ran it; about 1 s, hermetic (temp
+# git repos, HOME pointed into them). Pinned by scripts/test_required_fast_rows.py.
+run_check "land-batch-callsites-self" python3 scripts/test_land_batch_callsites.py
 run_check "wiring-user-routes"  python3 scripts/wiring_audit.py --user-routes --root "$(pwd)"
 # G11.a (L30): the deploy's own proof, here and not only in check_all.sh. On
 # 2026-10-14 and 15 a small rule file move left its neighbour suites green and

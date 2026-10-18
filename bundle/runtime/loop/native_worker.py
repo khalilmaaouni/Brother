@@ -35,6 +35,8 @@ import brother_login as BL  # noqa: E402  the loop's own Claude login, read on t
 #: The sandbox, inline (sandbox-exec -p) so it ships inside this module and can never go missing beside it: writes only to
 #: the seat worktree, its temp folder, the Claude state the CLI needs and the system temp; credential folders unreadable.
 #: Params WT, TMP, CLAUDE_STATE, LIBRARY come from -D. Proven by the prototype trials of 2026-10-02 (D2.5, RL3.a, R4.3).
+#: No unix socket under ~/.claude/bin can be connected to (1.1.6 S1.b, defense in depth: the run's login holder answers
+#: only on an inherited descriptor, and a socket there is never a seat's to reach).
 PROFILE = r"""(version 1)
 (allow default)
 (deny file-write*)
@@ -50,7 +52,7 @@ PROFILE = r"""(version 1)
 (deny process-exec (subpath (string-append (param "HOME") "/.claude/bin")))
 (deny process-exec (regex #"/git-credential-osxkeychain$") (regex #"/gh$"))
 (allow file-write* (subpath (param "TOOLDIR")) (regex #"^/private/tmp/claude-[0-9a-f]+-cwd$"))
-(deny network-outbound (regex #"^/private/tmp/com\.apple\.launchd\.[^/]+/Listeners$"))
+(deny network-outbound (regex #"^/private/tmp/com\.apple\.launchd\.[^/]+/Listeners$") (subpath (string-append (param "HOME") "/.claude/bin")))
 (deny file-read-data (subpath (param "HOME")))
 (allow file-read-data (subpath (param "WT")) (subpath (param "TMP")) (subpath (param "TOOLDIR"))
  (subpath (string-append (param "HOME") "/Library/Application Support/Claude/claude-code"))
@@ -595,8 +597,19 @@ def child_env_name(name):
 def login_child():
     """(child_env, fd) for ONE token lane child: the Keychain login on a pipe (fd, named by FD_VAR in child_env), never in
     an environment, with the CLI's own tool children scrubbed too. Raises brother_login.Failure when the login cannot be
-    read (a plain message, never the login). The caller passes fd to that one child and closes it afterwards."""
-    child_env, fd = BL.with_login({k: v for k, v in os.environ.items() if child_env_name(k)})
+    read (a plain message, never the login). The caller passes fd to that one child and closes it afterwards.
+    THE RUN'S HOLDER FIRST (1.1.6 S1, S1.b): the login the run's holder (brother_login.py hold --run DIR -- COMMAND)
+    read once at launch, asked on the descriptor this process inherited from it (never a path, so a seat's shell has
+    nothing to ask), so a Keychain that locks after launch no longer stops a seat; the fresh Keychain read only when no
+    holder is named, or BROTHER_LOOP_HOLD=off (the rollback). A refusing holder, or a named one that has ended (S2 round
+    1: its peer gone), raises naming the holder: no fallback. S2 round 3 (finding 1): inside a held run (HELD_RUN_VAR,
+    set by the holder) a process that was handed no holder refuses with UNHANDED: the fresh read is for an unheld run."""
+    held = BL.ask_holder() if os.environ.get("BROTHER_LOOP_HOLD") != "off" else ""
+    require_held = os.environ.get("BROTHER_LOOP_HOLD") != "off" and os.environ.get(BL.HELD_RUN_VAR)
+    if not held and require_held:
+        raise BL.Failure(BL.UNHANDED)
+    child_env, fd = BL.with_login({k: v for k, v in os.environ.items() if child_env_name(k)},
+                                  held.encode("ascii") if held else None)
     child_env[SCRUB_VAR] = "1"   # the CLI's own tool children never inherit its environment
     return child_env, fd
 
@@ -618,8 +631,9 @@ def _seat_session(m, effort, wt, common, held_fds, program=None):
                                   model_id=m["id"])
     except R.Refused as exc:
         return None, None, None, None, "%s: %s" % (MC.CONFIG_WAIT, exc)
-    # THE LOOP TOKEN LANE (BROTHER_LOOP_TOKEN=on, 2026-10-03): the Keychain login brother-login saved, read fresh
-    # here, goes to this one child on a pipe (login_fd, named by FD_VAR in its scrubbed environment), never in
+    # THE LOOP TOKEN LANE (BROTHER_LOOP_TOKEN=on, 2026-10-03): the Keychain login brother-login saved, from the
+    # run's holder when one is registered (1.1.6 S1) or else read fresh here (login_child), goes to this one child
+    # on a pipe (login_fd, named by FD_VAR in its scrubbed environment), never in
     # any environment; the parent's environment is never touched and nothing logs it. A missing or unreadable
     # login parks the round CONFIG_WAIT before the ledger row, never a silent fallback.
     token_on = SW.on("BROTHER_LOOP_TOKEN")
@@ -651,9 +665,20 @@ def _seat_go(runner, wt, child_env, login_fd):
 PING_PROMPT = "Reply with the single word ok and nothing else. Use no tools."
 REFRESH_TIMEOUT_S = 90
 SEAT_PROBE_TIMEOUT_S = 180
-REFRESH_HINT = ("a native seat cannot refresh an expired Claude login from inside its sandbox: refresh it with one plain "
-                "call (python3 ~/.claude/bin/native_worker.py refresh, which the driver also runs before every pass), "
-                "then prepare again; if that refresh fails too, sign in to Claude Code on this machine")
+
+
+def refresh_hint(transport="claude"):
+    """The remedy for a pin whose login a seat cannot use, naming the folder to run it from (C13): the code root this
+    program resolves (model_router.code_root: the deploy stamp's tree from the bin), or that refusal's own words."""
+    try:
+        cmd = R.refresh_remedy(transport, R.code_root())
+    except R.Refused as exc:
+        return "no folder to refresh from can be named: %s" % exc
+    if transport == "codex":
+        return "a Codex pin needs this machine's Codex login: %s; if that fails too, sign in to Codex on this machine" % cmd
+    return ("a native seat cannot refresh an expired Claude login from inside its sandbox: refresh it with one plain "
+            "call (%s, which the driver also runs before every pass), then prepare again; if that refresh fails too, "
+            "sign in to Claude Code on this machine" % cmd)
 
 
 def cheapest_claude(reg):
@@ -955,12 +980,18 @@ def fanout(jobs, repo, base, timeout_s, results=None, seat_count=None, runner=No
 
 
 def main(argv):
+    # THE HOP RULE HERE TOO (S2 round 3, finding 2): the fan out spawn hands this worker the run's holder; take it from
+    # the environment and close it on exec at once, so the landing fuzz (seat_fuzz), a seat's tools and any shell child
+    # are never told it nor inherit it, while this process's own seats still ask it (take_hold keeps it, login_child).
+    BL.take_hold()
     if argv[:1] == ["refresh"]:   # the driver's one line before every pass (loop_until.sh): OK, SKIPPED or FAILED <class>
         try:
             state, detail = refresh()
         except Exception as exc:   # sbe: allow-silent named on the line: a refresh that cannot run is FAILED, never silent
             state, detail = "FAILED", "no-answer (%s)" % type(exc).__name__
         print("REFRESH %s %s" % (state, detail), flush=True)
+        if state not in ("OK", "SKIPPED"):   # the driver reads the one REFRESH line on stdout; a hand run sees the remedy
+            print("REMEDY %s" % refresh_hint(), file=sys.stderr, flush=True)
         return 0 if state in ("OK", "SKIPPED") else 1
     if argv[:1] == ["seat-probe"]:   # the intake's seat proof, by hand
         state, detail = seat_probe()

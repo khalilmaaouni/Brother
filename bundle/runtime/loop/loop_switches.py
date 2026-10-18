@@ -85,7 +85,10 @@ def suite_env(base, home):
     # the state roots live under the suite's HOME, as grade_build.run puts them inside its sandbox (2026-10-03: the run's
     # own money root, outside the sandbox's write roots, turned L5a-7's green build into "Operation not permitted" x21)
     env = dict(drop_run_knobs(base), PYTHONDONTWRITEBYTECODE="1", HOME=home, TMPDIR=os.path.join(home, "tmp"),
-               BROTHER_OR_STATE_ROOT=os.path.join(home, "or-state"), BROTHER_JEV_STATE_DIR=os.path.join(home, "jev-state"))
+               BROTHER_OR_STATE_ROOT=os.path.join(home, "or-state"), BROTHER_JEV_STATE_DIR=os.path.join(home, "jev-state"),
+               # C9 (1.1.6): export folders live under the scratch root now, and the run's own root is outside the sandbox
+               BROTHER_SCRATCH=os.path.join(home, "scratch"))
     env.pop("BROTHER_RUN_DIR", None)
+    env.pop("BROTHER_LOGIN_HOLD_FD", None)   # brother_login.HOLD_FD_VAR (S2 round 3): model written code is never told the holder
     for k in [k for k in env if k.startswith("GIT_") or SECRET_ENV.search(k)]: env.pop(k)  # git location variables (its git config calls would land in the live repo) and credential-shaped names
     return env

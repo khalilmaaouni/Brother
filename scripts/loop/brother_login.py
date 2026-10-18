@@ -3,6 +3,8 @@
 
     python3 scripts/loop/brother_login.py      sign in once; the token lands in your login Keychain
     python3 scripts/loop/brother_login.py forget   remove it again (then revoke it in Claude settings)
+    python3 scripts/loop/brother_login.py hold --run DIR -- COMMAND...   hold the login in memory for one loop run,
+        answering COMMAND and only what COMMAND passes the descriptor to (see hold())
 
 HOW. `claude setup-token` is run inside a private pseudo terminal owned by this helper: nothing of its transcript
 reaches the screen, a log, or a file. The one token it prints is parsed after the child exits, handed on stdin
@@ -28,6 +30,7 @@ Test: python3 -B scripts/loop/test_brother_login.py (a fake claude and a fake re
 import errno
 import fcntl
 import hmac
+import math
 import os
 import pty
 import pwd
@@ -37,6 +40,8 @@ import secrets
 import select
 import shutil
 import signal
+import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -62,6 +67,15 @@ NOT_FOUND = 44    # the reader's exit status for an item that is not there
 FOREIGN = 45      # the reader's exit status for an item another program created (an older Brother used /usr/bin/security)
 OLD_ITEM = ("A login saved by an older Brother is in the way. Remove it, then run brother-login again:\n"
             "  security delete-generic-password -s %s -a \"$USER\" ~/Library/Keychains/login.keychain-db" % SERVICE)
+#: THE EXPIRY AHEAD (1.1.6 S4). The item is the token, then SAVED_AT and whole epoch seconds, written in one set, so a
+#: re-login replaces both at once. read_saved strips the field: every caller (with_login, hold, status) sees the bare
+#: token. `claude setup-token` makes "a one-year OAuth token" (code.claude.com/docs/en/authentication, "Generate a
+#: long-lived token", read 2026-10-18; its --help says only "long-lived"); a year is counted as 365 days. WARN_S is a
+#: choice, not a measurement: two weeks, so an owner away for a week still meets the warning on a status.
+SAVED_AT = b"\nsaved_at="
+LIFETIME_S = 365 * 86400
+WARN_S = 14 * 86400
+CLOCK = time.time   # tests point this at a fake clock
 
 
 class Failure(Exception):
@@ -126,22 +140,55 @@ def identity():
     return [SERVICE, ACCOUNT, KEYCHAIN]
 
 
-def read_saved():
-    """The saved token, bytes, or Failure (missing, locked, malformed). Never printed by anyone."""
+def read_item():
+    """(token, saved_at bytes or None) from the one item, or Failure (missing, locked, malformed). A login saved
+    before 1.1.6 S4 carries no saved_at: None, never a time. Neither value is printed by anyone."""
     r = quiet(["get"] + identity())
     require(r.returncode == 0, MISSING)
     value = r.stdout[:-1] if r.stdout.endswith(b"\n") else r.stdout
+    value, mark, saved_at = value.partition(SAVED_AT)
     require(TOKEN.fullmatch(value) is not None, "Saved login is not a Claude token. Run brother-login again.")
-    return value
+    return value, saved_at if mark else None
 
 
-def with_login(scrubbed_env):
+def read_saved():
+    """The saved token, bytes, or Failure (missing, locked, malformed). Never printed by anyone."""
+    return read_item()[0]
+
+
+def age_line(saved_at, now, lifetime_s, warn_s):
+    """The status line for a login saved at saved_at (epoch seconds; bytes or text from the item are read as a number):
+    its age, plus "Renew within N days: run brother-login." when under warn_s of lifetime_s is left, or a lapsed line
+    once it is gone. A saved_at that is missing, not a number, not finite, zero or below, or after now answers NO-DATA,
+    never fresh. A lifetime or warning window that is not a finite number (above zero for the lifetime) refuses."""
+    ok = lambda x: not isinstance(x, bool) and isinstance(x, (int, float)) and math.isfinite(x)
+    require(ok(lifetime_s) and lifetime_s > 0 and ok(warn_s) and warn_s >= 0 and ok(now) and now > 0,
+            "Brother's login lifetime is unknown here. Update Brother.")
+    try:
+        at = None if isinstance(saved_at, bool) else float(saved_at)
+    except (TypeError, ValueError):
+        at = None
+    if at is None or not math.isfinite(at) or at <= 0 or at > now:
+        return "Brother login age: NO-DATA (saved without a usable time). Run brother-login to record one."
+    age = now - at
+    line = "Brother login saved %d days ago." % (age // 86400)
+    left = lifetime_s - age
+    if left <= 0:
+        return line + " It has lapsed (a setup-token login lasts one year): run brother-login."
+    if left < warn_s:
+        return line + " Renew within %d days: run brother-login." % math.ceil(left / 86400)
+    return line
+
+
+def with_login(scrubbed_env, value=None):
     """(env, fd) for one claude child: env is a COPY of scrubbed_env naming FD_VAR=fd and carrying no TOKEN_VAR (an
-    inherited one included), and fd is the read end of a pipe holding the fresh Keychain token, its write end already
-    closed, so it reads exactly once and then reads empty. The caller passes fd to that one child (pass_fds) and closes
-    it after the spawn. The token is never in any environment, argv, file or log; os.environ is never touched."""
-    value = read_saved()
-    env = {k: v for k, v in scrubbed_env.items() if k != TOKEN_VAR}
+    inherited one included), and fd is the read end of a pipe holding the token, its write end already closed, so it
+    reads exactly once and then reads empty. value: the token the run's holder answered (ask_holder), or None for a
+    fresh Keychain read. The caller passes fd to that one child (pass_fds) and closes it after the spawn. The token is
+    never in any environment, argv, file or log; os.environ is never touched."""
+    value = read_saved() if value is None else value
+    require(TOKEN.fullmatch(value) is not None, "The held login is not a Claude token. Restart the run.")
+    env = {k: v for k, v in scrubbed_env.items() if k not in (TOKEN_VAR, HOLD_FD_VAR)}   # a child never names the holder
     r, w = os.pipe()   # both ends non inheritable; pass_fds opens r to the one child
     try:
         require(os.write(w, value) == len(value), "Brother could not hand over its login. Try again.")   # < pipe buffer
@@ -154,13 +201,221 @@ def with_login(scrubbed_env):
     return env, r
 
 
+#: THE RUN'S LOGIN HOLDER (1.1.6 S1, S1.b). In 1.1.5 the login Keychain locked while the owner slept and every seat
+#: started after that failed its fresh read. `hold --run DIR -- COMMAND...` reads the login ONCE at launch, keeps it in
+#: memory, and starts COMMAND (the run's launcher) as the ONLY holder of the other end of an unnamed socket pair, named to
+#: it by HOLD_FD_VAR (a descriptor number, never the login). No path exists on disk: S1's named socket answered any
+#: process of the same uid, a seat's own shell included, which defeated the reader's code identity ACL (security
+#: review 2026-10-18 01h5x, HIGH). A process gets the login only by holding the descriptor, so only processes the
+#: launcher passes it to can ask (every Python hop closes it unless pass_fds names it; native_worker's seats never get
+#: it). A request is one datagram carrying the write end of the asker's own pipe; the answer is a 4 byte length then
+#: the token, written into that pipe and nowhere else, so a holder killed mid answer is a short read, never a truncated
+#: token. It stops answering when the run folder is removed, and returns COMMAND's exit status once it ends.
+HOLD_FD_VAR = "BROTHER_LOGIN_HOLD_FD"
+HOLD_POLL_S = 0.5    # how soon the holder sees its run folder gone or its command ended
+HOLD_ANSWER_S = 10   # how long an asker waits for its answer
+_ASK = b"login?"
+#: the holder's end is closed: macOS answers ECONNRESET on the first send after that, then EDESTADDRREQ (measured)
+_DEAD = (errno.ECONNRESET, errno.EDESTADDRREQ, errno.ECONNREFUSED, errno.ENOTCONN, errno.EPIPE)
+#: S2 round 1 (review B): a named holder whose peer is gone (its run folder removed, its command ended, or it was
+#: stopped or killed) is a refusal that names the holder, never a quiet fresh Keychain read that, locked by then, named
+#: the Keychain. runner_pool.LOGIN_HINTS classes it ("The run's login holder"), so the unit parks once, owner told.
+HOLDER_ENDED = ("The run's login holder has ended, so this run no longer has its login. Restart the run "
+                "(start_run.sh) to read it again.")
+#: S2 round 1 (review A): the holder descriptor THIS process kept when take_hold took the name from its own
+#: environment, so the process's own in process roles (build plan, repair advisor) still ask the holder. "" when none;
+#: _BROKEN when the name named nothing open here (S2 round 3, DeepSeek lane L2): never the number itself, which a socket
+#: opened later in this process could take; ask_holder refuses _BROKEN as a name that is not a descriptor.
+_HELD = ""
+_BROKEN = "broken"
+#: THE HELD RUN'S MARK (S2 round 3, finding 1). hold() sets HELD_RUN_VAR=1 in its command's environment, and the driver
+#: and the pass keep it where they unset HOLD_FD_VAR, so every process of a held run knows it is one. It names no
+#: descriptor and carries no login. A Claude role host of a held run that was handed no holder (diag_round and its fan
+#: out) then refuses with UNHANDED (native_worker.login_child), never a quiet fresh Keychain read. The finisher's job,
+#: which outlives the run and reads fresh by design, clears it with the name.
+HELD_RUN_VAR = "BROTHER_LOGIN_HELD_RUN"
+UNHANDED = ("The run's login holder was not handed to this process, so it has no login here and does not read the "
+            "Keychain itself. Restart the run (start_run.sh), or run this role off the token lane.")
+
+
+def _run_folder(run_dir):
+    """The resolved run folder. Refuses one that is not absolute, carries a control character (a newline included) or
+    does not exist."""
+    require(isinstance(run_dir, str) and os.path.isabs(run_dir) and not re.search(r"[\x00-\x1f\x7f]", run_dir),
+            "A login holder needs an absolute run folder with no control character in its name.")
+    run = os.path.realpath(run_dir)
+    require(os.path.isdir(run), "The run folder to hold the login for does not exist: %s" % run)
+    return run
+
+
+def _take_request(chan):
+    """The write end of one asker's pipe, or None (no request yet, or one that is refused: every descriptor it carried
+    is closed, and the refusal is logged without any content)."""
+    try:
+        msg, anc, _, _ = chan.recvmsg(len(_ASK) + 1, socket.CMSG_SPACE(4 * struct.calcsize("i")))
+    except socket.timeout:
+        return None   # sbe: allow-silent no request arrived within the poll window; the holder simply polls again
+    except OSError:
+        return None   # sbe: allow-silent the asker went away mid send; it raises on its own empty answer
+    fds = []
+    for level, kind, data in anc:
+        if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+            n = len(data) // struct.calcsize("i")
+            fds.extend(struct.unpack("%di" % n, data[:n * struct.calcsize("i")]))
+    ok = msg == _ASK and len(fds) == 1   # a longer message or more descriptors arrive cut, and fail this too
+    if ok:
+        try:
+            ok = stat.S_ISFIFO(os.fstat(fds[0]).st_mode)   # an answer goes into a pipe, never a file or a socket
+        except OSError:
+            ok = False
+    if not ok:
+        for fd in fds:
+            os.close(fd)
+        print("brother-login hold: refused a malformed request", file=sys.stderr, flush=True)
+        return None
+    return fds[0]
+
+
+def _answer(fd, value):
+    """The framed token into the asker's pipe, without ever blocking the holder (a full pipe is the asker's loss)."""
+    try:
+        fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)
+        os.write(fd, struct.pack(">I", len(value)) + value)
+    except OSError:   # sbe: allow-silent an asker that hung up or gave a full pipe gets nothing, and raises on its short read
+        pass
+    finally:
+        os.close(fd)
+
+
+def serve(chan, value, running):
+    """Answer each request on chan (the holder's end of the pair) while running() is true."""
+    chan.settimeout(HOLD_POLL_S)
+    while running():
+        fd = _take_request(chan)
+        if fd is not None:
+            _answer(fd, value)
+
+
+def hold(run_dir, command, reader=None):
+    """Hold the saved login for one run: refuse a hostile run folder or an empty command, read the login ONCE with
+    reader (default read_saved, the signed reader), start command with the pair's other end as its one extra
+    descriptor, answer until the run folder is removed or command ends, and return command's exit status. Failure on
+    any refusal: nothing is started then."""
+    run = _run_folder(run_dir)
+    require(isinstance(command, (list, tuple)) and command and all(isinstance(a, str) and a for a in command),
+            "A login holder needs the command of the run it holds the login for.")
+    value = (reader or read_saved)()
+    require(isinstance(value, bytes) and TOKEN.fullmatch(value) is not None,
+            "Saved login is not a Claude token. Run brother-login again.")
+    mine, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        env = {k: v for k, v in os.environ.items() if k not in (TOKEN_VAR, FD_VAR)}
+        env[HOLD_FD_VAR] = str(theirs.fileno())
+        env[HELD_RUN_VAR] = "1"   # the run is held: no process of it reads the Keychain fresh (S2 round 3)
+        try:
+            # its own session (S2 round 1, review C): the command (the driver) leads its own process group, as it
+            # does off the token lane, so a stop signals its whole group, a foreground refresh child included
+            child = subprocess.Popen(list(command), env=env, pass_fds=(theirs.fileno(),), start_new_session=True)
+        except OSError:
+            raise Failure("The login holder could not start the run's command: %s" % command[0]) from None
+        finally:
+            theirs.close()
+        serve(mine, value, lambda: child.poll() is None and os.path.isdir(run))
+    finally:
+        mine.close()   # the run folder is gone or the command ended: every later ask finds a dead holder
+    return child.wait()
+
+
+def ask_holder(environ=None):
+    """The token the run's holder answers on the descriptor HOLD_FD_VAR names (in environ, default os.environ; for
+    this process's own environment, else the descriptor take_hold kept here), as text, or "" when no holder is named.
+    Raises Failure when the named holder has ended (HOLDER_ENDED), when the named descriptor is not a datagram unix
+    socket, or on a refused request, a short read or an answer that is not a Claude token: refused or ended is not
+    absent, so the caller never falls back to a fresh read. A process that does not hold the descriptor has nothing
+    to ask."""
+    own = environ is None or environ is os.environ
+    raw = (os.environ if environ is None else environ).get(HOLD_FD_VAR, "") or (_HELD if own else "")
+    if not raw:
+        return ""
+    require(re.fullmatch(r"[0-9]{1,6}", raw) is not None,
+            "The run's login holder is named by something that is not a descriptor. Restart the run.")
+    fd = int(raw)
+    try:
+        os.set_inheritable(fd, False)   # no program this process starts by exec ever inherits it
+        chan = socket.socket(fileno=os.dup(fd))   # refuses a descriptor that is not a socket
+    except OSError:
+        raise Failure("The run's login holder descriptor is not an open socket. Restart the run.") from None
+    r, w = os.pipe()
+    try:
+        with chan:
+            require(chan.family == socket.AF_UNIX and chan.type == socket.SOCK_DGRAM,
+                    "The run's login holder descriptor is not the holder's kind of socket. Restart the run.")
+            try:
+                chan.sendmsg([_ASK], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, struct.pack("i", w))])
+            except OSError as exc:
+                if exc.errno in _DEAD:
+                    raise Failure(HOLDER_ENDED) from None
+                raise Failure("The run's login holder did not take the request. Restart the run.") from None
+        os.close(w)
+        w = None
+        data = b""
+        deadline = time.monotonic() + HOLD_ANSWER_S
+        while len(data) <= 8192:
+            left = deadline - time.monotonic()
+            require(left > 0 and select.select([r], [], [], left)[0], "The run's login holder did not answer. Restart the run.")
+            chunk = os.read(r, 8192)
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        os.close(r)
+        if w is not None:
+            os.close(w)
+    require(data, "The run's login holder refused this request.")
+    require(len(data) >= 4 and struct.unpack(">I", data[:4])[0] == len(data) - 4,
+            "The run's login holder broke off its answer. Restart the run.")
+    require(TOKEN.fullmatch(data[4:]) is not None, "The run's login holder answered something that is not a login.")
+    return data[4:].decode("ascii")
+
+
+def take_hold(environ=None):
+    """THE HOP (1.1.6 S2): a loop process that holds the run's holder descriptor hands it to ONE child, never to all.
+    Pops HOLD_FD_VAR from environ (default os.environ), so no other child this process starts is told a number it
+    does not hold (a Python spawn closes every descriptor it is not given, and a seat told a closed one refuses), and
+    answers (env, fds) for the one child: ({}, ()) when none is named; ({HOLD_FD_VAR: raw}, (fd,)) when raw names a
+    socket open here; ({HOLD_FD_VAR: raw}, ()) when it names anything else, so that child's ask refuses (a broken hop
+    is loud, never a quiet fresh read). The caller spawns that child with env=dict(os.environ, **env), pass_fds=fds.
+    S2 round 1 (review A): over this process's own environment the name is kept in _HELD, so this process's own in
+    process roles still ask the holder (ask_holder), and a held descriptor is made close on exec, so no program this
+    process starts gets it unless pass_fds names it."""
+    global _HELD
+    own = environ is None or environ is os.environ
+    environ = os.environ if environ is None else environ
+    raw = environ.pop(HOLD_FD_VAR, "")
+    if not raw:
+        return {}, ()
+    try:
+        held = re.fullmatch(r"[0-9]{1,6}", raw) is not None and stat.S_ISSOCK(os.fstat(int(raw)).st_mode)
+        if held:
+            os.set_inheritable(int(raw), False)
+    except OSError:
+        held = False   # sbe: allow-silent not open here: the name goes on alone and that child's ask refuses
+    if own:
+        _HELD = raw if held else _BROKEN   # S2 round 3: validated first, so a broken name is never kept as a number
+    return {HOLD_FD_VAR: raw}, ((int(raw),) if held else ())
+
+
 def save(value):
-    """Write the token as the one item through the reader (stdin only), then prove it by reading it back."""
+    """Write the token and its saved_at (CLOCK, whole seconds) as the one item through the reader (stdin only), then
+    prove both by reading them back."""
     require(len(value) < 4096, "Login is too long. Update Brother.")
-    r = quiet(["set"] + identity(), value + b"\n")
+    saved_at = b"%d" % int(CLOCK())
+    r = quiet(["set"] + identity(), value + SAVED_AT + saved_at + b"\n")
     require(r.returncode != FOREIGN, OLD_ITEM)
     require(r.returncode == 0, "Login was not confirmed saved. Unlock Keychain and try again.")
-    require(hmac.compare_digest(read_saved(), value), "Login verification failed. Run brother-login again.")
+    token, back = read_item()
+    require(hmac.compare_digest(token, value) and back == saved_at,
+            "Login verification failed. Run brother-login again.")
 
 
 def extract(raw):
@@ -260,9 +515,13 @@ def forget():
 def status():
     """Whether a well formed login is saved, read through the same reader a seat uses. The value is dropped unread by
     anyone: never printed, measured or logged. Proves the item exists and is shaped like a Claude token, not that it is
-    valid or unrevoked. A Failure carries the login lane's own remedy (brother-login), never the interactive sign in."""
-    read_saved()
+    valid or unrevoked. A Failure carries the login lane's own remedy (brother-login), never the interactive sign in.
+    Then the age line (age_line, 1.1.6 S4): an unknown age is NO-DATA at exit 0; a lapsed login is a Failure."""
+    _, saved_at = read_item()
     print("Brother login is present and well formed in your login Keychain.")
+    line = age_line(saved_at, CLOCK(), LIFETIME_S, WARN_S)
+    require("lapsed" not in line, line)
+    print(line)
 
 
 def _interrupted(signum, frame):
@@ -270,7 +529,8 @@ def _interrupted(signum, frame):
 
 
 def main(argv, tty=None, deadline_s=SIGN_IN_S):
-    """The entry point: 0 on a verified save or removal, 1 on any refusal, 130 when cancelled. Every failure prints a
+    """The entry point: 0 on a verified save or removal, the held command's own exit status for hold, 1 on any
+    refusal, 130 when cancelled. Every failure prints a
     fixed sentence: no traceback, no child output, no token."""
     try:
         signal.signal(signal.SIGTERM, _interrupted)
@@ -279,8 +539,12 @@ def main(argv, tty=None, deadline_s=SIGN_IN_S):
             forget()
         elif argv == ["status"]:
             status()
+        elif argv[:1] == ["hold"]:
+            require(len(argv) >= 5 and argv[1] == "--run" and argv[3] == "--", "Use brother-login hold --run DIR -- COMMAND.")
+            return hold(argv[2], argv[4:])
         else:
-            require(argv == [], "Use brother-login, brother-login status or brother-login forget.")
+            require(argv == [], "Use brother-login, brother-login status, brother-login forget or "
+                                "brother-login hold --run DIR -- COMMAND.")
             build_reader()
             save(capture(tty, deadline_s))
             print("Brother login saved and verified in your login Keychain.")
@@ -289,7 +553,10 @@ def main(argv, tty=None, deadline_s=SIGN_IN_S):
         print(str(exc), file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("Cancelled. No successful change confirmed.", file=sys.stderr)
+        if argv[:1] == ["hold"]:   # a stopped holder writes into its driver's log: say what ended (S2 round 1)
+            print("brother-login hold: stopped; the run's login is no longer held.", file=sys.stderr)
+        else:
+            print("Cancelled. No successful change confirmed.", file=sys.stderr)
         return 130
     except Exception:   # sbe: allow-silent a traceback could carry the transcript; the fixed sentence is the whole report
         print("Brother login failed. Retry or contact support.", file=sys.stderr)

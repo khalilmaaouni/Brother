@@ -7,6 +7,20 @@
 # unknown returns the FLOOR, so an unreadable load, core count or money cap NARROWS the loop rather than
 # widening it. An explicit env var still wins, so a human can pin any knob for one run.
 
+# THE LOGIN HOLDER'S DESCRIPTOR REACHES THE POOL AND NO OTHER CHILD (1.1.6 S2 round 2, review claim 8): the same lines
+# as loop_until.sh's, which hands this pass the holder. Every program that can run code starts with the descriptor
+# closed and the name unset; runner_pool.py alone gets both (hold_give), and hands them to one unit runner at a time.
+HOLD_N="${BROTHER_LOGIN_HOLD_FD:-}"
+unset BROTHER_LOGIN_HOLD_FD
+case "$HOLD_N" in
+  ''|*[!0-9]*) ;;   # none named, or a name that is not a number: handed on as it came, and the asker refuses it loudly
+  *) for _c in python3 python perl bash sh git osascript; do
+       _p=$(type -P "$_c") && eval "$_c() { \"$_p\" \"\$@\" $HOLD_N<&-; }"
+     done;;
+esac
+hold_give() {   # hold_give PROGRAM ARGS...: PROGRAM is told the holder and keeps its descriptor; plain when none is named
+  if [ -n "$HOLD_N" ]; then BROTHER_LOGIN_HOLD_FD="$HOLD_N" command "$@"; else command "$@"; fi
+}
 # THE PULSE, on EVERY exit path including ones added after this line. Wiring it at each `exit`
 # by hand is exactly the mistake fixed earlier tonight, where a productivity guard sat after a
 # sibling early exit and was walked straight past. A trap cannot be bypassed by a new branch.
@@ -352,7 +366,7 @@ if ! git diff --quiet -- "$PLAN_FILE" 2>/dev/null; then
   echo "closure $(printf '%s\n' "$CLOSE_PUSH" | tail -1 | cut -c1-160)"
   [ "${CPRC:-1}" -ne 0 ] && echo "closure did not land (lander exit ${CPRC}): the plan change stays as the closer left it and the next pass reports it"
 fi
-POOL_ALL=$(python3 ~/.claude/bin/runner_pool.py 2>&1); PRC=$?
+POOL_ALL=$(hold_give python3 ~/.claude/bin/runner_pool.py 2>&1); PRC=$?
 POOL=$(printf '%s\n' "$POOL_ALL" | grep -E 'START|^started' | cut -c1-160)
 [ "${PRC:-0}" -ne 0 ] && echo "POOL exit=$PRC: $(printf '%s\n' "$POOL_ALL" | tail -1 | cut -c1-140)"
 echo "$POOL"

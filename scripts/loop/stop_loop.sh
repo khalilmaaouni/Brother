@@ -47,6 +47,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ONLY="${STOP_LOOP_ONLY:-}"
 DRY=0; case " $* " in *" --dry "*) DRY=1;; esac
 KIND=all; [ "${1:-}" = "--runners-only" ] && KIND=runners
+# --runners-only ALSO ENDS A LIVE DRIVER'S LOGIN REFRESH (named 2026-10-18, S2 round 2): loop_procs counts
+# bin/native_worker.py as a runner, the refresh included, so a hand --runners-only while a driver sits in its foreground
+# refresh kills it, and that driver logs REFRESH FAILED no-answer and raises one LOGIN alarm; its next pass refreshes
+# again. The one production caller is the driver's own end, after its last refresh, so only a hand stop meets this.
 procs() {                       # procs <driver|runners|all>: "pid command" lines; nonzero when ownership cannot be read
   python3 "$HERE/loop_procs.py" "$1" --only "$ONLY" --self "$$"
 }
@@ -136,6 +140,34 @@ if [ "$KIND" = all ]; then
   fi
   signal_lines KILL "$(printf '%s\n' "$DRIVERS" | alive_same)"
 fi
+# THE RUN'S LOGIN HOLDER (1.1.6 S2): start_run.sh writes "<holder pid> <its run folder>" into the driver's
+# <run folder>/login-holder.pid; the holder started the driver (hold --run DIR -- COMMAND) and ends with it, so this is
+# the stop for a holder that outlived its driver. It is reaped on a full stop only (S2 round 1, review B): never by
+# --runners-only, which leaves the run and its driver alive (reaping there made every later seat of that live run
+# read a locked Keychain), nor by --dry or --drain. A full stop stops every run of this loop by design (the driver
+# and runner sets above are not run scoped either), so every holder under the runs root is reaped. A pid whose command
+# line is not "... hold --run <that folder> -- ..." (a reused pid) is never signalled, and STOP_LOOP_ONLY limits it
+# like the rest.
+reap_holders() {
+  [ "$DRY" = 1 ] && return 0
+  local f p c run hdir n
+  for f in "${BROTHER_RUNS_ROOT:-$HOME/.claude/evidence/loop-runs}"/run-*/login-holder.pid; do
+    [ -f "$f" ] || continue
+    p=""; hdir=""
+    read -r p hdir < "$f" 2>/dev/null
+    case "$p" in ''|*[!0-9]*) echo "NOTE: $f names no pid; skipped"; continue;; esac
+    [ -n "$hdir" ] || { echo "NOTE: $f names no holder folder; skipped"; continue; }
+    run=${f%/login-holder.pid}
+    c=$(ps -ww -o command= -p "$p" 2>/dev/null) || continue   # gone already
+    case "$c" in *" hold --run $hdir -- "*) ;; *) continue;; esac
+    if [ -n "$ONLY" ]; then case "$c" in *"$ONLY"*) ;; *) continue;; esac; fi
+    kill -TERM "$p" 2>/dev/null
+    n=0; while kill -0 "$p" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.2; n=$((n + 1)); done
+    kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null
+    echo "OK   login holder $p of $run stopped"
+  done
+}
+[ "$KIND" = all ] && reap_holders
 if ! NOW1=$(owned_now); then echo "NO-DATA: a later process-table read failed; nothing more was signalled"; exit 2; fi
 signal_lines TERM "$NOW1"
 [ "$DRY" = 1 ] || sleep 3

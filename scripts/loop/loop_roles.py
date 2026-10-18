@@ -134,6 +134,25 @@ def _member_ok(role, spec, name, reg):
     return True
 
 
+#: S2 round 2 (review claim 3 part c): the words of model_call._TokenLane's refusal when a role's Claude call cannot use
+#: the loop login (a locked Keychain, or the run's login holder ended). The role modules (build_plan, repair_advisor)
+#: swallow every failure into None; login_refusal lifts this one out so the unit runner can say it and tell the owner.
+ROLE_LOGIN_REFUSED = "the loop login cannot be used"
+
+
+def login_refusal(attempts):
+    """The detail of the LAST attempt in attempts that is a configuration refusal of the loop login (failure "CONFIG",
+    its detail naming ROLE_LOGIN_REFUSED), or "". A chain may fall over to a member that fails some other way; the
+    login loss is still the news. Anything that is not a list or tuple of attempts answers ""."""
+    if not isinstance(attempts, (list, tuple)):
+        return ""
+    for a in reversed(attempts):
+        detail = getattr(a, "detail", "")
+        if getattr(a, "failure", None) == "CONFIG" and isinstance(detail, str) and ROLE_LOGIN_REFUSED in detail:
+            return detail
+    return ""
+
+
 def _breaker_on(env=None):
     """FX-11.4: is the breaker switch on? breaker.py (FX-11.1) is imported INSIDE this function, never at module
     level, so this file, the intake and scripts/test_attacker_role_limit.py still import where no breaker file is

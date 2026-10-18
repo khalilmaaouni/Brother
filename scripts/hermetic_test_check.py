@@ -58,6 +58,7 @@ sys.path.insert(0, HERE)
 
 import cut_preflight as P  # noqa: E402
 import evidence_obligation as EO  # noqa: E402
+import export_public as E  # noqa: E402
 import timing_hunt as TH  # noqa: E402
 
 
@@ -422,6 +423,20 @@ def _scratch_root():
                               or "~/.claude/brother-scratch")
 
 
+def _export_pair(kind):
+    """(tree, home): two fresh folders under the scratch root (export_public.scratch_dir, C9), the export tree and the
+    HOME its tests run under. Raises OSError having removed whichever one it made; never the system temp folder."""
+    made = []
+    try:
+        for what in ("export", "home"):
+            made.append(E.scratch_dir("hermetic-%s%s-" % (kind, what)))
+    except OSError:
+        for path in made:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
+    return made[0], made[1]
+
+
 def _keep(test, proc):
     """The refused run's whole output, kept outside the tree that is about
     to be deleted. Returns the path, or why it could not be written."""
@@ -600,8 +615,10 @@ def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S):
     # cached, never a verdict: each test below still runs, in this worktree, under the sandbox (which cannot write into
     # the cache entry, outside `tree` and `home`). A caller's own build is used exactly as passed.
     build = build or P.export_tree_builder(root, cache=True)
-    tree = tempfile.mkdtemp(prefix="hermetic-export-")
-    home = tempfile.mkdtemp(prefix="hermetic-home-")
+    try:
+        tree, home = _export_pair("")
+    except OSError as exc:
+        return [(NODATA, "hermetic-tests", "no scratch folder for the export tree could be made: %s" % exc)]
     try:
         try:
             build(tree)
@@ -830,8 +847,10 @@ def slow_host(root, files, n, repeats=SLOW_REPEATS, runner=None, build=None, hel
     clock = clock or time.monotonic
     hog_starter = hog_starter or start_hogs
     build = build or P.export_tree_builder(root, cache=True)   # SP4: leased like check()'s, the same rules
-    tree = tempfile.mkdtemp(prefix="hermetic-slow-export-")
-    home = tempfile.mkdtemp(prefix="hermetic-slow-home-")
+    try:
+        tree, home = _export_pair("slow-")
+    except OSError as exc:
+        return [(NODATA, "timing-slow-host", "no scratch folder for the export tree could be made: %s" % exc)]
     try:
         try:
             build(tree)
