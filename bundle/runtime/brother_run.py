@@ -1548,6 +1548,8 @@ def _write_receipt(run_dir, receipts, report, log_path=None):
         # every integration and refusal back to that document by now.
         body = receipt_door.receipt_record(run_dir, receipts, log_path)
         body["report"] = report
+        # LC6.b: the unit this run landed, its branch and its revision.
+        body.update(_landing_keys(run_dir, receipts))
         # WBS-70.03, Host Capability Receipt: the fourteen facts a
         # consequential run can identify about the host it ran under
         # (host_capability.py, "a fact looked up in a table, never a
@@ -1919,6 +1921,49 @@ def _head(cwd):
     proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd,
                           capture_output=True, text=True, timeout=30)
     return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def _run_branch(cwd, runner=None):
+    """LC6.b: the branch the run landed on, read from the directory the run
+    recorded, or NODATA. A cwd of None reads NODATA (a run that recorded no
+    directory is never handed this process's own branch); a cwd that is not a
+    path is refused by name. A failed git, an empty answer, a detached
+    checkout (the literal HEAD) and any exception all read NODATA. Prints
+    nothing, writes nothing, never raises out of the git call."""
+    if cwd is None:
+        return NODATA
+    if not isinstance(cwd, str) and not isinstance(cwd, os.PathLike):
+        raise ValueError("cwd must be a path, not %s" % type(cwd).__name__)
+    runner = runner or subprocess.run
+    try:
+        result = runner(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=os.fspath(cwd), capture_output=True, text=True,
+                        timeout=30)
+        if getattr(result, "returncode", 1) != 0:
+            return NODATA
+        name = (getattr(result, "stdout", "") or "").strip()
+    except Exception:  # noqa: BLE001
+        return NODATA
+    if not name or name == "HEAD":
+        return NODATA
+    return name
+
+
+def _landing_keys(run_dir, receipts):
+    """LC6.b: the two keys a receipt carries for what the run landed, from
+    the run's own target record and its own capsule. Anything the run did not
+    record reads NO-DATA; nothing here stops the receipt being written."""
+    target = _read_run_target(run_dir)
+    cwd = target.get("cwd") if isinstance(target, dict) else target
+    cwd = cwd if isinstance(cwd, (str, os.PathLike)) else None
+    revision = _checkpoint_canonical_revision(run_dir)
+    revision = revision if isinstance(revision, str) else None
+    facts = receipt_door.landing_facts(
+        receipts,
+        branch=_run_branch(cwd),
+        revision=revision,
+    )
+    return {"landing": facts, "landing_lines": receipt_door.landing_lines(facts)}
 
 
 def _changed_files(before, after, cwd):
@@ -2901,8 +2946,136 @@ def delivery_conclusion(final_receipts, refused, parked, receipt_available,
         nxt = "answer-release-screen"
     else:
         nxt = "review-receipt"
-    return {"state": state, "units": len(verdicts), "counts": counts,
-            "release": release, "next": nxt, "reason": reason}
+    conclusion = {"state": state, "units": len(verdicts), "counts": counts,
+                  "release": release, "next": nxt, "reason": reason}
+    # LC6.c: the push decision rides on the settled conclusion, so the one
+    # push site (push_branch) reads the same words the result line does.
+    conclusion.update(push_keys(release_answer, state, receipt_available))
+    return conclusion
+
+
+def may_push_branch(release_answer):
+    """LC6.c (A12): (allowed, sentence) for the ANSWER alone. The answer is
+    the shape the run reads, loom.read_answer: None, or a dict recorded on
+    the release screen whose `choice` is one of loom.CHOICES. Only the accept
+    choice on the release screen opens the gate; hold (a rejected review),
+    no answer, an empty or unknown word, an answer recorded on another screen
+    (or on none) and a vocabulary that no longer spells the accept word all
+    close it. Not a dict and not None is refused with ValueError naming the
+    type. Whether the RUN may push at all (state DONE, a readable receipt) is
+    push_keys' question, asked before this one."""
+    if release_answer is None:
+        return False, "nothing is pushed: the review gave no answer"
+    if not isinstance(release_answer, dict):
+        raise ValueError("release_answer must be a dict, not %s"
+                         % type(release_answer).__name__)
+    choice = release_answer.get("choice")
+    answer = choice.strip().lower() if isinstance(choice, str) else ""
+    words = tuple(str(word).strip().lower() for word in loom.CHOICES)
+    if "accept" not in words:
+        return False, "nothing is pushed: the review gave no answer"
+    screen = release_answer.get("screen")
+    if screen != RELEASE_SCREEN:
+        named = " ".join(screen.split())[:40] if isinstance(screen, str) else ""
+        return False, ("nothing is pushed: the answer was recorded on %s, not "
+                       "on the release screen" % (
+                           "the %s screen" % named if named else "no screen"))
+    if answer == "hold":
+        return False, "nothing is pushed: the review rejected the delivery"
+    if answer != "accept":
+        named = " ".join(answer.split())[:40] or "nothing"
+        return False, ("nothing is pushed: the review answered %s, which is "
+                       "not an acceptance" % named)
+    return True, "the review accepted the delivery; the branch may be pushed"
+
+
+RELEASE_SCREEN = "release"
+
+
+def push_keys(release_answer, state, receipt_available):
+    """The two keys the settled conclusion carries. push_allowed is True only
+    when the run left a readable receipt, its state is DONE AND the answer is
+    an accept on the release screen; every other case is False with the
+    reason named (the receipt is checked first, then the state, then the
+    answer). Never raises: an answer that cannot be read is a closed gate, so
+    a torn answer file cannot stop a delivery from being concluded."""
+    if receipt_available is not True:
+        return {"push_allowed": False,
+                "push_reason": "nothing is pushed: this run left no readable "
+                               "receipt"}
+    if state != "DONE":
+        return {"push_allowed": False,
+                "push_reason": "nothing is pushed: the run's state is %s, "
+                               "not DONE" % (state if state in RESULT_STATES
+                                             else NODATA)}
+    try:
+        allowed, reason = may_push_branch(release_answer)
+    except ValueError:
+        allowed, reason = False, ("nothing is pushed: the review's answer "
+                                  "could not be read")
+    return {"push_allowed": allowed, "push_reason": reason}
+
+
+#: A branch or remote this module will hand to git: a plain name, never an
+#: option (leading hyphen), a refspec (colon, plus) or a parent path (..).
+_PLAIN_REF = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
+PUSH_TIMEOUT_SECONDS = 120
+
+
+def _plain_ref(name):
+    return (isinstance(name, str) and bool(_PLAIN_REF.fullmatch(name))
+            and ".." not in name)
+
+
+def push_branch(conclusion, branch, cwd=None, runner=None, remote="origin"):
+    """LC6.c: the ONE place in this module that can build a push command.
+    Reads the settled conclusion first and refuses before any command exists:
+    only the exact boolean True in `push_allowed`, a plain branch name, a
+    plain remote name and a named directory reach git. Returns
+    {"pushed": bool, "push_command": str, "push_reason": str}; a refusal
+    reads push_command NO-DATA. A conclusion that is not a dict is refused
+    with ValueError. KNOWN LIMIT: a caller that forges a dict carrying
+    push_allowed True is not caught here; the caller is the deploy step, and
+    it passes the conclusion delivery_conclusion settled."""
+    if not isinstance(conclusion, dict):
+        raise ValueError("conclusion must be a dict, not %s"
+                         % type(conclusion).__name__)
+
+    def refuse(reason):
+        return {"pushed": False, "push_command": NODATA, "push_reason": reason}
+
+    if conclusion.get("push_allowed") is not True:
+        reason = conclusion.get("push_reason")
+        return refuse(reason if isinstance(reason, str) and reason else
+                      "nothing is pushed: the settled conclusion did not "
+                      "allow it")
+    if not isinstance(branch, str) or not branch.strip():
+        return refuse("nothing is pushed: no branch was named")
+    if not _plain_ref(branch) or not _plain_ref(remote):
+        return refuse("nothing is pushed: the branch or remote name is not "
+                      "a plain name")
+    if (not isinstance(cwd, str) and not isinstance(cwd, os.PathLike)
+            or not os.fspath(cwd)):
+        return refuse("nothing is pushed: no repository directory was named")
+    argv = ["git", "push", remote, branch]
+    command = " ".join(argv)
+    try:
+        result = (runner or subprocess.run)(
+            argv, cwd=os.fspath(cwd), capture_output=True, text=True,
+            timeout=PUSH_TIMEOUT_SECONDS)
+        code = result.returncode
+    except subprocess.TimeoutExpired:
+        return {"pushed": False, "push_command": command,
+                "push_reason": "nothing is pushed: the push did not finish "
+                               "in %s seconds" % PUSH_TIMEOUT_SECONDS}
+    except Exception:  # noqa: BLE001
+        return {"pushed": False, "push_command": command,
+                "push_reason": "nothing is pushed: the push did not run"}
+    return {"pushed": code == 0, "push_command": command,
+            "push_reason": (conclusion.get("push_reason") if code == 0 and
+                            isinstance(conclusion.get("push_reason"), str)
+                            else "the push did not land: git exited %s"
+                            % code)}
 
 
 #: TL1.c: the one engine-authored result line. A consumer reads the LAST

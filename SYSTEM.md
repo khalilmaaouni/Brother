@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 539 |
-| Parts with a purpose written in the file | 536 |
-| Parts with a suite wired into the battery | 470 |
-| Checks in the battery | 1310 |
+| Parts | 542 |
+| Parts with a purpose written in the file | 539 |
+| Parts with a suite wired into the battery | 472 |
+| Checks in the battery | 1338 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -310,6 +310,7 @@ undocumented corners looks complete and is not.
 | `journal_projection` | the delivery report, receipts-bound and a live | `journal-projection-self` |
 | `journey_passport` | WBS-30.06 Journey Passport: a VIEW composing evidence that already exists | `journey-passport-self`, `mutation-gate`, `mutation-gate-self` |
 | `keep_current` | update a Codex install only after every link reads PASS. | `keep-current-self` |
+| `kernel_closure` | .py: the judge kernel, the files the loop may never activate on its own judgement (unit A2, COUNCIL D2). | **NO-DATA**, nothing in the battery runs it |
 | `key_components` | the components this estate built on purpose cannot be lost, | `key-components`, `key-components-self` |
 | `l0_gate` | L0.1 decision and invariant gate. | **NO-DATA**, nothing in the battery runs it |
 | `l0_scan` | block the ship when a quarantined term hides in a name. | **NO-DATA**, nothing in the battery runs it |
@@ -339,6 +340,7 @@ undocumented corners looks complete and is not.
 | `load_reservation` | admit heavy work from MEASURED resources and an explicit | `load-reservation-self` |
 | `load_solpi_baseline` | Load and validate the pinned SoL-Pi baseline (unit L4.1, baseline lock). | **NO-DATA**, nothing in the battery runs it |
 | `loom` | the interaction layer above the receipt door. | `brother-run-self`, `loom-self` |
+| `loop_alone` | A3, the installed loop imports nothing from a source checkout (LC2.a, 1.1.7). | `loop-alone-self` |
 | `loop_bridge` | the scheduler's ready set becomes real dispatches. | `acceptance-11-disk-reading`, `loop-bridge-self`, `virgin-unit-proof`, `virgin-unit-proof-self` |
 | `loop_budget_grant` | SG1.a: a loop launch writes its own time boxed spend guard project raise. | `loop-budget-grant-self` |
 | `loop_phase_timings` | PH1.a (docs/plan/specs/PH1.md): one row per phase of a loop night, read from the logs the tools already write. | `loop-phase-timings-self` |
@@ -468,6 +470,7 @@ undocumented corners looks complete and is not.
 | `refresh_cut` | Refresh a cut: rewrite the export manifest and the release note that | `cut-self`, `refresh-cut-self` |
 | `refresh_cutover_state` | The receipt-time gate that keeps a cutover pack honest. | `cutover-pack-self` |
 | `regen_generated` | Regenerate generated files in order and verify they are current. | `regen-generated-self` |
+| `release_body` | Generate and validate release body tables from WBS and HOSTS sources. | `release-body-self` |
 | `release_claim_reproduction` | prove a release claim from a FRESH, independent | `release_claim_reproduction-self` |
 | `release_closeout` | the post-cut closeout matrix, one gate per subcommand. | `release-closeout-self` |
 | `release_invariant` | one release identity, or say exactly which link broke. | `cut-self`, `readiness-gate`, `readiness-gate-self`, `release-closeout-self`, `release-invariant`, `release-invariant-self` |
@@ -664,6 +667,7 @@ undocumented corners looks complete and is not.
 - `merge-queue`: `python3 scripts/merge_queue.py --demo`
 - `wbs-self`: `python3 scripts/test_wbs.py -v`
 - `private-terms-self`: `python3 scripts/test_private_terms_scan.py -v`
+- `private-terms-escapes`: `python3 -B scripts/test_private_terms_escapes.py -v`
 - `loop-bridge-self`: `python3 scripts/test_loop_bridge.py -v`
 - `wave-diamond-self`: `python3 scripts/test_wave_diamond.py -v`
 - `managed-safety-self`: `python3 scripts/test_managed_safety.py -v`
@@ -768,6 +772,8 @@ undocumented corners looks complete and is not.
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`
 - `bundle-doctor-route`: `python3 -B scripts/test_bundle_doctor_route.py`
 - `runs-root-one-rule`: `python3 -B scripts/test_runs_root_one_rule.py`
+- `cut-keeps-rehearsal`: `python3 -B scripts/test_cut_keeps_rehearsal.py`
+- `receipt-door-landing`: `python3 -B scripts/test_receipt_door_landing.py`
 - `bundle-installed-lookups`: `python3 scripts/test_bundle_installed_lookups.py -v`
 - `hook-guard-self`: `python3 -B scripts/test_hook_guard.py -v`
 - `quiet-start-bm`: `python3 -B scripts/test_quiet_start_bm.py`
@@ -922,6 +928,8 @@ undocumented corners looks complete and is not.
 - `loop-lifecycle-probes`: `python3 scripts/test_loop_lifecycle_probes.py`
 - `loop-tool-parity`: `python3 scripts/test_loop_tool_parity.py`
 - `loop-tool-parity-stamp`: `python3 scripts/test_loop_tool_parity_stamp.py`
+- `kernel-closure-row`: `python3 scripts/test_kernel_closure_row.py TestKernelClosureRow`
+- `clock-rows`: `python3 scripts/loop/test_clock_rows.py TestClockRows`
 - `loop-module-scope-names`: `python3 scripts/test_loop_module_scope_names.py`
 - `pass-pulse-self`: `python3 scripts/loop/pass_pulse.py --selftest`
 - `stop-loop`: `python3 scripts/test_stop_loop.py`
@@ -1067,6 +1075,8 @@ undocumented corners looks complete and is not.
 - `plan-lint-shared-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_shared.py`
 - `spec-score-no-claim`: `python3 -B scripts/loop/test_spec_score_no_claim.py`
 - `spec-score-no-claim-py39`: `/usr/bin/python3 -B scripts/loop/test_spec_score_no_claim.py`
+- `spec-intake-target`: `python3 -B scripts/loop/test_spec_intake_target.py`
+- `spec-intake-target-py39`: `/usr/bin/python3 -B scripts/loop/test_spec_intake_target.py`
 - `plan-lint-after-order`: `python3 -B scripts/loop/test_plan_lint_after_order.py`
 - `plan-lint-after-order-py39`: `/usr/bin/python3 -B scripts/loop/test_plan_lint_after_order.py`
 - `plan-lint-named-test`: `python3 -B scripts/loop/test_plan_lint_named_test.py`
@@ -1436,6 +1446,13 @@ undocumented corners looks complete and is not.
 - `plan-116-py39`: `/usr/bin/python3 -B scripts/test_plan_116.py`
 - `seed-117-self`: `python3 -B scripts/test_seed_117.py`
 - `seed-117-py39`: `/usr/bin/python3 -B scripts/test_seed_117.py`
+- `plan-117-self`: `python3 -B scripts/test_plan_117.py`
+- `plan-117-py39`: `/usr/bin/python3 -B scripts/test_plan_117.py`
+- `builder-preflight-self`: `python3 -B scripts/test_builder_preflight.py`
+- `builder-preflight-py39`: `/usr/bin/python3 -B scripts/test_builder_preflight.py`
+- `land-batch-loop-guard-py39`: `/usr/bin/python3 -B scripts/test_land_batch_loop_guard.py`
+- `merge-window-self`: `python3 -B scripts/test_merge_window.py`
+- `merge-window-py39`: `/usr/bin/python3 -B scripts/test_merge_window.py`
 - `cut-app-approval-116-self`: `python3 -B scripts/test_cut_app_approval.py`
 - `cut-app-approval-116-py39`: `/usr/bin/python3 -B scripts/test_cut_app_approval.py`
 - `land-apply-baseline-115-self`: `python3 -B scripts/loop/test_land_apply_baseline.py`
@@ -1488,6 +1505,10 @@ undocumented corners looks complete and is not.
 - `runner-pool-note-attempt-115-py39`: `/usr/bin/python3 -B scripts/loop/test_runner_pool_note_attempt.py`
 - `unproductive-cooldown-115-self`: `python3 -B scripts/loop/test_unproductive_cooldown.py`
 - `unproductive-cooldown-115-py39`: `/usr/bin/python3 -B scripts/loop/test_unproductive_cooldown.py`
+- `pool-why-lines-117-self`: `python3 -B scripts/loop/test_pool_why_lines.py`
+- `pool-why-lines-117-py39`: `/usr/bin/python3 -B scripts/loop/test_pool_why_lines.py`
+- `refill-after-quarantine-117-self`: `python3 -B scripts/loop/test_refill_after_quarantine.py`
+- `refill-after-quarantine-117-py39`: `/usr/bin/python3 -B scripts/loop/test_refill_after_quarantine.py`
 - `grade-build-guard-paths-115-self`: `python3 -B scripts/loop/test_grade_build_guard_paths_115.py`
 - `grade-build-guard-paths-115-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_guard_paths_115.py`
 - `run-summary-115-self`: `python3 -B scripts/loop/test_run_summary.py`
@@ -1688,6 +1709,9 @@ undocumented corners looks complete and is not.
 - `bin-resolution-sweep2`: `python3 -B scripts/loop/test_bin_resolution_sweep2.py`
 - `ev-gate-model-cost`: `python3 -B scripts/loop/test_ev_gate_model_cost.py`
 - `loop-report-abandoned`: `python3 -B scripts/loop/test_loop_report_abandoned.py`
+- `run-watch`: `python3 -B scripts/loop/test_run_watch.py TestRunWatch`
+- `landing-canary`: `python3 -B scripts/loop/test_landing_canary.py TestLandingCanary`
+- `loop-works-fully`: `python3 -B scripts/loop/test_loop_works_fully.py TestLoopWorksFully`
 - `probe-evidence`: `python3 -B scripts/loop/test_probe_evidence.py`
 - `probe-log-timestamp`: `python3 -B scripts/loop/test_probe_log_timestamp.py`
 - `unit-runner-h3a-self`: `python3 scripts/loop/test_unit_runner_h3a.py`
@@ -1877,5 +1901,12 @@ undocumented corners looks complete and is not.
 - `loop-budget-grant-self`: `python3 scripts/test_loop_budget_grant.py`
 - `branch-precheck-self`: `python3 scripts/test_branch_precheck.py`
 - `worktree-prune-self`: `python3 scripts/test_worktree_prune.py`
+- `release-body-self`: `python3 scripts/test_release_body.py`
+- `peak-bench-self`: `python3 scripts/loop/test_peak_bench.py`
+- `sbe-gate-self`: `python3 -B -m unittest products.brothersbe.tools.test_sbe_gate`
+- `unit-runner-i4a-self`: `python3 scripts/loop/test_unit_runner_i4a.py`
+- `builder-timebox-self`: `python3 scripts/test_builder_timebox.py`
+- `virgin-install-self`: `python3 scripts/test_virgin_install.py`
+- `loop-alone-self`: `python3 scripts/test_loop_alone.py`
 - `real-logs-unchanged`: `python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"`
 

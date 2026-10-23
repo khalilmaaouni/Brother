@@ -6,6 +6,7 @@
 #
 # usage, from anywhere (the worktrees are named):
 #   redeploy.sh --check     --plan-wt DIR --loop-wt DIR --plan-branch B --loop-branch B --deadline HH:MM
+#                           [--probe-cap-usd USD]   (no cap: the seat row reads NO-DATA, so a launch refuses)
 #   redeploy.sh             --plan-wt DIR --loop-wt DIR --plan-branch B --loop-branch B --deadline HH:MM
 #                           --plan docs/plan/X.json --scope REGEX --budget-usd N [--reason TEXT] [--drain-s SECONDS]
 #                           [--worker M] [--checker M] [--finisher M] [--documenter M] [--adversary M] [--gap SECONDS]
@@ -41,13 +42,17 @@
 set -u
 set -o pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+# LC3.a: the doctor check reads one verdict per capability from the enterprise doctor, on a certified host only.
+DOCTOR="$HERE/../enterprise_doctor.py"
+EXPECTED_CONTROLS="security-policy,code-owners,evidence-obligation,obligation-wired,signed-receipts,signing-identities,pinned-ci,ci-permissions,os-sandbox,egress-policy,delegated-identity,central-audit-store,fail-closed-mode"
+HOST_SUPPORTED="Darwin"
 die() { echo "REDEPLOY REFUSED [$1]: $2"; exit 2; }
-MODE=run; PW=""; LW=""; PB=""; LB=""; PLAN=""; SCOPE=""; BUDGET=""; DEADLINE=""; REASON="redeploy"; DRAIN_S=3600; ROLES=()
+MODE=run; PW=""; LW=""; PB=""; LB=""; PLAN=""; SCOPE=""; BUDGET=""; DEADLINE=""; REASON="redeploy"; DRAIN_S=3600; PROBE_CAP=""; ROLES=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) MODE=check; shift; continue;;
     --plan-only) MODE=planonly; shift; continue;;
-    --plan-wt|--loop-wt|--plan-branch|--loop-branch|--plan|--scope|--budget-usd|--deadline|--reason|--drain-s|\
+    --plan-wt|--loop-wt|--plan-branch|--loop-branch|--plan|--scope|--budget-usd|--deadline|--reason|--drain-s|--probe-cap-usd|\
     --worker|--checker|--finisher|--documenter|--adversary|--gap|--lift-hold)
       [ $# -ge 2 ] || die args "$1 needs a value"
       V=${2//[[:space:]]/}
@@ -57,6 +62,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --plan-wt) PW=$2;; --loop-wt) LW=$2;; --plan-branch) PB=$2;; --loop-branch) LB=$2;; --plan) PLAN=$2;;
     --scope) SCOPE=$2;; --budget-usd) BUDGET=$2;; --deadline) DEADLINE=$2;; --reason) REASON=$2;; --drain-s) DRAIN_S=$2;;
+    --probe-cap-usd) PROBE_CAP=$2;;
     *) ROLES+=("$1" "$2");;   # a launcher option: kept for start_run.sh as given, never read here
   esac
   shift 2
@@ -64,6 +70,10 @@ done
 [ -n "$PW" ] && [ -n "$LW" ] && [ -n "$PB" ] && [ -n "$LB" ] || die args "--plan-wt, --loop-wt, --plan-branch and --loop-branch are required"
 [ "$PB" != "$LB" ] || die args "the plan branch and the loop branch are the same branch ($PB)"
 case "$DRAIN_S" in *[!0-9]*) die args "--drain-s is a whole number of seconds";; esac
+if [ -n "$PROBE_CAP" ]; then   # LC3.b: a live probe runs only under a positive cap, checked before any check runs
+  case "$PROBE_CAP" in *[!0-9.]*|.*|*.|*.*.*) die args "--probe-cap-usd must be a positive number";; esac
+  awk -v c="$PROBE_CAP" 'BEGIN { exit !(c + 0 > 0) }' || die args "--probe-cap-usd must be greater than 0"
+fi
 if [ "$MODE" != planonly ]; then
   case "$DEADLINE" in
     [0-2][0-9]:[0-5][0-9])
@@ -205,7 +215,10 @@ else:
 PY
 )
   take pins "$out"
-  out=$(BROTHER_SCRATCH="$S" py <<'PY' 2>&1
+  if [ -z "$PROBE_CAP" ]; then
+    row NO-DATA seat "no cap: a live probe needs --probe-cap-usd"
+  else
+  out=$(BROTHER_SCRATCH="$S" PROBE_CAP="$PROBE_CAP" py <<'PY' 2>&1
 import os, sys; sys.path.insert(0, sys.argv[1])
 try:
     prog = os.environ.get("BROTHER_CLAUDE_BIN") or ""
@@ -213,7 +226,7 @@ try:
         import model_router
         prog = model_router.claude_bin()
     import loop_intake
-    got = loop_intake.seat_gate([{"transport": "claude", "status": "OK", "program": prog, "cause": "asked by redeploy --check"}])[0]
+    got = loop_intake.seat_gate([{"transport": "claude", "status": "OK", "program": prog, "cause": "asked by redeploy --check", "cap_usd": os.environ.get("PROBE_CAP")}])[0]
 except Exception as exc:
     print("NO-DATA the seat gate could not run (%s: %s)" % (type(exc).__name__, str(exc)[:160])); sys.exit(0)
 if got.get("status") == "OK" and got.get("cause") == "asked by redeploy --check":
@@ -225,6 +238,51 @@ else:
 PY
 )
   take seat "$out"
+  fi
+  # LC3.a doctor: read only, over the plan worktree, one verdict per capability and never BLOCKED. A host that is
+  # not the certified one reads NO-DATA with the words "not certified", and the doctor is not run at all.
+  host=$(uname -s 2>/dev/null || echo unknown)
+  if [ "$host" != "$HOST_SUPPORTED" ]; then
+    row NO-DATA doctor "the host is not certified: $host"
+  else
+    doc_out=$(python3 -B "$DOCTOR" --json --repo "$PW" 2>&1); doc_rc=$?
+    doc=$(DOC_OUT="$doc_out" DOC_RC="$doc_rc" EXPECTED="$EXPECTED_CONTROLS" python3 -B - 2>&1 <<'PY'
+import json, os, sys
+rc, raw = os.environ.get("DOC_RC", ""), os.environ.get("DOC_OUT", "")
+expected = [n for n in os.environ.get("EXPECTED", "").split(",") if n]
+if rc != "0":
+    print("FAIL the doctor refused (exit %s): %s" % (rc, " ".join(raw.split())[:300])); sys.exit(0)
+try:
+    d = json.loads(raw)
+except ValueError as exc:
+    print("NO-DATA the doctor printed no JSON (%s): %s" % (type(exc).__name__, " ".join(raw.split())[:300])); sys.exit(0)
+if not isinstance(d, dict):
+    print("NO-DATA the doctor printed no JSON (not an object): %s" % " ".join(raw.split())[:300]); sys.exit(0)
+controls = d.get("controls", [])
+if not isinstance(controls, list):
+    print("FAIL the doctor gave no list of controls"); sys.exit(0)
+if len(controls) != 13:
+    print("FAIL the doctor gave %d verdicts, expected 13" % len(controls)); sys.exit(0)
+if any(not isinstance(c, dict) for c in controls):
+    print("FAIL a control has no name"); sys.exit(0)
+names = [c.get("control") for c in controls]
+if any(not isinstance(n, str) or not n for n in names):
+    print("FAIL a control has no name"); sys.exit(0)
+if len(set(names)) != 13:
+    print("FAIL duplicate control names: %s" % ", ".join(sorted(names))); sys.exit(0)
+if set(names) != set(expected):
+    print("FAIL control names not in the expected set: %s" % ", ".join(sorted(set(names) - set(expected)))); sys.exit(0)
+bad = [c.get("control") for c in controls if c.get("status") not in ("PRESENT", "ABSENT", "NO-DATA")]
+if bad:
+    print("FAIL control %s reads a status outside PRESENT, ABSENT, NO-DATA" % ", ".join(bad)); sys.exit(0)
+nodata = [c.get("control") for c in controls if c.get("status") == "NO-DATA"]
+if nodata:
+    print("NO-DATA %d control(s) read NO-DATA: %s" % (len(nodata), ", ".join(nodata))); sys.exit(0)
+print("PASS 13 capabilities, no BLOCKED, no NO-DATA")
+PY
+)
+    take doctor "$doc"
+  fi
   # stage, parity, canary: on the merged tree, in the scratch, the way deploy_stamped.py stages and proves it
   if [ -z "$MERGED" ] || ! read_configs; then
     for p in stage parity canary; do row NO-DATA "$p" "no merged tree to read (see merge above) or deploy_stamped could not be read"; done

@@ -18,6 +18,8 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code@2.1.251
       - name: required-fast
+        env:
+          BROTHER_EXPORT_TREE: "1"
         run: sh scripts/required_fast.sh
   required-fast-canary:
     # the same steps, only for a manual dispatch on the private hub: the candidate export tree on GitHub's Linux
@@ -38,4 +40,6 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code@2.1.251
       - name: required-fast
+        env:
+          BROTHER_EXPORT_TREE: "1"
         run: sh scripts/required_fast.sh

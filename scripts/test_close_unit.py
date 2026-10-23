@@ -5,6 +5,11 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# THE FIXTURES OWN THEIR PLAN (2026-10-19): every fixture writes its plan at the default path, and close_unit.PLAN is
+# read at import from BROTHER_WBS, so a caller that selected another plan (a 1.1.7 closer, a loop pass) turned seven
+# cases red, found by the builder preflight's hermetic row. Dropped here, before the import, for this process and its
+# children alike.
+os.environ.pop("BROTHER_WBS", None)
 import close_unit as C  # noqa: E402
 
 DONE_CHECK = "python3 -B -m unittest plugin.runtime.brother.core.test_or_fanout"
@@ -60,6 +65,12 @@ class TheExitCodeDecides(unittest.TestCase):
 
     def test_no_output_still_yields_a_quote_placeholder_in_the_evidence(self):
         self.assertIn("no result line", C.evidence_line("U", "s", "c", ""))
+
+    def test_a_skipped_case_leaves_the_unit_partial(self):
+        # I12 (A1): C12 closed on "OK (skipped=1)". A zero exit with a skip is PARTIAL, the skipping test named.
+        ok, quoted = C.verdict(0, "test_b (m.T) ... skipped 'no home'\nRan 2 tests in 0.1s\n\nOK (skipped=1)\n")
+        self.assertFalse(ok)
+        self.assertTrue(quoted.startswith("PARTIAL: 1 test(s) skipped: m.T.test_b"), quoted)
 
 
 class ASpecSubUnitThePlanForgotKeepsTheUnitOpen(unittest.TestCase):

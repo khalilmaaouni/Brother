@@ -45,6 +45,14 @@ term's STORED spelling (`term.isupper()`), which took the case-sensitive path
 for this estate's upper-cased short terms and missed a lowercase occurrence
 of one in a candidate export tree that a review had already flagged.
 
+CORRECTED 2026-10-18 (PRIV1): a THIRD way. A term written with even one
+letter as a string escape (a backslash and hex digits), or split across two
+adjacent string literals, is not the term on disk, so a scan of the text as
+written never matched it, while the interpreter spells it out in full. Every
+scan now looks for every term in every READING of the text (text_views
+below): as written, with escapes and character references decoded, and with
+adjacent string literals joined.
+
 NO-DATA IS NEVER A PASS. No terms file means the scan did not run, and it says
 so and exits non-zero rather than reporting a clean tree it never examined. A
 missing list is the most likely way this control silently stops working.
@@ -52,10 +60,12 @@ missing list is the most likely way this control silently stops working.
 Python 3, standard library only. No network.
 """
 import argparse
+import html
 import os
 import re
 import subprocess
 import sys
+import unicodedata
 
 #: Outside every repository, on purpose. See the module docstring: a term list
 #: committed alongside the scanner publishes what the scanner exists to stop.
@@ -121,9 +131,61 @@ def pattern_for(term):
     return re.compile(bounded, re.IGNORECASE)
 
 
+#: A string escape that spells one character: a braced or four or eight digit
+#: hex code point, a two digit hex byte, a character NAME, or up to three octal
+#: digits. Python's set, plus the braced form other languages write.
+_ESCAPE = re.compile(r"\\(?:u\{([0-9a-fA-F]{1,6})\}|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})"
+                     r"|x([0-9a-fA-F]{2})|N\{([^}\r\n]{1,80})\}|([0-7]{1,3}))")
+
+#: Where the interpreter glues two string literals into one: a closing quote,
+#: then only blanks, line continuations or a plus sign, then an opening quote
+#: (with any prefix letters). One character class, so it scans in linear time.
+_ADJACENT = re.compile(r"""["'][\s\\+]*[rRbBuUfF]{0,2}["']""")
+
+
+def _unescape(match):
+    brace, u4, u8, x2, name, octal = match.groups()
+    try:
+        if name is not None:
+            return unicodedata.lookup(name)
+        if octal is not None:
+            return chr(int(octal, 8))
+        return chr(int(brace or u4 or u8 or x2, 16))
+    except (KeyError, ValueError, OverflowError):
+        return match.group(0)   # not a character: leave it as written
+
+
+def text_views(text):
+    """Every reading of `text` a term is looked for in, the text AS WRITTEN
+    first: then with string escapes and HTML character references decoded
+    (repeated until nothing changes, so an escaped backslash that spells a
+    second escape is decoded too), then that decoded text with adjacent string
+    literals joined.
+
+    Joining glues a literal to its neighbour ("x" "word" reads as xword), so a
+    reading may only ever be ADDED, never stand in for the one before it.
+    Out of scope, named: text a program assembles at run time (chr() calls,
+    base64, a join over a list), look-alike letters, and zero width
+    characters. A scanner cannot run the program; the defence there is that
+    no term is written into code at all."""
+    views = [text]
+    decoded = text
+    for _ in range(4):   # ponytail: four rounds; a fifth layer of escaping stays undecoded
+        step = html.unescape(_ESCAPE.sub(_unescape, decoded))
+        if step == decoded:
+            break
+        decoded = step
+    for view in (decoded, _ADJACENT.sub("", decoded)):
+        if view not in views:
+            views.append(view)
+    return views
+
+
 def scan_text(text, terms):
-    """Every term that appears. Returns a list, empty when the text is clean."""
-    return [t for t in terms if pattern_for(t).search(text)]
+    """Every term that appears in any reading of the text (text_views).
+    Returns a list, empty when the text is clean."""
+    views = text_views(text)
+    return [t for t in terms if any(pattern_for(t).search(v) for v in views)]
 
 
 def outgoing_range(remote="origin", branch=None, runner=None):

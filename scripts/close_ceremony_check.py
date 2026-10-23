@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import handover_pack_scan as hps  # noqa: E402
 
 ROOT = os.path.expanduser("~/Documents/BrotherModeUp-handovers")
+MAX_AGE_HOURS = 24.0
 
 SECTIONS = {
     "finished": r"(?im)^#+ .*(finished|delivered|what you are walking into)",
@@ -51,16 +52,74 @@ SECTIONS = {
 }
 
 
+def _boxed():
+    """True only when macOS answers that this process runs under a sandbox (sandbox_check on its own pid): the lander's
+    box. Anything it cannot ask, another platform included, is False, so the real check runs."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import ctypes
+        import ctypes.util
+        lib = ctypes.CDLL(ctypes.util.find_library("System") or "/usr/lib/libSystem.B.dylib")
+        check = lib.sandbox_check
+        check.restype = ctypes.c_int
+        check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        return check(os.getpid(), None, 0) == 1
+    except (OSError, AttributeError, ValueError):
+        return False
+
+
 def newest_pack(root):
     dirs = [os.path.join(root, d) for d in os.listdir(root)
             if os.path.isdir(os.path.join(root, d))]
     return max(dirs, key=os.path.getmtime) if dirs else None
 
 
+def pack_flags(pack):
+    """(start, has_board, has_log, has_zip) of a directory under the handover root: the four markers of a close pack, by the
+    one rule main() and expiry_errors share. A directory carrying none of them is not a pack."""
+    files = sorted(os.listdir(pack))
+    start = next((f for f in files if f.upper().startswith("01-START-HERE")), None)
+    has_board = any(f.lower().endswith(".html") and "board" in f.lower() for f in files)
+    has_log = any("session-log" in f.lower() or "session_log" in f.lower()
+                  or re.search(r"session.?log", f, re.I) for f in files)
+    return start, has_board, has_log, os.path.isfile(pack + ".zip")
+
+def expiry_errors(root, deadline, now=None):
+    """Refusal strings for a run that ends at `deadline` (epoch seconds): [] when the newest pack under `root` is still
+    inside the freshness bar (MAX_AGE_HOURS) at that moment, else one named refusal. A clock-bound row read at the
+    deadline, never only at launch (1.1.7 LR1.b: the pack is fresh when the run starts and a gate row reads it stale at
+    the landing). `now` is accepted so a caller can pin its clock; the expiry is absolute, so it is not read. A deadline
+    that is not a finite number and a root that is not a directory raise ValueError before any file is read."""
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or deadline != deadline \
+            or deadline in (float("inf"), float("-inf")):
+        raise ValueError("deadline must be a finite number of seconds, got %r" % (deadline,))
+    if now is not None and (isinstance(now, bool) or not isinstance(now, (int, float)) or now != now):
+        raise ValueError("now must be a number of seconds or None, got %r" % (now,))
+    if not isinstance(root, str) or not os.path.isdir(root):
+        raise ValueError("root must be a directory, got %r" % (root,))
+    fix = "refresh with python3 scripts/close_ceremony_check.py"
+    try:
+        # the newest directory that IS a pack: a scratch folder with no pack marker is not judged (main() reads it as
+        # NO-DATA too), so it cannot make a stale pack look fresh
+        dirs = sorted((os.path.join(root, d) for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))),
+                      key=os.path.getmtime, reverse=True)
+        pack = next((d for d in dirs if any(pack_flags(d))), None)
+        mtime = None if pack is None else os.path.getmtime(pack)
+    except OSError as exc:
+        return ["close ceremony: the packs under %s cannot be read (%s); %s" % (root, exc, fix)]
+    if pack is None:
+        return ["close ceremony: no pack under %s; %s" % (root, fix)]
+    expires = mtime + MAX_AGE_HOURS * 3600.0
+    if expires <= deadline:
+        return ["close ceremony: newest pack %s expires before %s; %s"
+                % (os.path.basename(pack), time.strftime("%Y-%m-%d %H:%M", time.localtime(deadline)), fix)]
+    return []
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=ROOT)
-    ap.add_argument("--max-age-hours", type=float, default=24.0)
+    ap.add_argument("--max-age-hours", type=float, default=MAX_AGE_HOURS)
     ap.add_argument("--terms", default=hps.TERMS_FILE,
                     help="private terms list (default: %s)" % hps.TERMS_FILE)
     ap.add_argument("--no-cache", action="store_true",
@@ -77,6 +136,19 @@ def main(argv=None):
     cache_path = None if args.no_cache else os.path.join(
         args.root, hps.CACHE_BASENAME)
 
+    # THE BOX (owner ruling 2026-10-19, A2, "Box-aware rows"): the lander's sandbox runs the gate with a throwaway HOME,
+    # where the default root cannot exist; that is asserted, never skipped, and the session's unboxed gate reads the real
+    # root at every merge window and at the cut. A box whose HOME is the account's own, or that holds the root, is not
+    # that box: FAIL, so the real check is wired in there. An explicit --root (the fixture suites) is never this branch.
+    if args.root == ROOT and _boxed():
+        import pwd
+        account = os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+        if os.path.realpath(os.path.expanduser("~")) == account or os.path.isdir(args.root):
+            print("FAIL: inside a sandbox whose HOME holds the handover root (%s); run the real check here" % args.root)
+            return 1
+        print("BOXED: the sandbox's throwaway HOME holds no handover root (%s); the session's unboxed gate reads the "
+              "real one" % args.root)
+        return 0
     if not os.path.isdir(args.root):
         print("NO-DATA: handover root %s does not exist" % args.root)
         return 2
@@ -88,12 +160,8 @@ def main(argv=None):
     problems = []
     age_h = (time.time() - os.path.getmtime(pack)) / 3600.0
     files = sorted(os.listdir(pack))
-    start = next((f for f in files if f.upper().startswith("01-START-HERE")), None)
-    has_board = any(f.lower().endswith(".html") and "board" in f.lower() for f in files)
-    has_log = any("session-log" in f.lower() or "session_log" in f.lower()
-                  or re.search(r"session.?log", f, re.I) for f in files)
+    start, has_board, has_log, has_zip = pack_flags(pack)
     zip_path = pack + ".zip"
-    has_zip = os.path.isfile(zip_path)
     # Measured 2026-09-17: the newest directory under the real root was a
     # release-cut handoff scratch directory (two markdown files, none of the
     # four markers, no zip beside it), and this check judged it as a close

@@ -323,7 +323,29 @@ for p in sys.stdin.read().split():
   # "nothing landed" and exited 1, and this branch then skipped the refill as if the tree needed a decision. With
   # a strict checker that starves the pool: no new runner until a pass happens to find nothing READY at all.
   # Only a REFUSED landing (gates red, stray paths, parity) means the tree needs a human; held builds do not.
-  if [ $LB -ne 0 ] && ! printf '%s' "${LANDED_LINE:-}" | grep -q '^nothing landed'; then
+# REFILL BEGIN
+  # A BUILD'S FAILURE IS NOT THE TREE'S (2026-10-22 04h07, the 1.1.7 proof run ended UNPRODUCTIVE on one bad build):
+  # land_batch quarantined I3.b ("failed the gates on its own"), reverted its paths and refused, and this branch read the
+  # refusal as a tree needing a decision, so nothing refilled and four sub units never started. When EVERY picked build
+  # has its own QUARANTINED line and the worktree fingerprint still equals the one taken before the landing, the tree
+  # is as it was: the pool refills. Anything else (a refusal naming no quarantine, a build not quarantined, a tree that
+  # moved, an unreadable fingerprint, an empty pick) keeps the stop below. test_refill_after_quarantine.py runs this.
+  quarantined_only() {
+    [ -n "${PICK:-}" ] || return 1
+    # the refusal must be the gates RED one and no other: a parity or conflict refusal leaves the fingerprint as it was
+    # (adversarial review, 2026-10-22), so the fingerprint alone cannot tell it from a build's own failure
+    printf '%s\n' "${LANDED_LINE:-}" | grep -q '^REFUSED: nothing committed, gates RED' || return 1
+    printf '%s\n' "${LANDED_LINE:-}" | grep '^REFUSED' | grep -qv '^REFUSED: nothing committed, gates RED' && return 1
+    for _qp in $PICK; do
+      _qs=$(basename "$_qp" | sed -n 's/^\([A-Za-z0-9-]*\.[A-Za-z0-9]*\)-r[0-9]*-build\.json$/\1/p')
+      [ -n "$_qs" ] || return 1
+      printf '%s\n' "${LANDED_LINE:-}" | grep -q "^QUARANTINED $(printf '%s' "$_qs" | sed 's/[.]/\\./g'):" || return 1
+    done
+    sentry verify "$FP_BEFORE" >/dev/null 2>&1
+  }
+  if [ $LB -ne 0 ] && ! printf '%s' "${LANDED_LINE:-}" | grep -q '^nothing landed' && quarantined_only; then
+    echo "runner pool refilled: the landing refused only quarantined build(s) and the tree is as it was before it"
+  elif [ $LB -ne 0 ] && ! printf '%s' "${LANDED_LINE:-}" | grep -q '^nothing landed'; then
     echo "runner pool NOT refilled: landing refused, tree needs a decision first"
     if ! LIVE_NOW=$(live_runners); then echo "$NO_TABLE"; exit 0; fi
     if [ "${LIVE_NOW:-0}" -eq 0 ]; then
@@ -332,6 +354,7 @@ for p in sys.stdin.read().split():
     fi
     exit 0        # runners still working: the pass was quiet, not unproductive
   fi
+# REFILL END
 fi
 # CLOSE WHAT IS FINISHED, BEFORE REFILLING. Measured 2026-09-21 on a live run: this script had no call to
 # close_unit at all, so across 34 passes and 2.5 hours it landed sub units while FOUR units sat with every sub
@@ -370,6 +393,17 @@ POOL_ALL=$(hold_give python3 ~/.claude/bin/runner_pool.py 2>&1); PRC=$?
 POOL=$(printf '%s\n' "$POOL_ALL" | grep -E 'START|^started' | cut -c1-160)
 [ "${PRC:-0}" -ne 0 ] && echo "POOL exit=$PRC: $(printf '%s\n' "$POOL_ALL" | tail -1 | cut -c1-140)"
 echo "$POOL"
+# WHY THE POOL STARTED WHAT IT STARTED (2026-10-22): only START and `started` were kept, so the log could not say why a
+# pass opened one runner where the work in progress cap allowed five (the binding cap was native seats over workers per
+# round, floor 1). The pool's own cap line and every skipped sub unit with its reason, each prefixed POOL so no line
+# starts with an outcome word a run watcher anchors on. test_pool_why_lines.py runs exactly these lines.
+# POOLWHY BEGIN
+POOL_CAP=$(printf '%s\n' "$POOL_ALL" | grep -E '^BUDGET cap ' | head -1 | cut -c1-220)
+POOL_SKIP=$(printf '%s\n' "$POOL_ALL" | sed -n 's/^[^ ][^ ]* *\([^ ][^ ]*\) *skip: \(.*\)$/\1 (\2)/p' | head -12 | cut -c1-100 \
+  | paste -s -d ';' - | sed 's/;/; /g' | cut -c1-640)
+if [ -n "$POOL_CAP" ]; then echo "POOL    $POOL_CAP"; fi
+if [ -n "$POOL_SKIP" ]; then echo "POOL    skipped: $POOL_SKIP"; fi
+# POOLWHY END
 
 # RC-7, A FAILURE THAT RETURNS SUCCESS. Measured 2026-09-21: this script ran 22 consecutive passes at exit 0
 # with ZERO runners alive, landing nothing, closing nothing, starting nothing, and every one of those passes

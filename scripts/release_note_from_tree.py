@@ -401,7 +401,12 @@ def pooled_rows(claim_suites, perturb, pool, workers=None, version=None,
 
     # FR1.d2: the disk floor is read before any live baseline, so a refusal
     # costs no minutes (run 5 spent 618 s in 2b, then refused on 8.3 GiB free).
-    floor = perturb_pool.floor_problem(tempfile.gettempdir())
+    # CS8.a: the copies live under the one scratch root, so that is where the floor is read.
+    try:
+        pool_root = perturb_pool.pool_scratch_root()
+    except (perturb_pool.CopyFailed, OSError) as exc:
+        return [], "%s: the pool scratch root cannot be used (%s); nothing ran" % (NODATA, exc)
+    floor = perturb_pool.floor_problem(pool_root)
     if floor:
         return [], floor
 

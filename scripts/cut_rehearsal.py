@@ -29,8 +29,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 SCHEMA = "cv1.rehearsal.2"
-# RC1.a: a .1 record (no rows) still reads, as rows == []; writing is always SCHEMA
-SCHEMAS_READ = ("cv1.rehearsal.1", "cv1.rehearsal.2")
+# CS12.a: a record that names the rehearsed tip (bumped_sha, bumped_tree) is written under SCHEMA_BUMPED; a record
+# without them (a worktree whose HEAD could not be read) keeps SCHEMA, the shape every older reader and test knows
+# (named .2b, not .3: test_cut_rehearsal.py keeps .3 as its example of a schema no reader knows)
+SCHEMA_BUMPED = "cv1.rehearsal.2b"
+# RC1.a: a .1 record (no rows) still reads, as rows == []; writing is SCHEMA or SCHEMA_BUMPED
+SCHEMAS_READ = ("cv1.rehearsal.1", "cv1.rehearsal.2", "cv1.rehearsal.2b")
 MAX_AGE_HOURS = 24.0
 FUTURE_SLACK_S = 300
 DEFAULT_TIMEOUT_S = 10800
@@ -62,6 +66,9 @@ ROW_NAMES = ("required-fast-hub", "export-real-home", "virgin-gate")
 ROW_HOMES = ("real", "empty")
 ROW_VERDICTS = ("PASS", "FAIL", "NO-DATA")
 ROW_FIELDS = ("row", "argv", "key", "home", "verdict", "seconds", "log_path", "log_sha256")
+# CS12.c: a row a rehearsal REUSED is carried into its record with the record it came from and that record's stamp,
+# so the next reader ages the row by when it was measured, never by when it was carried
+CARRIED_FIELDS = ("origin_record", "origin_stamp")
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
 EXPORT_TREE_RE = re.compile(r"^EXPORT-TREE: ([0-9a-f]{40})$", re.M)   # the one line cut_preflight and export_public print
 
@@ -234,12 +241,70 @@ def _script_trees(root, ref, runner=None):
     return trees, ""
 
 
+REHEARSED_REF = "refs/brother/rehearsed/%s-%s"
+#: CS12: the one line cut.py --check prints, after its exit rule accepted the chain's commits, naming the tip and the tree
+#: of the nested worktree the chain ran in (the rehearsal worktree itself never moves, so its HEAD is never the tip)
+TIP_PREFIX = "REHEARSED-TIP: "
+TIP_LINE_RE = re.compile(r"^%s([0-9a-f]{40}) ([0-9a-f]{40})$" % re.escape(TIP_PREFIX), re.M)
+CUT_SUBJECTS = ("%s: the version bump and the regenerated manifests",
+                "%s: the export manifest that describes the tree and the note it ships")
+
+
+def rehearsed_ref_name(version, candidate):
+    """The ref a rehearsal leaves at its bumped tip: refs/brother/rehearsed/<version>-<first 12 of the candidate>."""
+    return REHEARSED_REF % (version, candidate[:12])
+
+
+def write_rehearsed_ref(root, version, candidate, sha, runner=None):
+    """(True, '') when the rehearsed ref now points at `sha`, else (False, why). CS12.a: the ref keeps the
+    rehearsed commits reachable, and the cut driver adopts exactly the commit it names. Never deleted here."""
+    if not _is_str(version) or not VERSION_RE.fullmatch(version):
+        return False, "version %r is not X.Y.Z" % (version,)
+    if not _is_str(candidate) or not SHA_RE.fullmatch(candidate):
+        return False, "candidate %r is not 40 hex" % (candidate,)
+    if not _is_str(sha) or not SHA_RE.fullmatch(sha):
+        return False, "the bumped tip %r is not 40 hex" % (sha,)
+    ref = rehearsed_ref_name(version, candidate)
+    _out, why = _git(root, ["update-ref", ref, sha], runner=runner)
+    if why:
+        return False, "git update-ref %s failed: %s" % (ref, why)
+    return True, ""
+
+
+def _tip_from_output(root, version, candidate, output, runner=None):
+    """(tip, tree, '') from the REHEARSED-TIP line of the child's output (the last one), accepted only when the tip is
+    one or two commits on top of `candidate`, carrying the cut's own subjects, and its tree is the one the line names;
+    else ('', '', why). The commits stay in the object store after the child removed its worktree."""
+    lines = TIP_LINE_RE.findall(output if _is_str(output) else "")
+    if not lines:
+        return "", "", "the child printed no %s line, so the rehearsed tip is unknown" % TIP_PREFIX.strip()
+    tip, tree = lines[-1]
+    if _rc(_sh(["git", "merge-base", "--is-ancestor", candidate, tip], root, runner)) != 0:
+        return "", "", "the rehearsed tip %s is not on top of the candidate %s" % (tip[:12], candidate[:12])
+    count, why = _git(root, ["rev-list", "--count", "%s..%s" % (candidate, tip)], runner)
+    if why or count not in ("1", "2"):
+        return "", "", "the rehearsed tip %s is %s commits past the candidate, not the cut's one or two" % (
+            tip[:12], count or why)
+    subjects, why = _git(root, ["log", "--format=%s", "%s..%s" % (candidate, tip)], runner)
+    allowed = [t % version for t in CUT_SUBJECTS]
+    if why or not subjects or any(line not in allowed for line in subjects.splitlines()):
+        return "", "", "a commit under the rehearsed tip %s is not the cut's own: %s" % (tip[:12], why or subjects[:120])
+    actual, why = _git(root, ["rev-parse", tip + "^{tree}"], runner)
+    if why or actual != tree:
+        return "", "", "the rehearsed tip %s has tree %s, not the %s the child named" % (tip[:12], actual[:12], tree[:12])
+    return tip, tree, ""
+
+
 def validate_row(row):
     """'' when `row` is a whole row (exactly ROW_FIELDS, each of its type), else the first broken rule. Never raises."""
     if not isinstance(row, dict):
         return "a row is not an object"
-    if set(row) != set(ROW_FIELDS):
+    extra = set(row) - set(ROW_FIELDS) - set(CARRIED_FIELDS)
+    if extra or not set(ROW_FIELDS) <= set(row):
         return "a row has the fields %s, not %s" % (", ".join(sorted(str(k) for k in row)), ", ".join(ROW_FIELDS))
+    for field in CARRIED_FIELDS:
+        if field in row and (not _is_str(row[field]) or not row[field]):
+            return "the %s of row %s is not a non empty string" % (field, row.get("row"))
     if not _is_str(row["row"]) or row["row"] not in ROW_NAMES:
         return "row %r is not one of %s" % (row["row"], ", ".join(ROW_NAMES))
     if not isinstance(row["argv"], list) or not row["argv"] or not all(_is_str(a) for a in row["argv"]):
@@ -257,6 +322,32 @@ def validate_row(row):
     if not _is_str(row["log_sha256"]) or not HEX64_RE.fullmatch(row["log_sha256"]):
         return "the log sha256 of row %s is not 64 hex" % row["row"]
     return ""
+
+
+def carry_reused_rows(rows, origin_record, origin_stamp):
+    """A fresh list of copies of `rows`, each carrying `origin_record` and `origin_stamp` (CS12.c), the last of two rows
+    with one (row, home) kept. A row that already carries both keeps them: its first measurement is its origin, not the
+    record it passed through last. ValueError on rows that are not a list of whole rows, or an empty or non text
+    origin: nothing is dropped silently."""
+    if isinstance(rows, (str, bytes, dict)) or not isinstance(rows, (list, tuple)):
+        raise ValueError("rows must be a list of rows")
+    for what, value in (("origin_record", origin_record), ("origin_stamp", origin_stamp)):
+        if not _is_str(value) or not value:
+            raise ValueError("%s %r is not a non empty string" % (what, value))
+    kept = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("a carried row is not an object: %r" % (row,))
+        copy = dict(row)
+        if not all(_is_str(copy.get(f)) and copy[f] for f in CARRIED_FIELDS):
+            copy["origin_record"] = origin_record
+            copy["origin_stamp"] = origin_stamp
+        why = validate_row(copy)
+        if why:
+            raise ValueError("a carried row was refused: %s" % why)
+        kept.pop((copy["row"], copy["home"]), None)
+        kept[(copy["row"], copy["home"])] = copy
+    return list(kept.values())
 
 
 def row_line(row):
@@ -278,6 +369,8 @@ def parse_rows(output):
             problems.append("a CUTROW line is not JSON (%s)" % exc)
             continue
         why = validate_row(row)
+        if not why and isinstance(row, dict) and any(f in row for f in CARRIED_FIELDS):
+            why = "a row the chain just ran never carries an origin"
         if why:
             problems.append("a CUTROW line was refused: %s" % why)
         else:
@@ -286,10 +379,27 @@ def parse_rows(output):
 
 
 def record_rehearsal(version, candidate, tree, exit_code, verdict, log_path, seconds, cut_py_sha256, directory="",
-                     now=None, script_trees=None, note="", rows=()):
+                     now=None, script_trees=None, note="", rows=(), bumped_sha="", bumped_tree="", carried=()):
     """Write the record atomically (temp file then os.replace) and return its path. Raises ValueError on a
     candidate that is not 40 hex or a verdict outside READY, NOT-READY, NO-DATA, and on any other malformed field,
-    a malformed row included. A READY record needs a readable log and a tree hash for every SCRIPT_DIRS entry."""
+    a malformed row included. A READY record needs a readable log and a tree hash for every SCRIPT_DIRS entry.
+    CS12.a: `bumped_sha` and `bumped_tree` (the rehearsed worktree's HEAD and its tree) come together, each 40 hex or
+    both empty; a record that carries them is written under SCHEMA_BUMPED, one without keeps SCHEMA.
+    CS12.c: `carried` are the rows this rehearsal REUSED, each a whole row with its origin_record and origin_stamp
+    (carry_reused_rows makes them); they are written after the fresh rows, so for one (row, home) they win."""
+    if isinstance(carried, (str, bytes, dict)) or not isinstance(carried, (list, tuple)):
+        raise ValueError("carried must be a list of rows")
+    for row in carried:
+        why = validate_row(row)
+        if why:
+            raise ValueError(why)
+        if not all(row.get(f) for f in CARRIED_FIELDS):
+            raise ValueError("a carried row needs its origin_record and origin_stamp")
+    for what, value in (("bumped_sha", bumped_sha), ("bumped_tree", bumped_tree)):
+        if not _is_str(value) or (value and not SHA_RE.fullmatch(value)):
+            raise ValueError("%s %r is not 40 hex or empty" % (what, value))
+    if bool(bumped_sha) != bool(bumped_tree):
+        raise ValueError("bumped_sha and bumped_tree come together or not at all")
     if isinstance(rows, (str, bytes, dict)) or not isinstance(rows, (list, tuple)):
         raise ValueError("rows must be a list of rows")
     for row in rows:
@@ -335,7 +445,9 @@ def record_rehearsal(version, candidate, tree, exit_code, verdict, log_path, sec
     record = {"schema": SCHEMA, "version": version, "candidate_sha": candidate, "candidate_tree": tree,
               "exit_code": exit_code, "verdict": verdict, "log_path": log_path, "log_sha256": log_sha,
               "cut_py_sha256": cut_py_sha256, "script_trees": trees, "seconds": float(seconds),
-              "finished_at": _iso(stamp), "rows": [dict(r) for r in rows]}
+              "finished_at": _iso(stamp), "rows": [dict(r) for r in rows] + [dict(r) for r in carried]}
+    if bumped_sha:
+        record.update({"schema": SCHEMA_BUMPED, "bumped_sha": bumped_sha, "bumped_tree": bumped_tree})
     if note:
         record["note"] = note
     path = os.path.join(directory, "rehearsal-%s-%s-%d.json" % (version, candidate[:12], int(stamp)))
@@ -571,6 +683,50 @@ def run_rehearsal(root, version, candidate="", directory="", timeout_s=DEFAULT_T
         release_awake(handle)
 
 
+REUSED_RE = re.compile(r"^REUSED (%s) ([0-9a-f]{12}) (\S.*?)\s*$" % "|".join(ROW_NAMES), re.M)
+
+
+def reused_rows(output, version, directory):
+    """([rows the chain REUSED, each carrying its origin], [problems]) for the REUSED lines in the chain's output
+    (CS12.c). A line is matched to the record holding that row by its name, the first 12 of its key and the log (or
+    record) path it names; a row that is already carried keeps its own first origin, any other takes the record it was
+    read from and that record's finished_at (so the original and a carried copy give the same origin). A line no record holds, or a row whose log no longer hashes, is a
+    problem and no row: the next cut then runs that row, as it always did. Never raises."""
+    found = REUSED_RE.findall(output) if _is_str(output) else []
+    if not found:
+        return [], []
+    records, problems = row_sources(version, directory)
+    problems = list(problems)
+    carried = {}
+    for name, key12, where in found:
+        hits = []
+        for rec in records:
+            record_path = os.path.join(directory, rec["_name"])
+            for row in rec["rows"]:
+                if row["row"] == name and row["key"][:12] == key12 and where in (row["log_path"], record_path):
+                    hits.append((rec, row))
+        if not hits:
+            problems.append("the REUSED %s row (key %s) is held by no record, so it is not carried" % (name, key12))
+            continue
+        # any holder will do: a carried copy names the first origin and carry_reused_rows keeps it
+        rec, row = hits[0]
+        try:
+            ok = _sha256_file(row["log_path"]) == row["log_sha256"]
+        except OSError:
+            ok = False
+        if not ok:
+            problems.append("the REUSED %s row was not carried: its log %s does not hash to its log_sha256"
+                            % (name, row["log_path"]))
+            continue
+        try:
+            copy = carry_reused_rows([row], os.path.join(directory, rec["_name"]), rec["finished_at"])[0]
+        except ValueError as exc:
+            problems.append("the REUSED %s row was not carried: %s" % (name, exc))
+            continue
+        carried[(copy["row"], copy["home"])] = copy
+    return list(carried.values()), problems
+
+
 def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout_s, runner, clock, local=False):
     """run_rehearsal from the lock to the record, while the machine is held awake."""
     started = clock()
@@ -648,6 +804,16 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
         except (OSError, ValueError) as exc:
             raise RehearsalRefused("the local record could not be written: %s" % exc)
         return verdict, code, path
+    bumped_sha = bumped_tree = ""
+    if verdict == "READY":
+        # CS12: the chain ran in a nested worktree of the child's own, so the tip comes from the line the child
+        # printed, checked here against the candidate; a missing or bad line leaves the older record and no ref
+        bumped_sha, bumped_tree, why = _tip_from_output(root, version, sha, output, runner)
+        if why:
+            note = (note + "; " if note else "") + why
+    carried_rows, problems = reused_rows(output, version, directory)
+    if problems:
+        note = (note + "; " if note else "") + "; ".join(problems)
     trees, why = _script_trees(root, sha, runner)
     cut_sha = ""
     shown = _sh(["git", "show", "%s:scripts/cut.py" % sha], root, runner)
@@ -660,10 +826,24 @@ def _rehearse_locked(root, version, sha, tree, directory, scratch, lock, timeout
         verdict = "NO-DATA"
         note = (note + "; " if note else "") + why
         cut_sha = cut_sha or "0" * 64
+    # CS12.a: the ref moves only for a rehearsal that ends READY, so a failed second rehearsal never takes it away
+    # from the tip an earlier READY record names; a ref that cannot be written ends the rehearsal NOT-READY
+    ref = rehearsed_ref_name(version, sha)
+    prior, moved = "", False
+    if bumped_sha and verdict == "READY":
+        prior, _why = _git(root, ["rev-parse", "--verify", "--quiet", ref], runner=runner)
+        moved, why = write_rehearsed_ref(root, version, sha, bumped_sha, runner)
+        if not moved:
+            verdict = "NOT-READY"
+            note = (note + "; " if note else "") + why
     try:
         path = record_rehearsal(version, sha, tree, code, verdict, log_path, max(finished - started, 0.0), cut_sha,
-                                directory, now=finished, script_trees=trees, note=note, rows=rows)
+                                directory, now=finished, script_trees=trees, note=note, rows=rows,
+                                bumped_sha=bumped_sha, bumped_tree=bumped_tree, carried=carried_rows)
     except (OSError, ValueError) as exc:
+        if moved:   # no record names the new tip, so the ref goes back to where the last record left it
+            _git(root, ["update-ref", "-d", ref] if not SHA_RE.fullmatch(prior) else ["update-ref", ref, prior],
+                 runner=runner)
         raise RehearsalRefused("the record could not be written: %s" % exc)
     return verdict, code, path
 
@@ -871,6 +1051,9 @@ def _record_problem(data, name, schemas=SCHEMAS_READ, verdicts=VERDICTS):
             why = validate_row(row)
             if why:
                 return "the rehearsal record %s is malformed (%s)" % (name, why)
+    if data["schema"] == SCHEMA_BUMPED and not all(
+            _is_str(data.get(f)) and SHA_RE.fullmatch(data[f]) for f in ("bumped_sha", "bumped_tree")):
+        return "the rehearsal record %s is malformed (bumped_sha and bumped_tree are not 40 hex)" % name
     data["_epoch"] = stamp
     return ""
 
@@ -891,10 +1074,39 @@ def load_record(path):
     return data, ""
 
 
+def row_origin_stamp(row):
+    """(origin_stamp, '') of a carried row, (None, '') of a fresh one (neither origin field), else (None, reason):
+    a carried row without its stamp, a stamp that is empty, not text or not a readable ISO time, or a row that is not
+    an object. CS12.d: the one reader of the stamp, so no caller can fall back to the record's own time. Never raises."""
+    if not isinstance(row, dict):
+        return None, "a row is not an object"
+    if "origin_stamp" not in row and "origin_record" not in row:
+        return None, ""
+    if "origin_stamp" not in row:
+        return None, "the carried row has no origin_stamp"
+    raw = row["origin_stamp"]
+    if not _is_str(raw) or not raw or _parse_iso(raw) is None:
+        return None, "the carried row has an unreadable origin_stamp: %r" % (raw,)
+    return raw, ""
+
+
+def _carried_age_problem(row_name, last, origin, now_s):
+    """'' when the carried row's origin stamp is not from the future and not older than MAX_AGE_HOURS, else why."""
+    age = now_s - _parse_iso(origin)
+    if age < -FUTURE_SLACK_S:
+        return "the carried %s row is stamped from the future (%s)" % (row_name, origin)
+    if age > MAX_AGE_HOURS * 3600:
+        return "the carried %s row is stale: origin %s finished %s, older than %g hours" % (
+            row_name, last.get("origin_record", ""), origin, MAX_AGE_HOURS)
+    return ""
+
+
 def reusable_row(record, row, key, home, now=None):
-    """(row, '') only when `record` is a READY record, not from the future and not older than MAX_AGE_HOURS, whose
-    LAST row named `row` with home `home` carries exactly `key`, verdict PASS and a log still hashing to its
-    log_sha256. (None, reason) in every other case, so the caller runs the row."""
+    """(row, '') only when `record` is a READY record whose LAST row named `row` with home `home` carries exactly
+    `key`, verdict PASS and a log still hashing to its log_sha256, and is not from the future or older than
+    MAX_AGE_HOURS. The age is the record's finished_at for a row the record measured and, for a row it only carried
+    (CS12.c), the origin_stamp of its first measurement: a fresh record never makes an old row fresh.
+    (None, reason) in every other case, so the caller runs the row."""
     if not isinstance(record, dict):
         return None, "no rehearsal record"
     if not _is_str(row) or row not in ROW_NAMES or not _is_str(home) or home not in ROW_HOMES:
@@ -908,12 +1120,17 @@ def reusable_row(record, row, key, home, now=None):
     stamp = _parse_iso(record.get("finished_at"))
     if stamp is None:
         return None, "the record has no readable finished_at"
-    age = (time.time() if now is None else float(now)) - stamp
+    now_s = time.time() if now is None else float(now)
+    age = now_s - stamp
+    own_age = ""   # the record's own time, which judges a row only when the record measured it
     if age < -FUTURE_SLACK_S:
-        return None, "the record is stamped from the future (%s)" % record.get("finished_at")
-    if age > MAX_AGE_HOURS * 3600:
-        return None, "the record is stale: finished %s, older than %g hours" % (record.get("finished_at"), MAX_AGE_HOURS)
+        own_age = "the record is stamped from the future (%s)" % record.get("finished_at")
+    elif age > MAX_AGE_HOURS * 3600:
+        own_age = "the record is stale: finished %s, older than %g hours" % (record.get("finished_at"), MAX_AGE_HOURS)
     rows = record.get("rows")
+    if own_age and not (isinstance(rows, list) and any(
+            isinstance(r, dict) and any(f in r for f in CARRIED_FIELDS) for r in rows)):
+        return None, own_age
     if not isinstance(rows, list):
         return None, "the record carries no rows"
     last = None
@@ -928,6 +1145,12 @@ def reusable_row(record, row, key, home, now=None):
         return None, "the %s row measured key %s, not %s" % (row, last["key"][:12], key[:12])
     if last["verdict"] != "PASS":
         return None, "the %s row said %s, not PASS" % (row, last["verdict"])
+    origin, why = row_origin_stamp(last)
+    if why:
+        return None, why
+    why = _carried_age_problem(row, last, origin, now_s) if origin else own_age
+    if why:
+        return None, why
     try:
         log_sha = _sha256_file(last["log_path"])
     except OSError as exc:
@@ -1008,10 +1231,18 @@ def reusable_check_row(version, row, key, home, directory="", now=None):
         return None, "no record holds a %s row for home %s at key %s%s" % (
             row, home, key[:12], (" (" + reasons[0] + ")") if reasons else "")
     _, rec, last = best
-    age = (time.time() if now is None else float(now)) - rec["_epoch"]
-    if age < -FUTURE_SLACK_S:
+    now_s = time.time() if now is None else float(now)
+    origin, why = row_origin_stamp(last)   # CS12.d: a carried row is as old as its first measurement
+    if why:
+        return None, why
+    if origin:
+        why = _carried_age_problem(row, last, origin, now_s)
+        if why:
+            return None, why
+    age = now_s - rec["_epoch"]
+    if not origin and age < -FUTURE_SLACK_S:
         return None, "the record %s is stamped from the future (%s)" % (rec["_name"], rec["finished_at"])
-    if age > MAX_AGE_HOURS * 3600:
+    if not origin and age > MAX_AGE_HOURS * 3600:
         return None, "the record %s is stale: finished %s, older than %g hours" % (
             rec["_name"], rec["finished_at"], MAX_AGE_HOURS)
     if last["verdict"] != "PASS":
@@ -1025,7 +1256,7 @@ def reusable_check_row(version, row, key, home, directory="", now=None):
     return last, ""
 
 
-def covering_record(root, version, resume_sha="", directory="", runner=None, now=None, allowed_paths=()):
+def covering_record(root, version, resume_sha="", directory="", runner=None, now=None, allowed_paths=(), require_tip=""):
     """(record_path, reason): the path of the newest READY record that covers this commit (exact HEAD, or the resume
     rule when `resume_sha` is non empty), with reason ''; ('', the reason in words) otherwise. Unknown, corrupt or
     unreadable input refuses."""
@@ -1105,6 +1336,19 @@ def covering_record(root, version, resume_sha="", directory="", runner=None, now
                 rehearsed[rel] != trees[rel]
                 and not only_the_repin(root, newest["candidate_sha"], head, version, rel, runner)):
             return "", "REFUSED: %s changed since the rehearsal %s, so it covered different code" % (rel, where)
+    if require_tip and newest.get("bumped_sha"):
+        # CS12.b: a --resume cut ships the commit that was proved, no other: the record names it and the ref still
+        # points at it (a second rehearsal moves the ref, and this record then no longer covers a cut). Only the
+        # gate before the fence asks: after the chain a cold cut's HEAD holds commits of its own.
+        proved = newest["bumped_sha"]
+        ref = rehearsed_ref_name(version, newest["candidate_sha"])
+        actual, _why = _git(root, ["rev-parse", "--verify", "--quiet", "%s^{commit}" % ref], runner)
+        if require_tip != proved:
+            return "", "REFUSED: the resume commit %s is not the tip %s that rehearsal %s proved" % (
+                require_tip[:12], proved[:12], where)
+        if actual != proved:
+            return "", "REFUSED: rehearsal %s proved %s but %s points at %s" % (
+                where, proved[:12], ref, actual[:12] or "nothing")
     return os.path.join(directory, where), ""
 
 
@@ -1339,10 +1583,12 @@ def _newest_preflight(version, candidate, tree, directory, now):
     return rec, ""
 
 
-def rehearsal_refusal(root, version, resume_sha="", directory="", runner=None, now=None, allowed_paths=()):
+def rehearsal_refusal(root, version, resume_sha="", directory="", runner=None, now=None, allowed_paths=(),
+                      require_tip=""):
     """'' when covering_record finds a record, else its reason. `allowed_paths` is passed through to covering_record
-    and on to resume_chain_problem; an empty tuple on a resume means every path refuses."""
-    _path, reason = covering_record(root, version, resume_sha, directory, runner, now, allowed_paths)
+    and on to resume_chain_problem; an empty tuple on a resume means every path refuses. `require_tip` (CS12.b) is the
+    commit a --resume cut was asked to ship; a record that names a bumped_sha covers it only when they are the same."""
+    _path, reason = covering_record(root, version, resume_sha, directory, runner, now, allowed_paths, require_tip)
     return reason or ("" if _path else "REFUSED: no rehearsal record covers this commit")
 
 

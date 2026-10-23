@@ -37,8 +37,15 @@ ROW_KEYS = ("run", "phase", "started", "ended", "seconds", "source", "reason")
 MAX_LINE = 1 << 16             # a longer line is no shape this reader knows; it is skipped, never searched
 MAX_READ = 64 << 20            # bytes read from one log at most
 HALF_DAY = 43200
+JST = datetime.timezone(datetime.timedelta(hours=9))
+ZONE_OFFSETS = {
+    "Z": 0, "UTC": 0, "GMT": 0,
+    "JST": 9, "CEST": 2, "CET": 1, "EST": -5, "EDT": -4, "PST": -8, "PDT": -7,
+    "BST": 1, "IST": 5.5, "AEST": 10, "AEDT": 11, "NZST": 12, "NZDT": 13,
+    "MSK": 3, "CST": -6, "CDT": -5, "MST": -7, "MDT": -6,
+}
 
-FULL_STAMP = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?!\d)")
+FULL_STAMP = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?!\d)\s*([A-Za-z]{1,4}|[+-]\d{2}:?\d{2})?")
 CLOCK_PREFIX = re.compile(r"^(\d{2}):(\d{2}):(\d{2}) ")
 TIME_NODATA = re.compile(r"^TIME NO-DATA(?: ([A-Za-z0-9_]+))?:\s*(.*)$")
 TIME_LINE = re.compile(r"^TIME ([A-Za-z0-9_]+) (\S+)$")
@@ -64,52 +71,84 @@ class TimingsError(Exception):
 
 
 def _epoch(m):
+    if not isinstance(m, re.Match):
+        raise ValueError("_epoch needs a FULL_STAMP match")
+    groups = m.groups()
+    if len(groups) < 7:
+        raise ValueError("the match has no zone group")
+    zone = groups[6]
+    if not zone:
+        return None
     try:
-        return calendar.timegm(datetime.datetime(*[int(g) for g in m.groups()]).timetuple())
-    except (ValueError, OverflowError):
+        y, mo, d, hh, mm, ss = [int(g) for g in groups[:6]]
+        if zone in ("Z", "UTC", "GMT"):
+            tz = datetime.timezone.utc
+        elif zone[0] in "+-":
+            digits = zone[1:].replace(":", "")
+            if len(digits) != 4 or not digits.isdigit():
+                return None
+            sign = 1 if zone[0] == "+" else -1
+            tz = datetime.timezone(sign * datetime.timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
+        elif zone in ZONE_OFFSETS:
+            tz = datetime.timezone(datetime.timedelta(hours=ZONE_OFFSETS[zone]))
+        else:
+            return None
+        aware = datetime.datetime(y, mo, d, hh, mm, ss, tzinfo=tz)
+        epoch = int(aware.timestamp())
+        if epoch + 9 * 3600 > 253402300799:
+            return None
+        return epoch
+    except OverflowError:
+        return None
+    except (ValueError, OSError):
         return None
 
 
 def _iso(epoch):
     if epoch is None:
         return None
+    if isinstance(epoch, bool) or not isinstance(epoch, int):
+        raise ValueError("_iso needs an int epoch or None")
     try:
-        return (datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=epoch)).strftime("%Y-%m-%dT%H:%M:%S")
-    except (ValueError, OverflowError):
+        aware = datetime.datetime.fromtimestamp(epoch, tz=datetime.timezone.utc)
+        return aware.astimezone(JST).strftime("%Y-%m-%dT%H:%M:%S")
+    except OverflowError:
+        return None
+    except (ValueError, OSError):
         return None
 
 
 def _clocks(texts):
     """Each line's own stamp as an epoch or None; HH:MM:SS lines take their day from the nearest dated line."""
-    full, tod = [None] * len(texts), [None] * len(texts)
+    if texts is None or not isinstance(texts, list):
+        raise ValueError("_clocks needs a list of str")
+    for t in texts:
+        if not isinstance(t, str):
+            raise ValueError("every text must be a str")
+    matches = [FULL_STAMP.search(t) for t in texts]
+    epochs = [(_epoch(m) if m is not None else None) for m in matches]
+    clocks = list(epochs)
+    anchors = [j for j in range(len(texts)) if matches[j] is not None and epochs[j] is not None]
     for i, t in enumerate(texts):
-        m = FULL_STAMP.search(t)
-        if m:
-            full[i] = _epoch(m)
-        if full[i] is None:
-            c = CLOCK_PREFIX.match(t)
-            if c and int(c.group(1)) < 24 and int(c.group(2)) < 60 and int(c.group(3)) < 60:
-                tod[i] = int(c.group(1)) * 3600 + int(c.group(2)) * 60 + int(c.group(3))
-    out = list(full)
-    last = None
-    for i in range(len(texts)):
-        if full[i] is not None:
-            last = full[i]
-        elif tod[i] is not None and last is not None:
-            cand = last - last % 86400 + tod[i]
-            if cand < last - HALF_DAY:
-                cand += 86400          # past midnight
-            out[i] = last = cand
-    anchor = next((i for i in range(len(texts)) if full[i] is not None), None)
-    if anchor is not None:
-        nxt = full[anchor]
-        for i in range(anchor - 1, -1, -1):
-            if tod[i] is not None:
-                cand = nxt - nxt % 86400 + tod[i]
-                if cand > nxt + HALF_DAY:
-                    cand -= 86400      # the evening before the first dated line
-                out[i] = nxt = cand
-    return out
+        if matches[i] is not None:
+            continue
+        c = CLOCK_PREFIX.match(t)
+        if not c:
+            continue
+        hh, mm, ss = int(c.group(1)), int(c.group(2)), int(c.group(3))
+        if hh >= 24 or mm >= 60 or ss >= 60:
+            continue
+        if not anchors:
+            continue
+        j = min(anchors, key=lambda k: abs(k - i))
+        anchor_dt = datetime.datetime.fromtimestamp(epochs[j], tz=JST)
+        candidate = datetime.datetime(anchor_dt.year, anchor_dt.month, anchor_dt.day, hh, mm, ss, tzinfo=JST)
+        if candidate - anchor_dt > datetime.timedelta(hours=12):
+            candidate -= datetime.timedelta(days=1)
+        if anchor_dt - candidate > datetime.timedelta(hours=12):
+            candidate += datetime.timedelta(days=1)
+        clocks[i] = int(candidate.timestamp())
+    return clocks
 
 
 def _run_name(path):
@@ -195,10 +234,14 @@ def _row(run, phase, started, ended, seconds, source, reason):
 
 def _gap(a, b, what):
     """Seconds from stamp a to stamp b, clamped at 0 with the reason, or None with the reason."""
+    if a is not None and (isinstance(a, bool) or not isinstance(a, int)):
+        raise ValueError("_gap needs int epochs or None")
+    if b is not None and (isinstance(b, bool) or not isinstance(b, int)):
+        raise ValueError("_gap needs int epochs or None")
     if a is None or b is None:
-        return None, "%s: a stamp is missing, so the duration cannot be read" % what
+        return None, "no zone"
     if b < a:
-        return 0, "%s: the clock stepped back %d s; clamped at 0" % (what, a - b)
+        return 0, "stepped back %d s" % (a - b)
     return b - a, None
 
 

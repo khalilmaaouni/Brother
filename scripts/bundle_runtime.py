@@ -1156,11 +1156,18 @@ def build_manifest(closure, scripts_dir=SCRIPTS_DIR):
     files.sort(key=lambda f: f["path"])
     return {"generated_by": "scripts/bundle_runtime.py", "entry": ENTRY,
             "files": files,
-            "source_revision": _git_line(["rev-parse", "HEAD"], scripts_dir,
-                                         NO_REVISION),
-            "source_describe": _git_line(
-                ["describe", "--tags", "--always", "--dirty"],
-                scripts_dir, NO_DESCRIBE)}
+            **_source_stamp(scripts_dir)}
+
+
+def _source_stamp(scripts_dir):
+    """The two stamp fields for the checkout that TRACKS scripts_dir, or both NO-DATA strings. git looks UP for a
+    repository, so a scripts/ copied untracked under someone else's checkout (the grader's scratch root sits inside
+    a git worktree, 2026-10-22) used to be stamped with THAT checkout's HEAD, a revision whose scripts/ is not these
+    bytes. Tracked means git lists at least one file under scripts_dir; anything else reads NO-DATA."""
+    if not _git_line(["ls-files", "--", "."], scripts_dir, ""):
+        return {"source_revision": NO_REVISION, "source_describe": NO_DESCRIBE}
+    return {"source_revision": _git_line(["rev-parse", "HEAD"], scripts_dir, NO_REVISION),
+            "source_describe": _git_line(["describe", "--tags", "--always", "--dirty"], scripts_dir, NO_DESCRIBE)}
 
 
 def _content(manifest):
@@ -1220,13 +1227,36 @@ LOOP_DIR_NAME = "loop"
 LOOP_MANIFEST_NAME = "LOOP-MANIFEST.json"
 
 
+def _loop_tool_name(name, path):
+    """The one rule for a mirrored loop file: python, shell, the markdown a tool reads beside itself (brief_head.md),
+    C (brother_keychain.c), and never a cache or a backup."""
+    return name.endswith((".py", ".sh", ".md", ".c")) and ".bak" not in name and os.path.isfile(path)
+
+
+def _loop_packages(loop_dir):
+    """Sorted names of the packages directly under loop_dir: a folder holding an __init__.py. The tools import them
+    (scripts/loop/adapters, FX-31.5), so they ship; any other folder (scripts/loop/abc, an experiment) does not."""
+    if not os.path.isdir(loop_dir): return []
+    return sorted(n for n in os.listdir(loop_dir) if os.path.isfile(os.path.join(loop_dir, n, "__init__.py")))
+
+
+def _loop_names_in(loop_dir, also=()):
+    """Every relative name the rule above keeps in loop_dir: its own files, then each package's files as pkg/name.
+    `also` names more packages to read (the SOURCE's, when loop_dir is the bundle: a bundle package that lost its own
+    __init__.py must still have its files counted, or an extra file in it would go unseen)."""
+    if not os.path.isdir(loop_dir): return []
+    names = [n for n in os.listdir(loop_dir) if _loop_tool_name(n, os.path.join(loop_dir, n))]
+    for pkg in sorted(set(_loop_packages(loop_dir)) | {p for p in also if os.path.isdir(os.path.join(loop_dir, p))}):
+        names += [pkg + "/" + n for n in os.listdir(os.path.join(loop_dir, pkg)) if _loop_tool_name(n, os.path.join(loop_dir, pkg, n))]
+    return sorted(names)
+
+
 def loop_files(scripts_dir=SCRIPTS_DIR):
-    """Sorted relative names of the loop tools to mirror (python, shell, and the markdown a tool reads beside itself
-    such as brief_head.md; no caches, no backups); [] when there is no scripts/loop directory, which is not an error
-    for a checkout that has none."""
-    d = os.path.join(scripts_dir, LOOP_DIR_NAME)
-    if not os.path.isdir(d): return []
-    return sorted(n for n in os.listdir(d) if n.endswith((".py", ".sh", ".md", ".c")) and ".bak" not in n and os.path.isfile(os.path.join(d, n)))   # .c: brother_keychain.c, built by brother_login.py beside it (2026-10-03)
+    """Sorted relative names of the loop tools to mirror (_loop_tool_name, in scripts/loop and in each package beside
+    it, 2026-10-22: the mirror carried only the top level, so the installed model_call.py, native_worker.py and three
+    more died with No module named 'adapters'); [] when there is no scripts/loop directory, which is not an error for a
+    checkout that has none."""
+    return _loop_names_in(os.path.join(scripts_dir, LOOP_DIR_NAME))
 
 
 def _loop_manifest_bytes(names, scripts_dir):
@@ -1242,8 +1272,8 @@ def generate_loop(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
     for n in names:
         if _write_if_changed(os.path.join(dst_dir, n), _read_bytes(os.path.join(scripts_dir, LOOP_DIR_NAME, n))): changed.append(LOOP_DIR_NAME + "/" + n)
     if _write_if_changed(os.path.join(dst_dir, LOOP_MANIFEST_NAME), _loop_manifest_bytes(names, scripts_dir)): changed.append(LOOP_DIR_NAME + "/" + LOOP_MANIFEST_NAME)
-    for n in os.listdir(dst_dir):   # a tool retired from scripts/loop leaves the bundle too, and is named
-        if n != LOOP_MANIFEST_NAME and n not in names and (n.endswith(".py") or n.endswith(".sh")):
+    for n in _loop_names_in(dst_dir, _loop_packages(os.path.join(scripts_dir, LOOP_DIR_NAME))):   # a tool retired from scripts/loop (or from a package beside it) leaves the bundle too, and is named
+        if n not in names and (n.endswith(".py") or n.endswith(".sh")):
             os.remove(os.path.join(dst_dir, n)); changed.append(LOOP_DIR_NAME + "/" + n + " (removed)")
     return changed
 
@@ -1258,8 +1288,8 @@ def check_loop(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
         if not os.path.isfile(dst): problems.append("loop/%s: missing from bundle/runtime/loop" % n)
         elif _read_bytes(os.path.join(scripts_dir, LOOP_DIR_NAME, n)) != _read_bytes(dst): problems.append("loop/%s: bundle copy does not match scripts/loop" % n)
     if os.path.isdir(dst_dir):
-        for n in sorted(os.listdir(dst_dir)):
-            if n != LOOP_MANIFEST_NAME and (n.endswith(".py") or n.endswith(".sh")) and n not in names: problems.append("loop/%s: in the bundle, not in scripts/loop" % n)
+        for n in _loop_names_in(dst_dir, _loop_packages(os.path.join(scripts_dir, LOOP_DIR_NAME))):
+            if (n.endswith(".py") or n.endswith(".sh")) and n not in names: problems.append("loop/%s: in the bundle, not in scripts/loop" % n)
     mp = os.path.join(dst_dir, LOOP_MANIFEST_NAME)
     if not os.path.isfile(mp): problems.append("loop/%s: missing" % LOOP_MANIFEST_NAME)
     elif _read_bytes(mp) != _loop_manifest_bytes(names, scripts_dir): problems.append("loop/%s: stale" % LOOP_MANIFEST_NAME)

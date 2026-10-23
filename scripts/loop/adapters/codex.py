@@ -21,6 +21,8 @@ adapter never falls back to the child's cwd. Nothing here starts a process.
 """
 import json
 import os
+import shutil
+import tempfile
 
 import adapters as A
 from adapters.bridge import MODEL_NAME
@@ -29,8 +31,49 @@ from adapters.bridge import MODEL_NAME
 #: child that can write edited two tracked files in the launch worktree (measured 2026-09-22).
 EXEC = "exec"
 SANDBOX = ("--sandbox", "read-only")
+TEST_SANDBOX = ("--sandbox", "workspace-write")
+TEST_TMPDIR = ".codex-tmp"
+ENV_PROGRAM = "/usr/bin/env"
 #: The closed input: "" is written and the pipe closes, so codex reads end of input instead of waiting on the caller.
 CLOSED_STDIN = ""
+
+
+def test_tmpdir(root):
+    """The scratch root inside the code root: pure, creates nothing."""
+    return os.path.join(root, TEST_TMPDIR)
+
+
+def _prepare_test_tmpdir(root):
+    """Prepare the scratch root and return one fresh run directory inside it."""
+    base = test_tmpdir(root)
+    try:
+        os.makedirs(base, mode=0o700, exist_ok=True)
+    except OSError as exc:
+        raise A.Refused("no usable temporary directory inside the code root: %s (%s)" % (base, exc))
+    if not os.path.isdir(base):
+        raise A.Refused("the codex test scratch root is not a directory")
+    if not os.access(base, os.W_OK):
+        raise A.Refused("the codex test scratch root is not writable")
+    try:
+        run = tempfile.mkdtemp(prefix="run-", dir=base)
+    except OSError as exc:
+        raise A.Refused("no usable temporary directory inside the code root: %s (%s)" % (base, exc))
+    expected = os.path.join(os.path.realpath(root), TEST_TMPDIR, os.path.basename(run))
+    if os.path.realpath(run) != expected:
+        shutil.rmtree(run, ignore_errors=True)
+        raise A.Refused("the codex test scratch directory resolves outside the code root")
+    return run
+
+
+def discard_test_tmpdir(root, tmpdir):
+    """Remove a fresh run directory made by _prepare_test_tmpdir; refuse anything else."""
+    if os.path.islink(tmpdir):
+        raise A.Refused("not a test form scratch directory under the code root")
+    if os.path.dirname(os.path.abspath(tmpdir)) != test_tmpdir(root):
+        raise A.Refused("not a test form scratch directory under the code root")
+    if not os.path.basename(tmpdir).startswith("run-"):
+        raise A.Refused("not a test form scratch directory under the code root")
+    shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _directory(path):
@@ -89,7 +132,7 @@ class CodexAdapter(object):
     def __init__(self, program=None, root=None):
         self.program, self.root = program, root
 
-    def argv(self, model, prompt, timeout, row):
+    def argv(self, model, prompt, timeout, row, test=False):
         """(argv, stdin, None), the shape model_call._argv returns, with stdin closed. Refused before any process starts
         for a row of another transport, a row id or model that is not a plain name, an empty prompt, one holding a NUL
         or one that starts with a dash (codex would read it as a flag, --sandbox included), a timeout that is not a
@@ -97,6 +140,8 @@ class CodexAdapter(object):
         absolute path, or a code root that is not an absolute, existing directory."""
         if not isinstance(row, dict) or row.get("transport") != self.transport:
             raise A.Refused("the Codex adapter builds only a codex row's command line, not %.120r" % (row,))
+        if "test" in row:
+            raise A.Refused("a codex row carries no test flag: the test run is the caller's explicit form, not a row")
         model_id = row.get("id")
         if not isinstance(model_id, str) or not MODEL_NAME.fullmatch(model_id):
             raise A.Refused("a codex row's id must be a plain model id, not %.120r" % (model_id,))
@@ -117,6 +162,12 @@ class CodexAdapter(object):
         if not _directory(root):
             raise A.Refused("no trusted code root: codex runs in an absolute, existing directory the caller names, "
                             "never in the child's cwd (%.120r)" % (root,))
+        if not isinstance(test, bool):
+            raise A.Refused("the codex test form's flag must be a bool, not %.60r" % (test,))
+        if test:
+            tmpdir = _prepare_test_tmpdir(root)
+            argv = [ENV_PROGRAM, "TMPDIR=" + tmpdir, program, EXEC, "-m", model_id, "-C", root] + list(TEST_SANDBOX) + [prompt]
+            return argv, CLOSED_STDIN, None
         argv = [program, EXEC, "-m", model_id, "-C", root] + list(SANDBOX) + [prompt]
         return argv, CLOSED_STDIN, None
 

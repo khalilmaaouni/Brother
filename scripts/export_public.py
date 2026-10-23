@@ -2726,7 +2726,9 @@ def check_required_fast(export_dir):
     world, refused = _world_for(export_dir, "required_fast")
     if refused:
         return False, [refused]
-    proc = _run(["sh", script], world["cwd"],
+    # BROTHER_EXPORT_TREE=1 names this run as the export tree's own: scripts/kernel_closure.py --check reads it to SKIP
+    # (the committed list describes the hub); without it an absent docs/plan/specs is NO-DATA, never a skip (LR1 review)
+    proc = _run(["sh", script], world["cwd"], env=dict(os.environ, BROTHER_EXPORT_TREE="1"),
                 timeout=gate_timeout(floor=REQUIRED_FAST_FLOOR_SECONDS))
     text = ((proc.stdout or "") + (proc.stderr or "")).strip()
     summary = re.search(r"^pass\s+(\d+)\s+fail\s+(\d+)\s+no-data\s+(\d+)",

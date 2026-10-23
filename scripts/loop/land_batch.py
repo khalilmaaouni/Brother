@@ -10,7 +10,7 @@ disposable copy under the sandbox, the registered neighbour tests there too, pla
 every changed path attributed to a step or REFUSED, commit_scan gate, the pre-commit check and the push gate run by this command
 from a frozen copy of the base commit (git runs no hook), templated commit, push to hub only, parity, shared git config
 unchanged. Exit 0 only when parity holds."""
-import calendar, datetime, fcntl, hashlib, json, os, re, shutil, signal, stat, subprocess, sys, tempfile, time
+import calendar, datetime, fcntl, hashlib, json, os, re, shutil, signal, stat, subprocess, sys, tempfile, threading, time
 BIN = os.path.dirname(os.path.abspath(__file__)); EV = os.path.expanduser("~/.claude/evidence")
 REMOTE = "hub"   # fixture default for the pure helpers; main() replaces it from upstream()
 BRANCH = "refactor/brother-unified-1.1"   # fixture default, one statement so a module level string constant reader (test_land_batch_callsites) finds it
@@ -1248,10 +1248,58 @@ def gates_text(red, held):
     return "RED: " + ", ".join(red) + " | HELD: " + ", ".join(held)
 
 
+#: a record file a gate row names in its STALE text (LR1.b): the first path-like word after "STALE:"
+STALE_RECORD_RE = re.compile(r"[\w][\w./-]*\.(?:json|jsonl|md|txt|html|py|sh)\b")
+#: the gate's own suffix on a failing row: the keep file holding that row's full output, never a record
+FULL_SUFFIX_RE = re.compile(r"\s*\[full: [^\]]*\]")
+#: readiness_gate's restore drill line when the record is old, close_ceremony_check's pack line, and readiness_gate's
+#: list of exceptions past review_by (each "  - <name>" line under the heading)
+DRILL_OLD_RE = re.compile(r"([\w][\w./-]*\.json): drill_date \S+ is \d+ day\(s\) old, over the \d+ day freshness bar")
+PACK_OLD_RE = re.compile(r"pack (\S+) is [\d.]+ hours old, over the \d+ hour freshness bar")
+EXCEPTION_RE = re.compile(r"past review_by[^\n]*\n((?:\s+- [^\n]+\n?)+)")
+
+def clock_record(text):
+    """The record a gate row's text names as stale, or None: a STALE: line's first file (never the keep file the gate's
+    [full: ...] suffix names), the restore drill record of a drill_date line, the pack of a freshness bar line, or the
+    first exception past its review_by. It NEVER raises: judge_verdict runs after the landing commit with no unwind, so
+    any text, however odd, reads as no clock cause (LR1 review round 2)."""
+    try:
+        text = FULL_SUFFIX_RE.sub("", text)
+        for line in text.splitlines():
+            if "STALE:" in line:
+                for m in STALE_RECORD_RE.finditer(line.split("STALE:", 1)[1]):
+                    if not os.path.basename(m.group(0)).startswith("required-fast-fail-"):
+                        return m.group(0)
+        for rx in (DRILL_OLD_RE, PACK_OLD_RE):
+            m = rx.search(text)
+            if m:
+                return m.group(1)
+        m = EXCEPTION_RE.search(text + "\n")
+        if m:
+            for item in m.group(1).splitlines():
+                words = item.strip()[1:].split()      # "- name ..." -> name; "-" alone or "-  " -> nothing
+                if item.strip().startswith("-") and words:
+                    return "exception:" + words[0]
+        return None
+    except Exception:   # sbe: allow-silent a clock cause that cannot be read is no clock cause: the code failure text stands
+        return None
+
 def held_reason(held):
     """The sentence that names every held neighbour and says the build is neither landed nor quarantined.
     "" when nothing is held. A held that is not a list of (name, word) pairs is refused as NO-DATA, never read
-    as the empty safe case."""
+    as the empty safe case.
+    LR1.b: a held that is a gate row's refusal TEXT (its "FAIL exit N <row>" line, then any of the row's own output)
+    carrying a clock cause (clock_record) is not a code failure, and reads exactly "clock: <row> <record> stale". A
+    STALE: text that names no row or no record is refused as NO-DATA, never guessed. Any other text keeps the answer
+    it always had."""
+    if isinstance(held, str):
+        record = clock_record(held)       # never raises: it is the one guard, so this runs safe after the landing commit
+        if "STALE:" in held or record:
+            found_row = ROW_RE.search(held)
+            if not found_row or not record:
+                return "NO-DATA (a STALE text that names no gate row or no record file)"
+            row = found_row.group(3)
+            return "clock: %s %s stale" % (row, record)
     if not isinstance(held, (list, tuple)):
         return "NO-DATA (held neighbours are not a list of name and word pairs)"
     if not held:
@@ -1412,6 +1460,354 @@ def loop_change(frozen, log, lines):
         r.returncode, one_line((((r.stderr or "") + (r.stdout or "")).strip().splitlines() or ["no output"])[-1], 160))
 
 
+#: A2.d, THE DEPLOY STEP: GENERATION N JUDGES N+1 (COUNCIL D1, D2 as amended 2026-10-18; it replaces the hold above for a
+#: bin deployed with a kernel stamp, A2.b). In order, and the first refusal parks the batch with nothing pushed:
+#:   (1) the judge tree: a disposable copy of the landing commit with the stamp's kernel_overlay (generation N's gate,
+#:       the files its rows execute, the judge roots) written over it from the stamp's frozen copy, each verified
+#:       against the stamp's sha (a copy that does not match refuses: the kernel check);
+#:   (2) the whole gate there, sh scripts/required_fast.sh, boxed with an empty HOME (boxed); every row exit 0, none
+#:       FAIL or NO-DATA, or nothing lands;
+#:   (3) the trusted lander writes the whole gate record for the landing tree through generation N's gate_ledger.py (the
+#:       stamp's verified copy, never the build's), naming the gate bytes that ran;
+#:   (4) the next generation staged (deploy_stamped.sh stage: the canary runs there, pending kernel files keep N's
+#:       bytes) and loop tool parity over the staged bin;
+#:   (5) the push, through the frozen push gate, which now finds the record;
+#:   (6) the switch, deploy_stamped.sh publish --in-pass (the lease holder must be this process's ancestor); its own
+#:       parity after the swap restores on a refusal.
+#: A failure at (4) runs the stage's RESTORE (the target was never switched, so it restores the same bytes) and pushes
+#: nothing; at (6) the push has landed and the bin stays at N, restored, which the next pass's parity reads as DRIFT
+#: and stops on. TRUST, named: the non kernel loop tools of N+1 are trusted by this step's own gate as COUNCIL D1 rules;
+#: the pending set (the judge roots) waits for the owner's approval batched with the cut y (deploy_stamped activate).
+STAMP_FILE = ".deploy-stamp.json"
+ROW_RE = re.compile(r"^(PASS|FAIL|NO-DATA)\s+exit\s+(-?\d+)\s+(\S+)", re.M)
+
+
+def deploy_stamp(bin_dir=None):
+    """This lander's deployed stamp when it carries a kernel (A2.b), else None: a bin deployed before A2 has no
+    generation N to judge with, so a loop change stays HELD there. An unreadable stamp is None too (held)."""
+    try:
+        with open(os.path.join(bin_dir or BIN, STAMP_FILE), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    ok = isinstance(doc, dict) and isinstance(doc.get("kernel"), dict) and isinstance(doc.get("kernel_overlay"), list) \
+        and isinstance(doc.get("kernel_dir"), str)
+    return doc if ok else None
+
+
+#: the bundle mirrors scripts/bundle_runtime.py generates from scripts/: scripts/<rel> ships as bundle/runtime/<rel>, and
+#: its folder's manifest hashes it (a scripts/loop tool under LOOP-MANIFEST's "name", the rest under RUNTIME-MANIFEST's
+#: "path"), each written as json.dumps(indent=1, sort_keys=True) plus a newline
+MIRROR_MANIFESTS = (("loop/", os.path.join("bundle", "runtime", "loop", "LOOP-MANIFEST.json"), "name"),
+                    ("", os.path.join("bundle", "runtime", "RUNTIME-MANIFEST.json"), "path"))
+
+
+def _file_sha(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest() if os.path.isfile(path) else None
+
+
+def _manifest_text(doc):
+    return json.dumps(doc, indent=1, sort_keys=True) + "\n"
+
+
+def lay_kernel_list(root, stamp, log):
+    """Inside the judge, under the overlay, the whole gate's kernel-closure-list row must not hold a landing for a
+    mismatch the OVERLAY made (2026-10-21 review: the committed list is N+1's, the stamp's "kernel" is derived from the
+    DEPLOY tree (N+1 imports) while the judge tree holds generation N's bytes for the roots and rows, so neither list
+    describes the bytes the box holds, and every landing would HOLD). The expected list is the closure of the bytes the
+    box actually holds, derived AFTER the overlay by generation N's own kernel_closure.py (the stamp's verified copy,
+    run isolated, as ledger_n runs gate_ledger.py) and written over scripts/kernel_closure.txt in the DISPOSABLE judge
+    tree only. The row's purpose, a committed list that disagrees with the tree, stays the hub gate's (the unboxed
+    required_fast.sh on the integrated tree); inside the judge it is deliberately tautological. A tool that is not the
+    stamp's, will not run, or answers anything but a list of repository paths removes the file there, so the row reads
+    NO-DATA (exit 2), never a pass and never a red caused by the other generation. Returns True when a list was laid."""
+    dst = os.path.join(root, "scripts", "kernel_closure.txt")
+    if os.path.islink(dst) or os.path.lexists(dst):
+        os.remove(dst)
+    try:
+        rel = "scripts/kernel_closure.py"
+        tool = os.path.join(stamp["kernel_dir"], rel)
+        got = _file_sha(tool)
+        if got is None or got != stamp["kernel"].get(rel):
+            return False
+        r = sh(isolated(tool, ["--tree", root]), log, 600)
+        doc = json.loads(r.stdout) if r.returncode == 0 else None
+        keys = doc.get("kernel") if isinstance(doc, dict) else None
+        if not isinstance(keys, list) or not keys or not all(isinstance(k, str) and k for k in keys):
+            return False
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+        return False
+    with open(dst, "w", encoding="utf-8") as fh:
+        fh.write("# the closure of the bytes this judge tree holds after generation N's overlay, laid by the judge (never committed)\n")
+        fh.write("".join(k + "\n" for k in sorted(set(keys))))
+    return True
+
+def overlay_kernel(root, stamp, paths):
+    """Write generation N's copy of each path (from the stamp's kernel_dir) into root, removing it where N had none.
+    Every copy is verified against the stamp's sha first; a mismatch or a path the stamp does not name raises
+    ValueError (the kernel check).
+    THE MIRROR TRAVELS WITH ITS SOURCE (2026-10-19, PP1.c HELD on bundle-runtime FAIL: the judge tree took N's copy of
+    a pending root and kept N+1's bundle twin and manifest, so the row was red by construction): a scripts/ path whose
+    bundle/runtime twin the tree carries takes N's bytes in the twin too, and its manifest entry alone takes N's sha (the
+    landing's other mirrored files keep theirs, so N's whole manifest is never laid down). The landing's twin must equal
+    the landing's own copy and its entry that copy's sha, else the landing's mirror is stale. A loop tool the landing
+    removed with its twin comes back at N with its twin and its entry (bundle_runtime mirrors every scripts/loop tool;
+    a runtime twin follows brother_run's imports, which this cannot derive, so none is restored there and the gate
+    decides). Every check runs before the first write, including each destination's type and that no folder on its
+    way is a link: a refusal leaves root as it was, never a partial overlay."""
+    real_root = os.path.realpath(root)
+
+    def plain(path, rel):
+        """path must name a regular file or nothing, reached through real folders inside root, else ValueError"""
+        if os.path.lexists(path) and not os.path.islink(path) and not os.path.isfile(path):
+            raise ValueError("%s in the judge tree is not a regular file" % rel)
+        parent = os.path.dirname(path)
+        if os.path.realpath(parent) != os.path.normpath(os.path.join(real_root, os.path.relpath(parent, root))):
+            raise ValueError("a folder on the way to %s in the judge tree is a link" % rel)
+        while not os.path.lexists(parent):
+            parent = os.path.dirname(parent)
+        if not os.path.isdir(parent):
+            raise ValueError("a folder on the way to %s in the judge tree is a file" % rel)
+
+    writes, manifests = [], {}
+    for rel in dict.fromkeys(paths):
+        if not isinstance(rel, str) or rel not in stamp["kernel"] or rel.startswith(("/", "..")) or "/../" in rel:
+            raise ValueError("the overlay names %r, which the stamp's kernel does not hold" % (rel,))
+        want, src = stamp["kernel"][rel], os.path.join(stamp["kernel_dir"], rel)
+        got = _file_sha(src)
+        if got != want:
+            raise ValueError("generation N's copy of %s is %s, the stamp says %s" % (rel, got, want))
+        dst = os.path.join(root, rel)
+        plain(dst, rel)
+        writes.append((dst, src if want is not None else None, None))
+        if not rel.startswith("scripts/"):
+            continue
+        mirrored = rel[len("scripts/"):]
+        twin = os.path.join(root, "bundle", "runtime", mirrored)
+        landed = _file_sha(dst)
+        prefix, mpath, key = next(m for m in MIRROR_MANIFESTS if mirrored.startswith(m[0]))
+        name = mirrored[len(prefix):]
+        if os.path.lexists(twin):
+            if os.path.islink(twin) or _file_sha(twin) != landed:
+                raise ValueError("the bundle twin of %s does not match the landing's own copy: the landing's mirror is "
+                                 "stale" % rel)
+        elif not (landed is None and want is not None and prefix and ".bak" not in name
+                  and ("/" not in name or (name.count("/") == 1 and os.path.isfile(
+                      os.path.join(root, "scripts", "loop", name.split("/")[0], "__init__.py"))))
+                  and name.endswith((".py", ".sh", ".md", ".c"))     # bundle_runtime.loop_files' own rule, packages too
+                  and os.path.isdir(os.path.dirname(twin))):
+            continue
+        plain(twin, os.path.join("bundle", "runtime", mirrored))
+        writes.append((twin, src if want is not None else None, None))
+        manifests.setdefault(mpath, (key, []))[1].append((name, landed, want))
+    for mpath, (key, changes) in sorted(manifests.items()):
+        full = os.path.join(root, mpath)
+        plain(full, mpath)
+        try:
+            with open(full, encoding="utf-8") as fh:
+                text = fh.read()
+            doc = json.loads(text)
+        except (OSError, ValueError) as exc:
+            raise ValueError("%s cannot be read: %s" % (mpath, exc))
+        if not isinstance(doc, dict) or not isinstance(doc.get("files"), list) or _manifest_text(doc) != text:
+            raise ValueError("%s is not in the form this lander can rewrite byte for byte" % mpath)
+        inserted = False
+        for name, landed, want in changes:
+            hits = [f for f in doc["files"] if isinstance(f, dict) and f.get(key) == name]
+            if landed is None and not hits:       # removed by the landing, back at N: so is its entry
+                doc["files"].append({key: name, "sha256": want})
+                inserted = True
+                continue
+            if len(hits) != 1 or hits[0].get("sha256") != landed:
+                raise ValueError("%s: the manifest names %s as %s, the landing's copy is %s" % (
+                    mpath, name, [f.get("sha256") for f in hits], landed))
+            if want is None:
+                doc["files"].remove(hits[0])
+            else:
+                hits[0]["sha256"] = want
+        if inserted:
+            doc["files"].sort(key=lambda f: str(f.get(key)))
+        writes.append((full, None, _manifest_text(doc)))
+    for dst, src, text in writes:
+        if os.path.islink(dst) or (src is None and text is None and os.path.lexists(dst)):
+            os.remove(dst)
+        if text is not None:
+            with open(dst, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        elif src is not None:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+
+
+KEPT_FAIL_BOUND = 64 * 1024
+FULL_PATH_RE = re.compile(r"\[full: ([^\]]+)\]")
+
+def read_kept(output, tmp):
+    """{path: the last KEPT_FAIL_BOUND bytes of the file} for each failing gate row line of `output` whose LAST
+    "[full: path]" names a required-fast-fail-*.txt that is an absolute path under `tmp` (the box's own TMPDIR) and a
+    regular file there. required_fast.sh appends that suffix itself, after the row's 72-character tail, so the last one
+    is the gate's and an earlier one is the build's text (round 2, N3); a relative path, a path outside tmp, another
+    name, or a link reads nothing. boxed() calls this BEFORE it removes the box (round 2, M1: the box's TMPDIR and every
+    keep file died in its finally before judge_verdict looked). Never raises."""
+    kept = {}
+    try:
+        base = os.path.realpath(tmp)
+        for line in (output or "").splitlines():
+            if not re.match(r"(?:FAIL|NO-DATA)\s+exit\s", line):
+                continue
+            found = FULL_PATH_RE.findall(line)
+            path = found[-1] if found else None
+            if (not path or not os.path.isabs(path) or not os.path.basename(path).startswith("required-fast-fail-")
+                    or not path.endswith(".txt") or os.path.islink(path)):
+                continue
+            real = os.path.realpath(path)
+            if not real.startswith(base + os.sep) or not os.path.isfile(real):
+                continue
+            with open(real, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - KEPT_FAIL_BOUND))
+                kept[path] = fh.read().decode("utf-8", "replace")
+    except Exception:   # sbe: allow-silent a keep file that cannot be read adds no clock cause; the verdict is unchanged
+        pass
+    return kept
+
+def judge_verdict(code, out, kept=None):
+    """(ok, codes_text, why) from one boxed run of the whole gate: ok only when the process exited 0, the gate printed
+    at least one row, and every row is PASS with exit 0 (a NO-DATA row is not a pass here: the record vouches for
+    every row). codes_text is the gate's own 'name TAB exit' lines, the input gate_ledger.record_whole_gate reads."""
+    if isinstance(code, bool) or not isinstance(code, int) or not isinstance(out, str):
+        return False, "", "the gate answered in a shape the lander cannot read"
+    rows = ROW_RE.findall(out)
+    if not rows:
+        return False, "", "the gate printed no row (exit %d): %s" % (code, one_line((out.strip().splitlines() or ["no output"])[-1], 160))
+    bad = ["%s %s exit %s" % (name, word, rc) for word, rc, name in rows if word != "PASS" or rc != "0"]
+    if code != 0 or bad:
+        why = "the whole gate exited %d boxed: %s" % (code, ", ".join(bad[:6]) or "every row passed, the obligation step did not")
+        # LR1.b: a stale clock record is named first, so the HELD table blames the record and not the build; the code
+        # failure stays in the text after it
+        for line in out.splitlines():
+            if not re.match(r"(?:FAIL|NO-DATA)\s+exit\s", line):
+                continue
+            found = FULL_PATH_RE.findall(line)
+            cause = held_reason(line + "\n" + ((kept or {}).get(found[-1], "") if found and isinstance(kept, dict) else ""))
+            if cause.startswith("clock: "):
+                why = "%s; %s" % (cause, why)
+                break
+        return False, "", why
+    return True, "".join("%s\t%s\n" % (name, rc) for _w, rc, name in rows), "%d row(s) PASS boxed" % len(rows)
+
+
+def deploy_prepare(do):
+    """Steps (1) to (4), in order: do['judge'], do['record'], do['stage'] (each () -> (ok, detail)). The first refusal
+    ends it: nothing after it runs, and a refused stage runs do['restore'](). Returns (ok, detail)."""
+    for name in ("judge", "record", "stage"):
+        ok, detail = do[name]()
+        if not ok:
+            if name == "stage":
+                do["restore"]()
+            return False, "%s refused: %s" % (name, detail)
+    return True, detail
+
+
+def deploy_switch(do):
+    """Step (6) after the push landed: do['publish'](); a refusal runs do['restore'](). Returns (ok, detail)."""
+    ok, detail = do["publish"]()
+    if not ok:
+        do["restore"]()
+        return False, "publish refused, the bin is restored to generation N: %s" % detail
+    return True, detail
+
+
+def deploy_steps(stamp, log, staged):
+    """The real steps over the landing checkout (the current directory) for deploy_prepare and deploy_switch. staged:
+    a dict this fills with the stage's run directory and RESTORE command."""
+    import shlex
+    state = {}
+
+    def ledger_n(args):
+        """generation N's gate_ledger.py (the stamp's verified copy, never the build's), run isolated in this checkout"""
+        rel = os.path.join("scripts", "gate_ledger.py")
+        path = os.path.join(stamp["kernel_dir"], rel)
+        got = hashlib.sha256(open(path, "rb").read()).hexdigest() if os.path.isfile(path) else None
+        if got is None or got != stamp["kernel"].get("scripts/gate_ledger.py"):
+            raise ValueError("generation N's gate_ledger.py is %s, the stamp says %s" % (got, stamp["kernel"].get("scripts/gate_ledger.py")))
+        return sh(isolated(path, args), log, 300)
+
+    def judge():
+        try:
+            snap = ledger_n(["--whole-gate-snapshot"])
+            state["start_tree"] = (snap.stdout or "").strip()
+            if snap.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", state["start_tree"]):
+                return False, "the landing checkout is not clean before the gate: %s" % one_line((snap.stderr or snap.stdout or "no output").strip(), 160)
+            copy = make_copy(paths=[])
+        except (OSError, ValueError, TreeUnreadable) as exc:
+            return False, str(exc)
+        state["copy"], state["started"] = copy, time.time()
+        try:
+            overlay_kernel(copy, stamp, stamp["kernel_overlay"])
+            if stamp["kernel_overlay"]:
+                lay_kernel_list(copy, stamp, log)
+            r = boxed(["sh", "scripts/required_fast.sh"], log, 7200, None, cwd=copy)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            return False, "the judge tree could not run: %s" % exc
+        ok, state["codes"], why = judge_verdict(r.returncode, (r.stdout or "") + (r.stderr or ""), getattr(r, "kept", None))
+        return ok, why
+
+    def record():
+        try:
+            with tempfile.NamedTemporaryFile("w", prefix="deploy-step-codes-", suffix=".txt", delete=False) as fh:
+                fh.write(state["codes"]); codes = fh.name
+            try:
+                r = ledger_n(["--whole-gate-record", "--codes", codes, "--tree", state["start_tree"], "--obligation", "0",
+                              "--started", repr(state["started"]), "--worktree-key", "deploy-step",
+                              "--gate-file", os.path.join(stamp["kernel_dir"], "scripts", "required_fast.sh")])
+            finally:
+                os.remove(codes)
+        except (OSError, ValueError, KeyError) as exc:
+            return False, "the record could not be written: %s" % exc
+        return r.returncode == 0, one_line(((r.stdout or "") + (r.stderr or "")).strip() or "no output", 200)
+
+    def stage():
+        env = dict(os.environ, BROTHER_DEPLOY_SOURCE=os.getcwd(), BROTHER_DEPLOY_TARGET=BIN)
+        r = sh(["bash", os.path.join(BIN, "deploy_stamped.sh"), "stage"], log, 3600, env)
+        said = (r.stdout or "") + (r.stderr or "")
+        for line in said.splitlines():
+            if line.startswith("STAGED "):
+                staged["run"] = line[len("STAGED "):].strip()
+            elif line.startswith("RESTORE "):
+                staged["restore"] = shlex.split(line[len("RESTORE "):])
+        if r.returncode != 0 or not staged.get("run"):
+            return False, one_line((said.strip().splitlines() or ["no output"])[-1], 200)
+        penv = dict(os.environ, BROTHER_DEPLOY_TARGET=os.path.join(staged["run"], "tree", "scripts", "loop"))
+        p = sh([sys.executable, "-B", "scripts/test_loop_tool_parity.py"], log, 1800, penv)
+        if p.returncode != 0:
+            return False, "loop tool parity over the staged bin exited %d" % p.returncode
+        return True, "staged %s, canary and parity PASS" % staged["run"]
+
+    def restore():
+        if staged.get("restore"):
+            sh(staged["restore"] + ["--in-pass"], log, 1800)
+
+    def publish():
+        env = dict(os.environ, BROTHER_DEPLOY_SOURCE=os.getcwd(), BROTHER_DEPLOY_TARGET=BIN)
+        r = sh(["bash", os.path.join(BIN, "deploy_stamped.sh"), "publish", staged["run"], "--in-pass"], log, 3600, env)
+        said = ((r.stdout or "") + (r.stderr or "")).strip().splitlines() or ["no output"]
+        return r.returncode == 0, one_line(said[-1], 200)
+
+    def finish():
+        if state.get("copy"):
+            drop_copy(state.pop("copy"))
+    return {"judge": judge, "record": record, "stage": stage, "restore": restore, "publish": publish, "finish": finish,
+            "state": state}   # what judge leaves for record: the start tree, the gate's rows, the start time
+
+
+def overlay_pending(frozen, stamp):
+    """Generation N's bytes of every pending kernel file over a frozen copy (base_tree), so a landed and not yet
+    activated judge never judges: the frozen checks run N. No stamp, or nothing pending, changes nothing."""
+    if frozen and stamp and isinstance(stamp.get("pending_kernel"), dict):
+        overlay_kernel(frozen, stamp, sorted(stamp["pending_kernel"]))
+
+
 def env_line(env=None):
     """The environment a gate ran under, for the land log: TMPDIR, HOME, PWD and every BROTHER* value in full (paths
     and switches, never secrets), the other variables by NAME only. 2026-09-24: a discover gate refused the day's only
@@ -1448,7 +1844,9 @@ def boxed(argv, log, timeout, env, cwd=None, root=None, seed=()):
         except _G.SandboxRefused as e:
             log.write("\n$ %s\n%sexit=125\nSANDBOX REFUSED: %s\n" % (" ".join(argv), env_line(env), e)); log.flush()
             return subprocess.CompletedProcess(list(argv), 125, "", "SANDBOX REFUSED: %s" % e)
-        return sh(cmd, log, timeout, _LS.suite_env(env if env is not None else os.environ, home), cwd=cwd)
+        r = sh(cmd, log, timeout, _LS.suite_env(env if env is not None else os.environ, home), cwd=cwd)
+        r.kept = read_kept((r.stdout or "") + (r.stderr or ""), os.path.join(home, "tmp"))   # the keep files die with the box, below
+        return r
     finally:
         shutil.rmtree(home, ignore_errors=True)
 
@@ -1567,7 +1965,13 @@ def run_group(cmd, timeout, env, cwd=None, stdin=None):
     ELEVENTH REVIEW 2026-10-02, reproduced: a suite started a detached child that outlived subprocess.run and rewrote a
     landed file inside the window before git add. The sandbox is what keeps such a child out of the landing tree (it
     runs in a copy); the kill is what keeps it from running at all once its parent has answered.
-    stdin: text fed to the child (the push gate reads git's ref lines there); None leaves the child with this process's."""
+    stdin: text fed to the child (the push gate reads git's ref lines there); None leaves the child with this process's.
+    A TERM, INT or HUP TO THIS PROCESS REACHES THE CHILD (2026-10-21, LR1.d review, reproduced with a stand-in `sleep 300`:
+    the child leads its own session, so a group signal to the caller never reached it and a boxed gate ran on, parent 1,
+    for up to its 7200 s bound): while the child runs, each of those signals kills the child's nested groups and its group,
+    puts the previous handlers back and sends itself the same signal again, so the caller ends exactly as it would have.
+    ponytail: main thread only (Python allows handlers nowhere else), and a SIGKILL to this process cannot be forwarded;
+    a pgid record a reaper reads is the upgrade if a KILL ever has to reach the child."""
     # output goes to FILES, never pipes (twelfth review 2026-10-02, reproduced: a detached grandchild outside the group
     # held the pipe open and communicate() after the kill waited 8 s, for ever with a background server); stdin comes
     # from a file too, so no write to a child can block either
@@ -1581,6 +1985,19 @@ def run_group(cmd, timeout, env, cwd=None, stdin=None):
         p = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=fi if stdin is not None else None, stdout=fo, stderr=fe,
                              text=True, start_new_session=True)
         rc, note = None, ""
+        before = {}
+
+        def forward(signum, _frame):
+            for g in descendant_groups(p.pid):
+                kill_group(g)
+            kill_group(p.pid)
+            for s, h in before.items():
+                signal.signal(s, h)
+            os.kill(os.getpid(), signum)
+
+        if threading.current_thread() is threading.main_thread():
+            for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                before[s] = signal.signal(s, forward)
         try:
             try:
                 rc = p.wait(timeout=timeout)
@@ -1594,6 +2011,8 @@ def run_group(cmd, timeout, env, cwd=None, stdin=None):
                     pass   # it is killed and nothing it holds can block this read; its code reads 124 below
                 rc, note = 124, "NO-DATA: timed out after %ss\n" % timeout
         finally:
+            for s, h in before.items():
+                signal.signal(s, h)
             kill_group(p.pid)
         fo.seek(0); fe.seek(0)
         return subprocess.CompletedProcess(cmd, rc, fo.read(), fe.read() + note)
@@ -2430,6 +2849,11 @@ def main():
     if not dry and frozen is None:
         print("REFUSED: no frozen copy of the base commit could be made for the landing checks; nothing landed, see %s" % logp); return 1
     if frozen: FROZEN.append(frozen)
+    stamp = deploy_stamp()
+    try:
+        overlay_pending(frozen, stamp)
+    except (OSError, ValueError) as exc:
+        print("REFUSED: generation N's pending kernel could not be laid over the frozen copy (%s); nothing landed" % exc); return 1
     frozen_at = rev("HEAD")   # the commit the frozen copy holds: the red neighbour base comparison reuses it while HEAD is still that commit
     council, scores = load_json(EV + "/spec-council.json"), load_json(EV + "/spec-scores.json")
     landed, attributed, new_tests, facts, checks = [], set(), [], {}, []
@@ -2692,8 +3116,23 @@ def main():
     # not offered again until that tree changes. An unanswerable question holds the same way: it is never clear.
     lstate, lwhy = loop_change(frozen, log, ref_lines(REMOTE, BRANCH))
     print("LOOP    %s | %s" % (lstate, lwhy[:200]))
-    if lstate in ("loop", "unknown"):
+    staged, steps = {}, None
+    if lstate == "loop" and stamp is not None:
+        # A2.d: generation N judges N+1 (see deploy_prepare); a bin without a kernel stamp keeps the hold
+        steps = deploy_steps(stamp, log, staged)
+        try:
+            ok, detail = deploy_prepare(steps)
+        finally:
+            steps["finish"]()
+        print("DEPLOY  %s | %s" % ("PREPARED" if ok else "HELD", detail[:240]))
+        if not ok:
+            lstate, lwhy = "held", detail
+        else:
+            # The trusted judge, record and stage passed; the push gate now checks their evidence.
+            lstate = "clear"
+    if lstate in ("loop", "unknown", "held"):
         why = LOOP_HELD if lstate == "loop" else (
+            "HELD at the deploy step, nothing pushed: %s" % one_line(lwhy, 200) if lstate == "held" else
             "HELD: whether this batch changes the loop's own tools could not be told (%s), so it is never pushed by this run" % one_line(lwhy, 160))
         line = unwind(head, why, [], log, rev); print(line)
         if not line.startswith("UNWOUND"): return 1
@@ -2736,6 +3175,15 @@ def main():
         line = record_landing(os.environ.get("BROTHER_RUN_DIR", ""), landing, landed, landed_builds, verdict, REMOTE + "/" + BRANCH, None, None, parity=parity, **facts_row)
         if line: print(line)
         mark_landed(status_paths, landed_builds, rev(landing) if landing else "NO-DATA"); return exit_code(False, 0, cfg1 == cfg0)
+    if steps is not None and verdict in ("NOT-LANDED", "DIVERGED"):
+        steps["restore"]()   # the push did not land: the staged generation is never published
+    if steps is not None and verdict in ("LANDED", "FAST-FORWARD", "UNVERIFIED"):
+        ok, detail = deploy_switch(steps)
+        print("DEPLOY  %s | %s" % ("SWITCHED" if ok else "RESTORED", detail[:240]))
+        if not ok:
+            mark_landed(status_paths, landed_builds, rev(landing) if landing else "NO-DATA")
+            print("REFUSED: the landing is pushed and the bin stays at generation N; the next pass's parity stops on it | log %s" % logp)
+            return 1
     if verdict in ("NOT-LANDED", "DIVERGED"):
         # NOT LANDED IS NEVER PRINTED AS LANDED. This line used to print LANDED whatever the push did, and a commit
         # that never reached hub then blocked every later landing on parity.

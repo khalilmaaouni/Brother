@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from typing import List
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -34,10 +35,89 @@ BUNDLE = os.path.join(REPO, "bundle")
 RUNTIME = os.path.join(BUNDLE, "runtime")
 # under the caller's HOME, never the system temp folder: a run's records are not temp files, and the estate keeps
 # its scratch under one root (under a landing suite, HOME is already a throwaway)
-SCRATCH = os.path.join(os.path.expanduser("~"), ".claude", "brother-scratch")
+SCRATCH: str = os.path.join(os.path.expanduser("~"), ".claude", "brother-scratch")
 NAMED_ROOT = re.compile(r"--runs-root (\S+)")
 NOT_THE_ENGINE = shutil.ignore_patterns("RUNTIME-MANIFEST.json", "brother-run", "__pycache__")
 RUNS = os.path.join("docs", "plan", "runs")
+
+
+# THE BASELINE (2026-10-20). The files that already spelled the root when this guard landed (0b5f810b6), by path
+# under the repository. The guard used to compare file modification times ("written after the guard file"), but a
+# git checkout stamps every file with the moment it was written to disk, in no fixed order, so a fresh worktree or the
+# closer's boxed copy read a baseline file as a new offence at random: I11 could never close and every loop build of
+# I11.a graded red on this one case. Membership is a fact of the tree; a time is not. A file leaves the list by
+# asking the ONE rule for the root (the work this unit closes at the source); nothing ever joins it.
+KNOWN_SPELLERS = frozenset((
+    "scripts/loop/test_brief_untrusted_notes.py",
+    "scripts/loop/test_brother_login.py",
+    "scripts/loop/test_deadline_drain.py",
+    "scripts/loop/test_diag_frozen_root.py",
+    "scripts/loop/test_diag_notes.py",
+    "scripts/loop/test_grade_build_exact_apply.py",
+    "scripts/loop/test_login_hold.py",
+    "scripts/loop/test_loop_gap_wake.py",
+    "scripts/loop/test_loop_plan_selection.py",
+    "scripts/loop/test_native_worker.py",
+    "scripts/loop/test_probes_off.py",
+    "scripts/loop/test_redeploy_check.py",
+    "scripts/loop/test_run_summary.py",
+    "scripts/loop/test_run_summary_calls.py",
+    "scripts/loop/test_run_summary_state.py",
+    "scripts/loop/test_sandbox_first.py",
+    "scripts/loop/test_stop_drain.py",
+    "scripts/loop/test_wip_status.py",
+    "scripts/test_annotations_store.py",
+    "scripts/test_brother_antigravity_hook.py",
+    "scripts/test_deploy_canary.py",
+    "scripts/test_diag_round_candidate.py",
+    "scripts/test_export_scratch_root.py",
+    "scripts/test_hold_observed.py",
+    "scripts/test_host_live_collect.py",
+    "scripts/test_host_live_proof.py",
+    "scripts/test_lander_box_tripwire.py",
+    "scripts/test_loop_pass_code_root.py",
+    "scripts/test_loop_until_ends.py",
+    "scripts/test_proc_table_nodata.py",
+    "scripts/test_proof_pair_rehearsal.py",
+    "scripts/test_run_folder_identity.py",
+    "scripts/test_runner_straggler_settles.py",
+    "scripts/test_status_write_lock.py",
+    "scripts/test_stop_run_identity.py",
+    "scripts/test_unit_ledger_model_clock.py",
+))
+
+
+def _scratch_root_spellings() -> List[str]:
+    """The three regex spellings of the scratch root no test file but this one may keep for itself.
+
+    The third pattern uses .*? rather than [^)]* so it can cross the ) that os.path.expanduser("~") closes:
+    that is what lets it match the joined spelling os.path.join(os.path.expanduser("~"), ".claude",
+    "brother-scratch") the base tree keeps. A caller that asks the ONE rule for the root has no such literal.
+    """
+    return [
+        r"~/.claude/brother-scratch",
+        r"\$HOME/\.claude/brother-scratch",
+        r"os\.path\.join\(.*?\.claude.*?brother-scratch",
+    ]
+
+
+def _not_the_shipped_runs(where, names):
+    """What an install fixture leaves out of the shipped mirror: the caches, and the repository's own runs.
+
+    The mirror is built from this repository, so it can carry the estate's own docs/plan/runs (a copy of it or a
+    link to it). An install fixture must hold the shipped code alone: every case here plants exactly the earlier
+    runs it names, and a mirrored copy of the estate's runs turns one planted run into a second notice, measured
+    2026-10-19 as six red cases in this file on the base tree.
+    """
+    ignored = set(shutil.ignore_patterns("__pycache__")(where, names))
+    shipped = os.path.join(BUNDLE, RUNS)
+    for name in names:
+        path = os.path.join(where, name)
+        if path == shipped or shipped.startswith(path + os.sep):
+            ignored.add(name)
+        elif name == "runs" and os.path.basename(where) == "plan":
+            ignored.add(name)
+    return sorted(ignored)
 
 
 class Base(unittest.TestCase):
@@ -49,7 +129,11 @@ class Base(unittest.TestCase):
         self.home, self.target = self.folder("home"), self.folder("target")
         self.per_user = os.path.join(self.home, ".claude", "brother-run")
         self.env = {"HOME": self.home, "PATH": os.environ.get("PATH", ""), "LANG": "en_US.UTF-8",
-                    "TMPDIR": self.folder("tmp"), "PYTHONDONTWRITEBYTECODE": "1"}
+                    "TMPDIR": self.folder("tmp"), "PYTHONDONTWRITEBYTECODE": "1",
+                    # every fixture sits under the caller's HOME, which on a landing host is a throwaway folder
+                    # inside the checkout being graded: without this ceiling git walks up out of the fixture and
+                    # the engine honestly reports the CHECKOUT's earlier runs as a second notice (six red cases)
+                    "GIT_CEILING_DIRECTORIES": self.d}
         self.git(self.target, "init", "-q")
         self.git(self.target, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
                  "--allow-empty", "-m", "start")
@@ -68,7 +152,7 @@ class Base(unittest.TestCase):
     def install(self, root=None):
         """An install only copy: bundle/ alone, the plugin root of an installed plugin."""
         root = root or os.path.join(self.d, "install")
-        shutil.copytree(BUNDLE, root, symlinks=True, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(BUNDLE, root, symlinks=True, ignore=_not_the_shipped_runs)
         return root
 
     def checkout(self):
@@ -283,6 +367,127 @@ class ALayoutThatCannotBeToldApart(Base):
         root, said = self.discover(os.path.join(somewhere, "engine", "brother_run.py"))
         self.assertEqual(root, self.per_user, said[-600:])
         self.assertEqual(self.runs_folders(somewhere), [], "an unknown layout wrote beside the engine")
+
+
+class ATestFileThatSpellsTheScratchRootIsRefused(unittest.TestCase):
+    """No test file but this one may spell the scratch root: the ONE rule decides where a run's records live.
+
+    This file keeps the root in SCRATCH (the auditor must know what to look for) and excludes itself from the
+    scan, so neither its own constant nor its own pattern strings can match their own source. A spelling is
+    refused once the guard exists; a file that asks the ONE rule for the root carries no such literal at all.
+    """
+
+    def _scanned_test_paths(self) -> List[str]:
+        """Every test file the guard reads: scripts/test_*.py and scripts/loop/test_*.py, this file excepted."""
+        paths = []
+        for root in (os.path.join(REPO, "scripts"), os.path.join(REPO, "scripts", "loop")):
+            if not os.path.isdir(root):
+                continue
+            for name in sorted(os.listdir(root)):
+                if not (name.startswith("test_") and name.endswith(".py")):
+                    continue
+                path = os.path.join(root, name)
+                if os.path.abspath(path) == os.path.abspath(__file__):
+                    continue
+                paths.append(path)
+        return paths
+
+    def _refuse(self, path: str, match) -> None:
+        """The one refusal, so a test can show it going red without a live offence in the tree."""
+        self.fail(f"{path} spells the scratch root: {match.group(0)}")
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(REPO, "scripts")), "no scripts directory")
+    def _offences(self, root: str, paths: List[str], known=KNOWN_SPELLERS):
+        """(path, match) for every file under root that spells the scratch root and is not in `known`. Pure in the
+        sense that matters: it reads file contents only, never a file's time, so a checkout's write order cannot
+        change the verdict. A file that cannot be opened, or holds a byte that is not UTF-8, is read with
+        replacement and never crashes the guard."""
+        found = []
+        for path in paths:
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                continue   # it moved, or it is a directory named test_*.py: only files reach open
+            for pattern in _scratch_root_spellings():
+                match = re.search(pattern, text)
+                if match and rel not in known:
+                    found.append((path, match))
+                    break
+        return found
+
+    def test_no_test_spells_the_scratch_root(self) -> None:
+        """An empty scan is a failure, never a silent pass. A file outside KNOWN_SPELLERS that spells the root is
+        refused, naming the file and the matched text; a file in it is the work this unit closes at the source,
+        not a new offence."""
+        paths = self._scanned_test_paths()
+        self.assertTrue(paths, "no test files found")
+        self._check(REPO, paths)
+
+    def _check(self, root: str, paths: List[str], known=KNOWN_SPELLERS) -> None:
+        """The guard's verdict: the first offence fails the test through the one refusal."""
+        for path, match in self._offences(root, paths, known):
+            self._refuse(path, match)
+
+    def test_the_check_refuses_a_planted_offender_by_name(self) -> None:
+        """The wiring from the scan to the refusal, shown going red on a planted file (the real tree holds none)."""
+        root, path = self._planted("test_planted.py", 'X = "~/.claude/brother-scratch"\n')
+        with self.assertRaises(AssertionError) as caught:
+            self._check(root, [path], known=frozenset())
+        self.assertIn("test_planted.py spells the scratch root", str(caught.exception))
+
+    def _planted(self, name: str, text: str):
+        """A throwaway tree holding scripts/<name> with `text`, under the one scratch root's parent HOME."""
+        root = tempfile.mkdtemp(prefix="one-rule-guard-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "scripts"))
+        path = os.path.join(root, "scripts", name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return root, path
+
+    def test_a_new_file_that_spells_the_root_is_refused(self) -> None:
+        root, path = self._planted("test_new_offender.py", 'X = "~/.claude/brother-scratch"\n')
+        self.assertEqual([p for p, _ in self._offences(root, [path])], [path])
+
+    def test_a_baseline_file_that_spells_the_root_is_not_a_new_offence(self) -> None:
+        root, path = self._planted("test_old_offender.py", 'X = "~/.claude/brother-scratch"\n')
+        self.assertEqual(self._offences(root, [path], known=frozenset({"scripts/test_old_offender.py"})), [])
+
+    def test_the_verdict_never_reads_a_files_time(self) -> None:
+        """The defect this replaces: an old offender written to disk after the guard read as new. Both orders of
+        modification time give the same verdict for a new file and for a baseline file."""
+        root, path = self._planted("test_timed.py", 'X = "$HOME/.claude/brother-scratch"\n')
+        for stamp in (1.0, 4102444800.0):
+            os.utime(path, (stamp, stamp))
+            self.assertEqual(len(self._offences(root, [path], known=frozenset())), 1)
+            self.assertEqual(self._offences(root, [path], known=frozenset({"scripts/test_timed.py"})), [])
+
+    def test_the_baseline_never_names_this_guard(self) -> None:
+        """This file excludes itself from the scan; naming it in the baseline would hide nothing and mean nothing."""
+        self.assertNotIn("scripts/test_runs_root_one_rule.py", KNOWN_SPELLERS)
+
+    def test_the_guard_recognises_the_joined_form(self) -> None:
+        """The third pattern crosses the close paren of os.path.expanduser("~"), which is what lets it match the
+        joined spelling the base tree keeps. Pure: no file is read and no temporary directory is made."""
+        sample = 'SCRATCH = os.path.join(os.path.expanduser("~"), ".claude", "brother-scratch")'
+        for pattern in _scratch_root_spellings():
+            if re.search(pattern, sample):
+                return
+        self.fail("no pattern matches the joined form of the scratch root")
+
+    def test_the_guard_recognises_the_literal_spellings(self) -> None:
+        """A tilde and $HOME are the literals a file keeps for itself; each has its own pattern."""
+        for spelling in ("~/.claude/brother-scratch", "$HOME/.claude/brother-scratch"):
+            self.assertTrue(any(re.search(p, spelling) for p in _scratch_root_spellings()),
+                            "no pattern matches %s" % spelling)
+
+    def test_the_refusal_names_the_file_and_the_matched_text(self) -> None:
+        """The refusal itself is exercised: a check nobody has seen go red is not known to be able to fail."""
+        with self.assertRaises(AssertionError) as caught:
+            self._refuse("some/test_file.py", re.search(r"brother-scratch", "brother-scratch"))
+        self.assertIn("some/test_file.py spells the scratch root: brother-scratch", str(caught.exception))
 
 
 if __name__ == "__main__":

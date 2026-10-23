@@ -36,6 +36,7 @@ EV = os.path.expanduser("~/.claude/evidence")
 STAGES = os.path.join(EV, "brother-stages.jsonl")
 FAILURES = os.path.join(EV, "brother-failures.jsonl")
 LEDGER = DEFAULT_LEDGER = os.path.expanduser("~/.claude/brother-or-dispatch-state/openrouter-ledger.jsonl")
+import run_watch as _RW  # noqa: E402  (the one reader of a driver log's HELD rows: this report and the run's watcher agree on them)
 import plan_path as _PP  # noqa: E402  (the one plan selector: BROTHER_WBS or the default, an invalid value refuses)
 PLAN = _PP.selected()
 
@@ -140,6 +141,57 @@ def stage_yield(stage_rows):
                 # the seconds a FAILED pass really took (finding 10, 2026-09-27), never a share of the total
                 if not r.get("ok"): st["lost_secs"] += (t1 - t0)
     return dict(stats)
+
+
+def red_without_code_suites(stage_rows: list) -> List[Tuple[str, int]]:
+    """(suite, count) for every suite whose builds went red WITHOUT the build's code, the biggest count first, ties by
+    name. A stage row marks one with red_without_code true and names its suite in `suite` (a row naming none is counted
+    under UNNAMED, never dropped). A suite that failed WITH code is never listed. Not a list, or no such row: [].
+    NOTE: stage_log.leave does not write these two keys yet, so an empty answer is not proof that none went red."""
+    counts = collections.Counter()
+    for row in stage_rows if isinstance(stage_rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("red_without_code"):
+            name = row.get("suite")
+            counts[name if isinstance(name, str) and name.strip() else "UNNAMED"] += 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+_HELD_DEPLOY_STEP = re.compile(r"^HELD at the deploy step, nothing pushed:(.*)$")
+
+
+def _held_cause(line):
+    """(line, cause) for one driver log line when it is a HELD row, else None. A row naming no cause says UNEXPLAINED."""
+    m = _RW.HELD_ROW.match(line)
+    if m:
+        why = " ".join((m.group(2) or "").split())
+    else:
+        m = _RW.DEPLOY_ROW.match(line) or _HELD_DEPLOY_STEP.match(line)
+        if not m:
+            return None
+        why = " ".join((m.group(1) or "").split())
+    if not why:
+        return (line, "UNEXPLAINED")
+    return (line, why)
+
+
+def held_cause_table(log_path, from_last_run: bool = False) -> List[Tuple[str, str]]:
+    """(held_line, cause) for every HELD row of the driver log, in log order: `HELD    <sub> <why>`, `DEPLOY  HELD | <detail>`
+    and `HELD at the deploy step, nothing pushed: <why>`. A row whose cause text is empty carries the cause UNEXPLAINED.
+    A missing, unreadable or non string log is an empty list: the caller says NO-DATA, never zero. from_last_run reads only the
+    lines from the LAST `RUN START` row onward: a launch in the same minute appends to an older run's log, and an older run's
+    holds are not this run's."""
+    if not isinstance(log_path, str):
+        return []
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    if from_last_run:
+        lines = _RW.last_run_lines(lines)   # the one slicer, run_watch's: the watcher and the proof read the same run
+    return [r for r in (_held_cause(line.rstrip()) for line in lines) if r is not None]
 
 
 def _cost(v):
@@ -568,7 +620,7 @@ def wip_section(path: Optional[str], now: float) -> Tuple[List[str], int]:
 
 
 def report(since_hours: int = 24, plan_path: str = PLAN, out=sys.stdout, window=None,
-           rederive=None, wip_record: Optional[str] = None) -> int:
+           rederive=None, wip_record: Optional[str] = None, log_path: Optional[str] = None) -> int:
     now = datetime.datetime.now()
     since = now.timestamp() - since_hours * 3600
     until = None
@@ -639,6 +691,17 @@ def report(since_hours: int = 24, plan_path: str = PLAN, out=sys.stdout, window=
               % (fmt_hours(thrown), fmt_hours(total), 100.0 * thrown / total, STAGES))
     else:
         w("  NO-DATA: no stage ledger, so no action can be evidenced this window.\n")
+    w("\n  YIELD: RED WITHOUT CODE (suites whose builds went red without the build's code, source: %s)\n" % STAGES)
+    if st_rows is None:
+        w("    NO-DATA: the stage ledger is unreadable, so no suite can be named.\n")
+    else:
+        reds = red_without_code_suites(st_rows)
+        if not reds:
+            w("    none recorded in this window: a stage row marks one with red_without_code and suite, and the recorder does\n"
+              "    not write them yet, so this is not proof that none went red\n")
+        for suite, n in reds[:10]:
+            w("    %-30s %4d\n" % (suite, n))
+    w("\n")
     if mo is None:
         w("  NO-DATA: the money ledger %s is unreadable; spend is unknown, not zero.\n" % LEDGER)
     else:
@@ -673,6 +736,20 @@ def report(since_hours: int = 24, plan_path: str = PLAN, out=sys.stdout, window=
     for label, bad, path in (("stages", st_bad, STAGES), ("failures", fa_bad, FAILURES), ("ledger", le_bad, LEDGER)):
         if bad:
             w("  WARNING: %d corrupt line(s) skipped in %s (%s), usually a crash mid write\n" % (bad, label, path))
+    w("\n  HELDS AND CAUSES (source: the driver log named by --run)\n")
+    held = held_cause_table(log_path) if log_path else []
+    unexplained = sum(1 for _l, c in held if c == "UNEXPLAINED")
+    if not log_path:
+        w("    NO-DATA: no run is named (--run DRIVER_LOG), so no HELD line was read. That is not zero HELD lines.\n")
+    elif not os.path.isfile(log_path):
+        w("    NO-DATA: the driver log %s cannot be read, so no HELD line was read. That is not zero HELD lines.\n" % log_path)
+    else:
+        seen = collections.OrderedDict()      # an identical row repeated every pass is printed once with its count
+        for line, cause in held:
+            seen[(line, cause)] = seen.get((line, cause), 0) + 1
+        for (line, cause), n in list(seen.items())[:20]:
+            w("    %s%s\n      -> %s\n" % (line[:110], " (x%d)" % n if n > 1 else "", cause[:110]))
+        w("    %d HELD line(s), %d UNEXPLAINED\n" % (len(held), unexplained))
     wip_lines, wip_code = wip_section(wip_record, now.timestamp())
     for _wl in wip_lines:
         w(_wl + "\n")
@@ -698,6 +775,8 @@ def report(since_hours: int = 24, plan_path: str = PLAN, out=sys.stdout, window=
         if c:
             cls, n = c.most_common(1)[0]
             steps.append((n * 600.0, "Teach the brief about %s, the largest failure class at %d occurrence(s)." % (cls, n)))
+    if unexplained:
+        steps.append((float("inf"), "Name the cause of %d UNEXPLAINED HELD line(s), rows that carry none (source: %s): a hold nobody can explain cannot be fixed." % (unexplained, log_path)))
     if wip_code == 1 and _wip_over:
         steps.append((float("inf"), "Finish the oldest work before starting new: %s over the limit (source: %s)." % (", ".join(_wip_over), _wip_src)))
     for _, text in sorted(steps, reverse=True):
@@ -1023,7 +1102,7 @@ def main(argv=None):
         win = run_window(log)
         if win[0] is None:
             print("NO-DATA: %s; no figure is printed rather than one from the wrong window" % win[2]); return 2
-        return report(hours, plan, window=win, rederive="--run %s" % log)
+        return report(hours, plan, window=win, rederive="--run %s" % log, log_path=log)
     return report(hours, plan)
 
 

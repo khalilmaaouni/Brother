@@ -122,6 +122,10 @@ echo "${TEST_LIVE_SAY:-}"
 exit "${TEST_LIVE_RC:-0}"
 '''
 
+# 1.1.7 LR1.d: the launcher runs loop_canary.py --landing (the whole gate on one scratch change) before the driver; every
+# launcher fixture stands that step in through START_RUN_CANARY, and one case below proves the launch waits on it.
+STUB_CANARY = '#!/bin/bash\necho "${TMPDIR-UNSET}" > "$TEST_EVD/canary-tmpdir.txt"\necho "CANARY WOULD LAND: the replay and the landing stage (1 judge row(s)): stub"\nexit "${TEST_CANARY_RC:-0}"\n'
+
 DATED = "2099-01-01 09:00"
 
 
@@ -189,6 +193,8 @@ class StartRunTest(unittest.TestCase):
         _write(self.driver, STUB_DRIVER)
         self.live = os.path.join(self.tmp, "stub_live.sh")
         _write(self.live, STUB_LIVE)
+        self.canary = os.path.join(self.tmp, "stub_canary.sh")
+        _write(self.canary, STUB_CANARY)
         self.bin = os.path.join(self.tmp, "fakebin")
         _write(self.bin, "#!/bin/sh\nexit 0\n", executable=True)
 
@@ -203,11 +209,15 @@ class StartRunTest(unittest.TestCase):
 
     def _env(self, **extra):
         env = self._git_env()
-        env.update(START_RUN_EVIDENCE=self.evd, START_RUN_INTAKE=self.intake,
+        env.update(START_RUN_EVIDENCE=self.evd, START_RUN_INTAKE=self.intake, START_RUN_CANARY=self.canary,
                    START_RUN_DRIVER=self.driver, START_RUN_LIVE_CHECK=self.live, TEST_EVD=self.evd,
                    BROTHER_CLAUDE_BIN=self.bin, BROTHER_CODEX_BIN=self.bin,
                    # LA3.a: the launcher reads the power rule; no case may read this machine's real pmset
-                   BROTHER_POWER_SOURCE="AC Power")
+                   BROTHER_POWER_SOURCE="AC Power",
+                   # LR1.b: the clock rows (close pack, restore drill) are scripts/loop/test_clock_rows.py's subject;
+                   # this fixture repository carries neither record, so the launcher suites name the seam that turns
+                   # the step off (it prints its NOTE) rather than depending on where the fake HOME puts the scratch root
+                   START_RUN_CLOCK_ROWS="off")
         env.pop("BROTHER_POWER_WINDOW_S", None)
         for k, v in extra.items():
             if v is None:
@@ -281,6 +291,45 @@ class StartRunTest(unittest.TestCase):
         self.assertNotIn("OK   tree", result[1])
         self.assertNothingLaunched()
         self.assertEqual(power_rule.verdict("unreadable", 99999, 1200)[0], 2)
+
+    # LR1.d: step 4d, the landing canary, is waited on and its refusal stops the launch
+    def test_the_launch_waits_on_the_landing_canary(self):
+        result = self.go(TEST_CANARY_RC="1")
+        self.assertRefused(result, "canary", "landing stage (1 judge row(s)): stub")   # its last line is the named row
+        self.assertFalse(os.path.exists(os.path.join(self.evd, "driver-argv.txt")), "no driver started behind a refused canary")
+        result = self.go(TEST_CANARY_RC="3")
+        self.assertRefused(result, "canary", "NO-DATA")
+        self.assertFalse(os.path.exists(os.path.join(self.evd, "driver-argv.txt")))
+        # the seam removed: the checkout's own scripts/loop/loop_canary.py is the default, and this fixture repository has none
+        result = self.go(START_RUN_CANARY=None)
+        self.assertRefused(result, "canary", "in this checkout")
+        self.assertFalse(os.path.exists(os.path.join(self.evd, "driver-argv.txt")))
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("OK   canary CANARY WOULD LAND: the replay and the landing stage (1 judge row(s)): stub", out)
+        self.assertLess(out.index("OK   intake"), out.index("OK   canary"))
+
+    def test_the_canary_runs_under_the_one_scratch_root_whatever_the_callers_tmpdir(self):
+        """LR1 (2026-10-21): a caller's TMPDIR of unset or the system temp folder sent every canary file through the
+        /tmp link and broke path comparisons; the launcher gives the canary the one scratch root, as the driver does."""
+        # the ONE scratch root rule (I11: no test spells the root itself), asked under the launch's own HOME
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import export_public as EP
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_SCRATCH"}
+        env["HOME"] = self.home
+        saved = dict(os.environ)
+        try:
+            os.environ.clear(); os.environ.update(env)
+            root = EP.scratch_root().rstrip(os.sep) + os.sep
+        finally:
+            os.environ.clear(); os.environ.update(saved)
+        for caller in (None, "/tmp"):
+            with self.subTest(caller=caller):
+                rc, out = self.go(TMPDIR=caller)
+                self.assertEqual(rc, 0, out)
+                seen = open(os.path.join(self.evd, "canary-tmpdir.txt")).read().strip()
+                self.assertTrue(seen.startswith(root + "run-"), seen)
+                self.assertFalse(os.path.exists(seen), "the canary's scratch is removed when it ends")
 
     def test_ac_and_a_short_window_start(self):
         rc, out = self.go()
@@ -878,7 +927,7 @@ class StartRunTest(unittest.TestCase):
         self.assertTrue(any("OK   deadline %s 23:59" % d in out for d in days), out)
 
     # LA1.a: every launch step is timed and the total is printed (reporting only)
-    LAUNCHER_STEPS = ["args", "power", "tree", "pins", "controls", "live", "lift", "intake", "driver"]
+    LAUNCHER_STEPS = ["args", "power", "tree", "clock", "pins", "controls", "live", "lift", "intake", "driver"]
 
     def _timing_record(self):
         found = [f for f in os.listdir(os.path.join(self.evd, "loop-starts")) if re.match(r"timing-.*\.json$", f)]

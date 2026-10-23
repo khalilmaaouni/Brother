@@ -349,6 +349,26 @@ class TheManifestStampsItsSourceRevision(unittest.TestCase):
             self.assertTrue(manifest[field].startswith(BR.NODATA),
                             "%s: %s" % (field, manifest[field]))
 
+    def test_a_copy_inside_another_checkout_is_still_no_data(self):
+        """2026-10-22: the grader's scratch root sits inside a git worktree, and git looks UP for a repository, so a
+        scripts/ copied under it was stamped with that worktree's HEAD: a revision whose scripts/ is not these
+        bytes. Untracked inside someone else's checkout is outside a checkout, as far as the stamp can tell."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        outer = os.path.join(self.tmp, "outer")
+        os.makedirs(outer)
+        for args in (["init", "-q", outer],
+                     ["-C", outer, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                      "commit", "-q", "--allow-empty", "-m", "the enclosing checkout"]):
+            proc = sh(["git"] + args, env=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        scripts_dir = os.path.join(outer, "copy", "scripts")
+        runtime_dir = os.path.join(outer, "copy", "bundle", "runtime")
+        copy_scripts_subset(scripts_dir)
+        BR.generate(scripts_dir=scripts_dir, runtime_dir=runtime_dir)
+        manifest = _manifest(os.path.join(runtime_dir, BR.MANIFEST_NAME))
+        for field in BR.STAMP_FIELDS:
+            self.assertTrue(manifest[field].startswith(BR.NODATA),
+                            "%s: %s" % (field, manifest[field]))
 
 class TheCheckIgnoresTheStampAndNothingElse(unittest.TestCase):
     """The stamp says where the bytes came from; the hashes say what they
@@ -1134,6 +1154,37 @@ class LoopMirror(unittest.TestCase):
         self.assertIn("loop/b.sh (removed)", BR.generate_loop(self.scripts, self.runtime))
         open(os.path.join(self.scripts, "loop", "a.py"), "a").write("# more\n")
         self.assertTrue(any("LOOP-MANIFEST.json: stale" in x for x in BR.check_loop(self.scripts, self.runtime)))
+    def package(self):
+        """A package beside the tools (scripts/loop/adapters, FX-31.5) and a plain folder that is not one."""
+        for rel, body in (("pkg/__init__.py", "X = 1\n"), ("pkg/mod.py", "Y = 2\n"), ("pkg/old.py.bak-1", "old\n"),
+                          ("notes/n.py", "not a package\n")):
+            os.makedirs(os.path.dirname(os.path.join(self.scripts, "loop", rel)), exist_ok=True)
+            open(os.path.join(self.scripts, "loop", rel), "w").write(body)
+    def test_a_package_the_tools_import_ships_with_them(self):
+        """2026-10-22: model_call.py, native_worker.py and three more import adapters, and the mirror carried only
+        the top level files, so the installed copies died with No module named 'adapters'."""
+        self.package()
+        changed = BR.generate_loop(self.scripts, self.runtime)
+        self.assertIn("loop/pkg/__init__.py", changed); self.assertIn("loop/pkg/mod.py", changed)
+        self.assertEqual(open(os.path.join(self.runtime, "loop", "pkg", "mod.py")).read(), "Y = 2\n")
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "loop", "pkg", "old.py.bak-1")))
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "loop", "notes")))   # no __init__.py: not a package
+        names = [r["name"] for r in json.load(open(os.path.join(self.runtime, "loop", BR.LOOP_MANIFEST_NAME)))["files"]]
+        self.assertIn("pkg/mod.py", names)
+        self.assertEqual(BR.check_loop(self.scripts, self.runtime), [])
+    def test_check_names_a_changed_a_missing_and_an_extra_package_file(self):
+        self.package(); BR.generate_loop(self.scripts, self.runtime)
+        pkg = os.path.join(self.runtime, "loop", "pkg")
+        open(os.path.join(pkg, "mod.py"), "w").write("Y = 3\n"); os.remove(os.path.join(pkg, "__init__.py")); open(os.path.join(pkg, "z.py"), "w").write("x")
+        p = BR.check_loop(self.scripts, self.runtime)
+        self.assertTrue(any("pkg/mod.py: bundle copy does not match" in x for x in p), p)
+        self.assertTrue(any("pkg/__init__.py: missing" in x for x in p), p)
+        self.assertTrue(any("pkg/z.py: in the bundle" in x for x in p), p)
+    def test_a_retired_package_file_leaves_the_bundle(self):
+        self.package(); BR.generate_loop(self.scripts, self.runtime); os.remove(os.path.join(self.scripts, "loop", "pkg", "mod.py"))
+        self.assertIn("loop/pkg/mod.py (removed)", BR.generate_loop(self.scripts, self.runtime))
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "loop", "pkg", "mod.py")))
+        self.assertEqual(BR.check_loop(self.scripts, self.runtime), [])
     def test_no_loop_directory_is_nothing_to_mirror_and_no_problem(self):
         shutil.rmtree(os.path.join(self.scripts, "loop"))
         self.assertEqual(BR.generate_loop(self.scripts, self.runtime), []); self.assertEqual(BR.check_loop(self.scripts, self.runtime), [])

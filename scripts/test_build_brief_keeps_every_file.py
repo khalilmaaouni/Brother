@@ -31,9 +31,10 @@ WBS_JSON = ('{"initiative": "the launch", "units": [{"id": "U", "title": "a unit
 
 
 class BriefTree(object):
-    """A temp tree the brief builder runs in: a spec, a plan, an empty private names list, an empty runs folder.
-    Each fixture trips ONE guard: the plan row makes B5 pass, the section's done check makes B4 pass, and the
-    empty names list keeps the private guard quiet unless a test is about it."""
+    """A temp tree the brief builder runs in: a spec, a plan, a private names list, an empty runs folder.
+    Each fixture trips ONE guard: the plan row makes B5 pass, the section's done check makes B4 pass, and a
+    names list holding one fake token no text carries keeps the private guard quiet unless a test is about it
+    (an EMPTY list screens nothing and fails closed since PRIV1, 2026-10-18)."""
 
     def __init__(self, case):
         self.root = tempfile.mkdtemp(prefix="brief-keeps-")
@@ -41,7 +42,7 @@ class BriefTree(object):
         self.home = os.path.join(self.root, "_home")
         os.makedirs(self.home)
         os.makedirs(os.path.join(self.root, "_runs"))
-        self.write("_home/.brothersbe-private-names", "")
+        self.write("_home/.brothersbe-private-names", "zz-fixture-private-token\n")
         # under docs/plan/ and relative to the tree: the one shape plan_path.selected admits for BROTHER_WBS (2026-10-10)
         self.write("docs/plan/_plan.json", WBS_JSON)
 

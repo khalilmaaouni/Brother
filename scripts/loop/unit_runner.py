@@ -214,6 +214,12 @@ def status(text):
 
 
 REMEDY_FALLBACK = "read this run folder's STATUS and logs, then fix the cause named above"
+# THE LANE RULE (I4.a, issue I4 closed at its source): the ONE place this runner states what puts a
+# WITHHELD sub unit back in the pool. The clause is the words the loop pass script states; one plain
+# string literal, nothing read and nothing computed at import, so the probe gate loader's ALL CAPS
+# constant lift executes it like every other constant. Single quoted so it can never collide, as a
+# substring, with the double quoted remedy tail inside grade_nothing_line below.
+LANE_RULE = 'the pool re-seats the sub unit when its spec or a judge tool changes'
 
 
 def one_line(text, limit=300):
@@ -275,7 +281,7 @@ def grade_nothing_line(rnd, grc, lane, out_dir, code_root_set):
         line += "; no diagnosis note will arrive: the diagnostician is skipped because BROTHER_CODE_ROOT is not set in this launch"
         remedy = "set BROTHER_CODE_ROOT to the absolute path of the frozen code directory and relaunch the loop"
     else:
-        remedy = "read lane.log and grades/ in this round folder, fix the grader or machine fact it names; the pool re-seats the sub unit when its spec or a judge tool changes"
+        remedy = "read lane.log and grades/ in this round folder, fix the grader or machine fact it names; " + LANE_RULE
     return with_remedy(line, remedy)
 
 
@@ -550,7 +556,7 @@ base = os.path.join(run, "brief-base.md")
 r = subprocess.run([sys.executable, os.path.join(BIN, "build_brief.py"), unit, sub, spec, base], capture_output=True, text=True, timeout=300)
 if r.returncode != 0 or not os.path.isfile(base):
     status(with_remedy("WITHHELD brief could not be built: %s" % ((r.stderr or r.stdout).strip()[-160:]),
-                       "repair the spec section it names; the pool re-seats the sub unit when its spec changes")); sys.exit(2)
+                       "repair the spec section it names; " + LANE_RULE)); sys.exit(2)
 # THE BRIEF GATE (owner 2026-09-24: clear briefs per unit and from the epic, ENFORCED): a brief that does not show the
 # files its section names or the modules its named test imports, is over the dispatcher budget, carries no runnable
 # done_check, or does not state the unit's WBS row is refused HERE, before eight workers are paid to guess against it.

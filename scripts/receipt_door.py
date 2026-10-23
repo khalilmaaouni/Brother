@@ -2193,6 +2193,69 @@ def mark_for(receipt):
     return mark, why
 
 
+def landing_facts(receipts, branch=None, revision=None):
+    """LC6.a: what a run landed, read from receipts it already holds. Pure:
+    no file, no git, no print. Only a receipt whose mark is the verified row
+    of MARK_TABLE lands; a refused receipt, an unmarked one and a mark the
+    table does not carry never do. The same id listed twice lands once.
+    A fact the caller did not record reads NO-DATA and is named in
+    `missing`; a hostile type is refused with ValueError, never read."""
+    if not isinstance(receipts, (list, tuple)):
+        raise ValueError("receipts must be a list or a tuple, not %s"
+                         % type(receipts).__name__)
+    verified = MARK_TABLE["verified"]
+    landed = []
+    for receipt in receipts:
+        if not isinstance(receipt, dict):
+            raise ValueError("each receipt must be a dict, not %s"
+                             % type(receipt).__name__)
+        # mark_for answers (mark, why): the mark is element 0.
+        if mark_for(receipt)[0] == verified:
+            uid = next((v.strip() for v in (receipt.get(k) for k in
+                                            ("uid", "unit", "id"))
+                        if isinstance(v, str) and v.strip()), NODATA)
+            if uid == NODATA or uid not in landed:
+                landed.append(uid)
+    units, unit = str(len(landed)), ", ".join(landed)
+    if not landed:
+        units, unit = "0", NODATA
+    out = {"units": units, "unit": unit}
+    for name, value in (("branch", branch), ("revision", revision)):
+        if value is None:
+            out[name] = NODATA
+        elif isinstance(value, str):
+            out[name] = value.strip() or NODATA
+        else:
+            raise ValueError("%s must be a string, not %s"
+                             % (name, type(value).__name__))
+    out["missing"] = ", ".join(n for n in ("unit", "branch", "revision")
+                               if out[n] == NODATA)
+    return out
+
+
+def landing_lines(facts):
+    """LC6.a: the four or five plain lines a receipt prints for its landing
+    facts. No line is empty and none holds a line break."""
+    if not isinstance(facts, dict):
+        raise ValueError("facts must be a dict, not %s"
+                         % type(facts).__name__)
+
+    def read(key):
+        raw = facts.get(key)
+        return raw if isinstance(raw, str) and raw else NODATA
+
+    def one_line(key):
+        return re.sub(r"[\r\n]+", " ", read(key)).strip() or NODATA
+
+    lines = ["the run landed %s unit(s)" % one_line("units"),
+             "the landed unit: %s" % one_line("unit"),
+             "the branch it landed on: %s" % one_line("branch"),
+             "the revision it landed at: %s" % one_line("revision")]
+    if read("missing") != NODATA:
+        lines.append("not recorded: %s" % one_line("missing"))
+    return lines
+
+
 def _criteria(receipts):
     # Weights that already sum to 1, so decide.py has nothing to rescale and
     # the page carries no note about arithmetic the reader never asked about.

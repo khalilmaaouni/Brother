@@ -393,9 +393,65 @@ def adopt_problem(root, candidate, tip, version, runner=None):
     return ""
 
 
+def _record_json(record_path):
+    """(dict, '') for the JSON object at `record_path`, else (None, reason naming the path). Never raises."""
+    try:
+        with open(record_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, TypeError) as exc:
+        return None, "the rehearsal record %s is corrupt or unreadable (%s)" % (record_path, exc)
+    if not isinstance(data, dict):
+        return None, "the rehearsal record %s is not an object" % record_path
+    return data, ""
+
+
+def record_bumped_sha(record_path):
+    """(bumped_sha, bumped_tree, why) from a rehearsal record (CS12.a). A record of the bumped schema must carry
+    both as 40 hex: it never falls back to the log. An older record may lack them, which reads as ('', '', '');
+    one that carries a malformed value is refused. Any other schema, a non-object, a torn or missing file: why."""
+    data, why = _record_json(record_path)
+    if data is None:
+        return "", "", why
+    schema = data.get("schema")
+    if schema not in CR.SCHEMAS_READ:
+        return "", "", "the rehearsal record %s has schema %r, not one of %s" % (
+            record_path, schema, ", ".join(CR.SCHEMAS_READ))
+    bumped_sha, bumped_tree = data.get("bumped_sha", ""), data.get("bumped_tree", "")
+    if not isinstance(bumped_sha, str) or not isinstance(bumped_tree, str):
+        return "", "", "the rehearsal record %s carries a bumped_sha or bumped_tree that is not text" % record_path
+    if schema == CR.SCHEMA_BUMPED and not (SHA_RE.fullmatch(bumped_sha) and SHA_RE.fullmatch(bumped_tree)):
+        return "", "", "the record %s is schema %s and must carry bumped_sha and bumped_tree" % (record_path, schema)
+    if schema != CR.SCHEMA_BUMPED and (bumped_sha or bumped_tree) and not (
+            SHA_RE.fullmatch(bumped_sha) and SHA_RE.fullmatch(bumped_tree)):
+        return "", "", "the rehearsal record %s carries a bumped_sha or bumped_tree that is not 40 hex" % record_path
+    return bumped_sha, bumped_tree, ""
+
+
+def verified_rehearsal_log(record_path):
+    """(log text, '') only when the record names a log that exists and still hashes to its log_sha256, else
+    ('', reason). Every adopted record passes through here: the log is the evidence the record stands on."""
+    data, why = _record_json(record_path)
+    if data is None:
+        return "", why
+    log_path, log_sha256 = data.get("log_path"), data.get("log_sha256")
+    if not isinstance(log_path, str) or not log_path or not isinstance(log_sha256, str) or not log_sha256:
+        return "", "the rehearsal record %s names no log or no log hash" % record_path
+    try:
+        actual = CR._sha256_file(log_path)
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return "", "the rehearsal log is unreadable: %s" % exc
+    if actual != log_sha256:
+        return "", "the rehearsal log %s was altered after the record %s was written" % (log_path, record_path)
+    return text, ""
+
+
 def adopt_phase(root, version, candidate, record_path, runner=None):
     """(verdict, detail, tip, worktree): pin the rehearsed tip and make a detached worktree at it. The release
-    branch of the main checkout is never touched here."""
+    branch of the main checkout is never touched here. CS12.a: a record that names its bumped_sha is adopted only
+    when refs/brother/rehearsed/<version>-<candidate12> points at exactly that commit; a record without it (an
+    older schema) reads the tip from its log. Either way the log must still hash to the record's log_sha256."""
     runner = runner or real_runner
     record, why = CR.load_record(record_path)
     if record is None:
@@ -403,24 +459,42 @@ def adopt_phase(root, version, candidate, record_path, runner=None):
     if record.get("verdict") != "READY" or record.get("candidate_sha") != candidate:
         return "FAIL", "the record %s says %s for %s, not READY for %s" % (
             record_path, record.get("verdict"), str(record.get("candidate_sha"))[:12], candidate[:12]), "", ""
-    try:
-        with open(record["log_path"], "r", encoding="utf-8", errors="replace") as fh:
-            log_text = fh.read()
-    except OSError as exc:
-        return "NO-DATA", "the rehearsal log is unreadable: %s" % exc, "", ""
-    tip9, why = tip_from_log(log_text, version)
+    bumped_sha, _bumped_tree, why = record_bumped_sha(record_path)
     if why:
         return "FAIL", why, "", ""
-    tip, why = _git(root, ["rev-parse", "--verify", "--quiet", "%s^{commit}" % tip9], runner)
-    if why or not SHA_RE.fullmatch(tip):
-        return "FAIL", "%s is not a commit in this repository" % tip9, "", ""
+    log_text, why = verified_rehearsal_log(record_path)
+    if why:
+        return ("NO-DATA" if "unreadable" in why else "FAIL"), why, "", ""
+    if bumped_sha:
+        ref = CR.rehearsed_ref_name(version, candidate)
+        actual, _why = _git(root, ["rev-parse", "--verify", "--quiet", "%s^{commit}" % ref], runner)
+        if actual != bumped_sha:
+            return "FAIL", "the record names bumped_sha %s but %s points at %s" % (
+                bumped_sha, ref, actual or "nothing"), "", ""
+        tip = bumped_sha
+    else:
+        tip9, why = tip_from_log(log_text, version)
+        if why:
+            return "FAIL", why, "", ""
+        tip, why = _git(root, ["rev-parse", "--verify", "--quiet", "%s^{commit}" % tip9], runner)
+        if why or not SHA_RE.fullmatch(tip):
+            return "FAIL", "%s is not a commit in this repository" % tip9, "", ""
     why = adopt_problem(root, candidate, tip, version, runner)
     if why:
         return "FAIL", why, "", ""
     pin = pin_name(version, candidate)
+    made_pin = False
     had_pin, _ = _git(root, ["rev-parse", "--verify", "--quiet", "refs/heads/%s^{commit}" % pin], runner)
     if had_pin and had_pin != tip:
-        return "FAIL", "the pin %s exists at %s, not %s; it is never moved" % (pin, had_pin[:12], tip[:12]), "", ""
+        if not bumped_sha:
+            return "FAIL", "the pin %s exists at %s, not %s; it is never moved" % (pin, had_pin[:12], tip[:12]), "", ""
+        # a second rehearsal of the same candidate moved the ref to a new tip, and the record and the ref agree on
+        # it: the pin follows them, else a rerun could never adopt the commit that was proved last
+        _out, why = _git(root, ["branch", "-f", pin, tip], runner)
+        if why:
+            return "FAIL", "could not move the pin %s from %s to %s: %s" % (pin, had_pin[:12], tip[:12], why), "", ""
+        had_pin = tip   # moved, so this run made the pin: PASS below, never REUSED
+        made_pin = True
     if not had_pin:
         _out, why = _git(root, ["branch", pin, tip], runner)
         if why:
@@ -440,7 +514,7 @@ def adopt_phase(root, version, candidate, record_path, runner=None):
     rc, text = runner([sys.executable, "-B", "-c", COVER_CODE, version, tip], worktree)
     if rc != 0 or _last_line(text) != "OK":
         return "FAIL", "the covering record does not accept %s: %s" % (tip[:12], _last_line(text)), tip, worktree
-    verdict = "REUSED" if had_pin and had_tree else "PASS"
+    verdict = "REUSED" if had_pin and had_tree and not made_pin else "PASS"
     return verdict, "pin %s at %s, worktree %s" % (pin, tip[:12], worktree), tip, worktree
 
 

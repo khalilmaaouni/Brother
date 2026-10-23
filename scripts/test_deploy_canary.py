@@ -284,8 +284,10 @@ class DeployCanary(unittest.TestCase):
         self.assertEqual(self.s.deployed_files()[OWNER_TOOL_NAME], OWNER_TOOL)
         # The canary really ran FROM the staged tree, once, with the checkout as its working directory.
         rows = [l.split("\t") for l in self.s.stub_log.read_text().splitlines()]
+        # Both sides resolved: a caller TMPDIR spelled through a link (macOS /tmp, /var) must compare equal.
         stage = Path(os.path.realpath(str(self.s.bin)))
-        self.assertEqual(rows, [[str(stage / "loop_canary.py"), str(ROOT)]])
+        self.assertEqual([[os.path.realpath(c) for c in row] for row in rows],
+                         [[os.path.realpath(str(stage / "loop_canary.py")), os.path.realpath(str(ROOT))]])
 
     def test_c_every_tool_the_driver_calls_is_its_loop_source(self):
         self.require_deploy()
@@ -314,7 +316,8 @@ class DeployCanary(unittest.TestCase):
         # The burn guard contract: the path the driver calls, the loop source's hash, a staged file.
         record = m["files"][str(self.s.home / ".claude/bin/burn_guard.py")]
         self.assertEqual(record["sha256"], sha((LOOP / "burn_guard.py").read_bytes()))
-        self.assertTrue(record["resolved"].startswith(str(self.s.home / ".claude/brother-deploys") + os.sep))
+        self.assertTrue(os.path.realpath(record["resolved"]).startswith(
+            os.path.realpath(str(self.s.home / ".claude/brother-deploys")) + os.sep))
         hook = str(self.s.home / ".claude/hooks/bm_session_cap.py")
         self.assertIn(hook, [site["target"] for site in m["resolved_loaders"]])
         self.assertEqual(m["files"][hook]["sha256"], sha(HOOK))

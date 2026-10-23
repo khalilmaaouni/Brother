@@ -540,6 +540,13 @@ def _commit_problem(d, head, rel, root=None, full=None):
         # read FAIL (roadmap row E83). Asking the reader is the fix; keeping a
         # second copy of the rule in step by hand is not.
         binds = _receipt_still_binds(d, root, full) if root is not None else False
+        if isinstance(binds, str):
+            # I33.a: the reader answered a FAIL problem (it could not read the
+            # binding), not a binding verdict. Without this branch the `if
+            # binds` below would read the non-empty problem as "binds" and
+            # clear the caller's stale finding, turning an unreadable read into
+            # a PASS.
+            return binds
         if binds:
             return None
         if binds is None:
@@ -560,14 +567,17 @@ UNANSWERED = "NO-DATA: "
 
 def _receipt_still_binds(d, root, full):
     """`evidence.commit_binding_holds`; None when the reader is not installed
-    here (an import that fails), so the caller reports NO-DATA; False when it
-    cannot answer for any other reason.
+    here (an import that fails), so the caller reports NO-DATA; True when the
+    receipt still binds; a FAIL problem string when the read itself could not
+    be answered.
 
-    FALSE IS THE SAFE HALF and it is what an unreadable answer returns: a
-    directory that is not a work tree, or a reader that raises, leaves the
-    caller's stale finding exactly where it was. A reader that is not
-    installed at all returns None, which the caller reports as NO-DATA. This never
-    turns a FAIL into a PASS on the strength of something it could not read.
+    I33.a: the read's failure is reported, never swallowed. A directory that is
+    not a work tree, a torn `.git`, a permission refusal, or a reader that
+    raises all answer the FAIL problem below, carrying the exception's own
+    text, so a strict run blocks on a binding it could not read instead of
+    exiting 0. A reader that is not installed at all still returns None, which
+    the caller reports as NO-DATA. This never turns a FAIL into a PASS on the
+    strength of something it could not read.
     """
     try:
         from brothersbe import evidence as evidence_mod
@@ -575,8 +585,13 @@ def _receipt_still_binds(d, root, full):
         return None
     try:
         return bool(evidence_mod.commit_binding_holds(d, root, full))
-    except (OSError, ValueError, TypeError, KeyError):
-        return False
+    except Exception as exc:
+        # I33.a: this handler used to swallow the failed read and answer False,
+        # and that swallow is the FAIL the estate's lint over the exported
+        # product counted as its hit. The answer is FAIL-shaped on purpose: it
+        # carries no UNANSWERED marker, so a strict run blocks on a binding it
+        # could not read instead of exiting 0.
+        return f"FAIL: the receipt's binding could not be read: {exc}"
 
 
 #: Set once in `main()` from `--require-headcommit`, the same module-global

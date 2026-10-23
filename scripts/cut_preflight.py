@@ -509,6 +509,7 @@ def check_virgin_gate(root, runner=None, build=None, keep=None):
         except Exception as exc:  # sbe: allow-silent reported as NO-DATA below, never swallowed
             return NODATA, "virgin-gate", "the export tree could not be built: %s" % exc
         env = runner_env(home)
+        env["BROTHER_EXPORT_TREE"] = "1"   # the export tree's own run: kernel_closure.py --check SKIPs on it (hub list)
         proc = _run(["sh", os.path.join(tree, "scripts", "required_fast.sh")],
                     tree, runner, env=env)
         out = (proc.stdout or "") + (proc.stderr or "")
@@ -639,6 +640,35 @@ def check_machine_row(root, name, argv, runner=None, home=None):
 def check_machine_rows(root, runner=None, home=None):
     """The MACHINE_ROWS tuples in table order, one process each, in series."""
     return [check_machine_row(root, name, argv, runner, home) for name, argv in MACHINE_ROWS]
+
+
+def check_pool_floor(root=None, free=None):
+    """CS8.b: the pool's disk floor, read in the cheap tier before any export row, so a 14.9 GiB reading refuses in a
+    fraction of a second instead of after the minutes the pool would first spend. `root` is None (the pool's one scratch
+    root, perturb_pool.pool_scratch_root) or a path inside it: a roomy path anywhere else is never read in its place.
+    `free` is None (the real reading), a callable asked for the root, or the reading itself. An unreadable or invalid
+    reading (bool, string, None, NaN, infinity, negative) is NO-DATA, never OK."""
+    import perturb_pool
+    try:
+        top = perturb_pool.pool_scratch_root()
+    except (perturb_pool.CopyFailed, OSError):
+        return (NODATA, "perturb-floor", "the pool scratch root is unreadable")
+    if root is None:
+        root = top
+    if (not isinstance(root, str) or not root or perturb_pool.FORBIDDEN_PATH_TEXT in root
+            or not (os.path.realpath(root) == os.path.realpath(top) or perturb_pool._under(root, top))):
+        return (NODATA, "perturb-floor", "the pool scratch root is unreadable")
+    try:
+        if free is None:
+            free = perturb_pool.free_gib
+        reading = free(root) if callable(free) else free
+    except (OSError, TypeError, ValueError):
+        return (NODATA, "perturb-floor", "free space is unreadable")
+    if not perturb_pool.valid_reading(reading):
+        return (NODATA, "perturb-floor", "the free reading is invalid")
+    if reading < perturb_pool.DISK_FLOOR_GIB:
+        return (REFUSED, "perturb-floor", "%.1f GiB free is under the %d GiB floor" % (reading, perturb_pool.DISK_FLOOR_GIB))
+    return (OK, "perturb-floor", "free space is at or above the %d GiB floor" % perturb_pool.DISK_FLOOR_GIB)
 
 
 #: FC1.a (2026-10-11): a NO-DATA row spares the expensive rows exactly as a
@@ -942,6 +972,10 @@ def run_all(root, version, horizon_hours=DEFAULT_HORIZON_HOURS, remote=None,
         check_public_remote(root, version, remote, runner),
     ]
     results.extend(check_machine_rows(root, runner, home))
+    # CS8.b: the pool runs in step 2b of a full cut. A cheap-only preflight (the one a resumed cut asks, which skips 2b)
+    # never uses the pool, so it never refuses a cut for the pool's disk.
+    if virgin:
+        results.append(check_pool_floor())
     # P6: about twenty seconds (one export build, one shallow fetch), so it
     # waits for the one second checks and still runs before the minutes long
     # gate. cut.py asks it again after the bump, on the tree that ships.

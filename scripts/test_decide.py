@@ -729,6 +729,8 @@ class TheStampLandsWhereTheGateReadsIt(unittest.TestCase):
         for name in ("BROTHER_DECISION_SENTINEL", "BROTHER_CONFIG_DIR",
                      "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
             env.pop(name, None)
+        # These cases exercise this client's hook path, regardless of the caller's host.
+        env["BROTHER_CLIENT"] = "claude"
         return env
 
     def run_decide(self, home, session_id):
@@ -771,6 +773,11 @@ class TheStampLandsWhereTheGateReadsIt(unittest.TestCase):
         self.assertIsNone(stamp.get("used_at_epoch"),
                           "a fresh stamp is unconsumed; the gate is what "
                           "marks it used")
+
+    def test_the_callers_client_does_not_move_the_fixture_stamp(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"BROTHER_CLIENT": "codex"}):
+            self.test_the_stamp_is_written_per_session_where_the_gate_looks()
 
     def test_a_session_id_with_separators_cannot_escape_the_state_dir(self):
         home = tempfile.mkdtemp()

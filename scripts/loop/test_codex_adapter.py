@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Tests for scripts/loop/adapters/codex.py (FX-31.4).
 
-Every case drives CodexAdapter.argv, CodexAdapter.judge or CodexAdapter.cost directly. Nothing here starts a process,
+Every case drives CodexAdapter.argv, CodexAdapter.judge or CodexAdapter.cost directly. One case runs the built command
+line against a stand-in program in a temporary folder; the rest start no process,
 reads a home directory or writes outside a temporary folder: the program the argv names is a temporary file and the
 code root is a temporary directory. R-FX-31-1: a row, model, prompt, timeout, program or root the adapter cannot carry
 is refused before any process could start. R-FX-31-3: a failed exit, an empty answer or a provider refusal is never an
@@ -11,6 +12,7 @@ call rather than falling back to an untrusted cwd.
 import ast
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -258,6 +260,115 @@ class HostileInputIsRefused(unittest.TestCase):
         for usage in ("tokens", [], 5, True, {1, 2}):
             with self.assertRaises(ValueError, msg=repr(usage)):
                 adapter.cost(good, usage)
+
+
+class TheTestRunCarriesWorkspaceWriteAndTmpdir(unittest.TestCase):
+    """The explicit test form: workspace-write, a TMPDIR inside the code root's scratch root, fresh per call."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="codex-adapter-i5a-root-", dir=_TMP)
+        self.adapter = X.CodexAdapter(PROGRAM, self.root)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_a_test_run_carries_workspace_write_and_a_tmpdir_inside_the_workspace(self):
+        argv, stdin, extra = self.adapter.argv("luna", "run tests", 300, ROW, test=True)
+        self.assertEqual(argv[0], X.ENV_PROGRAM)
+        self.assertTrue(argv[1].startswith("TMPDIR="))
+        tmpdir = argv[1][len("TMPDIR="):]
+        self.assertTrue(os.path.isabs(tmpdir))
+        self.assertEqual(os.path.realpath(os.path.dirname(tmpdir)),
+                         os.path.realpath(os.path.join(self.root, X.TEST_TMPDIR)))
+        self.assertTrue(os.path.basename(tmpdir).startswith("run-"))
+        self.assertEqual(argv[2], PROGRAM)
+        self.assertEqual(argv[3], "exec")
+        self.assertEqual(argv[4:6], ["-m", "gpt-5-codex"])
+        self.assertEqual(argv[6:8], ["-C", self.root])
+        self.assertEqual(argv[8:10], ["--sandbox", "workspace-write"])
+        self.assertEqual(argv[10], "run tests")
+        self.assertEqual((stdin, extra), ("", None))
+        argv2, _, _ = self.adapter.argv("luna", "run tests", 300, ROW, test=True)
+        self.assertNotEqual(argv[1], argv2[1])
+
+    def test_an_ordinary_row_stays_read_only_and_creates_nothing(self):
+        scratch = os.path.join(self.root, X.TEST_TMPDIR)
+        self.assertFalse(os.path.exists(scratch))
+        argv, stdin, extra = self.adapter.argv("luna", "p", 60, ROW)
+        self.assertEqual(argv, [PROGRAM, "exec", "-m", "gpt-5-codex", "-C", self.root,
+                                "--sandbox", "read-only", "p"])
+        self.assertEqual((stdin, extra), ("", None))
+        self.assertFalse(os.path.exists(scratch))
+
+    def test_a_row_that_carries_its_own_test_flag_is_refused(self):
+        for value in (True, False, 1, "yes", None):
+            row = dict(ROW)
+            row["test"] = value
+            with self.assertRaises(A.Refused, msg=repr(value)):
+                self.adapter.argv("luna", "p", 60, row)
+
+    def test_the_test_form_refuses_a_non_bool_flag(self):
+        nan = float("nan")
+        for value in (1, 0, "yes", None, [], {}, nan):
+            with self.assertRaises(A.Refused, msg=repr(value)):
+                self.adapter.argv("luna", "p", 60, ROW, test=value)
+
+    def test_a_test_run_refuses_when_the_scratch_root_cannot_be_created(self):
+        base = os.path.join(self.root, X.TEST_TMPDIR)
+        with open(base, "w") as fh:
+            fh.write("not a directory")
+        with self.assertRaises(A.Refused) as caught:
+            self.adapter.argv("luna", "p", 60, ROW, test=True)
+        self.assertIn("no usable temporary directory inside the code root", str(caught.exception))
+
+    def test_a_symlinked_scratch_root_is_refused(self):
+        target = tempfile.mkdtemp(prefix="codex-adapter-i5a-target-", dir=_TMP)
+        link = os.path.join(self.root, X.TEST_TMPDIR)
+        os.symlink(target, link)
+        marker = os.path.join(target, "keep")
+        with open(marker, "w") as fh:
+            fh.write("keep")
+        with self.assertRaises(A.Refused) as caught:
+            self.adapter.argv("luna", "p", 60, ROW, test=True)
+        self.assertIn("resolves outside the code root", str(caught.exception))
+        self.assertTrue(os.path.isfile(marker), "the link's target is untouched")
+        shutil.rmtree(target, ignore_errors=True)
+
+    def test_discard_removes_only_a_fresh_run_directory(self):
+        run = X._prepare_test_tmpdir(self.root)
+        self.assertTrue(os.path.isdir(run))
+        X.discard_test_tmpdir(self.root, run)
+        self.assertFalse(os.path.exists(run))
+        base = X.test_tmpdir(self.root)
+        os.makedirs(base, exist_ok=True)
+        with self.assertRaises(A.Refused):
+            X.discard_test_tmpdir(self.root, base)
+        plain = os.path.join(self.root, "plain")
+        with open(plain, "w") as fh:
+            fh.write("x")
+        with self.assertRaises(A.Refused):
+            X.discard_test_tmpdir(self.root, plain)
+        outside = tempfile.mkdtemp(prefix="codex-adapter-i5a-outside-", dir=_TMP)
+        with self.assertRaises(A.Refused):
+            X.discard_test_tmpdir(self.root, outside)
+        shutil.rmtree(outside, ignore_errors=True)
+
+    def test_a_python_tempfile_works_under_the_test_form(self):
+        standin = os.path.join(_TMP, "codex-standin-i5a.py")
+        with open(standin, "w") as fh:
+            fh.write("#!%s\nimport tempfile\nprint(tempfile.mkdtemp())\n" % sys.executable)
+        os.chmod(standin, 0o755)
+        adapter = X.CodexAdapter(standin, self.root)
+        argv, stdin, extra = adapter.argv("luna", "p", 60, ROW, test=True)
+        self.assertEqual(argv[0], X.ENV_PROGRAM)
+        proc = subprocess.run(argv, stdin=subprocess.PIPE, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0)
+        made = proc.stdout.strip()
+        self.assertTrue(made.startswith(os.path.join(self.root, X.TEST_TMPDIR)))
+        self.assertTrue(os.path.isdir(made))
+        shutil.rmtree(made, ignore_errors=True)
+        run = argv[1][len("TMPDIR="):]
+        X.discard_test_tmpdir(self.root, run)
 
 
 if __name__ == "__main__":
