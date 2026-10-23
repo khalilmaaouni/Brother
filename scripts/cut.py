@@ -1817,6 +1817,19 @@ def rehearsed_exit_refusal(root, rehearsal, version, runner=None):
                                    _cut_own_paths(rehearsal), runner)
 
 
+def rehearsed_tip(rehearsal, runner=None):
+    """(HEAD, HEAD^{tree}) of the rehearsal worktree when both read as 40 hex, else ('', ''). CS12: the commit the
+    chain left is the one the owner will approve, so the rehearsal parent is told it before this tree goes."""
+    out = []
+    for rev in ("HEAD", "HEAD^{tree}"):
+        proc = _run(["git", "rev-parse", rev], rehearsal, runner)
+        text = (proc.stdout or "").strip()
+        if proc.returncode != 0 or not CR.SHA_RE.fullmatch(text):
+            return "", ""
+        out.append(text)
+    return out[0], out[1]
+
+
 def reusable_preflight(root, version, runner=None, directory="", now=None):
     """(record path, '') when the driver's preflight record (FR1.a) covers this exact commit, tree and export tree
     id, else ('', the reason). Every doubt is a reason, so the caller runs the full preflight: more work, never
@@ -1896,6 +1909,11 @@ def check_mode(root, version, bm, paths, force, runner=None,
                                 "question: %s" % why)
             else:
                 print("exit rule: the commits the chain made are the cut's own")
+                # CS12: the one machine line the rehearsal parent reads for the tip it will pin; only after the
+                # exit rule accepted the commits, and never for a local check, which no cut reads
+                tip, tip_tree = ("", "") if local else rehearsed_tip(rehearsal, runner)
+                if tip:
+                    print("%s%s %s" % (CR.TIP_PREFIX, tip, tip_tree), flush=True)
             # the real cut refuses to push an uncommitted change (pre_push_recheck
             # asks dirty_paths after the answer): ask it here, on the same tree
             dirty, why = dirty_paths(rehearsal, runner)
@@ -2431,7 +2449,8 @@ def _cut_own_paths(root):
 
 def rehearsal_refusal(root, version, resume_sha=None, runner=None):
     """CV1.b: '' when a READY rehearsal record covers this commit."""
-    return CR.rehearsal_refusal(root, version, resume_sha or "", runner=runner, allowed_paths=_cut_own_paths(root))
+    return CR.rehearsal_refusal(root, version, resume_sha or "", runner=runner, allowed_paths=_cut_own_paths(root),
+                                require_tip=resume_sha or "")
 
 
 # --- CV1.e: the owner's terminal is the only seam ---------------------------
@@ -2974,9 +2993,40 @@ def cut_gates(root, version, resume_sha=None, remote="", runner=None,
     return evidence_write_refusal(CR.evidence_dir())
 
 
+#: CS12.b: the one refusal of a real cut that was neither resumed from a rehearsed commit nor named cold.
+COLD_REFUSAL = ("a real cut from 1.1.7 on needs --resume <bumped_sha>, "
+                "or --cold in the owner's own words")
+
+
+def cold_refusal(version, resume_sha, cold):
+    """None when a real cut of `version` may start, else the refusal in words: before 1.1.7 anything goes; from
+    1.1.7 on it needs --resume with the full 40 hex commit the rehearsal left (anything else, blank or junk
+    included, is no resume) or the owner's --cold. A version that is not X.Y.Z is refused, never read as old.
+    The numbers are compared as numbers, so 1.1.10 is later than 1.1.7."""
+    if not isinstance(version, str) or not CUT_VERSION_RE.fullmatch(version):
+        return "the version %r is not X.Y.Z" % (version,)
+    if tuple(int(x) for x in version.split(".")) < (1, 1, 7):
+        return None
+    if cold:
+        return None
+    if isinstance(resume_sha, str) and re.fullmatch(r"[0-9a-f]{40}", resume_sha):
+        return None
+    return COLD_REFUSAL
+
+
 def cut_mode(root, version, bm, paths, force, yes, ask, runner=None,
              resume_sha=None, notes_file=None, notes_sha256=None,
-             approved_sha=""):
+             approved_sha="", cold=None):
+    # CS12.b: main says whether the owner named --cold (True or False) on the real command line; a caller that
+    # passes nothing (None) is not asking for the gate. ponytail: only main calls this, and main asks unless a
+    # runner was injected (the tests' seam, never the command line), so the gate sits on the one real door
+    if cold is not None:
+        why = cold_refusal(version, resume_sha or "", cold)
+        if why:
+            print(why)
+            return EXIT_REFUSED
+        if cold:
+            print("[cut] --cold named by the owner")
     refusal = cut_gates(root, version, resume_sha=resume_sha, runner=runner)
     if refusal:
         # CV1.a: refused before anything is claimed, parked or written.
@@ -3947,6 +3997,9 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
                           "and still runs required_fast.sh, refresh_cut "
                           "--check, release_invariant, the approve question, "
                           "the push and the reproduction")
+    ap.add_argument("--cold", action="store_true", default=False,
+                     help="the owner names a real cut without --resume; "
+                          "refused from 1.1.7 on without it")
     ap.add_argument("--answer-file", metavar="PATH", default=None,
                      help="REFUSED for a real cut (ruling 2026-10-03): its "
                           "one answer is typed on the owner's terminal; "
@@ -4178,7 +4231,8 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     return cut_mode(root, version, bm, paths, args.force_conflicts,
                     args.yes, ask, runner, resume_sha=args.resume,
                     notes_file=notes_file, notes_sha256=notes_sha256,
-                    approved_sha=approved_sha)
+                    approved_sha=approved_sha,
+                    cold=bool(args.cold) if runner is None else None)
 
 
 if __name__ == "__main__":

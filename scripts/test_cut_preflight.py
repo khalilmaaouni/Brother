@@ -8,12 +8,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cut_preflight as P  # noqa: E402
+import perturb_pool as PP  # noqa: E402
 
 NOW = datetime.datetime(2026, 9, 20, 15, 0, 0)
 
@@ -297,8 +299,11 @@ class CheapestFirst(unittest.TestCase):
         os.makedirs(os.path.join(home, ".claude"))
         kw.setdefault("home", home)
         self.last_runner = r
-        res = P.run_all(root, version, remote="https://x", runner=r, now=NOW,
-                        build=build, **kw)
+        # CS8.b: run_all reads the pool's disk floor, and a case about something else must not turn on how much room
+        # this machine has today; the cases about the floor pass their own pool_free
+        with mock.patch.object(PP, "free_gib", lambda path, v=kw.pop("pool_free", 999.0): v):
+            res = P.run_all(root, version, remote="https://x", runner=r, now=NOW,
+                            build=build, **kw)
         return res, built
 
     def test_the_previous_cut_is_read_from_the_newest_release_note(self):
@@ -498,8 +503,8 @@ class TheMachineRowsAreAskedOnThisMachine(unittest.TestCase):
         res, _built = self._all({})
         self.assertEqual([n for _v, n, _d in res],
                          ["no-cut-commit", "exceptions", "pack-clock", "readiness-rows", "release-plan", "no-promise", "version-after-bump",
-                          "changelog-text", "public-remote"] + list(MACHINE_NAMES) + ["plugin-bumps", "export-real-home",
-                                                                    "virgin-gate"])
+                          "changelog-text", "public-remote"] + list(MACHINE_NAMES) + ["perturb-floor", "plugin-bumps",
+                                                                    "export-real-home", "virgin-gate"])
 
 
 def declares(version):
@@ -1244,6 +1249,370 @@ class TheNoCutCommitRow(unittest.TestCase):
             C.run_chain("/fake/root", self.VERSION, (None, None, "x"), [], None, False, None,
                         resume_sha=self.HEAD)
         self.assertEqual(rd.call_args.kwargs.get("resume_sha"), self.HEAD)
+
+
+class _Scratch(unittest.TestCase):
+    """CS8: a scratch root of this test's own, made under the exporter's real one and aimed at with BROTHER_SCRATCH, so
+    no case writes into the shared root's top level and none touches the system temp folder."""
+
+    def setUp(self):
+        import export_public
+        real = export_public.scratch_root()
+        if PP.FORBIDDEN_PATH_TEXT in real:
+            self.skipTest("NO-DATA: this machine's scratch root contains %s, which W2 refuses" % PP.FORBIDDEN_PATH_TEXT)
+        self.top = os.path.realpath(tempfile.mkdtemp(prefix="run-cs8-test-", dir=real))
+        self.addCleanup(shutil.rmtree, self.top, True)
+        self.root = os.path.join(self.top, "scratch")
+        os.makedirs(self.root)
+        patch = mock.patch.dict(os.environ, {"BROTHER_SCRATCH": self.root})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def source(self):
+        """A tiny real git repository outside the scratch root; returns (path, sha)."""
+        src = os.path.join(self.top, "src")
+        env = PP.clean_env({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+        for args in (["init", "-q", "-b", "main", src],):
+            subprocess.run(["git"] + args, cwd=self.top, env=env, check=True, capture_output=True)
+        with open(os.path.join(src, "a.txt"), "w") as fh:
+            fh.write("one\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=src, env=env, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "one"],
+                       cwd=src, env=env, check=True, capture_output=True)
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=src, env=env, check=True,
+                             capture_output=True, text=True).stdout.strip()
+        return src, sha
+
+
+class _Proc(object):
+    returncode = 0
+
+    def communicate(self):
+        return b"", b""
+
+
+class ThePoolCopyIsUnderTheOneScratchRoot(_Scratch):
+    # REQ-CS8-A02
+    def test_make_copy_uses_the_one_scratch_root_and_never_the_system_temp(self):
+        src, sha = self.source()
+        self.assertEqual(PP.pool_scratch_root(), self.root)
+        dest = os.path.join(self.root, "copy0")
+        self.assertEqual(PP.make_copy(src, dest, floor_gib=0), sha)
+        self.assertTrue(os.path.isfile(os.path.join(dest, "a.txt")))
+        self.assertTrue(os.path.isfile(dest + PP.MARKER_SUFFIX))
+        self.assertTrue(PP._under(dest, PP.pool_scratch_root()))
+        # no BROTHER_SCRATCH: the exporter's home rule, a missing folder is made, the system temp is not the answer
+        home = os.path.join(self.top, "home")
+        os.makedirs(home)
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_SCRATCH"}
+        env["HOME"] = home
+        import export_public as EP   # the ONE scratch root rule (I11: no test spells the root itself)
+        with mock.patch.dict(os.environ, env, clear=True):
+            made = PP.pool_scratch_root()
+            expected = EP.scratch_root()
+        self.assertEqual(os.path.realpath(made), os.path.realpath(expected))
+        self.assertTrue(PP._under(made, home), "the root follows HOME when BROTHER_SCRATCH is unset")
+        self.assertTrue(os.path.isdir(made))
+        self.assertFalse(PP._under(made, tempfile.gettempdir()) and not PP._under(home, tempfile.gettempdir()))
+
+    def test_a_scratch_root_that_cannot_stand_is_refused_by_name(self):
+        import export_public
+        for label, bad in (("empty", ""), ("relative", "scratch/rel"), ("forbidden text", "/tmp/cs8-x")):
+            with self.subTest(case=label), mock.patch.object(export_public, "scratch_root", return_value=bad):
+                with self.assertRaises(PP.CopyFailed) as ctx:
+                    PP.pool_scratch_root()
+                self.assertIn(repr(bad), str(ctx.exception))
+        with mock.patch.object(export_public, "scratch_root", side_effect=PermissionError(13, "no", "x")):
+            with self.assertRaises(PP.CopyFailed):
+                PP.pool_scratch_root()
+        afile = os.path.join(self.top, "afile")
+        open(afile, "w").close()
+        with mock.patch.dict(os.environ, {"BROTHER_SCRATCH": afile}), self.assertRaises(PP.CopyFailed):
+            PP.pool_scratch_root()
+
+    # REQ-CS8-A03
+    def test_a_dest_outside_the_scratch_root_is_refused(self):
+        src, _ = self.source()
+        with mock.patch.object(PP, "_git", side_effect=AssertionError("a copy was started")):
+            # the forbidden text alone, a path that IS under the root (M-CS8A-TMPOK)
+            with self.assertRaises(PP.CopyFailed) as ctx:
+                PP.make_copy(src, os.path.join(self.root, "tmpdir", "copy0"), floor_gib=0)
+            self.assertIn("W2", str(ctx.exception))
+            with self.assertRaises(PP.CopyFailed) as ctx:
+                PP.make_copy(src, "/tmp/cs8-copy0", floor_gib=0)
+            self.assertIn("W2", str(ctx.exception))
+            # outside the root with no forbidden text at all (the under root guard alone)
+            outside = os.path.join(self.top, "elsewhere", "copy0")
+            os.makedirs(os.path.dirname(outside))
+            for label, dest in (("outside", outside), ("the root itself", self.root),
+                                ("relative", "copy0"), ("not text", None), ("empty", "")):
+                with self.subTest(case=label), self.assertRaises(PP.CopyFailed) as ctx:
+                    PP.make_copy(src, dest, floor_gib=0)
+                if label in ("outside", "the root itself", "relative"):
+                    self.assertIn("not under the one scratch root", str(ctx.exception))
+            # a link inside the root that leads out of it is outside
+            link = os.path.join(self.root, "link")
+            os.symlink(os.path.dirname(outside), link)
+            with self.assertRaises(PP.CopyFailed) as ctx:
+                PP.make_copy(src, os.path.join(link, "copy1"), floor_gib=0)
+            self.assertIn("not under the one scratch root", str(ctx.exception))
+            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(outside), "copy1")))
+
+    def test_an_existing_dest_is_refused_not_overwritten(self):
+        src, _ = self.source()
+        dest = os.path.join(self.root, "copy0")
+        os.makedirs(dest)
+        with open(os.path.join(dest, "keep"), "w") as fh:
+            fh.write("x")
+        with self.assertRaises(PP.CopyFailed) as ctx:
+            PP.make_copy(src, dest, floor_gib=0)
+        self.assertIn("never reused or overwritten", str(ctx.exception))
+        self.assertTrue(os.path.isfile(os.path.join(dest, "keep")))
+
+    # REQ-CS8-A01
+    def test_a_pool_under_its_floor_is_refused_inside_make_copy(self):
+        self.assertEqual(PP.DISK_FLOOR_GIB, 15)
+        dest = os.path.join(self.root, "copy0")
+        with mock.patch.object(PP, "_git", side_effect=AssertionError("a copy was started")):
+            with self.assertRaises(PP.CopyFailed) as ctx:
+                PP.make_copy("/nonexistent-source", dest, free=lambda p: 14.9)
+            self.assertIn("W6", str(ctx.exception))
+            self.assertIn("14.9 GiB", str(ctx.exception))
+            self.assertFalse(os.path.lexists(dest) or os.path.lexists(dest + PP.MARKER_SUFFIX))
+            self.assertEqual(PP.floor_problem(self.root, free=lambda p: 14.9)[:8], "NO-DATA:")
+            self.assertEqual(PP.floor_problem(self.root, free=lambda p: 15.0), "")
+
+    # REQ-CS8-A04
+    def test_an_invalid_free_reading_is_refused_by_make_copy(self):
+        src, _ = self.source()
+        bad = [True, False, "14.9", "", None, float("nan"), -1, -0.5, float("inf"), float("-inf"), [15], {}]
+        with mock.patch.object(PP, "_git", side_effect=AssertionError("a copy was started")):
+            for i, value in enumerate(bad):
+                for how, free in (("a reading", value), ("a reader", lambda p, v=value: v)):
+                    if free is None:
+                        continue   # free=None means the real reading, never an invalid one
+                    with self.subTest(value=repr(value), how=how):
+                        dest = os.path.join(self.root, "bad%d" % i)
+                        self.assertIn("free space reading is invalid", PP.floor_problem(self.root, free=free))
+                        with self.assertRaises(PP.CopyFailed) as ctx:
+                            PP.make_copy(src, dest, free=free)
+                        self.assertIn("invalid", str(ctx.exception))
+                        self.assertFalse(os.path.lexists(dest))
+            for exc in (OSError("gone"), ValueError("v"), TypeError("t")):
+                def boom(p, exc=exc):
+                    raise exc
+                self.assertIn("cannot be read", PP.floor_problem(self.root, free=boom))
+        # a real reading at or above the floor passes, as int, float or the real reader
+        for ok in (15, 15.0, 999.5):
+            self.assertEqual(PP.floor_problem(self.root, free=ok), "")
+        self.assertEqual(PP.make_copy(src, os.path.join(self.root, "good0"), free=lambda p: 15.0),
+                         PP.make_copy(src, os.path.join(self.root, "good1"), free=999))
+
+    def pool(self, rows=(("scripts/a.py", "scripts/test_a.py"), ("scripts/b.py", "scripts/test_b.py")), **kw):
+        """run_rows on fakes: returns (answers, dests the copier saw, spawn argvs)."""
+        dests, argvs = [], []
+
+        def copier(src, dest):
+            dests.append(dest)
+            os.makedirs(dest)
+            open(dest + PP.MARKER_SUFFIX, "w").close()
+
+        def spawn(argv, env):
+            argvs.append((argv, env))
+            with open(argv[4]) as fh, open(argv[6], "w") as out:
+                json.dump([[f, s, True, "red"] for f, s in json.load(fh)], out)
+            return _Proc()
+        kw.setdefault("copier", copier)
+        with mock.patch.object(PP, "settled_workers", lambda w, **k: w):
+            out = PP.run_rows(list(rows), "/src", 5, workers=kw.pop("workers", 1), spawn=spawn,
+                              say=lambda line: None, **kw)
+        return out, dests, argvs
+
+    # REQ-CS8-A02
+    def test_run_rows_defaults_its_base_to_the_scratch_root(self):
+        sentinel = os.path.join(self.root, "someone-elses-run")
+        os.makedirs(sentinel)
+        out, dests, argvs = self.pool()
+        self.assertEqual([v for _f, _s, v, _d in out], [True, True])
+        self.assertEqual(len(dests), 1, "one slice, one concrete copy")
+        for dest in dests:
+            self.assertTrue(os.path.isabs(dest) and PP._under(dest, self.root), dest)
+        argv, env = argvs[0]
+        run_dir = os.path.dirname(dests[0])
+        self.assertEqual(argv[3], dests[0], "the worker runs in the copy the copier was given")
+        scratch, rows_path, out_path = env["TMPDIR"], argv[4], argv[6]
+        # the worker's TMPDIR, rows file and out file are distinct siblings of the copy, never inside it
+        self.assertEqual(len({dests[0], scratch, rows_path, out_path}), 4)
+        for sibling in (scratch, rows_path, out_path):
+            self.assertEqual(os.path.dirname(sibling), run_dir)
+        # the shared root is caller owned: it stands, a foreign entry stands, only this run's folder is gone
+        self.assertTrue(os.path.isdir(self.root))
+        self.assertEqual(os.listdir(self.root), ["someone-elses-run"])
+        self.assertFalse(os.path.exists(run_dir))
+
+    def test_a_caller_base_outside_the_scratch_root_or_with_forbidden_text_is_refused(self):
+        elsewhere = os.path.join(self.top, "elsewhere")
+        forbidden = os.path.join(self.root, "tmpbase")
+        for base in (elsewhere, forbidden, self.root + "-sibling", "/tmp"):
+            os.makedirs(base, exist_ok=True)
+            with self.subTest(base=base), self.assertRaises(ValueError):
+                self.pool(base=base, copier=lambda s, d: self.fail("a copy was made"))
+        self.assertEqual(os.listdir(elsewhere), [], "a refused base is never written into")
+
+    def test_two_runs_on_the_shared_root_never_share_a_name_and_a_caller_base_is_kept(self):
+        seen = []
+
+        def run():
+            _out, dests, _argv = self.pool()
+            seen.extend(dests)
+        threads = [threading.Thread(target=run) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(len(set(seen)), 3, "two runs were given the same copy path")
+        self.assertEqual(len({os.path.dirname(d) for d in seen}), 3, "two runs share one run folder")
+        self.assertEqual(os.listdir(self.root), [], "a run left its folder behind")
+        base = os.path.join(self.root, "mine")
+        os.makedirs(base)
+        _out, dests, _argv = self.pool(base=base)
+        self.assertEqual([os.path.dirname(d) for d in dests], [base], "a caller base is used as it stands")
+        self.assertTrue(os.path.isdir(base), "the caller's base was removed")
+
+    def test_a_copy_that_could_not_be_removed_keeps_its_run_folder(self):
+        with mock.patch.object(PP, "remove_copy", side_effect=PP.CopyFailed("stuck")), mock.patch("sys.stderr"):
+            _out, dests, _argv = self.pool()
+        self.assertTrue(os.path.isdir(dests[0]), "a copy the pool could not remove must stay findable")
+        self.assertTrue(os.path.isdir(self.root))
+
+
+class ThePoolFloorIsReadInTheCheapTier(_Scratch):
+    FLOOR = "perturb-floor"
+
+    def tp(self):
+        tp = CheapestFirst("test_all_green_is_exit_zero_and_the_virgin_gate_ran")
+        self.addCleanup(tp.doCleanups)
+        return tp
+
+    def spared(self, res, built, runner, verdict):
+        """The floor row answers `verdict`; every row after it is spared, and nothing minutes long ran."""
+        rows = {n: (v, d) for v, n, d in res}
+        self.assertEqual(rows[self.FLOOR][0], verdict, res)
+        for name in ("plugin-bumps", "export-real-home", "virgin-gate"):
+            self.assertEqual(rows[name], (P.NODATA, P.SPARED), name)
+        self.assertEqual(built, [], "an export tree was built after the floor refused")
+        keys = [c[0] for c in runner.calls]
+        self.assertNotIn("export_public.py", keys)
+        self.assertNotIn("required_fast.sh", keys)
+        self.assertEqual(P.exit_code(res), P.EXIT_REFUSED if verdict == P.REFUSED else P.EXIT_NODATA)
+
+    # REQ-CS8-B01
+    def test_a_pool_under_its_floor_refuses_in_the_cheap_tier(self):
+        asked = []
+
+        def reader(root):
+            asked.append(root)
+            return 14.9
+        got = P.check_pool_floor(free=reader)
+        self.assertEqual(got, (P.REFUSED, self.FLOOR, "14.9 GiB free is under the 15 GiB floor"))
+        self.assertEqual(asked, [self.root], "the floor must be read on the pool scratch root")
+        print("%s: %s" % (got[1], got[2]))
+        self.assertEqual(P.check_pool_floor(free=lambda r: 15.0)[0], P.OK)
+        self.assertEqual(P.check_pool_floor(free=lambda r: 15)[0], P.OK)
+        self.assertEqual(P.check_pool_floor(free=999.5)[0], P.OK)
+        self.assertEqual(P.check_pool_floor(free=14.9)[0], P.REFUSED)
+        self.assertEqual(P.check_pool_floor(free=0)[0], P.REFUSED)
+        # free=None is the real reader, asked for the scratch root
+        seen = []
+        with mock.patch.object(PP, "free_gib", lambda path: seen.append(path) or 14.9):
+            self.assertEqual(P.check_pool_floor()[0], P.REFUSED)
+        self.assertEqual(seen, [self.root])
+        # a root inside the scratch root is read; a roomy path anywhere else is never read in its place
+        inside = os.path.join(self.root, "run")
+        os.makedirs(inside)
+        elsewhere = os.path.join(self.top, "elsewhere")
+        os.makedirs(elsewhere)
+        for label, root, want in (("the root itself", self.root, P.REFUSED), ("inside", inside, P.REFUSED),
+                                  ("outside", elsewhere, P.NODATA), ("forbidden text", self.root + "/tmpx", P.NODATA),
+                                  ("empty", "", P.NODATA), ("not text", 7, P.NODATA)):
+            with self.subTest(root=label):
+                self.assertEqual(P.check_pool_floor(root, free=lambda r: 14.9)[0], want)
+
+    # REQ-CS8-B01, REQ-CS8-B03
+    def test_a_refused_pool_floor_spares_the_export_row_and_the_virgin_gate(self):
+        tp = self.tp()
+        res, built = tp._all({}, pool_free=14.9)
+        self.spared(res, built, tp.last_runner, P.REFUSED)
+        self.assertEqual([d for v, n, d in res if n == self.FLOOR], ["14.9 GiB free is under the 15 GiB floor"])
+        # the same tree with room runs the export rows, so the refusal above is the floor's and nothing else's
+        res, built = tp._all({}, pool_free=15.0)
+        self.assertEqual(P.exit_code(res), P.EXIT_OK, res)
+        self.assertEqual(len(built), 2)
+
+    # M1 (review): a cheap-only preflight, the one a resumed cut asks, skips step 2b where the pool runs, so it
+    # must not refuse a cut for the pool's disk
+    def test_a_cheap_only_preflight_never_reads_the_pool_floor(self):
+        tp = self.tp()
+        seen = []
+        real = P.check_pool_floor
+        with mock.patch.object(P, "check_pool_floor", lambda *a, **k: seen.append(1) or real(*a, **k)):
+            res, built = tp._all({}, pool_free=14.4, virgin=False)
+        self.assertEqual(seen, [], "the pool floor was read on a path that never runs the pool")
+        self.assertNotIn(self.FLOOR, [n for _v, n, _d in res])
+        self.assertEqual(P.exit_code(res), P.EXIT_OK, res)
+        self.assertEqual(len(built), 1, "only the plugin bump tree: no export row runs without the virgin gate")
+        # the same disk on the full path is refused, so the skip above is the flag's and nothing else's
+        res, _built = tp._all({}, pool_free=14.4)
+        self.assertEqual([v for v, n, _d in res if n == self.FLOOR], [P.REFUSED])
+        self.assertEqual(P.exit_code(res), P.EXIT_REFUSED)
+
+    # REQ-CS8-B03
+    def test_the_floor_row_runs_before_any_export_row(self):
+        tp = self.tp()
+        order = []
+        real = P.check_pool_floor
+
+        def spy(*a, **k):
+            order.append(("floor", a, k, [c[0] for c in tp.last_runner.calls]))
+            return real(*a, **k)
+        with mock.patch.object(P, "check_pool_floor", spy):
+            res, _built = tp._all({})
+        names = [n for _v, n, _d in res]
+        self.assertEqual(names.count(self.FLOOR), 1)
+        self.assertEqual(names.index(self.FLOOR), names.index("installed-guard") + 1)
+        self.assertLess(names.index(self.FLOOR), names.index("plugin-bumps"))
+        self.assertLess(names.index(self.FLOOR), names.index("export-real-home"))
+        self.assertEqual(len(order), 1)
+        self.assertEqual(order[0][1:3], ((), {}))
+        self.assertNotIn("export_public.py", order[0][3])
+        self.assertNotIn("required_fast.sh", order[0][3])
+        self.assertIn("test_loop_guard_race.py", order[0][3], "the machine rows run first")
+
+    # REQ-CS8-B02
+    def test_a_corrupt_free_reading_is_no_data_and_spares_the_export(self):
+        def raises(exc):
+            def reader(root):
+                raise exc
+            return reader
+        bad = [True, False, "14.9", "", float("nan"), -1, -0.5, float("inf"), float("-inf"), [15], {},
+               lambda r: None, lambda r: "20", lambda r: float("nan")]
+        for value in bad:
+            with self.subTest(value=repr(value)):
+                got = P.check_pool_floor(free=value)
+                self.assertEqual(got[:2], (P.NODATA, self.FLOOR))
+                self.assertEqual(got[2], "the free reading is invalid")
+        for exc in (OSError("gone"), TypeError("t"), ValueError("v")):
+            with self.subTest(raises=type(exc).__name__):
+                self.assertEqual(P.check_pool_floor(free=raises(exc)),
+                                 (P.NODATA, self.FLOOR, "free space is unreadable"))
+        for exc in (PP.CopyFailed("no root"), PermissionError(13, "no", "x")):
+            with self.subTest(root=type(exc).__name__), mock.patch.object(PP, "pool_scratch_root", side_effect=exc):
+                self.assertEqual(P.check_pool_floor(free=lambda r: 999.0),
+                                 (P.NODATA, self.FLOOR, "the pool scratch root is unreadable"))
+        tp = self.tp()
+        res, built = tp._all({}, pool_free=float("nan"))
+        self.spared(res, built, tp.last_runner, P.NODATA)
 
 
 if __name__ == "__main__":

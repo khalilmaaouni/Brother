@@ -41,6 +41,10 @@ import receipt_door as RD  # noqa: E402
 import jev_seam  # noqa: E402
 import jev_g1_seam_cache  # noqa: E402
 import jev_checks  # noqa: E402
+from test_receipt_door_landing import TheLandingFactsAreReadNeverGuessed  # noqa: E402,F401
+from test_receipt_door_landing import TheRunsReceiptNamesTheUnitItsBranchAndItsRevision  # noqa: E402,F401
+from test_receipt_door_landing import ARejectedReviewPushesNothing  # noqa: E402,F401
+from test_receipt_door_landing import TheUnitsGateRunsEveryLandingClass  # noqa: E402,F401
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402

@@ -35,7 +35,7 @@ import ast
 import hashlib
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 GATE_RELPATH = os.path.join('scripts', 'readiness_gate.py')
 DRILL_RELPATH = os.path.join('scripts', 'restore_drill_enterprise.py')
@@ -420,3 +420,59 @@ def restore_evidence_errors(root, today):
     errors.extend(_covered_errors(doc, root, expected_covered))
     errors.extend(_freshness_errors(doc, today, max_age_days))
     return errors
+
+
+def expiry_errors(root, deadline, today=None):
+    '''Refusal strings for a run that ends at `deadline` (epoch seconds): [] when
+    the declared restore drill record is still inside the gate's own bar on the
+    deadline's date, else one named refusal (1.1.7 LR1.b). The record is fresh
+    at launch and a gate row reads it stale at the landing; this names it
+    before the run starts. The bar is the same inclusive one _freshness_errors
+    applies: a record stands through drill_date + max_age_days. A record or bar
+    that cannot be read comes back as a refusal naming the missing input.
+
+    root     : the tree holding scripts/readiness_gate.py and the record.
+    deadline : epoch seconds, a finite number (a bool, None, NaN or text is
+               refused with ValueError before any file is read).
+    today    : None, or a datetime.date the caller pins; refused with ValueError
+               when it is anything else. The staleness is measured at deadline.'''
+    root = _require_root(root)
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or deadline != deadline \
+            or deadline in (float('inf'), float('-inf')):
+        raise ValueError('deadline must be a finite number of seconds, got %r' % (deadline,))
+    if today is not None:
+        if isinstance(today, datetime):
+            today = today.date()
+        if isinstance(today, bool) or not isinstance(today, date):
+            raise ValueError('today must be a datetime.date or None, got %r' % (today,))
+    if not os.path.isdir(root):
+        raise ValueError('root must be a directory, got %r' % (root,))
+    try:
+        deadline_day = date.fromtimestamp(deadline)
+    except (OverflowError, OSError, ValueError):
+        raise ValueError('deadline %r is not a date this machine can read' % (deadline,))
+    fix = 'refresh with python3 scripts/restore_drill_enterprise.py'
+    declared = declared_restore_record(root)
+    if declared is None:
+        return ['restore drill: %s declares no readable %r item carrying a record '
+                'path and a max age in days; %s' % (GATE_RELPATH, RECORD_ITEM_ID, fix)]
+    record_relpath, max_age_days = declared
+    raw = _read_bytes(os.path.join(root, record_relpath))
+    if raw is None:
+        return ['restore drill: %s does not exist; %s' % (record_relpath, fix)]
+    try:
+        doc = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, ValueError):
+        return ['restore drill: %s is not readable JSON; %s' % (record_relpath, fix)]
+    drill_date = doc.get('drill_date') if isinstance(doc, dict) else None
+    try:
+        ran = date.fromisoformat(drill_date)
+    except (TypeError, ValueError):
+        return ['restore drill: %s carries no ISO drill_date; %s' % (record_relpath, fix)]
+    if ran > (today or date.today()):
+        return ['restore drill: %s drill_date %s is in the future (INVALID); %s' % (record_relpath, drill_date, fix)]
+    stale_on = ran + timedelta(days=max_age_days + 1)
+    stale = stale_on <= deadline_day
+    if stale:
+        return ['restore drill: %s stale on %s; %s' % (record_relpath, stale_on.isoformat(), fix)]
+    return []

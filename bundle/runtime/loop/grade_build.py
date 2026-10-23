@@ -806,6 +806,9 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # checks' import closure: a loop build never edits them
                    "scripts/cut.py", "scripts/cut_rehearsal.py", "scripts/next_cut.py", "scripts/outgoing_scan.py", "scripts/linux_canary.py",
                    "scripts/resource_gate.py",
+                   # CS8.b: cut_preflight reads the pool's disk floor from perturb_pool (and, through it, load_rule and the
+                   # release note perturbation module), so they join the frozen checks' import closure
+                   "scripts/perturb_pool.py", "scripts/loop/load_rule.py", "scripts/release_note_perturb.py",
                    # what the frozen builder exports is the landing tree's own allowlist (cut_preflight.export_tree_builder)
                    "docs/plan/export-allowlist.txt",
                    # EVERY MODULE THE LANDER ITSELF RUNS OR IMPORTS FROM THE FROZEN COPY OUTSIDE boxed() (review 16, 2026-10-03):
@@ -1584,17 +1587,49 @@ def brief_screen_mode(environ=None):
     raise ValueError("BROTHER_BRIEF_SCREEN=%r is not on or off" % (raw,))
 
 
-def private_hits(text):
-    """How many private terms an outgoing text carries. ONE function for every gate. Client terms and the first target app's name match
-    anywhere. Names from the private list match as WHOLE WORDS only: a four letter name inside the word serialization held an honest
-    brief on 2026-09-20. Unreadable list: every text counts as a hit (fails closed)."""
+def _terms_scan():
+    """scripts/private_terms_scan.py, the ONE reader of the private list (load_terms) and the one set of readings a term
+    is looked for in (text_views). Found beside this tree first (scripts/ next to scripts/loop), else under the code root,
+    the way model_router._paths reaches brother_paths: the deployed flat bin's parent is ~/.claude, which holds no scanner.
+    Its folder is on sys.path only for this one import, so the loop's own copies of shared names keep winning."""
+    module = sys.modules.get("private_terms_scan")
+    if module is not None:
+        return module
+    where = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isfile(os.path.join(where, "private_terms_scan.py")):
+        import model_router
+        where = os.path.join(model_router.code_root(), "scripts")
+    sys.path.insert(0, where)
     try:
-        names = [l.strip().lower() for l in open(os.path.expanduser("~/.brothersbe-private-names"), encoding="utf-8") if l.strip() and not l.startswith("#")]
-    except OSError:
+        import private_terms_scan as module
+    finally:
+        sys.path.remove(where)
+    return module
+
+
+def private_hits(text):
+    """How many private terms an outgoing text carries. ONE function for every gate. Every term comes from the one private
+    list, ~/.brothersbe-private-names, read by private_terms_scan.load_terms: no term is written in this file (PRIV1,
+    2026-10-18: a term written into code, however it is spelled, is a term the code publishes). The first target app's
+    name is screened only when the list carries it (its
+    brother-tree block). In any reading private_terms_scan.text_views gives (escapes decoded, adjacent literals
+    joined), a term counts as a WHOLE WORD in any case (a four letter name inside the word serialization held an honest
+    brief on 2026-09-20), and a term the list stores in CAPITALS also counts wherever it appears in capitals, inside a
+    longer word too: the anywhere rule the client codes had when they were literals here, kept so moving them into the
+    list weakens nothing. Fails CLOSED: a missing, unreadable or empty list, a scanner that cannot be loaded (no code
+    root), or a text that is not a string each count as a hit."""
+    if not isinstance(text, str):
         return 1
-    low = text.lower()
-    return (text.count("\u0055RRY") + text.count("\u0043CBJI") + low.count("\u0074onari")
-            + sum(len(re.findall(r"(?<![a-z])" + re.escape(n) + r"(?![a-z])", low)) for n in names))
+    try:
+        scan = _terms_scan()
+        names = scan.load_terms(os.path.expanduser("~/.brothersbe-private-names"))
+    except Exception:   # ImportError, model_router.Refused, OSError, a list that is not UTF-8: an unknown list blocks
+        return 1
+    if not names:
+        return 1
+    return max(sum(len(re.findall(r"(?<![a-z])" + re.escape(n.lower()) + r"(?![a-z])", view.lower()))
+                   + (view.count(n) if n.isupper() else 0) for n in names)
+               for view in scan.text_views(text))
 
 
 @contextlib.contextmanager

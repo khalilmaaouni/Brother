@@ -39,10 +39,17 @@ except ImportError:
 
 TRAILER_LINE = "Co-" + "Authored" + "-By: Claude <no" + "reply@anthropic.com>"
 
+# One budget for every child this suite starts. It was 60 s per call, tuned for an empty machine outside the box:
+# the landing judge runs this suite inside the grader's sandbox beside other gates, where pre_push_gate.py on a
+# fixture repository measured past 60 s and three cases read "timed out" (boxed: Ran 34 in 408 s, errors=3;
+# unboxed at the same load: Ran 34 in 168 s, OK; 2026-10-20). pre_push_gate.py itself already allows 300 s for
+# load (its own comment near check_drift), so its suite allows the same.
+CALL_TIMEOUT_S = 300
+
 
 def sh(args, cwd):
     return subprocess.run(args, cwd=cwd, capture_output=True, text=True,
-                          timeout=60)
+                          timeout=CALL_TIMEOUT_S)
 
 
 class ImportedHistoryStaysExcludedOnANewBranch(unittest.TestCase):
@@ -125,7 +132,7 @@ class ImportedHistoryStaysExcludedOnANewBranch(unittest.TestCase):
             [sys.executable, os.path.join(HERE, "pre_push_gate.py"),
              "--cwd", self.repo],
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            timeout=60)
+            timeout=CALL_TIMEOUT_S)
         self.assertEqual(proc.returncode, G.EXIT_BLOCKED,
                          proc.stdout + proc.stderr)
 
@@ -253,7 +260,7 @@ class DetachedHeadHasNoOutgoingRange(unittest.TestCase):
             [sys.executable, os.path.join(HERE, "pre_push_gate.py"),
              "--cwd", self.repo],
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            timeout=60)
+            timeout=CALL_TIMEOUT_S)
         out = proc.stdout + proc.stderr
         self.assertEqual(proc.returncode, G.EXIT_OK, out)
         self.assertIn("NO-DATA", out)
@@ -280,7 +287,7 @@ class DetachedHeadHasNoOutgoingRange(unittest.TestCase):
             [sys.executable, os.path.join(HERE, "pre_push_gate.py"),
              "--cwd", self.repo],
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            timeout=60)
+            timeout=CALL_TIMEOUT_S)
         out = proc.stdout + proc.stderr
         self.assertEqual(proc.returncode, G.EXIT_OK, out)
         self.assertIn("NO-DATA", out)
@@ -327,7 +334,7 @@ class AttachedBranchBehindOriginStillBlocks(unittest.TestCase):
             [sys.executable, os.path.join(HERE, "pre_push_gate.py"),
              "--cwd", self.repo],
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            timeout=60)
+            timeout=CALL_TIMEOUT_S)
         out = proc.stdout + proc.stderr
         self.assertEqual(proc.returncode, G.EXIT_BLOCKED, out)
         self.assertIn("BLOCK", out)
@@ -451,7 +458,7 @@ class ADetachedPushIsScannedFromTheRefsOnStdin(unittest.TestCase):
             [sys.executable, os.path.join(HERE, "pre_push_gate.py"),
              "--cwd", self.repo],
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            timeout=60)
+            timeout=CALL_TIMEOUT_S)
         self.assertEqual(proc.returncode, G.EXIT_OK,
                          proc.stdout + proc.stderr)
 

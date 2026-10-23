@@ -130,7 +130,7 @@ class BrokenCandidateJourney(unittest.TestCase):
         self.assertEqual(self.fx.scratch_left(), [], out)
 
     def run_redeploy(self, mode):
-        more = ["--deadline", self.TRC.DATED]
+        more = ["--deadline", self.TRC.DATED, "--probe-cap-usd", "5"]
         if mode is None:
             more += ["--plan", "docs/plan/P.json", "--scope", "^(A1)$", "--budget-usd", "5", "--reason", "u80 journey"]
         return self.fx.run_redeploy(*more, mode=mode, TEST_STAGE="fail", TEST_LIVE_RC="1",
@@ -143,7 +143,7 @@ class BrokenCandidateJourney(unittest.TestCase):
         self.assertEqual(sorted(n for n, (s, _) in rows.items() if s != "PASS"), ["stage"], out)
         self.assertEqual(rows["live"][0], "PASS", out)
         self.assertIn(self.BROKEN, rows["stage"][1])
-        self.assertIn("CHECK FAIL: 10 PASS, 1 FAIL, 0 NO-DATA", out)
+        self.assertIn("CHECK FAIL: 11 PASS, 1 FAIL, 0 NO-DATA", out)
         self.assertLiveLoopUntouched(out)
 
     def test_a_broken_candidate_is_refused_before_the_drain_and_nothing_is_deployed(self):

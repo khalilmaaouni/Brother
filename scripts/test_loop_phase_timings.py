@@ -33,7 +33,7 @@ DRIVER = ["LOOP UNTIL 05:00 | gap 120s | log /x/evidence/loop-until-20261017-223
           "00:10:00 pass 4 done (rc 0)\n",
           "LANDED  PH1.a | units with every sub unit landed (run the unit done-check): none | PH1.a usd 0.02 | log /tmp/l\n",
           "an unknown kind of line\n",
-          "RUN END 2026-10-18T05:00:00\n"]
+          "RUN END 2026-10-18T05:00:00+09:00\n"]
 STOP = ["DRAINED: no runner is alive after 35s; the loop is PAUSED; nothing was killed\n",
         "STOPPED: nothing of the loop is alive\n"]
 CUT = ["PHASE ready PASS 2s main is clean\n", "PHASE freeze PASS 61s frozen at abc\n",
@@ -119,7 +119,7 @@ class Requirements(Base):
         """REQ-PH1A-03: a clock that steps back clamps at 0 and says so."""
         rows = T.phases({"/d.log": ["LOOP UNTIL 05:00 | gap 60s | log /e/loop-until-a.log\n",
                                     "22:30:10 pass 1 done (rc 0)\n",
-                                    "LOOP DEADLINE at 2026-10-17 22:30:00 CEST\n"]})
+                                    "LOOP DEADLINE at 2026-10-17 22:30:00+09:00\n"]})
         run = by_phase(rows, "run")[0]
         self.assertEqual(run["seconds"], 0)
         self.assertIn("stepped back 10 s", run["reason"])
@@ -185,7 +185,7 @@ class Edges(Base):
         self.assertEqual([(r["run"], r["seconds"]) for r in T.phases({"/s": two})],
                          [("loop-until-one", 2), ("loop-until-two", 5)])
         drv = ["LOOP UNTIL 05:00 | gap 1s | log /e/a.log\n", "01:00:00 x\n",
-               "LOOP UNTIL 05:00 | gap 1s | log /e/b.log\n", "02:00:00 x\n", "RUN END 2026-10-18T03:00:00\n"]
+               "LOOP UNTIL 05:00 | gap 1s | log /e/b.log\n", "02:00:00 x\n", "RUN END 2026-10-18T03:00:00+09:00\n"]
         runs = by_phase(T.phases({"/d": drv}), "run")
         self.assertEqual([(r["run"], r["seconds"]) for r in runs], [("a", None), ("b", 3600)])
 
@@ -203,13 +203,13 @@ class Edges(Base):
 
     def test_hostile_logs(self):
         big = self.log("big.log", ["TIME a " + "9" * (1 << 20) + "\n", "TIME b 1\n"])
-        far = self.log("far.log", ["LOOP UNTIL 05:00 | gap 1s | log /e/f.log\n", "9999-12-31T23:59:58 x\n",
-                                   "RUN END 9999-12-31T23:59:59\n", "00:00:05 past the last day\n"])
+        far = self.log("far.log", ["LOOP UNTIL 05:00 | gap 1s | log /e/f.log\n", "9999-12-31T23:59:58Z x\n",
+                                   "RUN END 9999-12-31T23:59:59Z\n", "00:00:05 past the last day\n"])
         rc, _ = self.main(["--out", self.root, big, far, self.root])
         self.assertEqual(rc, 0)
         rows = self.ledger()
         self.assertEqual(by_phase(rows, "launch")[0]["seconds"], 1)
-        self.assertEqual(by_phase(rows, "run")[0]["seconds"], 1)
+        self.assertIsNone(by_phase(rows, "run")[0]["seconds"])
         self.assertIn("is a directory", [r for r in rows if r["source"] == self.root][0]["reason"])
 
     def test_usage_errors_exit_two(self):
@@ -244,6 +244,44 @@ class Edges(Base):
         self.assertRaises(ValueError, T.phases, {3: []})
         self.assertRaises(ValueError, T.write_ledger, [], os.path.join(self.root, "nope"))
         self.assertTrue(math.isnan(float("nan")))
+
+
+class I15Zone(Base):
+    """REQ-I15-01 to REQ-I15-08: zone aware stamps and JST clock lines read the wall clock."""
+
+    def test_a_utc_stamp_reads_its_epoch(self):
+        clocks = T._clocks(["2026-10-17T13:37:10Z\n"])
+        self.assertEqual(len(clocks), 1)
+        self.assertIsInstance(clocks[0], int)
+        self.assertEqual(T._iso(clocks[0]), "2026-10-17T22:37:10")
+
+    def test_a_stamp_without_a_zone_reads_no_data(self):
+        self.assertEqual(T._clocks(["2026-10-17T13:37:10\n"]), [None])
+
+    def test_a_utc_run_start_against_local_clock_lines_reads_the_wall_clock(self):
+        clocks = T._clocks(["2026-10-17T13:37:10Z start\n", "22:44:10 end\n"])
+        self.assertEqual(len(clocks), 2)
+        self.assertIsInstance(clocks[0], int)
+        self.assertIsInstance(clocks[1], int)
+        self.assertEqual(clocks[1] - clocks[0], 420)
+
+    def test_a_zone_abbreviation_reads_its_offset(self):
+        clocks = T._clocks(["2026-10-17 22:30:00 CEST\n"])
+        self.assertEqual(len(clocks), 1)
+        self.assertIsInstance(clocks[0], int)
+        self.assertEqual(T._iso(clocks[0]), "2026-10-18T05:30:00")
+
+    def test_a_clock_line_anchors_to_the_nearest_full_stamp(self):
+        clocks = T._clocks(["2026-10-17T06:00:00+09:00 early\n",
+                            "2026-10-18T18:00:00+09:00 late\n",
+                            "12:00:00 noon\n"])
+        self.assertEqual(len(clocks), 3)
+        for c in clocks:
+            self.assertIsInstance(c, int)
+        self.assertEqual(T._iso(clocks[2]), "2026-10-18T12:00:00")
+
+    def test_a_far_future_stamp_reads_no_data(self):
+        self.assertEqual(T._clocks(["9999-12-31T23:59:59Z\n"]), [None])
 
 
 if __name__ == "__main__":

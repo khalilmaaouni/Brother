@@ -9,6 +9,7 @@ A unit gets NO new runner while: a runner for it is alive; or one of its builds 
 on the tree AFTER that landing, or its patch will not apply); or its last run ended EXHAUSTED or WITHHELD (needs a human fact).
 Order of starts follows the council ranking first, then plan order.
 A unit the plan lint flags is skipped only when BROTHER_RUNFLOW_LINT=block; in report mode its findings are printed and admission is unchanged."""
+import hashlib
 import fcntl, glob, json, os, re, subprocess, sys, time
 import importlib.util   # ACC3.b: the one loading route the safety screen and the proof freeze both admit
 from typing import List, Optional, Set, Tuple   # ACC3.b: this block's typed contract
@@ -266,6 +267,125 @@ def fact_time(unit_id, mtime=os.path.getmtime, specs="docs/plan/specs", bin_dir=
     return newest
 
 
+def _seat_env_get(env, name):
+    """(value, readable) for `name` in `env` (a mapping) or the process environment when env is None. readable is
+    False when the read cannot be taken at all: env has no get(), or get() raised. A readable read of a missing
+    name answers (None, True)."""
+    if env is None:
+        return (os.environ.get(name), True)
+    try:
+        getter = env.get
+    except AttributeError:
+        return (None, False)
+    if not callable(getter):
+        return (None, False)
+    try:
+        return (getter(name), True)
+    except (KeyError, TypeError, AttributeError, ValueError):  # sbe: allow-silent an unreadable mapping read is the fingerprint's ? and the path readers' default
+        return (None, False)
+
+
+def seat_root(env=None):
+    """The driver-controlled seat root, as a realpath: the SEAT_ROOT_ENV value when it is a string holding a
+    non-space character, else SEAT_ROOT_DEFAULT. "" when the resolved path is the runs directory RUNS or sits under
+    it, because a root the unit runtimes write is not driver-controlled."""
+    value, readable = _seat_env_get(env, SEAT_ROOT_ENV)
+    if readable and isinstance(value, str) and value.strip():
+        chosen = value
+    else:
+        chosen = SEAT_ROOT_DEFAULT
+    try:
+        resolved = os.path.realpath(chosen)
+    except (OSError, ValueError, TypeError):  # sbe: allow-silent a root that cannot be resolved is no root
+        return ""
+    runs_real = os.path.realpath(RUNS)
+    if resolved == runs_real or resolved.startswith(runs_real + os.sep):
+        return ""
+    return resolved
+
+
+def launch_stamp_path(env=None):
+    """The realpath of the stamp file, or "" when seat_root(env) is "" or the resolved candidate escapes the seat
+    root. The LAUNCH_STAMP_ENV value when it is a string holding a non-space character is the candidate, a relative
+    one joined under the root; else the LAUNCH_STAMP_NAME entry under the root."""
+    root = seat_root(env)
+    if not root:
+        return ""
+    value, readable = _seat_env_get(env, LAUNCH_STAMP_ENV)
+    if readable and isinstance(value, str) and value.strip():
+        chosen = value
+    else:
+        chosen = LAUNCH_STAMP_NAME
+    joined = chosen if os.path.isabs(chosen) else os.path.join(root, chosen)
+    try:
+        resolved = os.path.realpath(joined)
+    except (OSError, ValueError, TypeError):  # sbe: allow-silent a stamp path that cannot be resolved is no stamp path
+        return ""
+    if not resolved.startswith(root + os.sep):
+        return ""
+    return resolved
+
+
+def seat_fingerprint(env=None):
+    """A lower case sha256 hex digest of the seat launch environment: the SEAT_ENV_NAMES lines name=value joined
+    with newlines, UTF-8 encoded. A missing name reads as the empty string; a read that raises reads as ?. The same
+    environment always yields the same digest, and any change to one of the four names yields a different one."""
+    lines = []
+    for name in SEAT_ENV_NAMES:
+        value, readable = _seat_env_get(env, name)
+        if not readable or (value is not None and not isinstance(value, str)):
+            lines.append("%s=?" % name)
+        elif value is None:
+            lines.append("%s=" % name)
+        else:
+            lines.append("%s=%s" % (name, value))
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest().lower()
+
+
+def write_launch_stamp(env=None):
+    """The production writer and the only place the stamp file is created. A "" stamp path writes nothing and
+    answers "". The current text (a missing, unreadable or non-file path reads as "") equal to the current
+    fingerprint leaves the file and its mtime alone; anything else creates the parent directory, writes the
+    fingerprint to a sibling temporary file named by appending .tmp, renames it over the stamp path and answers the
+    path. With env None the process environment's LAUNCH_STAMP_ENV is set to the path; a caller that passed its own
+    mapping leaves the process environment alone. Any OSError or ValueError while writing answers ""."""
+    path = launch_stamp_path(env)
+    if not path:
+        return ""
+    fingerprint = seat_fingerprint(env)
+    try:
+        with open(path, "rb") as fh:
+            current = fh.read().decode("utf-8", "replace")
+    except (OSError, ValueError):  # sbe: allow-silent a missing, unreadable or non-file path is no stamp yet
+        current = ""
+    if current != fingerprint:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(fingerprint)
+            os.replace(tmp, path)
+        except (OSError, ValueError):  # sbe: allow-silent a write that failed leaves no stamp and the pass unchanged
+            return ""
+    if env is None:
+        os.environ[LAUNCH_STAMP_ENV] = path
+    return path
+
+
+def launch_stamp_time(mtime=os.path.getmtime, env=None):
+    """The stamp's mtime as a float, or 0.0 for every doubtful input: an empty path, a path that is not a file, and
+    any OSError, ValueError or TypeError from `mtime`."""
+    path = launch_stamp_path(env)
+    if not path:
+        return 0.0
+    if not os.path.isfile(path):
+        return 0.0
+    try:
+        return float(mtime(path))
+    except (OSError, ValueError, TypeError):  # sbe: allow-silent an mtime that cannot be read is no fact
+        return 0.0
+
+
 RESEAT_MIN_S = 600   # a sub unit is not re-seated within ten minutes of its last start unless that run reached READY
 
 
@@ -305,19 +425,41 @@ def still_parked(word, run_at, fact_at):
 # R1 F2): a fresh proof that CLOSED a configuration breaker. A fault no program change can fix (a transient "No endpoints
 # found", lost access, a registry id repaired) is proven gone by that close, whatever the program record says.
 PARKED = ("EXHAUSTED", "WITHHELD", "CONFIG_WAIT")
+# I3.a: the driver writes a seat root stamp under a driver-controlled root and the pass names it in the process
+# environment. SEAT_ROOT_ENV names the root; SEAT_ROOT_DEFAULT is the fallback under the driver's evidence area,
+# home expanded at import time. LAUNCH_STAMP_ENV names the stamp file and LAUNCH_STAMP_NAME is the entry the writer
+# uses under the seat root. SEAT_ENV_NAMES are the four launch names the seat caps read and the fingerprint hashes.
+SEAT_ROOT_ENV = "BROTHER_SEAT_ROOT"
+SEAT_ROOT_DEFAULT = os.path.expanduser("~/.claude/evidence/seat-root")
+LAUNCH_STAMP_ENV = "BROTHER_LAUNCH_STAMP"
+LAUNCH_STAMP_NAME = "launch-stamp"
+SEAT_ENV_NAMES = ("BROTHER_SEAT_ROOT", "BROTHER_PIN_MODEL", "BROTHER_NATIVE_SEATS", "WORKERS_PER_ROUND")
+
+
+def seat_root_fact(word: str, spec_at: float) -> float:
+    """The fact time a parked unit is judged against. A spec_at that is a bool, a string, None, NaN or any other
+    non-number is refused with ValueError. For a word that is not the string WITHHELD the spec and judge fact
+    stands unchanged; for WITHHELD the seat root stamp joins the maximum, so a changed seat root readmits it."""
+    if isinstance(spec_at, bool) or not isinstance(spec_at, (int, float)):
+        raise ValueError("spec_at must be a number, not %r" % (spec_at,))
+    if spec_at != spec_at or spec_at == float("inf") or spec_at == float("-inf"):
+        raise ValueError("spec_at must be a number, not %r" % (spec_at,))
+    if word != "WITHHELD":
+        return float(spec_at)
+    return max(float(spec_at), launch_stamp_time())
 
 
 def parked_fact(word, unit_id, spec_path=None):
     """The newest fact for a sub unit whose last run ended `word`: fact_time, and for CONFIG_WAIT also the newest
     configuration breaker close. An unreadable breaker adds no fact (the unit stays parked)."""
-    fact = fact_time(unit_id, spec_path=spec_path)
+    fact_at = fact_time(unit_id, spec_path=spec_path)
     if word == "CONFIG_WAIT":
         try:
             import breaker
-            fact = max(fact, breaker.last_config_close())
+            fact_at = max(fact_at, breaker.last_config_close())
         except (ImportError, ValueError, OSError):
             pass   # sbe: allow-silent no readable close is no fact; the unit stays parked, the safe side
-    return fact
+    return seat_root_fact(word, fact_at)
 
 
 # A SEAT LOST MID RUN PARKS ONLY ITS TRANSPORT'S UNITS, AND SAYS SO ONCE (1.1.6 S3). Until S3 a lost Claude login parked
@@ -1246,6 +1388,7 @@ def room_of(burn_free: int, wip_free: int, seat_free: Optional[int] = None, busy
 def main():
     os.makedirs(RUNS, exist_ok=True)
     dry = "--dry" in sys.argv
+    write_launch_stamp()   # I3.a: the pass writes the seat root stamp before it ranks or admits any unit; a refused stamp leaves the pass as it was
     # THE RUN'S LOGIN HOLDER (1.1.6 S2): taken from this process's environment, so only the unit runners it starts are
     # told it, each with the descriptor itself (brother_login.take_hold). Nothing changes when no holder is named.
     hold_env, hold_fds = {}, ()

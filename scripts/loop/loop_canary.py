@@ -8,16 +8,27 @@ applied and graded in a sandbox worktree at the commit its landing was made agai
 (STATUS word). It must reach WOULD LAND. No model is called, nothing is pushed, the
 real tree is never touched.
 
-usage (repo root): loop_canary.py            exit 0 WOULD LAND, 1 a stage refused (named), 3 NO-DATA (the spec, the
-                                            build json or git cannot be read: on a machine without the evidence the
-                                            canary cannot run, and that is said, never passed)
+usage (repo root): loop_canary.py [--landing [--keep]]   exit 0 WOULD LAND, 1 a stage refused (named), 3 NO-DATA (the spec, the
+                                            build json, git, or the deployed stamp's revision cannot be read: on a
+                                            machine without the evidence the canary cannot run, and that is said,
+                                            never passed)
                    loop_canary.py --selftest
+THE LANDING STAGE (1.1.7 LR1.d), asked for with --landing, which start_run.sh passes and nothing else does: the intake
+(loop_intake.canary, cached for a day) and the deploy's staged proof (tool_stamp.prove) run this file bare with a 1800 second
+bound, and a whole gate on every deploy and every intake would run past it and refuse both. The replay is what they get.
+After the replay reaches WOULD LAND, landing_stage sends one tiny real change through the
+LIVE judge: a disposable worktree at the revision the DEPLOYED stamp names, one scratch file changed and committed there
+(the judge refuses a checkout with uncommitted changes, so the change must be a commit; it is on a detached HEAD in that
+worktree only, on no branch, never pushed, unreachable once the worktree is removed), then land_batch.deploy_steps' judge:
+the boxed whole gate on that merged tree with the stamp's kernel overlay, exactly as a landing runs it. It calls no model
+and writes nothing outside its temporary worktree. --keep leaves that worktree for inspection and says where. A replay
+that already refused, or has no data, skips it: the whole gate is not spent on a launch that is already refused.
 Covers: git worktree at the base commit, grade_build (preflight, red without code, green with code, mutations, both
 Pythons as the grader does it), the STATUS word rule (the checker hold is gone with the checker, owner decision 2026-10-02). Does NOT cover: the executed probe stage
 (it needs a model), the battery on the whole tree (minutes; the landing runs it), the push.
 """
-import json, os, re, shutil, subprocess, sys, tempfile
-from typing import List
+import json, os, re, shutil, signal, stat, subprocess, sys, tempfile, time
+from typing import List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # THIS file's own directory: the copies installed beside it
@@ -130,15 +141,74 @@ def verdict(rows):
     return "CANARY WOULD LAND: %d stage(s) passed%s" % (len(rows) - len(unm), ", %d unmeasured (%s)" % (len(unm), ", ".join(unm)) if unm else ""), 0
 
 
-def real_run(argv, cwd):
+RUN_BOUND_S = 1700   # one child's bound, seconds; a child past it is killed with its whole group
+
+
+def real_run(argv, cwd, bound=None):
+    """(returncode, text) of one child, which leads its own process group: when this process is interrupted (a TERM or an
+    INT raised as SystemExit by install_signal_raisers) or the child outlives its bound, the WHOLE group is killed, so a
+    grader's own children never outlive the canary."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
-        r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=1700, env=env)
-        # stderr FIRST: every stage reads a tool's verdict from the last line, and a tool's stderr notes (a lost
-        # ledger claim, 2026-09-30) are diagnostics that must never stand in for the verdict it printed on stdout.
-        return r.returncode, "\n".join(p for p in (r.stderr.rstrip("\n"), r.stdout) if p)
-    except (OSError, subprocess.SubprocessError) as exc:
+        p = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env,
+                             start_new_session=True)
+    except OSError as exc:
         return 99, str(exc)
+    try:
+        out, err = p.communicate(timeout=bound or RUN_BOUND_S)
+    except subprocess.TimeoutExpired as exc:
+        _kill_group(p)
+        return 99, str(exc)
+    except BaseException:
+        _kill_group(p)
+        raise
+    # stderr FIRST: every stage reads a tool's verdict from the last line, and a tool's stderr notes (a lost
+    # ledger claim, 2026-09-30) are diagnostics that must never stand in for the verdict it printed on stdout.
+    return p.returncode, "\n".join(x for x in (err.rstrip("\n"), out) if x)
+
+
+CHILD_GRACE_S = 40   # a child told to TERM is given this long to unwind (finish() drops the judge's copy, run_group kills the gate)
+
+
+def _kill_group(p, grace=None):
+    """TERM the process group the child leads, give it `grace` seconds (CHILD_GRACE_S) to unwind its own finally blocks (a
+    deployed judge's finish() and run_group's kill of its gate run only then), then SIGKILL what still stands and reap the
+    child. Never raises: the caller is already unwinding."""
+    grace = CHILD_GRACE_S if grace is None else grace
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+    except OSError:
+        pass   # sbe: allow-silent the group is already gone, the state this wants
+    try:
+        p.communicate(timeout=grace)
+    except (OSError, subprocess.SubprocessError):
+        pass   # sbe: allow-silent it did not unwind in time: the kill below is the answer
+    try:
+        os.killpg(p.pid, signal.SIGKILL)   # whatever is left of the group, the leader included
+    except OSError:
+        pass   # sbe: allow-silent nothing is left, the state this wants
+    try:
+        p.communicate(timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass   # sbe: allow-silent a child that will not be reaped in ten seconds is left to init; its group is already killed
+
+
+def _raise_on_signal(signum, frame):
+    """A TERM, INT or HUP becomes SystemExit(128 + signal), so every `finally` of the run unwinds (the sandbox worktree, the
+    landing worktree, the child groups). Later signals are ignored: a second one must not cut the clean up short."""
+    for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+        signal.signal(getattr(signal, name), signal.SIG_IGN)
+    raise SystemExit(128 + signum)
+
+
+def install_signal_raisers():
+    """Install _raise_on_signal for SIGTERM, SIGINT and SIGHUP (it also overrides an inherited ignore, which a shell gives a
+    background job). Only the main thread can; anywhere else this says nothing and changes nothing."""
+    try:
+        for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+            signal.signal(getattr(signal, name), _raise_on_signal)
+    except ValueError:
+        pass   # sbe: allow-silent not the main thread: signal.signal refuses, and no handler is the only other choice
 
 
 def missing_fixture_files(spec: dict) -> List[str]:
@@ -220,9 +290,237 @@ def verdict_set(results):
                                                                       ", unmeasured: %s" % ", ".join(unm) if unm else ""), 0
 
 
+#: The first words of the line a canary prints only when the landing stage ran and reached WOULD LAND. start_run.sh requires
+#: them: an older loop_canary.py that ignores --landing exits 0 after the replay alone, and must not read as a pass.
+LANDING_OK = "CANARY WOULD LAND: the replay and the landing stage"
+LANDING_SCRATCH = "logs/landing-canary-scratch.txt"   # the one file the landing stage changes: a new file, no neighbour reads it
+
+
+def deployed_bin() -> str:
+    """The deployed bin whose stamp names generation N: BROTHER_DEPLOY_TARGET (the deploy tools' own switch) else ~/.claude/bin."""
+    return os.path.expanduser(os.environ.get("BROTHER_DEPLOY_TARGET") or "~/.claude/bin")
+
+
+#: THE DEPLOYED LAND_BATCH RUNS IN A CHILD PYTHON, never imported here. The judge a landing runs is the deployed bin's, not this
+#: checkout's scripts/loop copy (the very code a landing is about to change); the child puts that bin first on its own
+#: sys.path and imports land_batch there, so this process loads no second copy and the deploy's closure check sees no dynamic
+#: import. mode "stamp" prints `STAMP <json>`; mode "judge" runs deploy_steps' judge inside the tree, finishes it, and prints
+#: `JUDGE [ok, why]`.
+DEPLOYED_CHILD = r"""
+import json, os, signal, sys
+bin_dir, mode = sys.argv[1], sys.argv[2]
+sys.path.insert(0, bin_dir)
+import land_batch as lb
+def _raise(signum, frame):
+    for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+        signal.signal(getattr(signal, name), signal.SIG_IGN)
+    raise SystemExit(128 + signum)
+for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+    signal.signal(getattr(signal, name), _raise)
+if mode == "stamp":
+    print("STAMP " + json.dumps(lb.deploy_stamp(bin_dir)))
+    sys.stdout.flush()
+else:
+    tree, stamp, logpath = sys.argv[3:6]
+    os.chdir(tree)
+    with open(logpath, "a", encoding="utf-8") as log:
+        do = lb.deploy_steps(json.loads(stamp), log, {})
+        try:
+            ok, why = do["judge"]()
+        finally:
+            do["finish"]()
+    print("JUDGE " + json.dumps([ok, why]))
+    sys.stdout.flush()
+"""
+JUDGE_BOUND_S = 7300   # the judge's own bound is 7200 seconds (land_batch.deploy_steps)
+
+
+def _deployed_child(bin_dir, mode, *args, bound=None):
+    """(returncode, output) of DEPLOYED_CHILD in a child python over `bin_dir`: stderr first, stdout last."""
+    # -I: PYTHONPATH, the user site and the current directory cannot shadow a module; the bin is first on its sys.path
+    # explicitly (DEPLOYED_CHILD), so the deployed land_batch and its siblings are what is imported
+    return real_run([sys.executable, "-I", "-B", "-c", DEPLOYED_CHILD, bin_dir, mode] + list(args), None, bound)
+
+
+def _last(text, word):
+    """The JSON after the last `<word> ` line of a child's output, or None."""
+    for line in reversed((text or "").splitlines()):
+        if line.startswith(word + " "):
+            try:
+                return json.loads(line[len(word) + 1:])
+            except ValueError:
+                break   # the last verdict line is malformed: that is no verdict, and an older line must not stand in for it
+    return None
+
+
+def deployed_stamp(bin_dir: Optional[str] = None) -> Optional[dict]:
+    """The deployed bin's stamp as ITS land_batch reads it (deploy_stamp: a stamp carrying a kernel), or None, said on stderr,
+    when the bin holds no land_batch.py, it will not run, or the stamp is missing or unreadable."""
+    bin_dir = bin_dir or deployed_bin()
+    if not os.path.isfile(os.path.join(bin_dir, "land_batch.py")):
+        sys.stderr.write("loop_canary: no land_batch.py in the deployed bin %s\n" % bin_dir)
+        return None
+    rc, text = _deployed_child(bin_dir, "stamp", bound=300)
+    stamp = _last(text, "STAMP")
+    if not isinstance(stamp, dict):
+        sys.stderr.write("loop_canary: the deployed land_batch in %s gave no stamp (exit %d): %s\n"
+                         % (bin_dir, rc, (text.strip().splitlines() or ["no output"])[-1][:160]))
+        return None
+    return stamp
+
+
+def live_judge(stamp: dict, tree: str, log, bin_dir: Optional[str] = None) -> tuple:
+    """(ok, why) from the landing's own judge step, the DEPLOYED land_batch's, run in a child python INSIDE `tree` (the judge
+    reads the checkout it runs in), its finish() run whatever the judge did; the gate's output goes to `log` (a file, by
+    name). No deployed land_batch, a child that exits non zero, and a child that prints no verdict are RuntimeError, never a
+    fall back to this checkout's copy and never a pass. The child leads its own process group, so an interrupt kills it."""
+    bin_dir = bin_dir or deployed_bin()
+    if not os.path.isfile(os.path.join(bin_dir, "land_batch.py")):
+        raise RuntimeError("no land_batch.py in the deployed bin %s" % bin_dir)
+    logpath = getattr(log, "name", None)
+    if not isinstance(logpath, str):
+        raise RuntimeError("the judge's log has no file name")
+    rc, text = _deployed_child(bin_dir, "judge", tree, json.dumps(stamp), logpath, bound=JUDGE_BOUND_S)
+    verdict = _last(text, "JUDGE")
+    if rc != 0 or verdict is None:
+        raise RuntimeError("the deployed judge child exited %d without a verdict: %s"
+                           % (rc, (text.strip().splitlines() or ["no output"])[-1][:200]))
+    return verdict[0], verdict[1]
+
+
+def _git(argv, cwd=None):
+    """(returncode, text) of one git command. A command that outlives its bound or cannot start is a non zero code (124, 127),
+    never an exception: the clean up in landing_stage's finally calls this too."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        r = subprocess.run(["git"] + argv, cwd=cwd, capture_output=True, text=True, timeout=300, env=env)
+    except subprocess.TimeoutExpired:
+        return 124, "git %s timed out after 300 seconds" % (argv[0] if argv and argv[0] != "-c" else "command")
+    except OSError as exc:
+        return 127, "git could not start (%s)" % type(exc).__name__
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def _no_data(why: str) -> List[dict]:
+    sys.stderr.write("loop_canary: landing stage NO-DATA: %s\n" % why)
+    return []
+
+
+GATE_LOG_TAIL = 2 * 1024 * 1024   # a kept gate log is its last 2 MB: the failing rows are at the end
+
+
+def keep_gate_log(box: str, log_path: str, stamp: Optional[str] = None) -> Optional[str]:
+    """Copy the refused landing judge's whole gate log (and any failing row's own output the judge left under `box`,
+    required-fast-fail-*.txt) to <evidence>/loop-starts/canary-gate-<stamp>.log, its last GATE_LOG_TAIL bytes each, and
+    return that path. Called BEFORE the disposable worktree and box are removed: 2026-10-21 a real launch was refused with
+    "the whole gate exited 1 boxed: deploy-canary FAIL exit 1" and the log went with the box, so nobody could see why. The
+    evidence folder is START_RUN_EVIDENCE when the launcher names one, else ~/.claude/evidence. A copy that cannot be made
+    returns None and says so on stderr: it never changes or fails the refusal itself."""
+    try:
+        stamp = stamp or "%s-%d" % (time.strftime("%Y%m%d-%H%M%S"), os.getpid())
+        folder = os.path.join(os.environ.get("START_RUN_EVIDENCE") or os.path.expanduser("~/.claude/evidence"), "loop-starts")
+        os.makedirs(folder, exist_ok=True)
+        dest = os.path.join(folder, "canary-gate-%s.log" % stamp)
+        sources = [log_path]
+        base = os.path.realpath(box)
+        for d, dirs, files in os.walk(box):   # os.walk never descends into a directory link
+            dirs[:] = [x for x in dirs if x != ".git"]
+            # the landing under judgement writes the box: a link, or a path resolving outside it, is never read
+            # (security review 2026-10-21, the same rule as land_batch.read_kept)
+            sources += sorted(p for p in (os.path.join(d, f) for f in files if f.startswith("required-fast-fail-") and f.endswith(".txt"))
+                              if not os.path.islink(p) and os.path.realpath(p).startswith(base + os.sep))
+        with open(dest, "wb") as out:
+            for src in sources:
+                fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))   # a link swapped in after the walk refuses
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    os.close(fd)
+                    continue
+                size = os.fstat(fd).st_size
+                with os.fdopen(fd, "rb") as fh:
+                    if size > GATE_LOG_TAIL:
+                        fh.seek(size - GATE_LOG_TAIL)
+                    out.write(("==== %s%s\n" % (os.path.basename(src), " (last %d of %d bytes)" % (GATE_LOG_TAIL, size) if size > GATE_LOG_TAIL else "")).encode())
+                    out.write(fh.read())
+                    out.write(b"\n")
+        return dest
+    except OSError as exc:
+        sys.stderr.write("loop_canary: could not keep the gate log of the refusal (%s: %s)\n" % (type(exc).__name__, exc))
+        return None
+
+
+def landing_stage(spec: dict, run: str, keep: bool = False, bin_dir: Optional[str] = None, judge=None) -> List[dict]:
+    """[{"name", "exit_code", "detail"}], one row for the live judge, or [] when it could not run (NO-DATA: the deployed
+    stamp or its revision cannot be read, no worktree, no commit). A spec that is not a dict and a run that is not a
+    non empty string are ValueError, before any worktree is made. bin_dir (default deployed_bin()) and judge (default
+    live_judge) are seams; the judge gets (stamp, tree, log) and answers (ok, why). A refusal row names the judge's own
+    refusal text, which names the gate rows that went red. The worktree is removed on every path unless keep."""
+    if not isinstance(spec, dict):
+        raise ValueError("spec must be a dict, not %s" % type(spec).__name__)
+    if not isinstance(run, str) or not run.strip():
+        raise ValueError("run must be a non empty string, not %r" % (run,))
+    stamp = deployed_stamp(bin_dir)
+    if stamp is None:
+        return _no_data("the deployed bin %s has no land_batch.py that runs, or its stamp is missing, unreadable or carries no kernel"
+                        % (bin_dir or deployed_bin()))
+    rev = stamp.get("revision")
+    if not isinstance(rev, str) or not re.fullmatch(r"[0-9a-f]{7,64}", rev):
+        return _no_data("the deployed stamp names no revision (%r)" % (rev,))
+    rc, txt = _git(["rev-parse", "--verify", "-q", rev + "^{commit}"])
+    if rc != 0:
+        return _no_data("the deployed revision %s is not in this repository" % rev[:12])
+    try:
+        box = tempfile.mkdtemp(prefix="loop-canary-landing-")
+    except OSError as exc:
+        return _no_data("no temporary folder for the disposable worktree (%s)" % type(exc).__name__)
+    tree = os.path.join(box, "tree")
+    made = False
+    log = None
+    try:
+        rc, txt = _git(["worktree", "add", "--detach", "-q", tree, rev])
+        if rc != 0:
+            return _no_data("git worktree add failed: %s" % txt[-120:])
+        made = True
+        scratch = os.path.join(tree, LANDING_SCRATCH)
+        if os.path.commonpath([os.path.realpath(tree), os.path.realpath(scratch)]) != os.path.realpath(tree):
+            return _no_data("the scratch path %s leaves the worktree" % LANDING_SCRATCH)
+        os.makedirs(os.path.dirname(scratch), exist_ok=True)
+        with open(scratch, "w", encoding="utf-8") as fh:
+            fh.write("landing canary scratch change for run %s at %s\n" % (run.strip(), rev))
+        for argv in (["add", "-f", "--", LANDING_SCRATCH],
+                     ["-c", "core.hooksPath=/dev/null", "-c", "user.name=loop landing canary", "-c", "user.email=canary@example.invalid",
+                      "-c", "commit.gpgsign=false", "commit", "-q", "-m", "loop landing canary: one scratch change (disposable, never pushed)"]):
+            rc, txt = _git(argv, cwd=tree)
+            if rc != 0:
+                return _no_data("git %s failed in the disposable worktree: %s" % (argv[0] if argv[0] != "-c" else "commit", txt[-120:]))
+        log_path = os.path.join(box, "judge.log")
+        log = open(log_path, "w", encoding="utf-8")
+        try:
+            ok, why = (judge or (lambda st, tr, lg: live_judge(st, tr, lg, bin_dir)))(stamp, tree, log)
+        except Exception as exc:   # sbe: allow-silent the judge's own failure IS the row: it is refused and named, never passed
+            ok, why = False, "the judge could not run: %s: %s" % (type(exc).__name__, str(exc)[:160])
+        detail = str(why)[:300] if why else "the judge gave no reason"
+        if ok is not True:   # a refusal keeps the gate's log past the box (LR1.d); the path sits on the REFUSED line
+            log.close()
+            kept = keep_gate_log(box, log_path)
+            if kept:
+                detail = "%s (gate log %s)" % (detail[:200], kept)
+        if keep:
+            detail += " (kept at %s, judge log %s)" % (tree, log_path)
+        return [{"name": "landing judge", "exit_code": 0 if ok is True else 1, "detail": detail}]
+    finally:
+        if log is not None:
+            log.close()
+        if made and not keep:
+            _git(["worktree", "remove", "--force", tree])
+            _git(["worktree", "prune"])
+        if not keep:
+            shutil.rmtree(box, ignore_errors=True)
+
+
 def main():
     if "--selftest" in sys.argv:
         return selftest()
+    install_signal_raisers()   # a TERM during the run unwinds every finally: no leaked worktree, no orphaned child group
     spec = load_spec()
     if spec is None:
         print("CANARY NO-DATA: docs/plan/loop-canary.json cannot be read or lacks sub, base_commit or build"); return 3
@@ -242,7 +540,30 @@ def main():
             print("%-8s %-13s %s" % (s, n, d))
         results.append((fx["sub"], rows))
         if verdict(rows)[1] != 0: break   # the first refused or unreadable fixture ends the canary: a run may not start
-    line, code = verdict_set(results); print(line); return code
+    line, code = verdict_set(results); print(line)
+    if code != 0:
+        return code   # the replay refused or has no data: the whole gate is not spent on a launch that is already refused
+    # THE LANDING STAGE (LR1.d): one tiny real change through the live judge. No rows is NO-DATA, never a pass.
+    if "--landing" not in sys.argv:
+        return code
+    keep = "--keep" in sys.argv
+    run = "canary-%d" % os.getpid()
+    rows = []
+    rows.extend(landing_stage(spec, run, keep))
+    if not rows:
+        print("CANARY NO-DATA: the landing stage could not run (the deployed stamp, its revision or the sandbox; the reason is on stderr)")
+        return 3  # NO-DATA
+    for row in rows:
+        print("%-8s %-13s %s" % ("OK" if row.get("exit_code") == 0 else "REFUSED", row.get("name"), row.get("detail")))
+        code = row.get("exit_code")
+        if isinstance(code, bool) or not isinstance(code, int):   # a row that does not say 0 or a number is not a pass
+            print("CANARY REFUSED at %s: the row carries no exit code (%r)" % (row.get("name"), code))
+            return 1
+        if row.get("exit_code"):
+            print("CANARY REFUSED at %s: %s" % (row.get("name"), row.get("detail")))
+            return 1
+    print("%s (%d judge row(s))" % (LANDING_OK, len(rows)))
+    return 0
 
 
 def selftest():

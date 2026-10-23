@@ -242,12 +242,14 @@ def tree_snapshot(repo):
     return tree, ''
 
 
-def record_whole_gate(path, repo, codes_text, start_tree, obligation, started, worktree_key='UNKNOWN'):
+def record_whole_gate(path, repo, codes_text, start_tree, obligation, started, worktree_key='UNKNOWN', gate_file=None):
     """Append the whole-gate PASS record and return (True, sentence), or write nothing and return (False, why).
 
     codes_text is the gate's own rows, one 'name TAB exit_code' per line. Every row must be exit 0 (a FAIL or a
     NO-DATA row writes nothing), the evidence obligation step must have exited 0, start_tree must be the clean
-    snapshot taken before any check ran, and HEAD^{tree} must still be that tree now. Anything unknown writes nothing."""
+    snapshot taken before any check ran, and HEAD^{tree} must still be that tree now. Anything unknown writes nothing.
+    gate_file: the required_fast.sh that actually ran, when it is not the repository's own (A2.d: the deploy step runs
+    generation N's frozen copy over the landing tree, and the record names the bytes that judged it)."""
     rows = [line for line in (codes_text or '').splitlines() if line.strip()]
     if not rows:
         return False, 'the gate recorded no rows'
@@ -271,7 +273,7 @@ def record_whole_gate(path, repo, codes_text, start_tree, obligation, started, w
                        'HEAD^{tree} moved during the run (%s, now %r)' % (start_tree, end_tree))
     try:
         started = float(started)
-        with open(os.path.join(repo, 'scripts', 'required_fast.sh'), 'rb') as handle:
+        with open(gate_file or os.path.join(repo, 'scripts', 'required_fast.sh'), 'rb') as handle:
             code_hash = hashlib.sha256(handle.read()).hexdigest()
     except (TypeError, ValueError, OSError) as exc:
         return False, 'the run could not be described: %s' % exc
@@ -444,6 +446,7 @@ def _main(argv=None):
     parser.add_argument('--obligation', default='', help='the evidence obligation step exit code')
     parser.add_argument('--started', default='', help='unix seconds the run started')
     parser.add_argument('--worktree-key', default='UNKNOWN')
+    parser.add_argument('--gate-file', default=None, help='the required_fast.sh that ran, when not ./scripts/required_fast.sh (A2.d)')
     args = parser.parse_args(argv)
     if args.whole_gate_snapshot:
         tree, why = tree_snapshot('.')
@@ -463,7 +466,7 @@ def _main(argv=None):
             shared, why = whole_gate_ledger('.')
             if shared is not None:
                 written, why = record_whole_gate(shared, '.', codes_text, args.tree, args.obligation,
-                                                 args.started, args.worktree_key)
+                                                 args.started, args.worktree_key, gate_file=args.gate_file)
         print('whole-gate: %s%s' % ('' if written else 'no PASS record: ', why))
         return 0 if written else 2
     if args.json:

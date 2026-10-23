@@ -45,7 +45,7 @@ esac
 STUB_INTAKE = '''import json, os
 def seat_gate(proofs, probe=None, native=None):
     with open(os.path.join(os.environ["TEST_LOG"], "seat.json"), "w") as fh:
-        json.dump({"scratch": os.environ.get("BROTHER_SCRATCH"), "program": proofs[0]["program"]}, fh)
+        json.dump({"scratch": os.environ.get("BROTHER_SCRATCH"), "program": proofs[0]["program"], "cap_usd": proofs[0].get("cap_usd")}, fh)
     p = dict(proofs[0])
     if os.environ.get("TEST_SEAT") == "raise":
         raise OSError("the seat could not be prepared")
@@ -84,6 +84,28 @@ if os.environ.get("TEST_PARITY") == "fail":
 print("PASS: stub parity")
 '''
 
+STUB_DOCTOR = '''import json, os, sys
+NAMES = ["security-policy", "code-owners", "evidence-obligation", "obligation-wired", "signed-receipts",
+         "signing-identities", "pinned-ci", "ci-permissions", "os-sandbox", "egress-policy",
+         "delegated-identity", "central-audit-store", "fail-closed-mode"]
+mode = os.environ.get("TEST_DOCTOR", "pass")
+if mode == "refuse":
+    print("not certified", file=sys.stderr)
+    sys.exit(2)
+controls = [{"control": name, "status": "PRESENT", "decided_by": "stub doctor"} for name in NAMES]
+if mode == "no_data":
+    controls[0]["status"] = "NO-DATA"
+elif mode == "duplicate":
+    controls[1]["control"] = controls[0]["control"]
+elif mode == "unknown":
+    controls[-1]["control"] = "not-a-real-control"
+elif mode == "blocked":
+    controls[0]["status"] = "BLOCKED"
+elif mode == "short":
+    controls = controls[:12]
+print(json.dumps({"controls": controls, "counts": {"present": len(controls)}}))
+'''
+
 
 def _write(path, body, executable=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -109,11 +131,16 @@ class RedeployFixture(unittest.TestCase):
         for name in ("redeploy.sh", "power_rule.py", "loop_canary.py", "tool_stamp.py"):
             shutil.copy2(os.path.join(HERE, name), os.path.join(self.tools, name))
         self.script = os.path.join(self.tools, "redeploy.sh")
+        _write(os.path.join(self.tmp, "enterprise_doctor.py"), STUB_DOCTOR)
         _write(os.path.join(self.tools, "stop_loop.sh"), STUB_STOP, executable=True)
         _write(os.path.join(self.tools, "loop_intake.py"), STUB_INTAKE)
         _write(os.path.join(self.tools, "deploy_stamped.py"), STUB_DEPLOY)
         self.fakebin = os.path.join(self.tmp, "fakebin")
         _write(self.fakebin, "#!/bin/sh\nexit 0\n", executable=True)
+        # The doctor reads `uname -s`; a host that is not Darwin reads NO-DATA. The suite pins the certified host in
+        # its own fake bin so it never depends on the machine it runs on, and one test overrides PATH with Linux.
+        self.ubin = os.path.join(self.tmp, "ubin")
+        _write(os.path.join(self.ubin, "uname"), "#!/bin/sh\necho Darwin\n", executable=True)
         self.build = os.path.join(self.tmp, "build.json")
         _write(self.build, "{}\n")
         # the repository: a bare upstream, the plan worktree a clone of it, the loop worktree a git worktree of that clone
@@ -150,7 +177,8 @@ class RedeployFixture(unittest.TestCase):
         env.update(HOME=self.home, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.path.join(self.tmp, "gitconfig"),
                    GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
                    GIT_COMMITTER_EMAIL="t@example.invalid", START_RUN_EVIDENCE=self.evd, TEST_LOG=self.log,
-                   BROTHER_CLAUDE_BIN=self.fakebin, BROTHER_CODEX_BIN=self.fakebin, BROTHER_POWER_SOURCE="AC Power")
+                   BROTHER_CLAUDE_BIN=self.fakebin, BROTHER_CODEX_BIN=self.fakebin, BROTHER_POWER_SOURCE="AC Power",
+                   PATH=self.ubin + os.pathsep + os.environ.get("PATH", ""))
         for k, v in extra.items():
             if v is None:
                 env.pop(k, None)
@@ -188,8 +216,9 @@ class RedeployFixture(unittest.TestCase):
                            stderr=subprocess.STDOUT, universal_newlines=True, timeout=180)
         return p.returncode, p.stdout
 
-    def check(self, **extra):
-        return self.run_redeploy("--deadline", DATED, **extra)
+    def check(self, *more, cap="5", **extra) -> tuple:
+        capped = ["--probe-cap-usd", cap] if cap is not None else []
+        return self.run_redeploy("--deadline", DATED, *(capped + list(more)), **extra)
 
     def stop_calls(self):
         try:
@@ -212,7 +241,7 @@ class RedeployFixture(unittest.TestCase):
         return [n for n in os.listdir(root) if n.startswith("redeploy-")] if os.path.isdir(root) else []
 
 
-CHECKS = ["power", "controls", "live", "plan", "loop", "merge", "pins", "seat", "stage", "parity", "canary"]
+CHECKS = ["power", "controls", "live", "plan", "loop", "merge", "pins", "seat", "stage", "parity", "canary", "doctor"]
 
 
 class CheckMode(RedeployFixture):
@@ -231,7 +260,7 @@ class CheckMode(RedeployFixture):
         self.assertEqual(rc, 0, out)
         rows = self.rows(out)
         self.assertEqual([n for n in CHECKS if rows.get(n, ("",))[0] == "PASS"], CHECKS, out)
-        self.assertIn("CHECK PASS: 11 PASS, 0 FAIL, 0 NO-DATA", out)
+        self.assertIn("CHECK PASS: 12 PASS, 0 FAIL, 0 NO-DATA", out)
         self.assertOnlyDry()
         # nothing pushed, nothing merged, no object written into the repository, the scratch removed
         self.assertEqual({b: self.upstream(b) for b in heads}, heads)
@@ -259,7 +288,7 @@ class CheckMode(RedeployFixture):
         self.assertIn("remedy: refresh the login", rows["seat"][1])
         self.assertEqual([n for n in CHECKS if n in rows], CHECKS, out)   # the first FAIL stopped nothing after it
         self.assertEqual(rows["parity"][0], "PASS", out)
-        self.assertIn("CHECK FAIL: 9 PASS, 2 FAIL, 0 NO-DATA", out)
+        self.assertIn("CHECK FAIL: 10 PASS, 2 FAIL, 0 NO-DATA", out)
         self.assertOnlyDry()
         self.assertEqual(self.scratch_left(), [])
 
@@ -267,10 +296,10 @@ class CheckMode(RedeployFixture):
         rc, out = self.check(TEST_LIVE_RC="2")
         self.assertEqual(rc, 2, out)
         self.assertEqual(self.rows(out)["live"][0], "NO-DATA", out)
-        self.assertIn("CHECK NO-DATA: 10 PASS, 0 FAIL, 1 NO-DATA", out)
+        self.assertIn("CHECK NO-DATA: 11 PASS, 0 FAIL, 1 NO-DATA", out)
         rc, out = self.check(TEST_LIVE_RC="2", TEST_PARITY="fail")
         self.assertEqual(rc, 1, out)
-        self.assertIn("CHECK FAIL: 9 PASS, 1 FAIL, 1 NO-DATA", out)
+        self.assertIn("CHECK FAIL: 10 PASS, 1 FAIL, 1 NO-DATA", out)
 
     def test_a_check_that_raises_or_prints_nothing_is_no_data_never_pass(self):
         for mode, why in (("raise", "the seat gate could not run (OSError"), ("silent", "the check printed no verdict")):
@@ -365,6 +394,36 @@ class CheckMode(RedeployFixture):
         self.git(self.pw, "push", "-q", "hub", "plan/x")
         self.only_fail("canary", "no readable canary spec")
 
+    def test_a_live_probe_without_a_cap_reads_no_data(self) -> None:
+        rc, out = self.check(cap=None)
+        state, detail = self.rows(out)["seat"]
+        self.assertEqual(state, "NO-DATA", out)
+        self.assertIn("no cap", detail)
+        self.assertFalse(os.path.exists(os.path.join(self.log, "seat.json")), "the seat gate ran with no cap: " + out)
+        self.assertIn("CHECK NO-DATA: 11 PASS, 0 FAIL, 1 NO-DATA", out)
+
+    def test_a_live_probe_with_a_positive_cap_passes_the_cap(self) -> None:
+        rc, out = self.check(cap="5")
+        self.assertEqual(self.rows(out)["seat"][0], "PASS", out)
+        with open(os.path.join(self.log, "seat.json")) as fh:
+            self.assertEqual(json.load(fh)["cap_usd"], "5", out)
+
+    def test_a_live_probe_with_a_non_positive_cap_is_refused_before_any_check(self) -> None:
+        for cap in ("0", "0.0", "-5"):
+            with self.subTest(cap=cap):
+                rc, out = self.check(cap=cap)
+                self.assertEqual(rc, 2, out)
+                self.assertIn("REDEPLOY REFUSED [args]: --probe-cap-usd must be", out)
+                self.assertEqual(self.rows(out), {}, out)
+
+    def test_a_live_probe_with_a_non_numeric_cap_is_refused_before_any_check(self) -> None:
+        for cap in ("banana", "1.2.3", ".5", "5.", "1e3"):
+            with self.subTest(cap=cap):
+                rc, out = self.check(cap=cap)
+                self.assertEqual(rc, 2, out)
+                self.assertIn("REDEPLOY REFUSED [args]: --probe-cap-usd must be a positive number", out)
+                self.assertEqual(self.rows(out), {}, out)
+
     def test_bad_arguments_refuse_before_anything(self):
         for more, why in (([], "--deadline HH:MM"), (["--deadline", DATED, "--surprise"], "unknown argument --surprise"),
                           (["--deadline", "--check"], "--deadline needs a value")):
@@ -373,6 +432,68 @@ class CheckMode(RedeployFixture):
                 self.assertEqual(rc, 2, out)
                 self.assertIn("REDEPLOY REFUSED [args]: " + why, out)
         self.assertEqual(self.stop_calls(), [])
+
+    # LC3.a: the doctor check, one verdict per capability, on the certified host only.
+    def _doctor_row(self, out):
+        return self.rows(out)["doctor"]
+
+    def test_a_doctor_that_gives_thirteen_named_verdicts_and_no_no_data_passes(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="pass")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self._doctor_row(out), ("PASS", "13 capabilities, no BLOCKED, no NO-DATA"), out)
+
+    def test_a_doctor_with_a_no_data_control_reads_no_data(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="no_data")
+        self.assertEqual(rc, 2, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "NO-DATA", out)
+        self.assertIn("1 control(s) read NO-DATA", detail)
+
+    def test_a_doctor_with_a_duplicate_control_name_fails(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="duplicate")
+        self.assertEqual(rc, 1, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "FAIL", out)
+        self.assertIn("duplicate control names", detail)
+
+    def test_a_doctor_with_an_unknown_control_name_fails(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="unknown")
+        self.assertEqual(rc, 1, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "FAIL", out)
+        self.assertIn("control names not in the expected set", detail)
+
+    def test_a_doctor_with_a_blocked_control_fails(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="blocked")
+        self.assertEqual(rc, 1, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "FAIL", out)
+        self.assertIn("reads a status outside PRESENT, ABSENT, NO-DATA", detail)
+
+    def test_a_doctor_with_fewer_than_thirteen_verdicts_fails(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="short")
+        self.assertEqual(rc, 1, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "FAIL", out)
+        self.assertIn("gave 12 verdicts, expected 13", detail)
+
+    def test_an_unsupported_host_reads_no_data_not_certified(self) -> None:
+        linuxbin = os.path.join(self.tmp, "linuxbin")
+        _write(os.path.join(linuxbin, "uname"), "#!/bin/sh\necho Linux\n", executable=True)
+        rc, out = self.check(PATH=linuxbin + os.pathsep + os.environ.get("PATH", ""))
+        self.assertEqual(rc, 2, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "NO-DATA", out)
+        self.assertIn("not certified", detail)
+        self.assertIn("Linux", detail)
+
+    def test_a_doctor_that_refuses_for_another_reason_fails(self) -> None:
+        rc, out = self.check(TEST_DOCTOR="refuse")
+        self.assertEqual(rc, 1, out)
+        state, detail = self._doctor_row(out)
+        self.assertEqual(state, "FAIL", out)
+        self.assertIn("the doctor refused (exit 2)", detail)
+        self.assertIn("not certified", detail)
 
 
 STUB_DEPLOY_SH = '''#!/bin/bash
@@ -396,7 +517,7 @@ class DefaultMode(RedeployFixture):
         _write(deploy, STUB_DEPLOY_SH, executable=True)
         _write(start, STUB_START_SH, executable=True)
         return self.run_redeploy("--deadline", DATED, "--plan", "docs/plan/P.json", "--scope", "^(A1)$",
-                                 "--budget-usd", "5", "--reason", "redeploy test", mode=None,
+                                 "--budget-usd", "5", "--probe-cap-usd", "5", "--reason", "redeploy test", mode=None,
                                  REDEPLOY_DEPLOY=deploy, REDEPLOY_START=start, **extra)
 
     def test_a_failed_check_refuses_before_any_drain(self):
@@ -462,7 +583,7 @@ class RoleFlags(RedeployFixture):
         _write(deploy, STUB_DEPLOY_SH, executable=True)
         _write(start, STUB_START_ARGV, executable=True)
         return self.run_redeploy("--deadline", DATED, "--plan", "docs/plan/P.json", "--scope", "^(A1)$",
-                                 "--budget-usd", "5", *roles, mode=None, REDEPLOY_DEPLOY=deploy, REDEPLOY_START=start,
+                                 "--budget-usd", "5", "--probe-cap-usd", "5", *roles, mode=None, REDEPLOY_DEPLOY=deploy, REDEPLOY_START=start,
                                  **extra)
 
     def start_argv(self):
@@ -501,12 +622,12 @@ class RoleFlags(RedeployFixture):
         self.assertEqual(self.stop_calls(), [], out)
 
     def test_check_takes_the_role_flags_stops_nothing_and_names_them(self):
-        rc, out = self.run_redeploy("--deadline", DATED, "--worker", "opus55", "--lift-hold", "the owner said go",
+        rc, out = self.run_redeploy("--deadline", DATED, "--probe-cap-usd", "5", "--worker", "opus55", "--lift-hold", "the owner said go",
                                     "--gap", "300", REDEPLOY_START=os.path.join(self.tmp, "absent_start.sh"))
         self.assertEqual(rc, 0, out)
         self.assertIn("ROLES   a launch would pass to start_run.sh: --worker 'opus55' --lift-hold 'the owner said go' "
                       "--gap '300'\n", out)
-        self.assertIn("CHECK PASS: 11 PASS, 0 FAIL, 0 NO-DATA", out)   # the roles line is no verdict
+        self.assertIn("CHECK PASS: 12 PASS, 0 FAIL, 0 NO-DATA", out)   # the roles line is no verdict
         self.assertEqual(set(self.stop_calls()), {"--dry"}, self.stop_calls())
 
     def test_check_without_role_flags_names_the_launchers_own_defaults(self):

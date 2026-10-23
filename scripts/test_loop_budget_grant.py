@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+from typing import Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop_budget_grant as grant  # noqa: E402
@@ -20,6 +21,41 @@ import loop_budget_grant as grant  # noqa: E402
 HOUR = 3600.0
 FUTURE = "2099-01-01T00:00:00+00:00"
 WORDS = "Bypass it automatically for Brother.loop runs"
+
+
+RUN_GUARD = """import datetime, json, os
+CONFIG = None
+def selftest() -> int:
+    run = os.environ.get("BROTHER_RUN_DIR")
+    path = os.path.join(run, "spend-guard.json") if run else CONFIG
+    if not path or not os.path.isfile(path):
+        return 1
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return 1
+    if not isinstance(data, dict):
+        return 1
+    entry = data.get("projects", {}).get("Brother", {})
+    if not isinstance(entry, dict):
+        return 1
+    hard = entry.get("session_hard")
+    if hard != 3000100:
+        return 1
+    until = entry.get("until")
+    if not isinstance(until, str) or not until:
+        return 1
+    try:
+        last = datetime.datetime.fromisoformat(until.replace("Z", "+00:00"))
+    except ValueError:
+        return 1
+    if last.tzinfo is None:
+        return 1
+    if last <= datetime.datetime.now(datetime.timezone.utc):
+        return 1
+    return 0
+"""
 
 
 def _iso(stamp):
@@ -213,6 +249,134 @@ class MainTest(_Scratch):
             with contextlib.redirect_stderr(io.StringIO()):
                 grant.main(["--words", WORDS, "--tokens", "1", "--until", FUTURE,
                             "--config", self.config, "--project-slug", "A"])
+
+
+class RunGrantTest(_Scratch):
+    def setUp(self):
+        _Scratch.setUp(self)
+        self.home = os.path.join(self.root, "home")
+        os.makedirs(os.path.join(self.home, ".claude", "hooks"))
+        self.run_dir = os.path.join(self.root, "run-1")
+        os.makedirs(self.run_dir)
+        patcher = mock.patch.dict(os.environ, {
+            "HOME": self.home,
+            "BROTHER_RUN_DIR": self.run_dir,
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.config = os.path.join(self.home, ".claude", "spend-guard.json")
+        self.run_grant = os.path.join(self.run_dir, "spend-guard.json")
+
+    def run_grant_main(self, *extra):
+        argv = ["--words", WORDS, "--tokens", "3000000", "--until", FUTURE,
+                "--spent", "100", "--config", self.config, "--project-slug", "Brother"] + list(extra)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = grant.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def write_guard(self, body):
+        with open(os.path.join(self.home, ".claude", "hooks", "spend_guard.py"), "w") as fh:
+            fh.write(body)
+
+    def write_run_grant(self, text):
+        with open(self.run_grant, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def read_run_grant(self):
+        with open(self.run_grant, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_overseer_session_reads_the_run_grant(self):
+        self.write_guard(RUN_GUARD)
+        self.write_config(json.dumps({
+            "override": None,
+            "projects": {"Brother": {"session_hard": 42}},
+        }))
+        run_block = grant.grant_block(WORDS, 3000000, FUTURE, 100, time.time())
+        self.write_run_grant(json.dumps({"projects": {"Brother": run_block}}))
+        code, out, err = self.run_grant_main()
+        self.assertEqual(code, 0, err)
+        self.assertIn("guard selftest: PASS", out)
+        saved = json.loads(self.read_config())
+        self.assertEqual(saved["projects"]["Brother"]["session_hard"], 3000100)
+        self.assertEqual(saved["projects"]["Brother"]["until"], FUTURE)
+        run_saved = json.loads(self.read_run_grant())
+        self.assertEqual(run_saved["projects"]["Brother"]["session_hard"], 3000100)
+
+    def test_a_run_grant_with_a_wrong_ceiling_is_refused(self):
+        self.write_guard(RUN_GUARD)
+        self.write_config('{"override": null}')
+        run_block = grant.grant_block(WORDS, 3000000, FUTURE, 100, time.time())
+        run_block["session_hard"] = 42
+        run_block["session_soft"] = 42
+        self.write_run_grant(json.dumps({"projects": {"Brother": run_block}}))
+        grant_before = self.read_run_grant()
+        config_before = self.read_config()
+        code, _, err = self.run_grant_main()
+        self.assertEqual(code, 2, err)
+        self.assertIn("selftest", err)
+        self.assertEqual(self.read_config(), config_before)
+        self.assertEqual(self.read_run_grant(), grant_before)
+
+    def test_a_run_grant_with_a_past_until_is_refused(self):
+        self.write_guard(RUN_GUARD)
+        self.write_config('{"override": null}')
+        run_block = grant.grant_block(WORDS, 3000000, FUTURE, 100, time.time())
+        run_block["until"] = _iso(time.time() - HOUR)
+        self.write_run_grant(json.dumps({"projects": {"Brother": run_block}}))
+        grant_before = self.read_run_grant()
+        config_before = self.read_config()
+        code, _, err = self.run_grant_main()
+        self.assertEqual(code, 2, err)
+        self.assertIn("selftest", err)
+        self.assertEqual(self.read_config(), config_before)
+        self.assertEqual(self.read_run_grant(), grant_before)
+
+    def test_a_run_grant_with_a_missing_or_unparsing_until_is_refused(self):
+        self.write_guard(RUN_GUARD)
+        self.write_config('{"override": null}')
+        for bad in (None, "", "not a time", 12):
+            run_block = grant.grant_block(WORDS, 3000000, FUTURE, 100, time.time())
+            run_block["until"] = bad
+            self.write_run_grant(json.dumps({"projects": {"Brother": run_block}}))
+            grant_before = self.read_run_grant()
+            config_before = self.read_config()
+            code, _, err = self.run_grant_main()
+            self.assertEqual(code, 2, repr(bad))
+            self.assertIn("selftest", err)
+            self.assertEqual(self.read_config(), config_before)
+            self.assertEqual(self.read_run_grant(), grant_before)
+
+    def test_a_run_dir_without_a_grant_never_reads_as_the_safe_case(self):
+        self.write_guard(RUN_GUARD)
+        block = grant.grant_block(WORDS, 7000000, FUTURE, 100, time.time())
+        self.write_config(json.dumps({"projects": {"Brother": block}}))
+        empty_run = os.path.join(self.root, "run-empty")
+        os.makedirs(empty_run)
+        config_before = self.read_config()
+        with mock.patch.dict(os.environ, {"BROTHER_RUN_DIR": empty_run}):
+            code, _, err = self.run_grant_main()
+        self.assertEqual(code, 2, err)
+        self.assertIn("selftest", err)
+        self.assertEqual(self.read_config(), config_before)
+        saved = json.loads(self.read_config())
+        self.assertEqual(saved["projects"]["Brother"]["session_hard"], 7000100)
+        self.assertEqual(os.listdir(empty_run), [])
+
+    def test_a_torn_run_grant_refuses_and_leaves_it_whole(self):
+        self.write_guard(RUN_GUARD)
+        self.write_config('{"override": null}')
+        self.write_run_grant("not json {")
+        with open(self.run_grant, "rb") as fh:
+            torn_before = fh.read()
+        config_before = self.read_config()
+        code, _, err = self.run_grant_main()
+        self.assertEqual(code, 2, err)
+        self.assertIn("selftest", err)
+        self.assertEqual(self.read_config(), config_before)
+        with open(self.run_grant, "rb") as fh:
+            self.assertEqual(fh.read(), torn_before)
 
 
 class HostileInputTest(unittest.TestCase):

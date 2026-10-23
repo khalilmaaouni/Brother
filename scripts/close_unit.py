@@ -164,7 +164,38 @@ def verdict(returncode, output):
     # loop report reading "exited 1:" and nothing else (2026-10-03). A pass keeps "no result line": unchanged.
     if not lines and returncode != 0:
         lines = [l.strip() for l in (output or "").splitlines() if l.strip()][-1:]
+    # A SKIP IS NOT A PASS (A1, I12, 2026-10-19): CY1.a closed on "OK (skipped=11)" of 15 and C12 on "OK (skipped=1)", because
+    # the OK word was read and skipped=N never was. A zero exit with N above 0 is PARTIAL: not ok, the skipping tests named
+    # first so the reason survives the 400 character cut.
+    n, names = skipped(output)
+    if returncode == 0 and n:
+        named = ", ".join(names) if names else "not named in the output (run the done check with -v to name them)"
+        return False, ("PARTIAL: %d test(s) skipped: %s. %s" % (n, named, " ".join(lines[-2:])))[:400]
     return returncode == 0, " ".join(lines[-4:])[:400]
+
+
+#: unittest's summary line, OK or FAILED, carrying a skipped=N count
+SKIPPED_RE = re.compile(r"^(?:OK|FAILED) \(.*\bskipped=(\d+)")
+#: a verbose (-v) skip line: "test_x (mod.Class) ... skipped 'why'" (3.9) or "test_x (mod.Class.test_x) ..." (3.11+);
+#: a test with a docstring prints its id on the line before, and the docstring line carries the "... skipped"
+SKIP_LINE_RE = re.compile(r"^(?P<head>.*?) \.\.\. skipped\b")
+TEST_ID_RE = re.compile(r"^(\w+) \(([\w.]+)\)")
+
+
+def skipped(output):
+    """(N, names): the skipped tests summed over every unittest summary in output (a chained done check prints one per
+    step), and the tests a verbose run names. Without -v unittest names none, so names may be shorter than N."""
+    lines = (output or "").splitlines()
+    n = sum(int(m.group(1)) for m in (SKIPPED_RE.match(l.strip()) for l in lines) if m)
+    names = []
+    for i, line in enumerate(lines):
+        m = SKIP_LINE_RE.match(line)
+        if not m:
+            continue
+        t = TEST_ID_RE.match(m.group("head")) or (TEST_ID_RE.match(lines[i - 1]) if i else None)
+        if t:
+            names.append(t.group(2) if t.group(2).endswith("." + t.group(1)) else "%s.%s" % (t.group(2), t.group(1)))
+    return n, list(dict.fromkeys(names))
 
 
 def evidence_line(unit_id, stamp, command, quoted):
@@ -219,6 +250,38 @@ def run_done_check(steps, env):
     return code, out
 
 
+def preflight_refusal(base):
+    """'' when scripts/builder_preflight.sh passed over the lane from base, else why DONE is refused. ONE PROOF FOR DONE
+    (A1, I10 and I13): a builder lane closes through this program, so the five lints it could have run before handing the
+    work over run here first, bare in the lane (they read its git range and the deployed stamp), and the done check then
+    runs boxed. A preflight that could not judge (exit 2) refuses too: NO-DATA is never a pass."""
+    if not isinstance(base, str) or not re.fullmatch(r"[A-Za-z0-9_./^~][A-Za-z0-9_./^~-]{0,99}", base):
+        return "the --lane-base %r is not a revision this tool will read" % (base,)
+    # THE BASE'S PREFLIGHT, NEVER THE LANE'S (security review, 2026-10-19): the lane's copy is code the subject controls,
+    # so it is read from the base commit with git show; its first row then refuses a lane that touches any program it runs.
+    import tempfile
+    shown = subprocess.run(["git", "show", "%s:scripts/builder_preflight.sh" % base], capture_output=True, text=True)
+    if shown.returncode != 0 or not shown.stdout.strip():
+        return ("the builder preflight refused (exit 2): NO-DATA: the base %s carries no scripts/builder_preflight.sh "
+                "to judge the lane with" % base)
+    box = tempfile.mkdtemp(prefix="lane-preflight-")
+    try:
+        script = os.path.join(box, "builder_preflight.sh")
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write(shown.stdout)
+        r = subprocess.run(["sh", script, "--base", base], capture_output=True, text=True, timeout=3600)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return "the builder preflight could not run (%s)" % exc
+    finally:
+        import shutil
+        shutil.rmtree(box, ignore_errors=True)
+    said = [l for l in ((r.stdout or "") + (r.stderr or "")).splitlines() if l.strip()]
+    print("\n".join(said))
+    if r.returncode == 0:
+        return ""
+    return "the builder preflight refused (exit %d): %s" % (r.returncode, (said or ["no output"])[-1][:200])
+
+
 def unlisted_spec_subs(unit):
     """Sub unit ids the unit's own spec defines (`## <id>.N` headings) that its plan row neither lists in sub_units
     nor names anywhere else (a removal is recorded in the row's text, as L0's evidence records L0.3 and L0.4).
@@ -255,6 +318,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("units", nargs="*")
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--lane-base", default=None, metavar="REV",
+                    help="a builder lane's base: scripts/builder_preflight.sh runs its five lints over REV..the tree "
+                         "before any done check, and a refusal keeps every named unit open (A1, I13)")
     if argv is None:
         raw_argv = sys.argv[1:]
     elif isinstance(argv, (list, tuple)) and all(isinstance(a, str) for a in argv):
@@ -280,6 +346,13 @@ def main(argv=None):
         print("nothing to close: no unit has every sub unit landed with a done_check waiting")
         return 1
     env = done_check_env(os.environ)
+    if args.lane_base is not None and not args.dry:
+        refused = preflight_refusal(args.lane_base)
+        if refused:
+            for uid in wanted:
+                print("%-5s NOT CLOSED: %s" % (uid, refused))
+            print("CLOSED  0 unit(s): none")
+            return 1
     closed = []
     for uid in wanted:
         unit = next((u for u in plan["units"] if u["id"] == uid), None)

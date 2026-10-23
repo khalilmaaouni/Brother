@@ -29,6 +29,7 @@ REAL_SIBLINGS = ("land_batch.py", "plan_store.py", "spec_check.py", "grade_build
                  "diag_notes.py",   # reject_status keeps a landing refusal as the sub unit's diagnosis note (1.1.4)
                  "loop_hold.py",   # the one reader of the loop's stop controls, asked first by main()
                  "plan_path.py",   # the one plan selector every reader and writer imports (2026-10-10)
+                 "brief_check.py",   # plan_lint imports it since af6dd5487 (2026-10-14); without it the closer exits 1
                  "sandbox.sb")   # neighbours run under the sandbox (2026-10-02)
 SUB, UNIT, BRANCH = "U1.a", "U1", "main"
 

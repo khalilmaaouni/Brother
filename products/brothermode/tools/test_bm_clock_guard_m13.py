@@ -223,7 +223,9 @@ class TestHookEntry(unittest.TestCase):
             data = json.loads(out.strip())
             self.assertEqual(data["hookSpecificOutput"]["hookEventName"], "PreToolUse")
             self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
-            self.assertEqual(data["hookSpecificOutput"]["permissionDecisionReason"], "MISMATCH")
+            # the reason names its code first, then the token it matched (2026-10-21: a bare code named nothing)
+            self.assertTrue(data["hookSpecificOutput"]["permissionDecisionReason"].startswith("MISMATCH: "))
+            self.assertIn(_t(14, 22), data["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_pretooluse_allow_with_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -444,7 +446,8 @@ class TestHookEntry(unittest.TestCase):
         self.assertEqual(code, 0)
         data = json.loads(out.strip())
         self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertEqual(data["hookSpecificOutput"]["permissionDecisionReason"], "NO-DATA")
+        self.assertTrue(data["hookSpecificOutput"]["permissionDecisionReason"].startswith("NO-DATA: "))
+        self.assertIn(_t(14, 22), data["hookSpecificOutput"]["permissionDecisionReason"])
 
     # ----- the Codex payload shape: "transcript_path": null on every hook -----
     # Recorded live on 2026-10-04 (HP1, Codex): the host passes session_id,
@@ -496,7 +499,8 @@ class TestHookEntry(unittest.TestCase):
             self.assertEqual(code, 0)
             data = json.loads(out.strip())
             self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
-            self.assertEqual(data["hookSpecificOutput"]["permissionDecisionReason"], "NO-DATA")
+            self.assertTrue(data["hookSpecificOutput"]["permissionDecisionReason"].startswith("NO-DATA: "))
+            self.assertIn(_t(14, 22), data["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_codex_null_transcript_estimate_only_allows(self):
         with tempfile.TemporaryDirectory() as home:
@@ -532,6 +536,192 @@ class TestHookEntry(unittest.TestCase):
         self.assertEqual(len(guard_hooks), 1)
         self.assertEqual(guard_hooks[0]["timeout"], 10)
         self.assertEqual(guard_hooks[0]["statusMessage"], "Auditing clock times after the turn")
+
+
+def _t(hour, minute):
+    """A clock token for a fixture, built, never written out (this guard reads the test source too)."""
+    return "%02d%s%02d" % (hour, chr(58), minute)
+
+
+class TestClaudeCodeTranscript(unittest.TestCase):
+    """The transcript Claude Code actually writes (record keys measured 2026-10-21 on a live session file: 0 top level
+    tool_result records; every result nested in a user record's message content as {type, tool_use_id, content}; the
+    command in the assistant record's tool_use block as {type, id, name, input}). The guard was specified against a
+    flat {type: tool_result, command, stdout} line that this host never writes, so a date read never counted and every
+    bare time was denied NO-DATA. Each case isolates one condition."""
+
+    def _prompt(self, text="go"):
+        return {"type": "user", "message": {"role": "user", "content": text}}
+
+    def _call(self, tid, command):
+        return {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": command}}]}}
+
+    def _result(self, tid, content):
+        return {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tid, "content": content}]}}
+
+    def _read(self, tid, hour, minute):
+        """A date call and its result, as `date` prints it (seconds after the minute)."""
+        return [self._call(tid, "date"), self._result(tid, "Wed Oct 21 %s%s13 JST 2026" % (_t(hour, minute), chr(58)))]
+
+    def _deny(self, records, command, tool_use_id="toolu_now"):
+        """The PreToolUse reason, or None when the call is allowed."""
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "t.jsonl")
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(_jsonl(*records) + "\n")
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "transcript_path": path,
+                       "tool_input": {"command": command}, "tool_use_id": tool_use_id}
+            code, out, _err = _run_main(json.dumps(payload))
+        self.assertEqual(code, 0)
+        if not out.strip():
+            return None
+        data = json.loads(out.strip())["hookSpecificOutput"]
+        self.assertEqual(data["permissionDecision"], "deny")
+        return data["permissionDecisionReason"]
+
+    def test_a_date_read_backs_a_time_in_the_same_minute(self):
+        records = [self._prompt()] + self._read("toolu_a", 21, 49)
+        self.assertIsNone(self._deny(records, "deadline %s" % _t(21, 49)))
+
+    def test_a_later_tool_result_does_not_end_the_turn(self):
+        records = [self._prompt()] + self._read("toolu_a", 21, 49) + [
+            self._call("toolu_b", "ls"), self._result("toolu_b", "a b c")]
+        self.assertIsNone(self._deny(records, "deadline %s" % _t(21, 50)))
+
+    def test_a_result_given_as_text_blocks_counts(self):
+        records = [self._prompt(), self._call("toolu_a", "date '+%Y'"),
+                   self._result("toolu_a", [{"type": "text", "text": "2026-10-21 %s JST" % _t(21, 50)}])]
+        self.assertIsNone(self._deny(records, "at %s" % _t(21, 50)))
+
+    def test_a_new_prompt_starts_a_new_turn(self):
+        records = [self._prompt()] + self._read("toolu_a", 21, 49) + [self._prompt("next")]
+        reason = self._deny(records, "deadline %s" % _t(21, 49))
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_only_a_clock_command_is_evidence(self):
+        records = [self._prompt(), self._call("toolu_a", "echo %s" % _t(21, 49)),
+                   self._result("toolu_a", _t(21, 49))]
+        reason = self._deny(records, "deadline %s" % _t(21, 49))
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_a_result_whose_call_has_no_command_is_not_evidence(self):
+        # a Read of a file that prints a time: no command, so never a clock read
+        read = {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_r", "name": "Read", "input": {"file_path": "/x"}}]}}
+        records = [self._prompt(), read, self._result("toolu_r", "Wed Oct 21 %s%s13 JST 2026" % (_t(21, 49), chr(58)))]
+        reason = self._deny(records, "deadline %s" % _t(21, 49))
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_a_read_after_the_current_call_is_not_evidence(self):
+        records = [self._prompt(), self._call("toolu_now", "ls")] + self._read("toolu_late", 21, 49)
+        reason = self._deny(records, "deadline %s" % _t(21, 49), tool_use_id="toolu_now")
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_the_deny_names_the_time_it_matched_and_the_remedy(self):
+        reason = self._deny([self._prompt()], "deadline %s" % _t(6, 30))
+        self.assertTrue(reason.startswith("NO-DATA"), reason)
+        self.assertIn(_t(6, 30), reason)
+        self.assertIn("date", reason)
+
+    def test_a_utc_offset_is_not_a_clock_time(self):
+        # no clock read at all: the offset alone must not be read as a time to verify
+        stamp = "2026-10-21T%s%s00.259201+%s" % (_t(5, 23), chr(58), _t(0, 0))
+        self.assertIsNone(self._deny([self._prompt()], "since %s" % stamp))
+        self.assertIsNone(self._deny([self._prompt()], "zone UTC+%s" % _t(9, 0)))
+
+    def test_the_seconds_of_a_longer_time_are_not_a_clock_time(self):
+        # hours, minutes and seconds after a T: the minutes and seconds pair read as a time before this fix
+        self.assertIsNone(self._deny([self._prompt()], "at 2026-10-21T%s%s00" % (_t(5, 23), chr(58))))
+
+    # ----- an adversarial review of the fix (2026-10-21), each a concrete input it built -----
+
+    def test_a_label_colon_does_not_hide_a_time(self):
+        reason = self._deny([self._prompt()], "Time%s%s" % (chr(58), _t(12, 34)))
+        self.assertTrue(reason and _t(12, 34) in reason, reason)
+
+    def test_a_hyphen_after_seconds_with_no_date_is_a_range_not_an_offset(self):
+        records = [self._prompt()] + self._read("toolu_a", 12, 34)
+        reason = self._deny(records, "%s%s56-%s" % (_t(12, 34), chr(58), _t(13, 45)))
+        self.assertTrue(reason and reason.startswith("MISMATCH") and _t(13, 45) in reason, reason)
+
+    def test_a_date_given_a_time_is_not_a_clock_read(self):
+        for command in ('date -d "%s"' % _t(12, 34), "date -j -f %%H%%M %s" % _t(12, 34), "date -v+3H"):
+            records = [self._prompt(), self._call("toolu_a", command), self._result("toolu_a", _t(12, 34))]
+            reason = self._deny(records, "at %s" % _t(12, 34))
+            self.assertTrue(reason and reason.startswith("NO-DATA"), (command, reason))
+
+    def test_a_compound_command_after_date_is_not_a_clock_read(self):
+        records = [self._prompt(), self._call("toolu_a", "date && echo %s" % _t(12, 34)),
+                   self._result("toolu_a", _t(12, 34))]
+        reason = self._deny(records, "at %s" % _t(12, 34))
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_a_clock_tool_joined_to_another_command_is_not_a_clock_read(self):
+        for command in ("clock && echo %s" % _t(12, 34), "bm_clock | sed s/x/%s/" % _t(12, 34),
+                        "clock $(echo %s)" % _t(12, 34)):
+            records = [self._prompt(), self._call("toolu_a", command), self._result("toolu_a", _t(12, 34))]
+            reason = self._deny(records, "at %s" % _t(12, 34))
+            self.assertTrue(reason and reason.startswith("NO-DATA"), (command, reason))
+
+    # ----- the automated security review of 58edb1483: the shell splits differently from shlex -----
+
+    def test_a_newline_or_metacharacter_joined_command_is_not_a_clock_read(self):
+        for command in ("clock\necho %s" % _t(12, 34), "date\necho %s" % _t(12, 34), "clock > f" ,
+                        "date '+%%H' > /dev/null; echo %s" % _t(12, 34), "clock {x}"):
+            records = [self._prompt(), self._call("toolu_a", command), self._result("toolu_a", _t(12, 34))]
+            reason = self._deny(records, "at %s" % _t(12, 34))
+            self.assertTrue(reason and reason.startswith("NO-DATA"), (command, reason))
+
+    def test_a_format_carrying_a_literal_time_is_not_a_clock_read(self):
+        for command in ("date +%s" % _t(12, 34), "date '+%s'" % _t(12, 34), "date +%%H%s34" % chr(58)):
+            records = [self._prompt(), self._call("toolu_a", command), self._result("toolu_a", _t(12, 34))]
+            reason = self._deny(records, "at %s" % _t(12, 34))
+            self.assertTrue(reason and reason.startswith("NO-DATA"), (command, reason))
+
+    def test_a_substitution_inside_a_format_is_not_a_clock_read(self):
+        # one shlex token, a + and no digit: only the raw metacharacter check stops the shell expanding a file's text
+        records = [self._prompt(), self._call("toolu_a", 'date "+$(cat /x/t)"'), self._result("toolu_a", _t(12, 34))]
+        reason = self._deny(records, "at %s" % _t(12, 34))
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_only_known_iso_units_count(self):
+        out = "2026-10-21T%s%s13+0900" % (_t(12, 34), chr(58))
+        for command, counts in (("date -Iseconds", True), ("date -Ibogus", False)):
+            records = [self._prompt(), self._call("toolu_a", command), self._result("toolu_a", "at " + _t(12, 34) + " " + out)]
+            reason = self._deny(records, "at %s" % _t(12, 34))
+            self.assertEqual(reason is None, counts, (command, reason))
+
+    def test_a_format_the_shell_could_expand_is_not_a_clock_read(self):
+        # a glob or a tilde has no digit and no metacharacter, but the shell can expand it to a file named +<time>
+        for command in ("date +*", "date +%H?", "date '+[0-9]'", "date +~"):
+            records = [self._prompt(), self._call("toolu_a", command), self._result("toolu_a", _t(12, 34))]
+            reason = self._deny(records, "at %s" % _t(12, 34))
+            self.assertTrue(reason and reason.startswith("NO-DATA"), (command, reason))
+
+    def test_a_clock_tool_with_arguments_is_not_a_clock_read(self):
+        records = [self._prompt(), self._call("toolu_a", "bm_clock %s" % _t(12, 34)), self._result("toolu_a", _t(12, 34))]
+        reason = self._deny(records, "at %s" % _t(12, 34))
+        self.assertTrue(reason and reason.startswith("NO-DATA"), reason)
+
+    def test_a_full_format_of_conversions_still_reads_the_clock(self):
+        fmt = "+%Y-%m-%d %H" + chr(58) + "%M" + chr(58) + "%S %Z"
+        records = [self._prompt(), self._call("toolu_a", "date '%s'" % fmt),
+                   self._result("toolu_a", "2026-10-21 %s%s13 JST" % (_t(12, 34), chr(58)))]
+        self.assertIsNone(self._deny(records, "at %s" % _t(12, 34)))
+
+    def test_date_in_utc_still_reads_the_clock(self):
+        records = [self._prompt(), self._call("toolu_a", "date -u"),
+                   self._result("toolu_a", "Wed Oct 21 %s%s13 UTC 2026" % (_t(12, 34), chr(58)))]
+        self.assertIsNone(self._deny(records, "at %s" % _t(12, 34)))
+
+    def test_a_zone_name_then_a_space_then_an_offset_is_not_a_time(self):
+        self.assertIsNone(self._deny([self._prompt()], "zone UTC +%s" % _t(9, 0)))
+
+    def test_a_time_range_end_is_still_a_time(self):
+        reason = self._deny([self._prompt()], "window %s-%s" % (_t(21, 0), _t(22, 0)))
+        self.assertTrue(reason and _t(22, 0) in reason, reason)
 
 
 if __name__ == "__main__":

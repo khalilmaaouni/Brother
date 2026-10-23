@@ -7214,14 +7214,17 @@ class AnUnwritableDefaultRunsRootFallsBack(unittest.TestCase):
 
     def test_an_unwritable_default_falls_back_and_prints_its_line(self):
         buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
+        # The judge's HOME is temporary. This fixture tests the fallback choice,
+        # so give its config provider a distinct durable path instead of the host's HOME.
+        config = os.path.join(os.sep, "fixture", "client-config")
+        with contextlib.redirect_stdout(buf), mock.patch.object(_br.brother_paths, "config_dir", return_value=config):
             root = _br._resolve_runs_root(None, default=self.tmp,
                                           probe=self._refuse)
         # Portability release (2026-09-06): the fallback is DURABLE, under the
         # client's own config directory, never the process temp directory,
         # because a receipt under /tmp is lost at reboot (the v1.0.8 signed-in
         # receipt landed under /private/tmp and was scored FAIL for it).
-        expected = os.path.join(_br.brother_paths.config_dir(), "brother", "runs")
+        expected = os.path.join(config, "brother", "runs")
         self.assertEqual(root, expected)
         self.assertNotIn("/tmp", root)
         self.assertFalse(root.startswith(tempfile.gettempdir()))

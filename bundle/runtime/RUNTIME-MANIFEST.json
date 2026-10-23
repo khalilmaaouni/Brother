@@ -23,7 +23,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "7d08858a89c6d69f3fafac19e2862eae1b7a6d7a9781f4de5efb2a9070712622"
+   "sha256": "a6b2210664a0206166b6c595f37f97eaf316826dbac28326f0f4ec7c7ea39fd9"
   },
   {
    "path": "brother_state.py",
@@ -283,7 +283,7 @@
   },
   {
    "path": "receipt_door.py",
-   "sha256": "cde9f8d0f2c1dcb107d216397d2cc66ec803686ed291a143f8ef7f76531e37c8"
+   "sha256": "1ce894d57d6f63a29a01cb9021d52c11363f1e8625d462972b1b5e9d8dec4f06"
   },
   {
    "path": "resource_gate.py",
@@ -327,6 +327,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "preflight/20260926-182529-2335-ga512dd54e-dirty",
- "source_revision": "a512dd54e93af22abfa7dcb7b3c797d553595988"
+ "source_describe": "v1.0.17-3857-gd5599b20d",
+ "source_revision": "d5599b20d1616342a581295f627ef8e94273c30e"
 }

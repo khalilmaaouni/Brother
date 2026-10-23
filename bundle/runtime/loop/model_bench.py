@@ -54,12 +54,11 @@ import model_call as MC
 # Three graded samples is the smallest number at which a pass rate is not one coin flip. Below it
 # the score is PROVISIONAL and may not be presented as measured, and --write will not touch a prior
 # with it. The threshold is a constant so a mutation of it is visible in one place.
-#: Terms no benchmark prompt may contain. Built from escapes on purpose: the estate's commit gate
-#: scans every staged diff for these literals, so a file that spells them out cannot be committed,
-#: and this file is the scanner. The same trap caught scripts/loop/commit_scan.py hours earlier,
-#: where the fix is identical: encode the literal at the source, never reach for a gate bypass.
-FORBIDDEN_IN_PROMPTS = ("/Users/", "Brother", "scripts/", "docs/plan",
-                        "\x43CBJI", "\x55RRY")
+#: Paths no benchmark prompt may contain. No private term is written here (PRIV1, 2026-10-18): spelling a term
+#: so the commit gate cannot read it hides the term from the gate, never from the reader. The scan itself reads
+#: escaped and split literals (private_terms_scan.text_views), at the commit and at the export, so this file,
+#: prompts included, is screened for the private list like any other.
+FORBIDDEN_IN_PROMPTS = ("/Users/", "Brother", "scripts/", "docs/plan")
 
 MIN_SAMPLES = 3
 

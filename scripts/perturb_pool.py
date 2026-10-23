@@ -26,6 +26,7 @@ The verdict function is release_note_perturb.covers, unchanged, with
 root=<copy>. This module adds no verdict logic.
 """
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -71,14 +72,59 @@ def free_gib(path):
     return shutil.disk_usage(path).free / (1024 ** 3)
 
 
+def pool_scratch_root():
+    """CS8.a: the one scratch root the exporter uses (export_public.scratch_root: BROTHER_SCRATCH, else
+    ~/.claude/brother-scratch), made when missing. The system temp folder is never a substitute: a root that cannot be
+    made or written, or is empty, not absolute or carries FORBIDDEN_PATH_TEXT, is CopyFailed.
+    ponytail: the exporter makes the folder before this reads its name, so a forbidden BROTHER_SCRATCH is refused only
+    after its folder exists (the one scratch pruner reaps it); a non creating resolver is the upgrade."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import export_public
+    try:
+        root = export_public.scratch_root()
+    except OSError as exc:
+        raise CopyFailed("the scratch root cannot be used (%s); the system temp folder is never used instead" % exc)
+    if not isinstance(root, str) or not root or not os.path.isabs(root) or FORBIDDEN_PATH_TEXT in root:
+        raise CopyFailed("the scratch root %r must be absolute and must not contain %r" % (root, FORBIDDEN_PATH_TEXT))
+    return root
+
+
+def _under(path, root):
+    """True when the real path of `path` is strictly inside the real path of `root`."""
+    try:
+        real, top = os.path.realpath(path), os.path.realpath(root)
+        return real != top and os.path.commonpath([real, top]) == top
+    except ValueError:
+        return False
+
+
+def valid_reading(reading):
+    """CS8.a, CS8.b: a free space reading is a finite, non negative int or float. A bool, a string, None, NaN, an
+    infinity and a negative number are never a reading, so none can read as roomy."""
+    if isinstance(reading, bool) or not isinstance(reading, (int, float)):
+        return False
+    if reading != reading or reading < 0:
+        return False
+    return not math.isinf(reading)
+
+
 def make_copy(source_root, dest, floor_gib=DISK_FLOOR_GIB, free=free_gib):
-    """W1, W2, W6. Returns the commit the copy stands at. `dest` must not exist."""
+    """W1, W2, W6. Returns the commit the copy stands at. `dest` must be absolute, must not exist and must lie under
+    pool_scratch_root() (CS8.a); the floor is read before any copy is made."""
+    if not isinstance(dest, str) or not dest:
+        raise CopyFailed("the copy path %r is not text" % (dest,))
     if FORBIDDEN_PATH_TEXT in dest:
         raise CopyFailed("W2: %r contains %r" % (dest, FORBIDDEN_PATH_TEXT))
+    root = pool_scratch_root()
+    if not os.path.isabs(dest) or not _under(dest, root):
+        raise CopyFailed("the copy path %r is not under the one scratch root %s" % (dest, root))
+    if os.path.lexists(dest):
+        raise CopyFailed("the copy path %r already exists; a copy is never reused or overwritten" % (dest,))
     parent = os.path.dirname(dest.rstrip(os.sep))
-    have = free(parent)
-    if have < floor_gib:
-        raise CopyFailed("W6: %.1f GiB free under %s, floor is %d" % (have, parent, floor_gib))
+    problem = floor_problem(parent, floor_gib, free)
+    if problem:
+        raise CopyFailed("W6: %s" % problem)
     sha = _git(["rev-parse", "HEAD"], source_root)
     common = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], source_root)
     _git(["clone", "-q", "--local", "--no-checkout", common, dest], parent)
@@ -89,14 +135,18 @@ def make_copy(source_root, dest, floor_gib=DISK_FLOOR_GIB, free=free_gib):
 
 
 def floor_problem(path, floor_gib=DISK_FLOOR_GIB, free=None):
-    """FR1.d2: '' when `path` has at least `floor_gib` GiB free, else the NO-DATA reason. An unreadable reading blocks.
+    """FR1.d2: '' when `path` has at least `floor_gib` GiB free, else the NO-DATA reason. An unreadable or invalid
+    reading blocks (CS8.a): `free` is None (the real reading), a callable asked for `path`, or the reading itself.
     Asked by the caller before any baseline runs, so a refusal costs no minutes (make_copy keeps its own W6 check)."""
-    free = free or free_gib
+    free = free_gib if free is None else free
     try:
-        have = free(path)
+        have = free(path) if callable(free) else free
     except (OSError, ValueError, TypeError) as exc:
         return "NO-DATA: the free space under %s cannot be read (%s), floor is %d, read before any baseline" % (
             path, exc, floor_gib)
+    if not valid_reading(have):
+        return "NO-DATA: free space reading is invalid (%r) under %s, floor is %d, read before any baseline" % (
+            have, path, floor_gib)
     if have < floor_gib:
         return "NO-DATA: %.1f GiB free under %s, floor is %d, read before any baseline" % (have, path, floor_gib)
     return ""
@@ -242,8 +292,17 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
     requested = max(1, int(workers))
     slots = min(requested, len(rows))
     waiting = [rows[i::slots] for i in range(slots)]
-    own_base = base is None
-    base = base or tempfile.mkdtemp(prefix="perturb-pool-")
+    # CS8.a: every copy lives under the one scratch root. A caller's base is the caller's: used as it stands (it must lie
+    # under the root) and never removed. With no base the run makes its own folder inside the shared root, so two runs
+    # sharing the root never share a name, and its cleanup removes that folder alone, never the root.
+    root = pool_scratch_root()
+    own_base = False
+    if base is None:
+        base = tempfile.mkdtemp(prefix="perturb-pool-", dir=root)
+        own_base = True
+    elif FORBIDDEN_PATH_TEXT in base or not _under(base, root):
+        raise ValueError("the base %r must not contain %r and must lie under the one scratch root %s"
+                         % (base, FORBIDDEN_PATH_TEXT, root))
     first = max(1, min(int(settled_workers(workers)), slots))
     watched, stop = [], threading.Event()
     watcher = threading.Thread(target=_watch_rows, daemon=True,

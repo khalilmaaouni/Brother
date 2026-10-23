@@ -142,10 +142,31 @@ class RunnerPoolAdmission(unittest.TestCase):
         for k in [k for k in e if k.startswith("GIT_")]:
             e.pop(k)
         e.update(env or {})
+        self.seed_old_seat_root(e)
         r = subprocess.run([sys.executable, "-B", POOL] + (["--dry"] if dry else []), cwd=self.dir, env=e,
                            capture_output=True, text=True, timeout=180)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r.stdout
+
+    def seed_old_seat_root(self, e):
+        """An unchanged seat root, stated once per case. Every pass writes the seat root stamp (I3.a, write_launch_stamp)
+        and, from I3.b, a stamp newer than a parked run is a fact that readmits a WITHHELD unit. A fixture HOME starts
+        with no stamp, so its first pass wrote one dated now and every planted WITHHELD case read a seat root that had
+        just changed (found 2026-10-22: I3.b's builds held twice on the two "stays parked" cases below). The pool's own
+        writer seeds the stamp with this case's environment, dated two days back, so the seat root is the same one the
+        planted runs saw; a case that changes the seat environment still moves it. Before I3.b nothing reads it."""
+        if getattr(self, "_seat_root_seeded", False):
+            return
+        self._seat_root_seeded = True
+        code = ("import sys; sys.path.insert(0, %r); import runner_pool as r; print(r.write_launch_stamp())"
+                % os.path.dirname(POOL))
+        r = subprocess.run([sys.executable, "-B", "-c", code], cwd=self.dir, env=e, capture_output=True, text=True,
+                           timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        path = (r.stdout.strip().splitlines() or [""])[-1]
+        if path and os.path.isfile(path):
+            old = time.time() - 2 * 86400
+            os.utime(path, (old, old))
 
     def started(self, out):
         return set(re.findall(r"^\S+\s+(\S+)\s+START$", out, flags=re.M))

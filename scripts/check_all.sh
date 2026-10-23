@@ -515,6 +515,9 @@ run_check "wbs-self"             python3 scripts/test_wbs.py -v
 # instead would either fail on every machine without the list, or tempt
 # somebody to commit the list, which is the exact thing it prevents.
 run_check "private-terms-self"   python3 scripts/test_private_terms_scan.py -v
+# PRIV1 (2026-10-18): an escaped or split term is still a term, and the loop's
+# brief screen holds no term of its own. Fake terms only, like the suite above.
+run_check "private-terms-escapes" python3 -B scripts/test_private_terms_escapes.py -v
 run_check "loop-bridge-self"     python3 scripts/test_loop_bridge.py -v
 run_check "wave-diamond-self"    python3 scripts/test_wave_diamond.py -v
 run_check "managed-safety-self" python3 scripts/test_managed_safety.py -v
@@ -935,6 +938,10 @@ run_check "bundle-runtime-self" python3 scripts/test_bundle_runtime.py -v
 # route, proven on a mirror this tree's generator regenerates into a scratch copy.
 run_check "bundle-doctor-route" python3 -B scripts/test_bundle_doctor_route.py
 run_check "runs-root-one-rule" python3 -B scripts/test_runs_root_one_rule.py
+# cut-keeps-rehearsal (CS12, 1.1.7): the rehearsal keeps its commits and the record names them, so the commit approved is the commit proved.
+run_check "cut-keeps-rehearsal" python3 -B scripts/test_cut_keeps_rehearsal.py
+# receipt-door-landing (LC6, 1.1.7): the receipt names the landed unit, branch and revision; a rejected review pushes nothing.
+run_check "receipt-door-landing" python3 -B scripts/test_receipt_door_landing.py
 run_check "bundle-installed-lookups" python3 scripts/test_bundle_installed_lookups.py -v
 # hook-guard-self: the one plugin's double-fire guard (docs/architecture/
 # ADR-ONE-PLUGIN-HOOKS.md) fires each bundled hook once, alone or beside an
@@ -1657,6 +1664,8 @@ run_check "unit-runner-probe-gate" python3 scripts/test_unit_runner_probe_gate.p
 run_check "loop-lifecycle-probes" python3 scripts/test_loop_lifecycle_probes.py
 run_check "loop-tool-parity" python3 scripts/test_loop_tool_parity.py
 run_check "loop-tool-parity-stamp" python3 scripts/test_loop_tool_parity_stamp.py
+run_check "kernel-closure-row" python3 scripts/test_kernel_closure_row.py TestKernelClosureRow
+run_check "clock-rows" python3 scripts/loop/test_clock_rows.py TestClockRows
 run_check "loop-module-scope-names" python3 scripts/test_loop_module_scope_names.py
 run_check "pass-pulse-self" python3 scripts/loop/pass_pulse.py --selftest
 run_check "stop-loop" python3 scripts/test_stop_loop.py
@@ -1810,6 +1819,8 @@ run_check "plan-lint-shared" python3 -B scripts/loop/test_plan_lint_shared.py
 run_check "plan-lint-shared-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_shared.py
 run_check "spec-score-no-claim" python3 -B scripts/loop/test_spec_score_no_claim.py
 run_check "spec-score-no-claim-py39" /usr/bin/python3 -B scripts/loop/test_spec_score_no_claim.py
+run_check "spec-intake-target" python3 -B scripts/loop/test_spec_intake_target.py
+run_check "spec-intake-target-py39" /usr/bin/python3 -B scripts/loop/test_spec_intake_target.py
 run_check "plan-lint-after-order" python3 -B scripts/loop/test_plan_lint_after_order.py
 run_check "plan-lint-after-order-py39" /usr/bin/python3 -B scripts/loop/test_plan_lint_after_order.py
 run_check "plan-lint-named-test" python3 -B scripts/loop/test_plan_lint_named_test.py
@@ -2527,6 +2538,15 @@ run_check "plan-116-self" python3 -B scripts/test_plan_116.py
 run_check "plan-116-py39" /usr/bin/python3 -B scripts/test_plan_116.py
 run_check "seed-117-self" python3 -B scripts/test_seed_117.py
 run_check "seed-117-py39" /usr/bin/python3 -B scripts/test_seed_117.py
+run_check "plan-117-self" python3 -B scripts/test_plan_117.py
+run_check "plan-117-py39" /usr/bin/python3 -B scripts/test_plan_117.py
+# A1 (1.1.7): the builder preflight's five lints and close_unit's one proof for DONE, on a copy of the tree
+run_check "builder-preflight-self" python3 -B scripts/test_builder_preflight.py
+run_check "builder-preflight-py39" /usr/bin/python3 -B scripts/test_builder_preflight.py
+# A2 (1.1.7): the deploy step's guards (stamp kernel, pending parity, judge overlay) and the merge window, both interpreters
+run_check "land-batch-loop-guard-py39" /usr/bin/python3 -B scripts/test_land_batch_loop_guard.py
+run_check "merge-window-self" python3 -B scripts/test_merge_window.py
+run_check "merge-window-py39" /usr/bin/python3 -B scripts/test_merge_window.py
 run_check "cut-app-approval-116-self" python3 -B scripts/test_cut_app_approval.py
 run_check "cut-app-approval-116-py39" /usr/bin/python3 -B scripts/test_cut_app_approval.py
 run_check "land-apply-baseline-115-self" python3 -B scripts/loop/test_land_apply_baseline.py
@@ -2579,6 +2599,10 @@ run_check "runner-pool-note-attempt-115-self" python3 -B scripts/loop/test_runne
 run_check "runner-pool-note-attempt-115-py39" /usr/bin/python3 -B scripts/loop/test_runner_pool_note_attempt.py
 run_check "unproductive-cooldown-115-self" python3 -B scripts/loop/test_unproductive_cooldown.py
 run_check "unproductive-cooldown-115-py39" /usr/bin/python3 -B scripts/loop/test_unproductive_cooldown.py
+run_check "pool-why-lines-117-self" python3 -B scripts/loop/test_pool_why_lines.py
+run_check "pool-why-lines-117-py39" /usr/bin/python3 -B scripts/loop/test_pool_why_lines.py
+run_check "refill-after-quarantine-117-self" python3 -B scripts/loop/test_refill_after_quarantine.py
+run_check "refill-after-quarantine-117-py39" /usr/bin/python3 -B scripts/loop/test_refill_after_quarantine.py
 run_check "grade-build-guard-paths-115-self" python3 -B scripts/loop/test_grade_build_guard_paths_115.py
 run_check "grade-build-guard-paths-115-py39" /usr/bin/python3 -B scripts/loop/test_grade_build_guard_paths_115.py
 run_check "run-summary-115-self" python3 -B scripts/loop/test_run_summary.py
@@ -2797,6 +2821,12 @@ run_check "bin-resolution" python3 -B scripts/loop/test_bin_resolution.py
 run_check "bin-resolution-sweep2" python3 -B scripts/loop/test_bin_resolution_sweep2.py
 run_check "ev-gate-model-cost" python3 -B scripts/loop/test_ev_gate_model_cost.py
 run_check "loop-report-abandoned" python3 -B scripts/loop/test_loop_report_abandoned.py
+# the run arms a watcher that announces an unexplained HELD once, and start_run.sh refuses a launch without one (1.1.7 LR1.c)
+run_check "run-watch" python3 -B scripts/loop/test_run_watch.py TestRunWatch
+# the landing canary sends one tiny real change through the live judge, and start_run.sh refuses a launch it does not clear (1.1.7 LR1.d)
+run_check "landing-canary" python3 -B scripts/loop/test_landing_canary.py TestLandingCanary
+# the yield section names suites red without code, the HELD table names every cause, and the proof reads a named run (1.1.7 LR1.e; the fixture class only, the live class is the unit acceptance)
+run_check "loop-works-fully" python3 -B scripts/loop/test_loop_works_fully.py TestLoopWorksFully
 run_check "probe-evidence" python3 -B scripts/loop/test_probe_evidence.py
 run_check "probe-log-timestamp" python3 -B scripts/loop/test_probe_log_timestamp.py
 run_check "unit-runner-h3a-self" python3 scripts/loop/test_unit_runner_h3a.py
@@ -3014,6 +3044,13 @@ run_check "loop-phase-timings-self" python3 scripts/test_loop_phase_timings.py
 run_check "loop-budget-grant-self" python3 scripts/test_loop_budget_grant.py
 run_check "branch-precheck-self" python3 scripts/test_branch_precheck.py
 run_check "worktree-prune-self" python3 scripts/test_worktree_prune.py
+run_check "release-body-self" python3 scripts/test_release_body.py
+run_check "peak-bench-self" python3 scripts/loop/test_peak_bench.py
+run_check "sbe-gate-self" python3 -B -m unittest products.brothersbe.tools.test_sbe_gate
+run_check "unit-runner-i4a-self" python3 scripts/loop/test_unit_runner_i4a.py
+run_check "builder-timebox-self" python3 scripts/test_builder_timebox.py
+run_check "virgin-install-self" python3 scripts/test_virgin_install.py
+run_check "loop-alone-self" python3 scripts/test_loop_alone.py
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook
 # suites) is caught. See the snapshot comment above.

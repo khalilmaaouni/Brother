@@ -42,6 +42,24 @@
 #              the login starts nothing and the launch refuses [holder]. Off the token lane step 5 is unchanged.
 #              The driver leads its own process group on both lanes (the holder starts it in its own session,
 #              S2 round 1), so stop_loop.sh signals the driver's whole group, a foreground refresh included.
+# 1.1.7 LR1.c, THE WATCHER:
+#   5c WATCH   after the driver's first line, scripts/loop/run_watch.py (seam START_RUN_WATCH) is started detached beside
+#              the driver (its own session, output to <run folder>/watcher.log) over the driver's own log and heartbeat
+#              ($EVD/LOOP-HEARTBEAT.json); its pid goes in <run folder>/watcher.pid (the driver's run folder, else a
+#              watch-<stamp> folder beside the launch records). A watcher that is missing or does not stay alive for a
+#              second stops the driver's group and refuses the launch [watch]: a run nobody watches is not started.
+# 1.1.7 LR1.d, THE LANDING CANARY:
+#   4d CANARY  after the intake (and the grant), this checkout's scripts/loop/loop_canary.py (seam START_RUN_CANARY; a
+#              file that does not end in .py runs under bash) replays the known good build AND sends one tiny real change
+#              through the live judge (its landing stage, asked for with --landing: the intake and the deploy run the
+#              canary bare, replay only). Exit 0 starts; exit 1 refuses [canary] with the named row (its
+#              last line); exit 3 refuses [canary] NO-DATA; any other exit refuses too. Its output is in
+#              $STARTS/canary-<stamp>.log. It is a minute-scale replay plus the whole gate on one scratch change, so the
+#              launch waits for it; a signal stops it with the intake's own handler.
+# 1.1.7 LR1.b, THE CLOCK ROWS:
+#   1b CLOCK   after the tree and before the pins, the close ceremony pack and the restore drill record must still be
+#              fresh at the deadline (scripts/close_ceremony_check.py and scripts/acc6_restore_evidence.py, expiry_errors);
+#              an expiry, a missing record or a helper that cannot run refuses [clock] with the refresh command.
 # The run's money is its own: the driver writes <run dir>/money/run-budget.json from the intake's budget and deadline,
 # and nothing carries over from another run. Seams for tests: START_RUN_INTAKE, START_RUN_DRIVER, START_RUN_EVIDENCE.
 # TIMING (LA1.a, reporting only): one `TIME <step> <seconds>` line per step, then, after STARTED, the wait for the
@@ -87,7 +105,20 @@ refuse() { restore_controls; echo "START REFUSED [$1]: $2"; python3 -B "$(dirnam
 # an ignore, so the children keep the default SIGPIPE). LOCK is set once this launch owns the launch lock.
 IPID=""; PID=""; LOCK=""
 on_signal() {
-  if [ -n "$IPID" ]; then kill -TERM -- "-$IPID" 2>/dev/null; kill -TERM "$IPID" 2>/dev/null; fi
+  if [ -n "$IPID" ]; then
+    kill -TERM -- "-$IPID" 2>/dev/null; kill -TERM "$IPID" 2>/dev/null
+    # LR1 review M3: the canary (step 4d) unwinds its worktrees on a TERM, so it is given up to 90 seconds to do so (its judge child is told TERM and has loop_canary.CHILD_GRACE_S = 40 s, plus 10 s to reap, plus its own two git removals); what
+    # still stands after that is killed (bash reaps the child as soon as it ends, so kill -0 stops answering; no ps, which a
+    # sandbox can refuse)
+    G=${START_RUN_CANARY_GRACE_S:-90}; case "$G" in ""|*[!0-9]*) G=90;; esac   # the seam is for tests; a bad value is the default
+    W=0   # a counter, not `seq 1 N`: BSD seq counts DOWN for N below 1
+    while [ "$W" -lt $((G * 2)) ]; do
+      kill -0 "$IPID" 2>/dev/null || break
+      sleep 0.5
+      W=$((W + 1))
+    done
+    kill -KILL -- "-$IPID" 2>/dev/null
+  fi
   refuse signal "interrupted${PID:+; the driver pid $PID may still be running and honours the restored hold}"
 }
 release_lock() { [ -z "$LOCK" ] || { rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null; }; }
@@ -173,6 +204,56 @@ AHEAD=$(git rev-list --count "$UP..HEAD"); BEHIND=$(git rev-list --count "HEAD..
 [ "$BEHIND" = 0 ] || refuse tree "$BEHIND commit(s) behind $UP: git merge --ff-only $UP"
 echo "OK   tree   $BRANCH clean and equal to $UP"
 tmark tree 2>/dev/null || true
+
+# 1b CLOCK (1.1.7 LR1.b): a record the whole gate reads against the clock must still be fresh when the run ENDS, not
+# only when it starts. 2026-10-21: three standing exceptions expired at midnight and every tree's gate went red for a
+# reason no build caused. The close ceremony pack and the restore drill record are asked, from this launcher's own
+# checkout, for their expiry before the deadline (close_ceremony_check.expiry_errors, acc6_restore_evidence.expiry_errors);
+# an expiry, a drill record that is missing or unreadable, or a helper that crashes refuses [clock] with the first line
+# and nothing starts. THE CLOCK RULE IS THE HUB'S ESTATE LAW, so it is NOT a refusal where it cannot apply: a route whose
+# folder holds no such helpers (the plugin's bundle/runtime/loop) and a handover root that does not exist (another
+# user's machine) each print a NOTE and go on. SEAMS: START_RUN_HANDOVER_ROOT (the pack folder), START_RUN_CLOCK_ROWS=off.
+# It is off ONLY for START_RUN_CLOCK_ROWS=off or a START_RUN_EVIDENCE under a temp or scratch folder (the launcher suites'
+# own throwaway evidence), never for any other value; off prints a NOTE, never a silent skip. The helper's stdout is the
+# verdict; its stderr is dropped, so a stray warning is never read as a refusal.
+CLK=on
+case "${START_RUN_EVIDENCE:-}" in
+  /tmp/*|/private/tmp/*|/var/folders/*|/private/var/folders/*|"$HOME"/.claude/brother-scratch/*) CLK=off;;
+esac
+[ -z "${TMPDIR:-}" ] || case "${START_RUN_EVIDENCE:-}" in "${TMPDIR%/}"/*) CLK=off;; esac
+[ "${START_RUN_CLOCK_ROWS:-}" != off ] || CLK=off
+if [ "$CLK" = off ]; then
+  echo "NOTE clock: the close pack and the restore drill were NOT checked against the deadline (START_RUN_CLOCK_ROWS=off or a test evidence folder)"
+elif ! { [ -f "$LDIR/../close_ceremony_check.py" ] && [ -f "$LDIR/../acc6_restore_evidence.py" ] && [ -f "$LDIR/../handover_pack_scan.py" ]; }; then
+  echo "NOTE clock: not checked on this route (helpers absent beside $LDIR)"
+else
+  CLKOUT=$(python3 -B - "$LDIR/.." "$REPO" "$DEADLINE" "${START_RUN_HANDOVER_ROOT:-}" <<'PY' 2>/dev/null
+import datetime, os, sys
+here, repo, dl, hroot = sys.argv[1:5]
+sys.path.insert(0, os.path.abspath(here))
+try:
+    import close_ceremony_check as cc
+    import acc6_restore_evidence as ar
+    deadline = datetime.datetime.strptime(dl, "%Y-%m-%d %H:%M").timestamp()
+    root = hroot or cc.ROOT
+    lines = []
+    if os.path.isdir(root):
+        lines += cc.expiry_errors(root, deadline)
+    else:
+        print("NOTE clock: no handover root at %s (another user's machine), the close pack was not checked" % root)
+    lines += ar.expiry_errors(repo, deadline)
+except Exception as exc:
+    lines = ["clock rows could not be checked (%s: %s); the helpers are scripts/close_ceremony_check.py and scripts/acc6_restore_evidence.py"
+             % (type(exc).__name__, exc)]
+print("\n".join(lines))
+PY
+  ) || CLKOUT="clock rows could not be checked (the helper process failed)"
+  printf '%s\n' "$CLKOUT" | grep '^NOTE ' || true
+  CLKOUT=$(printf '%s\n' "$CLKOUT" | awk 'NF && $0 !~ /^NOTE /' | head -1)
+  [ -z "$CLKOUT" ] || refuse clock "$CLKOUT"
+  echo "OK   clock  the close pack and the restore drill outlast the deadline $DEADLINE"
+fi
+tmark clock 2>/dev/null || true
 
 # 2 PINS
 for WHICH in claude codex; do
@@ -401,6 +482,37 @@ PY
   echo "OK   grant  $GOUT"
 fi
 
+# 4d CANARY (1.1.7 LR1.d): the whole path on one tiny real change, before the first pass. Run in its own process group
+# like the intake, so a signal stops it. Only exit 0 goes on; 1 names the refusing row, 3 is NO-DATA, anything else is a
+# canary that did not answer: every one of them refuses, never a start.
+CANARY=${START_RUN_CANARY:-$REPO/scripts/loop/loop_canary.py}
+[ -f "$CANARY" ] || refuse canary "no $CANARY in this checkout"
+CLOG="$STARTS/canary-$STAMP.log"
+case "$CANARY" in *.py) CCMD=(python3 -B "$CANARY" --landing);; *) CCMD=(bash "$CANARY" --landing);; esac
+# THE ONE SCRATCH ROOT (LR1, 2026-10-21; the rule loop_until.sh states: $BROTHER_SCRATCH/run-<stamp>): the canary and every
+# child it starts write under it, never in the caller's TMPDIR or the system temp folder (on macOS /tmp is a link to
+# /private/tmp, so a path spelled through it no longer equals the same path resolved, which refused every real launch).
+CTMP="${BROTHER_SCRATCH:-$HOME/.claude/brother-scratch}/run-$STAMP"
+mkdir -p "$CTMP" || refuse canary "cannot create its scratch directory $CTMP"
+TMPDIR="$CTMP" perl -e 'setpgrp(0, 0); exec @ARGV or die "exec $ARGV[0]: $!\n"' "${CCMD[@]}" > "$CLOG" 2>&1 &
+IPID=$!
+wait "$IPID"
+CRC=$?
+IPID=""
+rm -rf "$CTMP"   # our own directory, named above and made here; the driver prunes the root by age as well
+CLAST=$(awk 'NF' "$CLOG" | tail -1 | cut -c1-300)
+case "$CRC" in
+  0) # exit 0 is not enough (LR1 review): an older loop_canary.py ignores --landing and exits 0 after the replay alone, so
+     # the last line must be the one only a landing stage that reached WOULD LAND prints (loop_canary.LANDING_OK)
+     case "$CLAST" in
+       "CANARY WOULD LAND: the replay and the landing stage"*) echo "OK   canary $CLAST ($CLOG)";;
+       *) refuse canary "the canary exited 0 without the landing stage's line (an older loop_canary.py ignores --landing); its last line: ${CLAST:-none} (full: $CLOG)";;
+     esac;;
+  1) refuse canary "${CLAST:-the canary refused and said nothing} (full: $CLOG)";;
+  3) echo "NOTE canary: ${CLAST:-no reason} (full: $CLOG)"; refuse canary "NO-DATA";;
+  *) refuse canary "the canary exited $CRC: ${CLAST:-no output} (full: $CLOG)";;
+esac
+
 # THE FIRST CLAIMED UNIT AND THE TIMING RECORD (LA1.a). The loop log's name carries only %Y%m%d-%H%M, so a relaunch in
 # the same minute appends to an older run's log: only a START row after the LAST `RUN START` line is this launch's.
 # Exits non zero when the record could not be written; the caller ignores it (`|| true`): reporting only.
@@ -491,6 +603,29 @@ start_holder() {
   kill -0 "$PID" 2>/dev/null || { echo "the login holder pid $PID ended before its pid file was written"; return 1; }
   echo "OK   holder pid $PID serves the run's login for $run (it started the driver pid $DPID)"
 }
+# 5c WATCH (1.1.7 LR1.c): arm the watcher beside the driver DPID over its own log and heartbeat. Prints the OK line and
+# returns 0, or prints why and returns 1 (the caller stops the driver's group and refuses [watch]).
+arm_watcher() {
+  local watch=${START_RUN_WATCH:-$LDIR/run_watch.py} logp run wpid
+  [ -f "$watch" ] || { echo "no watcher $watch"; return 1; }
+  logp=$(grep -m1 '^LOOP UNTIL' "$DLOG" | sed -n 's/.*| log //p')
+  [ -n "$logp" ] || { echo "the driver's log path could not be read from its first line"; return 1; }
+  run=$(run_folder 2>/dev/null) || run="$STARTS/watch-$STAMP"
+  mkdir -p "$run" 2>/dev/null || { echo "cannot create the watcher's folder $run"; return 1; }
+  wpid=$(python3 - "$watch" "$DPID" "$logp" "$EVD/LOOP-HEARTBEAT.json" "$run" <<'PY'
+import os, subprocess, sys
+watch, pid, log, hb, run = sys.argv[1:6]
+out = open(os.path.join(run, "watcher.log"), "ab")
+p = subprocess.Popen([sys.executable, "-B", watch, "--pid", pid, "--log", log, "--heartbeat", hb, "--run-dir", run],
+                     stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+print(p.pid)
+PY
+  ) || { echo "the watcher could not be spawned"; return 1; }
+  sleep 1
+  kill -0 "$wpid" 2>/dev/null || { echo "the watcher pid $wpid ended within a second: $(tail -2 "$run/watcher.log" 2>/dev/null | tr '\n' ' ' | cut -c1-160)"; return 1; }
+  printf '%s\n' "$wpid" > "$run/watcher.pid" 2>/dev/null || { kill "$wpid" 2>/dev/null; echo "the watcher's pid file under $run could not be written"; return 1; }
+  echo "OK   watch  pid $wpid watches the driver pid $DPID ($run)"
+}
 # The launch record (1.1.6 S2): written at STARTED, read by the next launch's boot step. Reporting only.
 launch_record() {
   local run
@@ -546,6 +681,12 @@ for _ in $(seq 1 120); do
       refuse holder "$HOUT; the run's process group $PID was stopped"
     fi
     echo "$HOUT"
+    if ! WOUT=$(arm_watcher); then
+      kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null
+      case "$DPID" in ''|*[!0-9]*|"$PID") ;; *) kill -TERM -- "-$DPID" 2>/dev/null || kill -TERM "$DPID" 2>/dev/null;; esac
+      refuse watch "$WOUT; the run's process group $PID was stopped"
+    fi
+    echo "$WOUT"
     echo "OK   driver pid $DPID: $(grep -m1 '^LOOP UNTIL' "$DLOG")"
     echo "STARTED: watch with: tail -f $(grep -m1 '^LOOP UNTIL' "$DLOG" | sed -n 's/.*| log //p')"
     trap - INT TERM HUP ALRM QUIT

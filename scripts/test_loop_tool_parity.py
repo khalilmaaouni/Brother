@@ -20,7 +20,7 @@ that makes it one.
 
 Run: python3 scripts/test_loop_tool_parity.py
 """
-import json, os, re, subprocess, sys
+import hashlib, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)                     # THIS directory, not whatever sys.path offers
@@ -96,6 +96,25 @@ def wrong_copy_installed(bin_dir=BIN, loop_dir=None, other_dir=None, referenced=
 STAMP = ".deploy-stamp.json"
 
 
+def pending_kernel(bin_dir=BIN):
+    """The stamp's pending kernel entries (A2.b), {repository path: {deployed_sha256, landed_sha256, ...}}, or {} when
+    the stamp carries none. A stamp whose pending list is not an object of objects reads {} too: nothing is then
+    excused, so every difference stays a DRIFT (the unknown never reads as pending)."""
+    try:
+        with open(os.path.join(bin_dir, STAMP), encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    pend = doc.get("pending_kernel") if isinstance(doc, dict) else None
+    if not isinstance(pend, dict) or not all(isinstance(v, dict) for v in pend.values()):
+        return {}
+    return pend
+
+
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest() if data is not None else None
+
+
 def stamped_revision(bin_dir=BIN):
     """The revision the executed directory declares it was deployed from, or None.
 
@@ -113,14 +132,20 @@ def stamped_revision(bin_dir=BIN):
     return None
 
 
+def repo_rel(path):
+    """`path` (a repository file found through REPO_DIRS) relative to the repository root, computed from this check's
+    own folder (HERE) and never from git's spelling, or None when it is not under it. 2026-10-19, measured: run by the
+    deploy as .../brother-wt/..., git printed the stored case .../Brother-wt/..., so a relpath between the two read
+    ../../brother-wt/... on a disk that folds case, the pending kernel file read DRIFT and versioned_at never matched."""
+    rel = os.path.relpath(os.path.abspath(path), os.path.dirname(os.path.abspath(HERE)))
+    return None if rel == ".." or rel.startswith(".." + os.sep) else rel.replace(os.sep, "/")
+
+
 def versioned_at(revision, path):
     """The bytes of `path` (a file inside this repository) as committed at `revision`, or None when git
     cannot show it (the revision is not in this repository, or the file did not exist there)."""
-    top = subprocess.run(["git", "-C", HERE, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-    if top.returncode != 0 or not top.stdout.strip():
-        return None
-    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(top.stdout.strip()))
-    if rel.startswith(".."):
+    rel = repo_rel(path)
+    if rel is None:
         return None
     shown = subprocess.run(["git", "-C", HERE, "show", "%s:%s" % (revision, rel)], capture_output=True)
     return shown.stdout if shown.returncode == 0 else None
@@ -154,7 +179,8 @@ def drifted():
     namesake in scripts is reported as a SHADOW rather than a drift: worth knowing, because two
     tools with one name is how the wrong one gets edited, but not a failure of this check."""
     out, at_revision = [], []
-    revision = stamped_revision()
+    revision = stamped_revision(BIN)   # BIN read now, not the default bound at import (a test rebinds it)
+    pend = pending_kernel(BIN)
     for name in sorted(set(n for d in REPO_DIRS if os.path.isdir(d) for n in os.listdir(d))):
         if not name.endswith((".py", ".sh")):
             continue
@@ -168,7 +194,12 @@ def drifted():
         if a_bytes is None or b_bytes is None:
             out.append((name, "unreadable"))
         elif a_bytes != b_bytes:
-            if revision is not None and versioned_at(revision, canonical) == b_bytes:
+            # A2.c: a kernel file landed and not yet activated keeps generation N's bytes in bin by design; it reads
+            # PENDING only when bin holds exactly the deployed bytes AND this tree exactly the landed ones
+            entry = pend.get(repo_rel(canonical))
+            if entry and entry.get("deployed_sha256") == _sha256(b_bytes) and entry.get("landed_sha256") == _sha256(a_bytes):
+                at_revision.append((name, "PENDING"))
+            elif revision is not None and versioned_at(revision, canonical) == b_bytes:
                 at_revision.append((name, revision))
             else:
                 out.append((name, "differs"))
@@ -397,6 +428,10 @@ def main():
     (d, at_revision), m = drifted(), bin_only_but_used()
     sh = shadows()
     for name, revision in at_revision:
+        if revision == "PENDING":
+            print("PENDING kernel %-28s bin holds generation N's bytes and this tree the landed ones; it activates "
+                  "on the owner's approval (A2.c), never a drift" % name)
+            continue
         print("note revision  %-28s equals the versioned copy at the deployed revision %s, not this "
               "tree's copy" % (name, revision[:12]))
     for name in sh:

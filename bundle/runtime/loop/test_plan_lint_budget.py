@@ -43,7 +43,8 @@ class Fixture(unittest.TestCase):
         self.home = os.path.join(tmp.name, "home")
         os.makedirs(os.path.join(self.root, "docs", "plan", "specs"))
         os.makedirs(self.home)
-        self.private_names("# empty list: no private term in these fixtures\n")
+        # one fake token no fixture carries: an EMPTY list screens nothing and fails closed (PRIV1, 2026-10-18)
+        self.private_names("zz-fixture-private-token\n")
         saved = os.environ.get("HOME")
         self.addCleanup(lambda: os.environ.__setitem__("HOME", saved) if saved is not None else os.environ.pop("HOME", None))
         os.environ["HOME"] = self.home

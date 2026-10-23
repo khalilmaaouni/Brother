@@ -146,6 +146,37 @@ def _seam_present():
         os.path.join(SEAM_DIR, "bm_vault_policy.py")))
 
 
+def _boxed():
+    """True only when macOS answers that this process runs under a sandbox (sandbox_check on its own pid): the lander's
+    box. Anything it cannot ask, another platform included, is False, so the real proofs run and a box that cannot be
+    told apart fails rather than passes (owner ruling 2026-10-19, A2: "Box-aware rows")."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import ctypes
+        import ctypes.util
+        lib = ctypes.CDLL(ctypes.util.find_library("System") or "/usr/lib/libSystem.B.dylib")
+        check = lib.sandbox_check
+        check.restype = ctypes.c_int
+        check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        return check(os.getpid(), None, 0) == 1
+    except (OSError, AttributeError, ValueError):
+        return False
+
+
+def _bind_refused():
+    """True only when binding a localhost socket is refused with EPERM, the box's own refusal."""
+    import errno
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 0))
+        return False
+    except PermissionError as exc:
+        return exc.errno == errno.EPERM
+    finally:
+        s.close()
+
+
 def _free_port():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -489,6 +520,57 @@ class TheProofCatchesACollapsedSeam(unittest.TestCase):
                             "caught as a leak, not pass:\n" + "\n".join(lines))
 
 
+class TheBoxBranch(unittest.TestCase):
+    """Owner ruling 2026-10-19 (A2, "Box-aware rows"): in the lander's sandbox main() asserts the localhost refusal, never
+    skips; a sandbox that allows the socket FAILs so the real proofs are wired there instead."""
+
+    def run_main(self, boxed, refused, wedge=True):
+        import contextlib, io
+        g, out = globals(), io.StringIO()
+        saved = (g["_boxed"], g["_bind_refused"], g["run_slow_server_report_is_bounded_proof"], g["_seam_present"])
+        g["_boxed"], g["_bind_refused"] = (lambda: boxed), (lambda: refused)
+        g["run_slow_server_report_is_bounded_proof"] = lambda: (wedge, ["wedge (stubbed in this test): %s" % wedge])
+        g["_seam_present"] = lambda: True
+        try:
+            with contextlib.redirect_stdout(out):
+                code = main()
+        finally:
+            g["_boxed"], g["_bind_refused"], g["run_slow_server_report_is_bounded_proof"], g["_seam_present"] = saved
+        return code, out.getvalue()
+
+    def test_the_box_refusal_is_asserted_and_passes(self):
+        code, out = self.run_main(True, True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("BOXED: a localhost socket is refused with EPERM", out)
+
+    def test_a_wedged_server_still_fails_inside_the_box(self):
+        code, out = self.run_main(True, True, wedge=False)
+        self.assertEqual(code, 1, out)
+
+    def test_only_eperm_is_the_boxs_refusal(self):
+        import errno
+        class Refusing(object):
+            def __init__(self, *a):
+                pass
+            def bind(self, addr):
+                raise PermissionError(self.code, "refused")
+            def close(self):
+                pass
+        real = socket.socket
+        try:
+            for code, want in ((errno.EPERM, True), (errno.EACCES, False)):
+                Refusing.code = code
+                socket.socket = Refusing
+                self.assertEqual(_bind_refused(), want, code)
+        finally:
+            socket.socket = real
+
+    def test_a_box_that_allows_the_socket_fails(self):
+        code, out = self.run_main(True, False)
+        self.assertEqual(code, 1, out)
+        self.assertIn("inside a sandbox that allows a localhost socket", out)
+
+
 def main():
     # Runs before the seam check: it needs no fixture, and a suite that can
     # wedge is worth knowing about even when the seam is missing.
@@ -503,6 +585,19 @@ def main():
               "see PROVENANCE.md in that directory" % SEAM_DIR)
         return 2
     overall_ok = wedge_ok
+    if _boxed():
+        # THE BOX (owner ruling 2026-10-19, A2, "Box-aware rows"): the lander's sandbox has no network, so the two tenant
+        # server proofs cannot start here; the box's refusal is asserted instead, never skipped, and the session's
+        # unboxed gate runs the real proofs at every merge window and at the cut. A box that allows the bind is not the
+        # box this was written for: FAIL, so the real proofs are wired in here, never silently passed.
+        if not _bind_refused():
+            print(FAIL + " exit 1 test_tenancy_isolation: inside a sandbox that allows a localhost socket; run the real "
+                         "proofs here")
+            return 1
+        print("ok  BOXED: a localhost socket is refused with EPERM inside the sandbox, so the two tenant proofs run in "
+              "the session's unboxed gate, not here")
+        print((PASS + " exit 0 test_tenancy_isolation") if overall_ok else (FAIL + " exit 1 test_tenancy_isolation"))
+        return 0 if overall_ok else 1
     ok, lines = run_leakage_proof(collapse=False)
     if ok is None:
         print("\n".join(lines))

@@ -2,11 +2,57 @@
 import json
 import pathlib
 import re
+import shlex
 import sys
 
 _TIME_RE = re.compile(r"\b(?:[01][0-9]|2[0-3]):[0-5][0-9]\b")
 _ESTIMATE_RE = re.compile(r"\b(?:estimate|estimated|approx|eta|placeholder|example|fake)\b", re.IGNORECASE)
 _BOUNDARY = ".!?" + chr(10) + ";"
+# A UTC offset's lead: a full ISO date and time with seconds, or a zone name, right before the sign. A bare time with
+# seconds is not enough: a hyphen after it may start a range end, and that end is a clock time (adversarial review,
+# 2026-10-21).
+_OFFSET_LEAD_RE = re.compile(r"(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?|(?:UTC|GMT) ?)$")
+# Any shell metacharacter, a newline or a backslash in the raw command: shlex splits differently from the shell, so
+# the raw string is refused before it is split (security review of 58edb1483, 2026-10-21).
+_SHELL_META_RE = re.compile(r"[;&|<>$`(){}\n\r\\]")
+# A date +FORMAT counts only when built from conversions (a percent sign, an optional padding flag, a letter) and
+# fixed separators: a digit prints itself and a glob or a tilde lets the shell substitute a file name, so either
+# could print any time (security review of c96aecd19, 2026-10-21).
+_DATE_FORMAT_RE = re.compile(r"\+(?:%[-_^#]?[A-Za-z%]|[ :/,.TZ-])*")
+
+
+def _not_a_clock(text: str, start: int) -> bool:
+    """True when the match at `start` is not a clock time: the tail of a longer colon chain (the minutes and seconds
+    of an hours, minutes and seconds time, whose hours a letter such as an ISO T hides from the word boundary; the
+    colon must follow a digit, so a label such as "Time:" never hides a time), or a UTC offset (a sign, then hours and
+    minutes, after an ISO date and time with seconds or after UTC or GMT). Found 2026-10-21: both shapes denied calls
+    that carried no clock time at all."""
+    if start > 1 and text[start - 1] == ":" and text[start - 2].isdigit():
+        return True
+    if start > 0 and text[start - 1] in "+-":
+        return _OFFSET_LEAD_RE.search(text, max(0, start - 40), start - 1) is not None
+    return False
+
+
+def _reads_the_clock(command: str) -> bool:
+    """True for a command that prints the clock as it is now. `date` counts only with -u, -R, -I[unit] or a
+    +FORMAT that holds no digit (a digit in a format prints itself, so a format could print any time); -d, -j -f, -r
+    and -v print a time they were given or shifted. The estate's clock tools count only bare. A command carrying any
+    shell metacharacter can run a second command, so it never counts (adversarial and security reviews,
+    2026-10-21: before the transcript fix no read was ever found, so these holes were out of reach; the fix made
+    them live)."""
+    if _SHELL_META_RE.search(command):
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    if not tokens or tokens[0] not in CLOCK_COMMAND_ALLOWLIST:
+        return False
+    if tokens[0] != "date":
+        return len(tokens) == 1
+    return all(t in ("-u", "-R") or re.fullmatch(r"-I(?:date|hours|minutes|seconds|ns)?", t) is not None
+               or _DATE_FORMAT_RE.fullmatch(t) is not None for t in tokens[1:])
 
 def _require_text(value: object, name: str) -> str:
     if not isinstance(value, str):
@@ -22,6 +68,8 @@ def find_times(text: str) -> list[tuple[str, int, int, int, int]]:
     text = _require_text(text, "text")
     found = []
     for match in _TIME_RE.finditer(text):
+        if _not_a_clock(text, match.start()):
+            continue
         token = match.group(0)
         hour = int(token[0:2])
         minute = int(token[3:5])
@@ -120,8 +168,7 @@ def parse_clock_evidence(transcript_text: str) -> list[int]:
         command = record.get("command")
         if not isinstance(command, str):
             continue
-        tokens = command.split()
-        if not tokens or tokens[0] not in CLOCK_COMMAND_ALLOWLIST:
+        if not _reads_the_clock(command):
             continue
         result_text = None
         for field in CLOCK_RESULT_FIELDS:
@@ -277,18 +324,68 @@ def extract_evidence(payload: dict) -> str:
     for index, record in enumerate(parsed):
         if not isinstance(record, dict):
             continue
-        if record.get("type") == "user":
+        if record.get("type") == "user" and _is_prompt(record):
             last_user = index
         if isinstance(current_id, str) and index > last_user:
-            if _record_id(record) == current_id:
+            if _record_id(record) == current_id or current_id in _tool_use_ids(record):
                 stop_at = index
                 break
     kept: list[str] = []
+    commands: dict[str, str] = {}
     for index in range(last_user + 1, stop_at):
         record = parsed[index]
-        if isinstance(record, dict) and record.get("type") == "tool_result":
-            kept.append(lines[index])
+        if not isinstance(record, dict):
+            continue
+        if record.get("type") == "tool_result":
+            kept.append(lines[index])   # the flat line (a host that writes one; the fixtures of M1.1)
+            continue
+        # Claude Code's own records: the command in an assistant tool_use block, its output in a tool_result block of
+        # the next user record. Each pair becomes one flat line, the shape parse_clock_evidence reads.
+        for block in _blocks(record):
+            if record.get("type") == "assistant" and block.get("type") == "tool_use":
+                tool_input = block.get("input")
+                command = tool_input.get("command") if isinstance(tool_input, dict) else None
+                if isinstance(block.get("id"), str) and isinstance(command, str):
+                    commands[block["id"]] = command
+            elif record.get("type") == "user" and block.get("type") == "tool_result":
+                command = commands.get(block.get("tool_use_id"))
+                output = _block_text(block)
+                if command is not None and output is not None:
+                    kept.append(json.dumps({"type": "tool_result", "tool_use_id": block.get("tool_use_id"),
+                                            "command": command, "stdout": output}))
     return "\n".join(kept)
+
+
+def _blocks(record: dict) -> list[dict]:
+    """The content blocks of a Claude Code record ({"message": {"content": [...]}}), or [] for any other shape."""
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _is_prompt(record: dict) -> bool:
+    """A user record that a person wrote, which starts a turn. Claude Code writes every tool result as a user record
+    too, holding tool_result blocks; reading those as prompts ended the turn at the last tool call, so no clock read
+    before it ever counted."""
+    return not any(b.get("type") == "tool_result" for b in _blocks(record))
+
+
+def _tool_use_ids(record: dict) -> list[str]:
+    """The ids of the tool_use blocks in an assistant record (the current call's own record ends the window)."""
+    if record.get("type") != "assistant":
+        return []
+    return [b.get("id") for b in _blocks(record) if b.get("type") == "tool_use"]
+
+
+def _block_text(block: dict) -> object:
+    """A tool_result block's output as text: its string content, or the text of its text blocks; None otherwise."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text") for b in content
+                         if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+    return None
 
 
 def _times_to_report(outgoing_text: str) -> list[str]:
@@ -447,6 +544,22 @@ def _warn(text: str) -> None:
     sys.stderr.write(mod.one_line(text) + "\n")
 
 
+_REMEDY = {
+    "NO-DATA": "no clock read earlier in this turn backs it; run date first and quote its output, write the time as "
+               "15h20, or label it an estimate",
+    "MISMATCH": "it is more than 2 minutes from every clock read in this turn; quote the clock's own time",
+}
+
+
+def _deny_reason(reason: str, times: list[str]) -> str:
+    """The deny text a person reads. A bare reason code named no token, so a deny looked like it had no time in it
+    (2026-10-21: the matched token was a UTC offset, invisible as a time to the reader)."""
+    if not times:
+        return reason
+    return "%s: the clock time(s) %s in this call: %s" % (reason, ", ".join(times),
+                                                         _REMEDY.get(reason, "see bm_clock_guard.py"))
+
+
 def _emit_guard_verdict(payload: object, decision: str, reason: str, times: list[str]) -> int:
     hook_event = None
     if isinstance(payload, dict):
@@ -457,7 +570,7 @@ def _emit_guard_verdict(payload: object, decision: str, reason: str, times: list
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
+                    "permissionDecisionReason": _deny_reason(reason, times),
                 }
             }
             sys.stdout.write(json.dumps(body) + "\n")
@@ -660,7 +773,7 @@ def main(argv: list[str]) -> int:
     try:
         evidence_text = extract_evidence(payload)
     except ValueError:
-        return _emit_guard_verdict(payload, "BLOCK", "NO-DATA", [])
+        return _emit_guard_verdict(payload, "BLOCK", "NO-DATA", required_times)
     except Exception:
         return _emit_guard_verdict(payload, "BLOCK", "CORRUPT", [])
     try:

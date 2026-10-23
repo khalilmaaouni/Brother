@@ -14,6 +14,7 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import export_public  # noqa: E402
 import perturb_pool as PP  # noqa: E402
 
 ENV = PP.clean_env({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
@@ -25,8 +26,9 @@ def sh(args, cwd):
 
 class Base(unittest.TestCase):
     def setUp(self):
+        # CS8.a: a pool copy lives under the one scratch root, so the fixture does too (never the system temp)
         # realpath: macOS hands out /var/... which is a link to /private/var/...
-        self.top = os.path.realpath(tempfile.mkdtemp(prefix="pool-test-"))
+        self.top = os.path.realpath(tempfile.mkdtemp(prefix="pool-test-", dir=export_public.scratch_root()))
         self.addCleanup(shutil.rmtree, self.top, True)
         if PP.FORBIDDEN_PATH_TEXT in self.top:
             self.skipTest("NO-DATA: this machine's temp root contains /tmp, which W2 refuses")
@@ -373,7 +375,7 @@ class TestFR1D(unittest.TestCase):
     """The baseline receipts (d1)."""
 
     def setUp(self):
-        self.top = os.path.realpath(tempfile.mkdtemp(prefix="fr1d-test-"))
+        self.top = os.path.realpath(tempfile.mkdtemp(prefix="fr1d-test-", dir=export_public.scratch_root()))
         self.addCleanup(shutil.rmtree, self.top, True)
         self.root = os.path.join(self.top, "repo")
         self.ev = os.path.join(self.top, "evidence")
@@ -578,6 +580,37 @@ class TestFR1D(unittest.TestCase):
             rows, problem = RN.pooled_rows([("c", SUITE)], perturb, lambda *a: [], workers=1, version=VER)
         self.assertEqual((rows, calls), ([], []))
         self.assertTrue(problem.startswith("NO-DATA") and "5.0 GiB" in problem and "floor is 15" in problem, problem)
+
+    def floor_run(self):
+        """pooled_rows to its floor read, on a harness that runs no suite: (rows, problem, baseline calls)."""
+        calls = []
+        perturb = type("P", (), {"run_suite": lambda self, s: calls.append(s) or (0, ""),
+                                 "wall_for": lambda self, s: 60, "sibling_suite": lambda self, r: None})()
+        with mock.patch.dict(os.environ, {"BROTHER_CUT_TEST": "1", "BROTHER_CUT_EVIDENCE_DIR": self.ev}), \
+                mock.patch.object(RN, "ROOT", self.root), \
+                mock.patch.object(RN, "subject_files", return_value=["scripts/a.py"]), \
+                mock.patch("refresh_cut.dirty_paths", return_value=([], "")):
+            rows, problem = RN.pooled_rows([("c", SUITE)], perturb, lambda *a: [], workers=1, version=VER)
+        return rows, problem, calls
+
+    def test_the_floor_is_read_where_the_copies_live_not_in_the_system_temp(self):
+        import export_public
+        asked = []
+        with mock.patch.object(PP, "free_gib", lambda p: asked.append(p) or 5.0):
+            rows, problem, calls = self.floor_run()
+        self.assertEqual(asked, [export_public.scratch_root()])
+        self.assertNotEqual(os.path.realpath(asked[0]), os.path.realpath(tempfile.gettempdir()))
+        self.assertTrue(problem.startswith("NO-DATA") and "5.0 GiB" in problem, problem)
+        self.assertEqual((rows, calls), ([], []))
+
+    def test_a_scratch_root_that_cannot_be_used_is_no_data_before_any_baseline(self):
+        for exc in (PP.CopyFailed("no root"), PermissionError(13, "no", "x")):
+            with self.subTest(exc=type(exc).__name__), \
+                    mock.patch.object(PP, "pool_scratch_root", side_effect=exc), \
+                    mock.patch.object(PP, "free_gib", lambda p: 999.0):
+                rows, problem, calls = self.floor_run()
+            self.assertEqual((rows, calls), ([], []))
+            self.assertTrue(problem.startswith("NO-DATA") and "scratch root cannot be used" in problem, problem)
 
     def test_an_unreadable_disk_reading_blocks(self):
         def boom(path):

@@ -293,7 +293,9 @@ class LaunchFixture(unittest.TestCase):
         self.stubs = {}
         for name, body, ex in (("stub_intake.py", STUB_INTAKE, False), ("stub_driver.sh", STUB_DRIVER, False),
                                ("stub_live.sh", TSR.STUB_LIVE, False), ("stub_holder.py", STUB_HOLDER, False),
-                               ("stub_grant.py", STUB_GRANT, False), ("fakebin", "#!/bin/sh\nexit 0\n", True)):
+                               ("stub_grant.py", STUB_GRANT, False), ("fakebin", "#!/bin/sh\nexit 0\n", True),
+                               # 1.1.7 LR1.d: the landing canary step of start_run.sh, stood in
+                               ("stub_canary.sh", TSR.STUB_CANARY, False)):
             self.stubs[name] = os.path.join(self.tmp, name)
             TSR._write(self.stubs[name], body, executable=ex)
         self.addCleanup(self._reap_holders)
@@ -308,6 +310,7 @@ class LaunchFixture(unittest.TestCase):
         env.update(START_RUN_EVIDENCE=self.evd, START_RUN_INTAKE=self.stubs["stub_intake.py"],
                    START_RUN_DRIVER=self.stubs["stub_driver.sh"], START_RUN_LIVE_CHECK=self.stubs["stub_live.sh"],
                    START_RUN_HOLDER=self.stubs["stub_holder.py"], START_RUN_GRANT=self.stubs["stub_grant.py"],
+                   START_RUN_CANARY=self.stubs["stub_canary.sh"],
                    START_RUN_TIMING_WAIT_S="0", START_RUN_BOOTTIME="boot A",
                    TEST_EVD=self.evd, TEST_LOOP_DIR=HERE, BROTHER_RUNS_ROOT=self.runs,
                    BROTHER_CLAUDE_BIN=self.stubs["fakebin"], BROTHER_CODEX_BIN=self.stubs["fakebin"],

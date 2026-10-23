@@ -25,6 +25,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cut as C  # noqa: E402
+import export_public  # noqa: E402
 import perturb_pool as PP  # noqa: E402
 import refresh_cut as RC  # noqa: E402
 import test_cut as TC  # noqa: E402
@@ -236,7 +237,7 @@ def _scripted_pool(base, answers):
 class ThePoolSaysARowAsItIsAnswered(unittest.TestCase):
 
     def setUp(self):
-        self.base = tempfile.mkdtemp(prefix="fr1f-pool-")
+        self.base = tempfile.mkdtemp(prefix="fr1f-pool-", dir=export_public.scratch_root())
         self.addCleanup(shutil.rmtree, self.base, True)
 
     def test_a_row_answered_prints_one_line(self):

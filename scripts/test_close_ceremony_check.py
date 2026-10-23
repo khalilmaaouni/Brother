@@ -489,5 +489,55 @@ class ANewestDirectoryThatIsNotAPackIsNoDataNeverAFail(unittest.TestCase):
         self.assertIn("not a close pack", out)
 
 
+
+class TheBoxBranch(unittest.TestCase):
+    """Owner ruling 2026-10-19 (A2, "Box-aware rows"): in the lander's sandbox the default root is asserted absent under a
+    throwaway HOME, never skipped; any other sandbox FAILs so the real check is wired there instead."""
+
+    def run_main(self, home, boxed, argv=()):
+        out, saved = io.StringIO(), (C._boxed, os.environ.get("HOME"), C.ROOT)
+        C._boxed = lambda: boxed
+        os.environ["HOME"] = home
+        C.ROOT = os.path.join(home, "Documents", "BrotherModeUp-handovers")
+        try:
+            with contextlib.redirect_stdout(out):
+                code = C.main(list(argv))
+        finally:
+            C._boxed, C.ROOT = saved[0], saved[2]
+            if saved[1] is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = saved[1]
+        return code, out.getvalue()
+
+    def test_a_throwaway_home_in_the_box_asserts_the_refusal(self):
+        home = tempfile.mkdtemp(prefix="cc-box-")
+        self.addCleanup(shutil.rmtree, home, True)
+        code, out = self.run_main(home, True)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out.startswith("BOXED: "), out)
+
+    def test_a_box_whose_home_holds_the_root_fails(self):
+        home = tempfile.mkdtemp(prefix="cc-box-")
+        self.addCleanup(shutil.rmtree, home, True)
+        os.makedirs(os.path.join(home, "Documents", "BrotherModeUp-handovers"))
+        code, out = self.run_main(home, True)
+        self.assertEqual(code, 1, out)
+        self.assertTrue(out.startswith("FAIL: inside a sandbox"), out)
+
+    def test_outside_the_box_a_missing_root_stays_no_data(self):
+        home = tempfile.mkdtemp(prefix="cc-box-")
+        self.addCleanup(shutil.rmtree, home, True)
+        code, out = self.run_main(home, False)
+        self.assertEqual(code, 2, out)
+        self.assertTrue(out.startswith("NO-DATA: handover root"), out)
+
+    def test_an_explicit_root_is_never_the_box_branch(self):
+        home = tempfile.mkdtemp(prefix="cc-box-")
+        self.addCleanup(shutil.rmtree, home, True)
+        code, out = self.run_main(home, True, ["--root", os.path.join(home, "absent")])
+        self.assertEqual(code, 2, out)
+
+
 if __name__ == "__main__":
     unittest.main()

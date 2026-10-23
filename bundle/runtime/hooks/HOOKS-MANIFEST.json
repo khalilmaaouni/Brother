@@ -54,7 +54,7 @@
   },
   {
    "path": "brothermode/tools/bm_clock_guard.py",
-   "sha256": "fd16a815d713c38bf77bb930602d7621e06bafb5c56b056b87bb0a85386a6bce"
+   "sha256": "17a993b71d3bae88f5db8d01af7762299a27f859b40130760d6cb4a485261f3e"
   },
   {
    "path": "brothermode/tools/bm_connectors.py",
@@ -210,7 +210,7 @@
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "5b3535fd9d1ce798d2a03b3b7ab9bd01e7c0fb44ed15943752865425a3afb0f4"
+   "sha256": "acfdf1349c54c0a54e7362c8c8cf37e0e83906d85249d07f24a57d7e4c5ca4dd"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -638,7 +638,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_gate.py",
-   "sha256": "4eb26101a1eeea25805f7e9d1150eb07b63f56afdd5ecf6878149060cad579fe"
+   "sha256": "0fc647e39b208abc2e394230a20b41acc6636adb1be067c2af7a1e351219bf81"
   },
   {
    "path": "brothersbe/tools/sbe_guard_common.py",

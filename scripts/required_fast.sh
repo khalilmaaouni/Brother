@@ -594,6 +594,7 @@ run_check "loop-reporting"       python3 scripts/loop/loop_report.py --selftest
 run_check "loop-model-routing"   python3 scripts/loop/model_router.py --selftest
 run_check "loop-model-call"      python3 scripts/loop/model_call.py --selftest
 run_check "loop-tool-parity"     python3 scripts/test_loop_tool_parity.py
+run_check "kernel-closure-list"  python3 scripts/kernel_closure.py --check
 run_check "loop-owns-complete"   python3 scripts/test_bl_owns_complete.py
 run_check "loop-silent-failure"  python3 scripts/test_loop_report_run.py Lint
 run_check "loop-wiring"          python3 scripts/test_loop_wiring.py --max 4

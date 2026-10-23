@@ -1128,7 +1128,8 @@ class ThePoolMeasuresTheTable(unittest.TestCase):
         for copier, spawn, want in ((no_copy, None, "no work copy"),
                                     (fake_copy, lambda argv, env: Dead(),
                                      "the worker ended before this row")):
-            base = os.path.realpath(tempfile.mkdtemp())
+            import export_public
+            base = os.path.realpath(tempfile.mkdtemp(prefix="pool-base-", dir=export_public.scratch_root()))
             self.addCleanup(shutil.rmtree, base, True)
 
             def pool(rows, root, wall, workers, copier=copier, spawn=spawn, base=base):

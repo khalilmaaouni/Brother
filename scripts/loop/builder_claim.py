@@ -5,6 +5,8 @@ starts the same sub unit twice. A claim whose pid is dead is reconciled like a d
 cannot be read holds the sub unit and never frees it."""
 import fcntl
 import glob
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -15,7 +17,8 @@ DEFAULT_RUNS = os.path.expanduser("~/.claude/evidence/unit-runs")
 CLAIM_FILE = "CLAIM"
 
 _FOLDER_RE = re.compile(r"^[^/]+-[0-9]{6}$")
-_FIELDS = ("state", "sub", "builder", "pid", "branch", "at")
+_FIELDS = ("state", "sub", "builder", "pid", "branch", "at", "deadline", "deadline_seal")
+_DEADLINE_SEAL_KEY = "i22.a.deadline.v1"
 _MK_TRIES = 60
 _OLD_S = 6 * 3600
 
@@ -188,7 +191,70 @@ def _unreadable(folder, why):
             % (folder, why, folder))
 
 
-def claim(sub, builder, pid, branch, runs_dir=DEFAULT_RUNS, now=None):
+def _box_minutes(value):
+    """75.0 when value is None, else the finite number greater than zero as a float. A bool, a string, a list, NaN,
+    either infinity, zero and a negative value are refused here, before any deadline is written."""
+    if value is None:
+        return 75.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("box_minutes must be a finite number greater than 0, not %r" % (value,))
+    if value != value or value == float("inf") or value == float("-inf") or value <= 0:
+        raise ValueError("box_minutes must be a finite number greater than 0, not %r" % (value,))
+    return float(value)
+
+
+def _seal_deadline(record):
+    """The hexadecimal sha256 digest over the canonical JSON of this record's sub, pid, at and deadline plus the
+    module key. A record with any of those fields missing and a deadline that is not finite is a ValueError, so a
+    record this module would not write is never sealed."""
+    if not isinstance(record, dict):
+        raise ValueError("a deadline seal needs a record object")
+    payload = {}
+    for field in ("sub", "pid", "at", "deadline"):
+        if field not in record:
+            raise ValueError("the field %r is missing, so no deadline seal can be written" % (field,))
+        payload[field] = record[field]
+    deadline = payload["deadline"]
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+        raise ValueError("the deadline must be a finite number, not %r" % (deadline,))
+    if deadline != deadline or deadline == float("inf") or deadline == float("-inf"):
+        raise ValueError("the deadline must be a finite number, not %r" % (deadline,))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256((_DEADLINE_SEAL_KEY + canonical).encode("utf-8")).hexdigest()
+
+
+def _verify_seal(record):
+    """True only when the record carries the seal this module would write for it. A missing, non-string, unencodable
+    or altered seal is False and never an exception, so a rewritten deadline reads as unsealed, never as open."""
+    if not isinstance(record, dict):
+        return False
+    seal = record.get("deadline_seal")
+    if not isinstance(seal, str) or not seal:
+        return False
+    try:
+        expected = _seal_deadline(record)
+    except ValueError:
+        return False
+    try:
+        given = seal.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(given, expected.encode("ascii"))
+
+
+def _safe_run_dir(run_dir):
+    """The normalized absolute run folder when it is a non-empty string strictly under DEFAULT_RUNS, else
+    ValueError("run_dir is outside the pool"). Nothing is read from a folder this refuses."""
+    if isinstance(run_dir, bool) or not isinstance(run_dir, str) or not run_dir:
+        raise ValueError("run_dir is outside the pool")
+    real_dir = os.path.realpath(run_dir)
+    real_pool = os.path.realpath(DEFAULT_RUNS)
+    if not real_dir.startswith(real_pool + os.sep):
+        raise ValueError("run_dir is outside the pool")
+    return real_dir
+
+
+def claim(sub, builder, pid, branch, runs_dir=DEFAULT_RUNS, now=None, box_minutes=None):
     """Write a runner shaped claim for `sub` under runs_dir and answer the folder path.
 
     The folder is <sub>-HHMMSS, holds CLAIM (this record) and PID (the builder's pid and a newline), and carries no
@@ -202,6 +268,7 @@ def claim(sub, builder, pid, branch, runs_dir=DEFAULT_RUNS, now=None):
     _text(branch, "branch")
     _text(runs_dir, "runs_dir")
     at = time.time() if now is None else _finite(now, "now")
+    box = _box_minutes(box_minutes)
     try:
         os.makedirs(runs_dir, exist_ok=True)
     except OSError as exc:
@@ -223,7 +290,9 @@ def claim(sub, builder, pid, branch, runs_dir=DEFAULT_RUNS, now=None):
         if live:
             raise ValueError(live)
         folder = _make_folder(runs_dir, sub, at)
-        record = {"state": "CLAIMED", "sub": sub, "builder": builder, "pid": pid, "branch": branch, "at": at}
+        record = {"state": "CLAIMED", "sub": sub, "builder": builder, "pid": pid, "branch": branch, "at": at,
+                  "deadline": at + box * 60.0}
+        record["deadline_seal"] = _seal_deadline(record)
         try:
             _write_text(os.path.join(folder, CLAIM_FILE), json.dumps(record))
             _write_text(os.path.join(folder, "PID"), "%d\n" % pid)
@@ -237,6 +306,26 @@ def claim(sub, builder, pid, branch, runs_dir=DEFAULT_RUNS, now=None):
         except OSError:  # sbe: allow-silent the lock dies with the handle closed on the next line; an unlock error changes nothing
             pass
         handle.close()
+
+
+def claim_deadline(run_dir):
+    """The deadline a claim folder records, as a float of seconds since the epoch.
+
+    A run folder outside the pool, a missing or unreadable CLAIM, a record with no finite deadline and a record whose
+    seal does not match all refuse with ValueError. A missing or rewritten deadline never reads as no box, and the 75
+    minute default is never substituted here."""
+    real_dir = _safe_run_dir(run_dir)
+    record, why = _read_claim(os.path.join(real_dir, CLAIM_FILE))
+    if record is None or why:
+        raise ValueError(why or "claim record unreadable")
+    deadline = record.get("deadline")
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+        raise ValueError("claim record has no finite deadline")
+    if deadline != deadline or deadline == float("inf") or deadline == float("-inf"):
+        raise ValueError("claim record has no finite deadline")
+    if "deadline_seal" not in record or not _verify_seal(record):
+        raise ValueError("claim record has no valid deadline seal")
+    return float(deadline)
 
 
 def release(run_dir, runs_dir=DEFAULT_RUNS):
@@ -315,6 +404,157 @@ def claim_hold(runs_dir, sub, pid_alive=None):
     return ""
 
 
+class TimeboxError(RuntimeError):
+    """A git action the timebox enforcement needs cannot be done: git cannot start, it times out, or the
+    commit fails for a reason other than nothing to commit. A subclass of RuntimeError, so a caller that
+    catches RuntimeError still refuses the box."""
+    pass
+
+
+def _bounded(text, limit=240):
+    """The text as a string, cut to at most limit characters with an ellipsis tail when longer."""
+    value = str(text)
+    return value if len(value) <= limit else value[:limit] + "..."
+
+
+def _git(args, cwd):
+    """Run one git command in cwd and answer (returncode, combined stdout and stderr).
+
+    The safety screen for this build refuses the subprocess import in every file this unit writes and shows
+    no command runner for the unit, so this module cannot spawn git; every call refuses with TimeboxError,
+    and the dispatcher folds the refusal into the BLOCKED marker instead of crashing. When a command runner
+    seat is granted, this function is the single place a subprocess.run would be added, with a literal-list
+    argv, shell left unset, and the only computed path going through cwd=. A hostile args or cwd is refused
+    with ValueError before anything else."""
+    if not isinstance(args, list) or any(not isinstance(item, str) for item in args):
+        raise ValueError("args must be a list of strings, not %r" % (args,))
+    if not isinstance(cwd, str) or not cwd:
+        raise ValueError("cwd must be a non-empty string, not %r" % (cwd,))
+    raise TimeboxError("git cannot be started: subprocess is not available in this build")
+
+
+def box_verdict(run_dir, now=None):
+    """OPEN when the claim's sealed deadline has not passed, BLOCK when it has.
+
+    deadline comes from claim_deadline(run_dir), whose own ValueError for a missing, torn or rewritten
+    record is this function's refusal too, so a broken claim never reads as no box. now defaults to
+    time.time() and a non-finite now is refused with ValueError. This function writes nothing."""
+    if now is None:
+        resolved = time.time()
+    else:
+        resolved = _finite(now, "now")
+    deadline = claim_deadline(run_dir)
+    return "OPEN" if resolved <= deadline else "BLOCK"
+
+
+def preserve_wip(tree_dir, message):
+    """Keep the builder's diff as a WIP commit and answer "WIP", or "CLEAN" when there is nothing to commit.
+
+    git add -A runs first; a nonzero return code is a TimeboxError. The commit is called with --no-verify
+    so no hook runs. When the commit returns 0 this returns "WIP"; when the commit output carries the phrase
+    "nothing to commit" it returns "CLEAN"; any other commit failure raises TimeboxError naming the return
+    code and a bounded tail of the output. The claim store is never touched. This build cannot start git at
+    all, so _git answers TimeboxError and that is this function's refusal."""
+    if not isinstance(tree_dir, str) or not tree_dir:
+        raise ValueError("tree_dir must be a non-empty string, not %r" % (tree_dir,))
+    if not isinstance(message, str) or not message:
+        raise ValueError("message must be a non-empty string, not %r" % (message,))
+    rc, out = _git(["add", "-A"], tree_dir)
+    if rc != 0:
+        raise TimeboxError("git add -A in %s failed (rc %d): %s" % (tree_dir, rc, _bounded(out)))
+    rc, out = _git(["commit", "--no-verify", "-m", message], tree_dir)
+    if rc == 0:
+        return "WIP"
+    if "nothing to commit" in out:
+        return "CLEAN"
+    raise TimeboxError("git commit in %s failed (rc %d): %s" % (tree_dir, rc, _bounded(out)))
+
+
+def _read_claim_state(run_dir, allow_blocked=True):
+    """(record, None) for a claim record whose state is CLAIMED, or BLOCKED when allow_blocked is true,
+    else (None, why).
+
+    The claim file is read as bytes. An unreadable, empty, non-utf8, torn or non-object record answers
+    (None, why) and never raises. The state must be one of CLAIMED and BLOCKED, or CLAIMED only when
+    allow_blocked is False. run_dir must be a non-empty string strictly under DEFAULT_RUNS; a hostile
+    run_dir or a non-bool allow_blocked is refused with ValueError. claim_hold is not changed."""
+    if allow_blocked is not True and allow_blocked is not False:
+        raise ValueError("allow_blocked must be a bool, not %r" % (allow_blocked,))
+    real_dir = _safe_run_dir(run_dir)
+    path = os.path.join(real_dir, CLAIM_FILE)
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        return None, "the claim cannot be read: %s" % (exc,)
+    if not raw:
+        return None, "the claim file is empty"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, "the claim is not valid utf-8: %s" % (exc,)
+    try:
+        record = json.loads(text)
+    except ValueError as exc:
+        return None, "the claim is truncated or not JSON: %s" % (exc,)
+    if not isinstance(record, dict):
+        return None, "the claim JSON is not an object"
+    allowed = ("CLAIMED", "BLOCKED") if allow_blocked else ("CLAIMED",)
+    state = record.get("state")
+    if state not in allowed:
+        return None, "the state is %r, not one of %s" % (state, list(allowed))
+    return record, None
+
+
+def _write_marker(run_dir, when, reason):
+    """Write the dispatcher-owned BLOCKED marker under run_dir through _write_text, so no reader sees a torn
+    file."""
+    _write_text(os.path.join(run_dir, "BLOCKED"),
+                json.dumps({"state": "BLOCKED", "blocked_at": when, "reason": reason}, sort_keys=True))
+
+
+def enforce_timebox(run_dir, tree_dir, now=None):
+    """Record the expired box as BLOCKED in the dispatcher-owned claim state and keep the WIP.
+
+    run_dir must be a non-empty string strictly under DEFAULT_RUNS; tree_dir must be a non-empty string; a
+    non-finite now is refused with ValueError and now defaults to time.time(). The claim record is read
+    through _read_claim_state. When it cannot be read, preserve_wip is still attempted (its TimeboxError is
+    caught and folded into the reason) and only the separate BLOCKED marker is written. When the record
+    already names state BLOCKED this call is a no-op that returns "BLOCKED". When box_verdict answers OPEN
+    this call returns "OPEN" and writes nothing. When it answers BLOCK, preserve_wip runs, the claim record
+    is rewritten with state BLOCKED and blocked_at now, and the marker is written; a TimeboxError from
+    preserve_wip leaves the claim record alone and only writes the marker. The WIP commit is the only git
+    action; nothing is pushed and no new claim file appears."""
+    real_dir = _safe_run_dir(run_dir)
+    if not isinstance(tree_dir, str) or not tree_dir:
+        raise ValueError("tree_dir must be a non-empty string, not %r" % (tree_dir,))
+    when = time.time() if now is None else _finite(now, "now")
+    record, why = _read_claim_state(real_dir)
+    if record is None:
+        reason = "claim unreadable: %s" % (why or "no reason given",)
+        try:
+            preserve_wip(tree_dir, "WIP: I22 timebox expired")
+        except TimeboxError as exc:
+            reason = "%s; WIP commit failed: %s" % (reason, _bounded(exc))
+        _write_marker(real_dir, when, reason)
+        return "BLOCKED"
+    if record.get("state") == "BLOCKED":
+        return "BLOCKED"
+    verdict = box_verdict(real_dir, when)
+    if verdict == "OPEN":
+        return "OPEN"
+    try:
+        preserve_wip(tree_dir, "WIP: I22 timebox expired")
+    except TimeboxError as exc:
+        _write_marker(real_dir, when, "WIP commit failed: %s" % (_bounded(exc),))
+        return "BLOCKED"
+    record["state"] = "BLOCKED"
+    record["blocked_at"] = when
+    _write_text(os.path.join(real_dir, CLAIM_FILE), json.dumps(record, sort_keys=True))
+    _write_marker(real_dir, when, "timebox expired")
+    return "BLOCKED"
+
+
 def main(argv=None):
     """The command line the session uses: claim, release and check.
 
@@ -328,6 +568,11 @@ def main(argv=None):
         raise SystemExit(2)
     runs = DEFAULT_RUNS
     try:
+        if argv and argv[0] == "--enforce-timebox":
+            if len(argv) != 3:
+                raise ValueError("--enforce-timebox takes <run_dir> <tree_dir>")
+            print(enforce_timebox(argv[1], argv[2]))
+            return 0
         if argv and argv[0] == "claim":
             if len(argv) != 5:
                 raise ValueError("claim takes <sub> <builder> <pid> <branch>")

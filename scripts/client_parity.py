@@ -87,6 +87,7 @@ EXEMPT = {
     "scripts/loop/adapters/codex.py": "the FX-31 loop model adapter for codex exec, where Codex is an outside model the loop calls, not a client install surface; FX-31 (docs/plan/specs/fixes/FX-31.md) defines no Cursor model transport",
     "scripts/loop/test_codex_adapter.py": "tests the FX-31 loop model adapter for codex exec, where Codex is an outside model the loop calls, not a client install surface; FX-31 (docs/plan/specs/fixes/FX-31.md) defines no Cursor model transport",
     "bundle/runtime/loop/test_codex_adapter.py": "bundled mirror of scripts/loop/test_codex_adapter.py (exempt above)",
+    "bundle/runtime/loop/adapters/codex.py": "bundled mirror of scripts/loop/adapters/codex.py (exempt above); the loop mirror ships the adapters package since 2026-10-22",
     "scripts/fixtures/hp1-real-2026-10-04/codex-trace-rows.jsonl": "recorded hook rows of one real Codex run of the HP1 live proof, replayed as test input by scripts/test_host_live_proof.py beside the two claude- recordings in the same folder; data a test reads, not a client install surface. This file alone: the next recording is a new path and is asked about again",
 }
 
