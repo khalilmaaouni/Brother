@@ -227,7 +227,8 @@ SUITES = (
     # share the same session-identity module.
     "test_bm_bash_audit.py",
     # D6 (2026-08-07): the hook cost benchmark, tools/bm_hookbench.py, and the
-    # page it generates, docs/PERFORMANCE.md. Placed right after the two hook
+    # page it renders on --out (the checked in copy was retired by D-13 on
+    # 2026-10-24). Placed right after the two hook
     # suites whose programs it times, since it drives the same hook
     # entrypoints against a throwaway store and asserts nothing about how long
     # they took, only that the page is generated from a real run and refuses

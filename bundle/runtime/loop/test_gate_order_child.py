@@ -30,10 +30,10 @@ import grade_build as GB  # noqa: E402
 CORE = "plugin/runtime/brother/core"
 INITS = ("plugin/__init__.py", "plugin/runtime/__init__.py", "plugin/runtime/brother/__init__.py", CORE + "/__init__.py")
 NAMES = [g[0] for g in LB.GATES]
-# bundle fails half its runs and is the cheapest, so a measured order puts it first; the other two never fail and keep
-# their fixed positions (a tie breaks on the current position)
-ROW = {"registration": (0, 10000), "system_doc": (0, 5000), "bundle": (1, 2000)}
-MEASURED = ["bundle", "registration", "system_doc"]
+# bundle fails half its runs and is the cheapest, so a measured order puts it first; the other three never fail and keep
+# their fixed positions (a tie breaks on the current position); product_manifests is 1.1.8 H1's gate
+ROW = {"registration": (0, 10000), "system_doc": (0, 5000), "bundle": (1, 2000), "product_manifests": (0, 3000)}
+MEASURED = ["bundle", "registration", "system_doc", "product_manifests"]
 
 
 def line(name, rc, ms):

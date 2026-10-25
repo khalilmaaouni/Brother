@@ -1807,6 +1807,9 @@ run_check "loop-gate-cache-py39" /usr/bin/python3 -B scripts/loop/test_loop_gate
 run_check "landing-standard" python3 -B scripts/loop/test_landing_standard.py
 run_check "land-batch-mirror" python3 -B scripts/loop/test_land_batch_mirror.py
 run_check "land-batch-mirror-py39" /usr/bin/python3 -B scripts/loop/test_land_batch_mirror.py
+# 1.1.8 H1: the landing regenerates every product's CHECKSUMS.sha256 (land_batch GATES product_manifests)
+run_check "product-manifests" python3 -B scripts/test_product_manifests.py
+run_check "product-manifests-py39" /usr/bin/python3 -B scripts/test_product_manifests.py
 run_check "grade-build-mirror" python3 -B scripts/loop/test_grade_build_mirror.py
 run_check "grade-build-mirror-py39" /usr/bin/python3 -B scripts/loop/test_grade_build_mirror.py
 run_check "landing-standard-mirror" python3 -B scripts/loop/test_landing_standard_mirror.py
@@ -2536,6 +2539,24 @@ run_check "baseline-115-self" python3 -B scripts/test_baseline_115.py
 run_check "baseline-115-py39" /usr/bin/python3 -B scripts/test_baseline_115.py
 run_check "plan-116-self" python3 -B scripts/test_plan_116.py
 run_check "plan-116-py39" /usr/bin/python3 -B scripts/test_plan_116.py
+run_check "plan-118-self" python3 -B scripts/test_plan_118.py Plan
+run_check "plan-118-py39" /usr/bin/python3 -B scripts/test_plan_118.py Plan
+run_check "red-on-base-s4-self" python3 -B scripts/test_red_on_base.py
+run_check "red-on-base-s4-py39" /usr/bin/python3 -B scripts/test_red_on_base.py
+run_check "kernel-whole-gate-s1-self" python3 -B scripts/test_kernel_whole_gate.py
+run_check "kernel-whole-gate-s1-py39" /usr/bin/python3 -B scripts/test_kernel_whole_gate.py
+run_check "suite-env-git-s6-self" python3 -B scripts/test_suite_env_git.py
+run_check "suite-env-git-s6-py39" /usr/bin/python3 -B scripts/test_suite_env_git.py
+run_check "admission-refusals-s3-self" python3 -B scripts/test_admission_refusals.py
+run_check "admission-refusals-s3-py39" /usr/bin/python3 -B scripts/test_admission_refusals.py
+run_check "deploy-layout-imports-s5-self" python3 -B scripts/test_deploy_layout_imports.py
+run_check "deploy-layout-imports-s5-py39" /usr/bin/python3 -B scripts/test_deploy_layout_imports.py
+run_check "open-line-self" python3 -B scripts/test_open_line.py
+run_check "open-line-py39" /usr/bin/python3 -B scripts/test_open_line.py
+run_check "plan-119-self" python3 -B scripts/test_plan_119.py Plan
+run_check "plan-119-py39" /usr/bin/python3 -B scripts/test_plan_119.py Plan
+run_check "plan-lanes-self" python3 -B scripts/plan_lanes.py --selftest
+run_check "plan-lanes-py39" /usr/bin/python3 -B scripts/plan_lanes.py --selftest
 run_check "seed-117-self" python3 -B scripts/test_seed_117.py
 run_check "seed-117-py39" /usr/bin/python3 -B scripts/test_seed_117.py
 run_check "plan-117-self" python3 -B scripts/test_plan_117.py
@@ -3051,6 +3072,8 @@ run_check "unit-runner-i4a-self" python3 scripts/loop/test_unit_runner_i4a.py
 run_check "builder-timebox-self" python3 scripts/test_builder_timebox.py
 run_check "virgin-install-self" python3 scripts/test_virgin_install.py
 run_check "loop-alone-self" python3 scripts/test_loop_alone.py
+run_check "hook-latency-lat0b-self" python3 scripts/test_hook_latency_lat0b.py
+run_check "hook-floors-lat0h-self" python3 -B scripts/test_hook_floors.py
 # LAST, on purpose: compares against the snapshot taken at the very top of
 # this file, so growth from ANY check this battery ran (not only the hook
 # suites) is caught. See the snapshot comment above.

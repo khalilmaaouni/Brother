@@ -24,6 +24,11 @@ GATE = os.path.join(HERE, "required_fast.sh")
 #: The rows the whole gate must carry: name to the exact command words.
 REQUIRED = {
     "land-batch-callsites-self": ["python3", "scripts/test_land_batch_callsites.py"],
+    "bm-hookperf": ["python3", "-B", "products/brothermode/tools/test_bm_hookperf.py"],
+    "bm-hookbench": ["python3", "-B", "products/brothermode/tools/test_bm_hookbench.py"],
+    "hook-latency": ["python3", "-B", "scripts/test_hook_latency.py"],
+    # 2026-10-23: the cut's approval suite went red in check_all.sh alone and the 1.1.7 cut never saw it
+    "cut-app-approval-self": ["python3", "-B", "scripts/test_cut_app_approval.py"],
 }
 
 _ROW = re.compile(r'^\s*run_check\s+"([^"\n]+)"\s+(\S.*)$')
@@ -83,6 +88,9 @@ def row_problems(rows, root, required):
 
 class RequiredFastRows(unittest.TestCase):
     CMD = REQUIRED["land-batch-callsites-self"]
+    # the fixture tests judge the parser and the judge against this one row; the real gate
+    # test judges every row in REQUIRED
+    ONE = {"land-batch-callsites-self": CMD}
 
     def test_the_real_gate_has_the_row(self):
         rows = gate_rows(read_gate(GATE))
@@ -94,14 +102,14 @@ class RequiredFastRows(unittest.TestCase):
         # the exact command, judged against a root that lacks the file (docs/ has no scripts/),
         # then against the real tree that has it: only the file check differs between the two
         rows = {"land-batch-callsites-self": list(self.CMD)}
-        problems = row_problems(rows, os.path.join(ROOT, "docs"), REQUIRED)
+        problems = row_problems(rows, os.path.join(ROOT, "docs"), self.ONE)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("not on disk", problems[0])
-        self.assertEqual(row_problems(rows, ROOT, REQUIRED), [])
+        self.assertEqual(row_problems(rows, ROOT, self.ONE), [])
 
     def test_the_old_phantom_path_is_refused(self):
         phantom = ["python3", "scripts/loop/test_land_batch_callsites.py"]
-        problems = row_problems({"land-batch-callsites-self": phantom}, ROOT, REQUIRED)
+        problems = row_problems({"land-batch-callsites-self": phantom}, ROOT, self.ONE)
         self.assertTrue(any("not on disk" in p for p in problems), problems)
 
     def test_an_unreadable_gate_is_a_problem(self):
@@ -115,24 +123,24 @@ class RequiredFastRows(unittest.TestCase):
             self.assertIsNone(gate_rows(hostile), hostile)
         # unreadable is a problem even when nothing is required
         self.assertTrue(row_problems(None, ROOT, {}))
-        self.assertTrue(row_problems(None, ROOT, REQUIRED))
-        self.assertIn("could not be read", row_problems(None, ROOT, REQUIRED)[0])
+        self.assertTrue(row_problems(None, ROOT, self.ONE))
+        self.assertIn("could not be read", row_problems(None, ROOT, self.ONE)[0])
 
     def test_an_empty_gate_names_the_row_absent(self):
         rows = gate_rows("")
         self.assertEqual(rows, {})
-        self.assertEqual(row_problems(rows, ROOT, REQUIRED),
+        self.assertEqual(row_problems(rows, ROOT, self.ONE),
                          ["row land-batch-callsites-self is absent from the gate"])
 
     def test_a_different_command_is_refused(self):
         rows = gate_rows('run_check "land-batch-callsites-self" python3 scripts/test_land_batch.py\n')
-        problems = row_problems(rows, ROOT, REQUIRED)
+        problems = row_problems(rows, ROOT, self.ONE)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("expected", problems[0])
 
     def test_a_path_outside_the_tree_is_refused(self):
         for word in ("../test_land_batch_callsites.py", "/etc/test_land_batch_callsites.py"):
-            problems = row_problems({"land-batch-callsites-self": ["python3", word]}, ROOT, REQUIRED)
+            problems = row_problems({"land-batch-callsites-self": ["python3", word]}, ROOT, self.ONE)
             self.assertTrue(any("outside the tree" in p for p in problems), (word, problems))
 
     def test_corrupt_comment_and_unknown_lines(self):
@@ -146,10 +154,10 @@ class RequiredFastRows(unittest.TestCase):
         rows = gate_rows(text)
         self.assertEqual(rows, {"unknown-row": ["python3", "scripts/does_not_exist.py"],
                                 "indented": ["true"]})
-        self.assertEqual(row_problems(rows, ROOT, REQUIRED),
+        self.assertEqual(row_problems(rows, ROOT, self.ONE),
                          ["row land-batch-callsites-self is absent from the gate"])
         good = text + '\nrun_check "land-batch-callsites-self" python3 scripts/test_land_batch_callsites.py\n'
-        self.assertEqual(row_problems(gate_rows(good), ROOT, REQUIRED), [])
+        self.assertEqual(row_problems(gate_rows(good), ROOT, self.ONE), [])
 
 
 if __name__ == "__main__":

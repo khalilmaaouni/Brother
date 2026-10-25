@@ -170,6 +170,7 @@ class Fixture(object):
                  "scripts/test_u1a.py": GREEN_TEST, "scripts/check_all.sh": "#!/bin/sh\n# LAST, on purpose\n",
                  "scripts/test_battery_registration.py": GREEN, "scripts/system_doc.py": GREEN,
                  "scripts/bundle_runtime.py": GREEN, "scripts/hermetic_test_check.py": GREEN,
+                 "scripts/product_manifests.py": GREEN,   # 1.1.8 H1's landing gate, green like the others
                  # the two checks the installed hooks run, trivial as the gates are; the real hook body runs the gate stub
                  "scripts/self_check_staged.py": GREEN, "scripts/pre_push_gate.py": GREEN, "scripts/pre_push_hook.sh": PRE_PUSH_HOOK_BODY}
         files.update(tree_files or {})
@@ -1136,6 +1137,8 @@ class Landings(unittest.TestCase):
                  "system_doc": lambda c: c.endswith(" -B scripts/system_doc.py --check"),
                  "system_doc regenerate": lambda c: c.endswith(" -B scripts/system_doc.py"),
                  "bundle": lambda c: c.endswith(" -B scripts/bundle_runtime.py --check"),
+                 "product_manifests": lambda c: c.endswith(" -B scripts/product_manifests.py --check"),
+                 "product_manifests regenerate": lambda c: c.endswith(" -B scripts/product_manifests.py"),
                  "commit_scan": lambda c: c.endswith("/commit_scan.py"),
                  # the pre-commit hook's check, run by the lander from the frozen copy of the base commit (D13)
                  "pre-commit check": lambda c: c.endswith("/scripts/self_check_staged.py") and "/land-base-" in c,

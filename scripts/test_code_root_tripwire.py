@@ -79,6 +79,14 @@ LANDINGS = load("tw_landings", os.path.join(LOOP, "test_land_batch_landings.py")
 CONTRACT = load("tw_repair_contract", os.path.join(HERE, "test_repair_wave_contract.py"))
 
 
+def gate_history():
+    """One logged landing of every gate the lander runs, read from land_batch.GATES itself: the order policy refuses a
+    history whose check set differs from the lander's (1.1.8 H1 added product_manifests and a hard coded three went red)."""
+    from plugin.runtime.brother.core import dream_gate
+    names = [g[0] for g in load("tw_land_batch_gates", os.path.join(LOOP, "land_batch.py")).GATES]
+    return "".join(dream_gate.format_gate_line("landing." + g, 0, 50) for g in names)
+
+
 def mark(path, line):
     """Insert line after the module docstring and any __future__ import, so the file still compiles and keeps __doc__."""
     with open(path, encoding="utf-8") as fh:
@@ -211,9 +219,7 @@ class Tripwire(unittest.TestCase):
                                  extra_env or {}, WITNESS_LOG=os.path.join(self.tmp, "witness"),
                                  TRIPWIRE_LOG=os.path.join(self.tmp, "tripwire")))
         sys.path.insert(0, REPO)
-        from plugin.runtime.brother.core import dream_gate
-        LANDINGS.write(os.path.join(f.home, ".claude", "evidence", "loop-runs", "r0", "gates.tsv"),
-                       "".join(dream_gate.format_gate_line("landing." + g, 0, 50) for g in ("registration", "system_doc", "bundle")))
+        LANDINGS.write(os.path.join(f.home, ".claude", "evidence", "loop-runs", "r0", "gates.tsv"), gate_history())
         return f
 
     def test_scenario_1_landing_runs_the_code_root(self):
@@ -520,9 +526,7 @@ class LanderNeverRunsTheLandingTree(unittest.TestCase):
         for mod in ("dream_gate_policy.py", "dream_gate.py"):   # the landing tree's are a build's writes: a marker on import
             LANDINGS.write(os.path.join(self.tree, CORE, mod), "open(%r, 'a').write(%r + '\\n')\n" % (self.marker, mod))
         sys.path.insert(0, REPO)
-        from plugin.runtime.brother.core import dream_gate
-        LANDINGS.write(os.path.join(self.runs, "r0", "gates.tsv"),
-                       "".join(dream_gate.format_gate_line("landing." + g, 0, 50) for g in ("registration", "system_doc", "bundle")))
+        LANDINGS.write(os.path.join(self.runs, "r0", "gates.tsv"), gate_history())
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)

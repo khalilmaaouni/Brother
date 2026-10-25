@@ -986,6 +986,54 @@ def admissible(plan, sub):
     refusal = lint_refusal(unit, sub, spec_text)
     if refusal:
         return refusal
+    return shape_refusal(unit, sub, spec_text)
+
+
+#: The council's per unit record (spec_council.py writes it); read at call time so a test can name a fixture.
+COUNCIL_PATH = os.path.expanduser("~/.claude/evidence/spec-council.json")
+_DOC_PATH = re.compile(r"(^|/)docs/|\.md$|\.txt$|\.html$")
+
+
+def _test_or_doc(path):
+    base = os.path.basename(path)
+    return base.startswith("test_") or "/tests/" in "/" + path or bool(_DOC_PATH.search(path))
+
+
+def council_record(unit_id):
+    """(record or {}, problem): the council's record for one unit. No council file yet is no record; a file or entry
+    that cannot be read is a problem, never an empty record (the fail direction: it refuses)."""
+    try:
+        with open(COUNCIL_PATH, encoding="utf-8") as fh:
+            book = json.load(fh)
+    except FileNotFoundError:
+        return {}, ""
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        return None, "%s: %s" % (type(exc).__name__, exc)
+    if not isinstance(book, dict):
+        return None, "the council file is not one object per unit"
+    rec = book.get(unit_id, {})
+    if not isinstance(rec, dict) or not isinstance(rec.get("blockers", []), list):
+        return None, "the council record of %s is not readable" % unit_id
+    return rec, ""
+
+
+def shape_refusal(unit, sub, spec_text):
+    """S3 (D13, D15): "" or why the grader could never land this sub unit. TEST-OR-DOC-ONLY: every file its section
+    says it changes is a test or a doc, which the grader cannot pass (it needs tests that fail without the code): by
+    hand. A section that names no changed file is left to the spec score and the plan lint, which judge its shape.
+    PROVEN-BLOCKER: the council record holds a blocker whose state is PROVEN (a recorded state; nothing is run here).
+    An unreadable council record refuses with NO-DATA; a blocker in any other state admits."""
+    paths = plan_lint.write_paths(plan_lint._section(spec_text, sub))
+    if paths and all(_test_or_doc(p) for p in paths):
+        return ("%s TEST-OR-DOC-ONLY: every changed file is a test or a doc (%s), and the grader needs tests that fail "
+                "without the code; route: by hand" % (sub, ", ".join(paths[:3])))
+    rec, problem = council_record(unit.get("id") if isinstance(unit, dict) else None)
+    if problem:
+        return "NO-DATA the council record cannot be read (%s): a proven blocker is unknown" % problem
+    proven = [b for b in rec.get("blockers", []) if isinstance(b, dict) and b.get("state") == "PROVEN"]
+    if proven:
+        return "%s PROVEN-BLOCKER: the council proved %d blocker(s), first: %s; route: spec repair" % (
+            sub, len(proven), str(proven[0].get("claim", ""))[:200])
     return ""
 
 
@@ -1447,7 +1495,7 @@ def main():
     except (OSError, ValueError):
         SCORES = {}  # unreadable scores hold everything: never a pass
     try:
-        COUNCIL_STATE = json.load(open(os.path.expanduser("~/.claude/evidence/spec-council.json")))
+        COUNCIL_STATE = json.load(open(COUNCIL_PATH))
     except (OSError, ValueError):
         COUNCIL_STATE = {}
     started = 0

@@ -386,7 +386,11 @@ def held_on(status_text, tree):
 GATES = (("registration", ["scripts/test_battery_registration.py"], None, ()),
          ("system_doc", ["scripts/system_doc.py", "--check"], ["scripts/system_doc.py"], ("SYSTEM.md",)),
          ("bundle", ["scripts/bundle_runtime.py", "--check"], ["scripts/bundle_runtime.py"],
-          ("bundle/runtime/", "bundle/codex-skills/", "bundle/hooks/hooks.json", "bundle/mcp.json", "bundle/.antigravity-plugin/scripts/")))
+          ("bundle/runtime/", "bundle/codex-skills/", "bundle/hooks/hooks.json", "bundle/mcp.json", "bundle/.antigravity-plugin/scripts/")),
+         # 1.1.8 H1 (owner, 2026-10-23): a product file landed with its CHECKSUMS.sha256 stale and the next whole gate held on
+         # verify-install (06f512b06); plan_lint already reads the manifest as the landing's to regenerate, now it is
+         ("product_manifests", ["scripts/product_manifests.py", "--check"], ["scripts/product_manifests.py"],
+          ("products/brothermode/CHECKSUMS.sha256", "products/brothersbe/CHECKSUMS.sha256")))
 
 
 #: the suffixes scripts/bundle_runtime.loop_files mirrors from scripts/loop into bundle/runtime/loop (read 2026-10-14)

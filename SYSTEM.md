@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 542 |
-| Parts with a purpose written in the file | 539 |
-| Parts with a suite wired into the battery | 472 |
-| Checks in the battery | 1338 |
+| Parts | 546 |
+| Parts with a purpose written in the file | 543 |
+| Parts with a suite wired into the battery | 475 |
+| Checks in the battery | 1360 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -266,6 +266,7 @@ undocumented corners looks complete and is not.
 | `hermetic_test_check` | .py: a changed test is run where the public runner runs it. | **NO-DATA**, nothing in the battery runs it |
 | `hermetic_worker_env` | Test-owned disk premise and disposable worker coordination state. | `hermetic-worker-env-self` |
 | `hook_guard` | .py: run a bundled hook command once, never twice, never zero. | `bundle-runtime-self`, `hook-guard-self`, `host-live-claude-self`, `host-live-proof-self` |
+| `hook_latency` | Hook latency measurement for the 17 rows of the roadmap's 5b table. | **NO-DATA**, nothing in the battery runs it |
 | `host_adapter_spec` | the vocabulary a host adapter's capability report is | `host_adapter_spec-self` |
 | `host_capability` | WBS-70.03's Host Capability Receipt. | `capability_negotiation-self`, `claude_parity-self`, `host-capability-self` |
 | `host_doc_check` | .py: the accuracy check for the two host install pages (HP1.c, spec docs/plan/specs/HP1.md, sections | `host-doc-check-self` |
@@ -397,6 +398,7 @@ undocumented corners looks complete and is not.
 | `night_tick` | The durable half of the night watch. | `night-tick-selftest` |
 | `normalization_trace` | WBS-40.03 Normalization Trace: derived-matching-key audit trail. | `normalization-trace-self` |
 | `one_plugin_readiness` | .py: the submission readiness bars of the one Brother plugin (OP1.f, docs/plan/specs/OP1.md | **NO-DATA**, nothing in the battery runs it |
+| `open_line` | declare the between-release drift on release-invariant when the next release line opens. | `open-line-py39`, `open-line-self` |
 | `optimization_loop` | .py: sequences Brother's real Observe/Evaluate/Optimise | **NO-DATA**, nothing in the battery runs it |
 | `oracle_stability` | WBS-80.02 Oracle stability: run a benchmark_harness.py task/arm oracle | `oracle-stability-self` |
 | `orchestrator_authority` | ORCH-03 of the 1.0.20 orchestration control plane: authority with epochs. | `orchestrator-authority-self` |
@@ -423,6 +425,7 @@ undocumented corners looks complete and is not.
 | `plan_briefs` | PG1.e: one brief per sub unit from the writer batch file, dispatched at full width, the report filed by script. | `plan-briefs-py39`, `plan-briefs-self`, `plan-pipeline-py39`, `plan-pipeline-self` |
 | `plan_clock` | PG1.g: the plan pipeline's four bars, read from real timestamps, never from a report. | `plan-clock-py39`, `plan-clock-self` |
 | `plan_gen` | PG1.b: one command builds the next release plan from the closing ceremony's seed. | `plan-gen-py39`, `plan-gen-self`, `plan-pipeline-py39`, `plan-pipeline-self` |
+| `plan_lanes` | is a set of owned files LOOP work or HAND work? The 1.1.8 council's split rule (DECISIONS-118 C1), as | `plan-lanes-py39`, `plan-lanes-self` |
 | `plan_pipeline` | PG1.f: the one command from the closing ceremony's seed to a loop that is building. | `plan-pipeline-py39`, `plan-pipeline-self` |
 | `plan_seed` | PG1.a: the closing ceremony's seed for the next release plan (schema brother-plan-seed/1). | `plan-seed-py39`, `plan-seed-self` |
 | `plugin_bump_gate` | .py: a plugin whose shipped files changed must carry a new | `cut-self`, `plugin-bump-gate-self` |
@@ -447,6 +450,7 @@ undocumented corners looks complete and is not.
 | `probe_wave` | aggregate one wave of probe outcomes into one verdict per lane. | `probe-wave-self` |
 | `process_containment` | DOM-40.05: cancellation must terminate the whole owned descendant tree. | `process_containment-self` |
 | `product_acceptance` | P0.4 of docs/plan/P0-COMPOSITION-WAVE-2026-08-30.md. | `product-acceptance-self` |
+| `product_manifests` | every product's CHECKSUMS.sha256 describes the tree it ships in, checked and regenerated at landing. | `product-manifests`, `product-manifests-py39` |
 | `progress_deadline` | alive is not advancing, and output is not progress. | `progress-deadline-self` |
 | `proof_card` | the customer-facing Proof Card, projected from one run's own | `proof-card-self` |
 | `propose_mechanisms` | L4.4 mechanism mapping and proposal. | **NO-DATA**, nothing in the battery runs it |
@@ -1063,6 +1067,8 @@ undocumented corners looks complete and is not.
 - `landing-standard`: `python3 -B scripts/loop/test_landing_standard.py`
 - `land-batch-mirror`: `python3 -B scripts/loop/test_land_batch_mirror.py`
 - `land-batch-mirror-py39`: `/usr/bin/python3 -B scripts/loop/test_land_batch_mirror.py`
+- `product-manifests`: `python3 -B scripts/test_product_manifests.py`
+- `product-manifests-py39`: `/usr/bin/python3 -B scripts/test_product_manifests.py`
 - `grade-build-mirror`: `python3 -B scripts/loop/test_grade_build_mirror.py`
 - `grade-build-mirror-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_mirror.py`
 - `landing-standard-mirror`: `python3 -B scripts/loop/test_landing_standard_mirror.py`
@@ -1444,6 +1450,24 @@ undocumented corners looks complete and is not.
 - `baseline-115-py39`: `/usr/bin/python3 -B scripts/test_baseline_115.py`
 - `plan-116-self`: `python3 -B scripts/test_plan_116.py`
 - `plan-116-py39`: `/usr/bin/python3 -B scripts/test_plan_116.py`
+- `plan-118-self`: `python3 -B scripts/test_plan_118.py Plan`
+- `plan-118-py39`: `/usr/bin/python3 -B scripts/test_plan_118.py Plan`
+- `red-on-base-s4-self`: `python3 -B scripts/test_red_on_base.py`
+- `red-on-base-s4-py39`: `/usr/bin/python3 -B scripts/test_red_on_base.py`
+- `kernel-whole-gate-s1-self`: `python3 -B scripts/test_kernel_whole_gate.py`
+- `kernel-whole-gate-s1-py39`: `/usr/bin/python3 -B scripts/test_kernel_whole_gate.py`
+- `suite-env-git-s6-self`: `python3 -B scripts/test_suite_env_git.py`
+- `suite-env-git-s6-py39`: `/usr/bin/python3 -B scripts/test_suite_env_git.py`
+- `admission-refusals-s3-self`: `python3 -B scripts/test_admission_refusals.py`
+- `admission-refusals-s3-py39`: `/usr/bin/python3 -B scripts/test_admission_refusals.py`
+- `deploy-layout-imports-s5-self`: `python3 -B scripts/test_deploy_layout_imports.py`
+- `deploy-layout-imports-s5-py39`: `/usr/bin/python3 -B scripts/test_deploy_layout_imports.py`
+- `open-line-self`: `python3 -B scripts/test_open_line.py`
+- `open-line-py39`: `/usr/bin/python3 -B scripts/test_open_line.py`
+- `plan-119-self`: `python3 -B scripts/test_plan_119.py Plan`
+- `plan-119-py39`: `/usr/bin/python3 -B scripts/test_plan_119.py Plan`
+- `plan-lanes-self`: `python3 -B scripts/plan_lanes.py --selftest`
+- `plan-lanes-py39`: `/usr/bin/python3 -B scripts/plan_lanes.py --selftest`
 - `seed-117-self`: `python3 -B scripts/test_seed_117.py`
 - `seed-117-py39`: `/usr/bin/python3 -B scripts/test_seed_117.py`
 - `plan-117-self`: `python3 -B scripts/test_plan_117.py`
@@ -1908,5 +1932,7 @@ undocumented corners looks complete and is not.
 - `builder-timebox-self`: `python3 scripts/test_builder_timebox.py`
 - `virgin-install-self`: `python3 scripts/test_virgin_install.py`
 - `loop-alone-self`: `python3 scripts/test_loop_alone.py`
+- `hook-latency-lat0b-self`: `python3 scripts/test_hook_latency_lat0b.py`
+- `hook-floors-lat0h-self`: `python3 -B scripts/test_hook_floors.py`
 - `real-logs-unchanged`: `python3 scripts/real_logs.py compare "$REAL_LOGS_SNAPSHOT"`
 
