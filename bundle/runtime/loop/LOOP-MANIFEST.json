@@ -86,7 +86,7 @@
   },
   {
    "name": "deploy_stamped.py",
-   "sha256": "d7cfb58b70c33b08cbf36b4c93d0b9bfb7c09220706a23e07c83cee322699e6b"
+   "sha256": "1bf5c1c4c3dc0753e04d35a4e84763cdcfb7ec8bd7bb1c72462e5c4f5ab1a42e"
   },
   {
    "name": "deploy_stamped.sh",
@@ -138,7 +138,7 @@
   },
   {
    "name": "grade_build.py",
-   "sha256": "12a1fdc0869b5d5419710acf236e6fd0a8a308c60198f7184302666560202695"
+   "sha256": "7c495f7c9b9de1e454f73645835368a5c28c8a11c2fae4f912ec43fd10b3a4fc"
   },
   {
    "name": "grade_lane.sh",
@@ -166,11 +166,11 @@
   },
   {
    "name": "land_apply.py",
-   "sha256": "cc73401f477075347ea953be6efe60e38faa2aa41a8274a3a1ff90a4bbe4e683"
+   "sha256": "f0704f5243ba5f98b92c0ef7a9284ea5ac2c6326e64afb01c30c9f4f7082d5c4"
   },
   {
    "name": "land_batch.py",
-   "sha256": "63539746a8bf67908eff0d0db0df2af216a37d83e31a3439190d2c485acc6e4a"
+   "sha256": "161defff11011d986a659f97efcd798b057f9e717ed6bdd65d71a04c24065914"
   },
   {
    "name": "land_fuzz_child.py",
@@ -234,7 +234,7 @@
   },
   {
    "name": "loop_switches.py",
-   "sha256": "331cb9b686d100bcf26e2a49eb0176d8f80c3ec904c9c780a8778f267948e6af"
+   "sha256": "5e570402d51d675471f4de4ecd0ad55382967b55ae61e511f74d3075ad089a07"
   },
   {
    "name": "loop_until.sh",
@@ -374,7 +374,7 @@
   },
   {
    "name": "runner_pool.py",
-   "sha256": "9eb30bbdb0085feacdb22e3e56e545720b99f63f0393690ace162a98af454409"
+   "sha256": "7479aca05617bc3b1b45b05c21e24b21798816ec5d4a4be33fc4961979daf066"
   },
   {
    "name": "salvage.py",
@@ -530,7 +530,7 @@
   },
   {
    "name": "test_gate_order_child.py",
-   "sha256": "41f1b3ff78c493dcda1b631051ea75ef3fa1279465d61df8393b1792de1e844b"
+   "sha256": "87ea95d97a170684b330ff0e6dab145aca48c6768a3cd78df594dfa9a4d16ff8"
   },
   {
    "name": "test_grade_build_env_115.py",
@@ -582,7 +582,7 @@
   },
   {
    "name": "test_land_apply.py",
-   "sha256": "410ecdb63dff41904193fc1e928acbe522923cf190de5955e2b76f51001123f8"
+   "sha256": "7585a8531c984ef442fdb48a4e2d5399e044ebfc457759fe705823452ddde893"
   },
   {
    "name": "test_land_apply_baseline.py",
@@ -614,7 +614,7 @@
   },
   {
    "name": "test_land_batch_landings.py",
-   "sha256": "a5344c337acfc3ac5035778255b925c926f5ee45cd54140713bf701c7a94c2ae"
+   "sha256": "b96abbcfce364e2b78701aad632c50b301453b79b8af2125e0c1cc465853411b"
   },
   {
    "name": "test_land_batch_mirror.py",
@@ -870,7 +870,7 @@
   },
   {
    "name": "test_runner_pool_load.py",
-   "sha256": "c4efb8f46eace812d93fb389d4a0387d9b83849e9c795441516049248e1484a9"
+   "sha256": "031206a065e3ce332002095e4ebbafad08bcb18c12eadd24e384c0b5bbc7cf4f"
   },
   {
    "name": "test_runner_pool_note_attempt.py",

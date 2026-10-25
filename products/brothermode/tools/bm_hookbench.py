@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure what BrotherMode's hooks cost, and generate docs/PERFORMANCE.md.
+"""Measure what BrotherMode's hooks cost, and render the record as a page.
 
 WHY THIS EXISTS
   An external review asked a question nobody in this project could answer: a
@@ -11,9 +11,12 @@ WHY THIS EXISTS
   class of unbacked claim the rest of this repository refuses.
 
   This tool answers what it can answer honestly and refuses the rest by name.
-  docs/PERFORMANCE.md is GENERATED from a run of this file. Every number on that
-  page comes out of a measurement here, and the page carries the machine record
-  it was taken on, because a latency number without a machine is a rumour.
+  A run prints its record; --out PATH renders that record as a page. Every number
+  on the page comes out of a measurement here, and the page carries the machine
+  record it was taken on, because a latency number without a machine is a rumour.
+  The checked in copy, docs/PERFORMANCE.md, was RETIRED by D-13 (LAT0H,
+  2026-10-24) in favour of the rows scripts/hook_latency.py prints, so a bare
+  run no longer writes into docs/: it prints the record and writes nothing.
 
 WHAT IT MEASURES
   1. WHAT ACTUALLY RUNS, read from hooks/hooks.json rather than typed: which
@@ -58,16 +61,16 @@ THE THROWAWAY WORLD
   directory, with HOME, the setup config path, the vault path and the project
   root all pinned inside it, and the process working directory moved there. The
   founder's own store, vault and home are never read or written. The only file
-  this tool writes outside that temporary directory is the page itself.
+  this tool writes outside that temporary directory is the page --out names.
 
 Python 3.9, standard library only. No network. No subprocess.
 No em or en dashes anywhere in this file or its output.
 
 Usage:
-  python3 tools/bm_hookbench.py                  # measure, rewrite the page
+  python3 tools/bm_hookbench.py                  # measure, the record on stdout
   python3 tools/bm_hookbench.py --reps 25        # more repetitions
-  python3 tools/bm_hookbench.py --json           # the record on stdout, no write
-  python3 tools/bm_hookbench.py --out PATH       # write somewhere else
+  python3 tools/bm_hookbench.py --json           # the same, said explicitly
+  python3 tools/bm_hookbench.py --out PATH       # render the page to PATH
   python3 tools/bm_hookbench.py --compare P.json # re-measure, check the band
 """
 
@@ -97,7 +100,6 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
-PAGE = os.path.join(ROOT, "docs", "PERFORMANCE.md")
 
 #: Repetitions per program, after the warmup. Fifteen is enough for a median
 #: and a visible spread without turning the suite into a coffee break; it is a
@@ -1159,7 +1161,7 @@ def main(argv):
     if any(arg in ("-h", "--help") for arg in argv):
         sys.stdout.write(__doc__)
         return 0
-    reps, as_json, out, compare_to = DEFAULT_REPS, False, PAGE, None
+    reps, as_json, out, compare_to = DEFAULT_REPS, False, None, None
     rest = list(argv)
     while rest:
         arg = rest.pop(0)
@@ -1208,7 +1210,7 @@ def main(argv):
                                           REPRODUCIBILITY_FACTOR)))
             return 1 if outside else 0
         record = measure(reps)
-        if as_json:
+        if as_json or out is None:
             sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
             return 0
         _write_page(out, render(record))

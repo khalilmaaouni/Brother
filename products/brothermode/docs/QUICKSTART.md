@@ -58,7 +58,7 @@ The pinned clone ref comes from
 release ref, independent of the product's `VERSION`:
 
 ```bash
-git clone --branch v1.1.7 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
+git clone --branch v1.1.8 --depth 1 https://github.com/khalilmaaouni/Brother.git ~/.claude/skills/brothermode-src
 cd ~/.claude/skills/brothermode-src/products/brothermode
 ls SKILL.md
 cat VERSION

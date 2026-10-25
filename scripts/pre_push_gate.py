@@ -912,6 +912,23 @@ def _loop_named_files(tip, cwd=ROOT, runner=None):
     return set(found["CANDIDATE_ENTRIES"]) | set(found["CANDIDATE_DATA"]), ""
 
 
+_KERNEL_LIST = "scripts/kernel_closure.txt"
+
+
+def _kernel_files(tip, cwd=ROOT, runner=None):
+    """S1 (decision D4): the judge kernel the tip names in scripts/kernel_closure.txt, a set of repository paths, or None
+    when the file is there but cannot be read. kernel_closure.py derives it from the gate's run_check rows, so every
+    test file a whole gate row runs, and what it imports, is a member. A tip without the file names none (an empty set),
+    as a tip without deploy_stamped.py names no loop file."""
+    exists = _git(["cat-file", "-e", "%s:%s" % (tip, _KERNEL_LIST)], cwd, runner)
+    if exists is not None and exists.returncode != 0:
+        return set()
+    shown = _git(["show", "%s:%s" % (tip, _KERNEL_LIST)], cwd, runner)
+    if shown is None or shown.returncode != 0:
+        return None
+    return {line.strip() for line in (shown.stdout or "").splitlines() if line.strip() and not line.startswith("#")}
+
+
 def _whole_gate_base(local_sha, remote_sha, remote_name, cwd=ROOT, runner=None):
     """G11.b, adversarial review 2026-10-16: the commit whose TREE the pushed tip is compared with, or None when no base
     can be read. An existing remote ref: its current sha. A new ref: the merge base with the remote's default branch
@@ -976,6 +993,9 @@ def check_whole_gate(cwd=ROOT, runner=None, stdin_text=None, remote_name=None):
                 return [(NODATA, "whole-gate", "%s, so whether this push changes a loop file is unknown. "
                                                "That is not a pass" % why)]
             loop = sorted(paths & named)
+        if paths:   # S1: a judge kernel member (a gate row's own test file included) is a loop change too
+            kernel = _kernel_files(tip, cwd, runner)
+            loop = sorted(paths) if kernel is None else sorted(set(loop) | (paths & kernel))   # unreadable: every path
         if not loop:
             out.append((OK, "whole-gate", "no loop file in this push, so no whole-gate record is needed"))
             continue

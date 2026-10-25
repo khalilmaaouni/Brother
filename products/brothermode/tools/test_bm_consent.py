@@ -651,85 +651,12 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
 
     # -- every wired command, any module (from the review session) ---------
 
-    # Two different counts, kept apart on purpose, because conflating them is
-    # how the count in the docs went wrong twice already: hooks/hooks.json
-    # holds SEVEN command strings and those strings invoke ELEVEN programs,
-    # since the PreCompact line is one `sh -c` script running two and the
-    # Stop line is one running four. The program floor moved from 8 to 9 on
-    # 2026-08-05 when the Stop line gained the half hour catch-up check
-    # beside the unfinished-work warning, and from 9 to 11 in the same
-    # day's L05 loop when it gained the page rewrite (bm_view.py render
-    # --if-stale) and the alert tick (bm_view.py alert --tick); raising a
-    # floor is the only direction this number is ever allowed to move.
-    # Raised 7 to 8 and 11 to 12 on 2026-08-09 when the PreToolUse Bash
-    # entry gained bm_session_cap.py, the machine-wide session cap. Raised
-    # 8 to 9 and 12 to 13 on 2026-09-02 (row V1) when the PreToolUse fence
-    # group gained a second entry, tools/vault_recall_hook.py check, the
-    # point-of-need recall hook; it is one command string and one program,
-    # not a chain, so both floors move by exactly one.
-    #
-    # Raised 9 to 10 and 13 to 14 on 2026-09-04 (row E54) when the
-    # SessionStart group gained a second entry beside bm_sessionstart.py:
-    # tools/bm_vault.py refresh, the index-refresh step. One command string,
-    # one program, so both floors move by exactly one, the same shape as
-    # the V1 raise above.
-    #
-    # Raised 10 to 11 and 14 to 15 on 2026-09-05 (LL-1, the attempt breaker)
-    # when the PostToolUse Bash group gained a second entry beside
-    # bm_bash_audit.py post: tools/attempt_hook.py. One command string, one
-    # program, so both floors move by exactly one, the same shape as the
-    # V1 and E54 raises above.
-    #
-    # BOTH NUMBERS SURVIVED THE 2026-08-17 WINDOWS PORT UNCHANGED, and that
-    # is the point rather than a coincidence. The port moved the Stop and
-    # PreCompact chains out of two `sh -c` strings and into
-    # tools/bm_hookchain.py's CHAINS table, so a naive count of the manifest
-    # would now find 8 programs rather than 12 and this floor would have had
-    # to be LOWERED, which is the one direction it may never move. Counting
-    # through the expansion instead keeps the floor honest: the same twelve
-    # programs still run on the same eight command strings, and a program
-    # dropped from the table fails here exactly as a program dropped from a
-    # command string used to.
-    # Bumped 2026-09-15 (never lowered): the canary added one command
-    # string to SessionStart and one new "Skill" matcher entry under
-    # PostToolUse, each running one program (bm_brother_canary.py
-    # sessionstart / postskill).
-    MIN_WIRED_COMMAND_STRINGS = 15
-    MIN_WIRED_PROGRAMS = 19
-    _PROGRAM_RE = re.compile(
-        r"(?:python3|sh)\s+\S*?(?:tools|scripts)/\S+\.(?:py|sh)")
-
-    @classmethod
-    def count_wired_programs(cls, commands):
-        """Programs actually RUN by a list of (event, command) pairs, with
-        the chain driver expanded into its rows. Shared with
-        tools/test_bm_hookperf.py, which re-derives this repository's
-        consolidation blockers and must count the same way this floor
-        does."""
-        total = 0
-        for _event, cmd in commands:
-            for match in cls._PROGRAM_RE.finditer(cmd):
-                text = match.group(0)
-                if "bm_hookchain.py" not in text:
-                    total += 1
-                    continue
-                # The chain name is the argument AFTER the driver path, and
-                # the path in a hook command is QUOTED, so the character
-                # right after the match is a closing quote rather than a
-                # space. Stripping it is not cosmetic: without it this read
-                # the chain name as a bare quote mark and refused a manifest
-                # that was perfectly correct.
-                tail = cmd[match.end():].split(";")[0].split("|")[0]
-                tail = tail.strip().lstrip('"\'').strip()
-                name = tail.split()[0] if tail.split() else ""
-                rows = CHAINS.get(name)
-                if not rows:
-                    raise AssertionError(
-                        "a hook command runs the chain driver with chain "
-                        "name %r, which tools/bm_hookchain.py does not "
-                        "define; that chain dies at every firing" % name)
-                total += len(rows)
-        return total
+    # No count floor here any more (D-13, LAT0H, 2026-10-24): the floors
+    # MIN_WIRED_COMMAND_STRINGS and MIN_WIRED_PROGRAMS could only rise, so
+    # they forced every future hook consolidation to fail this file. The
+    # vacuous pass they also guarded stays guarded: _wired_commands refuses
+    # an empty manifest, every wired command must exit 0, and the chain
+    # driver exits 2 on a chain name it does not define.
 
     def _wired_commands(self):
         """Every command string in hooks/hooks.json, in file order.
@@ -785,9 +712,8 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
         - the founder's own sentence is in no file, in either tree.
 
         Contributed by the review session that found the two Criticals, with
-        two defects of their version fixed on the way in: the canary walk
-        covers the project root as well as HOME, and the floor is 8 rather
-        than 7 because hooks.json wires eight programs across seven lines."""
+        one defect of their version fixed on the way in: the canary walk
+        covers the project root as well as HOME."""
         env = dict(self.env)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         transcript = os.path.join(self.tmp, "wired.jsonl")
@@ -814,7 +740,6 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
                                "cwd": self.project,
                                "hook_event_name": event})
 
-        ran = 0
         for event, command in self._wired_commands():
             concrete = command.replace("${CLAUDE_PLUGIN_ROOT}", ROOT)
             concrete = concrete.replace("$CLAUDE_PLUGIN_ROOT", ROOT)
@@ -831,7 +756,6 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
                                input=payload_for(event), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, universal_newlines=True,
                                timeout=180)
-            ran += 1
             self.assertEqual(r.returncode, 0,
                              "%s: %s exited %d\n%s%s"
                              % (event, concrete, r.returncode, r.stdout, r.stderr))
@@ -844,21 +768,6 @@ class TelemetryEveryHookProgramPreConsentCase(unittest.TestCase):
                     leaked, [],
                     "%s: the founder's own message reached %s in the %s tree "
                     "before consent" % (event, ", ".join(leaked), label))
-        self.assertGreaterEqual(
-            ran, self.MIN_WIRED_COMMAND_STRINGS,
-            "only %d wired command string(s) were driven; hooks/hooks.json is "
-            "expected to hold at least %d, and a manifest that parsed to "
-            "fewer must not read as a pass"
-            % (ran, self.MIN_WIRED_COMMAND_STRINGS))
-        programs = self.count_wired_programs(self._wired_commands())
-        self.assertGreaterEqual(
-            programs, self.MIN_WIRED_PROGRAMS,
-            "the %d wired command string(s) name only %d program "
-            "invocation(s); at least %d are expected, because the PreCompact "
-            "line runs TWO programs off one payload and counting strings "
-            "instead of programs is exactly how the second one shipped "
-            "ungated" % (ran, programs, self.MIN_WIRED_PROGRAMS))
-
     def test_calibrated_a_wired_command_that_never_ran_is_not_a_pass(self):
         """The vacuous-pass guard the review session asked for. Silence from a
         program that does not exist looks identical to silence from a program

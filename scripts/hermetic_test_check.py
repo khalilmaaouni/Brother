@@ -567,6 +567,44 @@ def declared_no_data(tree, test, proc):
         inputs.append(expected)
     return inputs, ""
 
+def declared_red(root, test):
+    """The reason the battery's EXEMPT register (scripts/test_battery_registration.py in the checkout, read as a literal,
+    never imported) gives `test`, or ''. 1.1.8 H3, 2026-10-23: a harness written before its code is red by design while
+    its unit is OPEN, the battery already declares it so, and this gate refused every push that reached it (the night's
+    landings included). Only the register's own literal counts; an unreadable register declares nothing."""
+    import ast
+    try:
+        with open(os.path.join(root, "scripts", "test_battery_registration.py"), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError, ValueError):
+        return ""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "EXEMPT" for t in node.targets):
+            try:
+                exempt = ast.literal_eval(node.value)
+            except ValueError:
+                return ""
+            if not isinstance(exempt, dict):
+                return ""
+            rel = test[len("scripts/"):] if test.startswith("scripts/") else None
+            reason = exempt.get(rel) if rel else None
+            return reason.strip() if isinstance(reason, str) else ""
+    return ""
+
+
+def _declared_red_in_checkout(root, test, runner, timeout):
+    """'' unless `test` is declared red by design AND is red in the checkout too, else the OK detail to report. A
+    declared test that passes in the checkout fails only on the export tree: that IS a hermeticity defect and is still
+    refused, so the declaration never hides what this gate exists to catch."""
+    reason = declared_red(root, test)
+    if not reason:
+        return ""
+    again, problem = _checkout_rerun(root, test, runner, timeout)
+    if problem or again is None or again.returncode in (0, 124, 127):
+        return ""
+    return ("RED BY DESIGN as declared in scripts/test_battery_registration.py EXEMPT (%s), and red in the checkout "
+            "too, so not a hermeticity defect" % reason[:160])
+
 def _refusal(root, test, proc, runner, timeout):
     """The refusal's words, chosen by a rerun in the checkout. Measured
     2026-09-26: the export only wording was false for 2 of 3 refusals, both
@@ -649,9 +687,12 @@ def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S):
                 results.append((NODATA, test, "could not be run: %s" % P._last(proc)))
             else:
                 inputs, _why = declared_no_data(tree, test, proc)
+                declared = "" if inputs else _declared_red_in_checkout(root, test, runner, timeout)
                 if inputs:
                     results.append((OK, test, "NO-DATA on the export tree as declared (%s absent)"
                                     % ", ".join(inputs)))
+                elif declared:
+                    results.append((OK, test, declared))
                 else:
                     results.append((REFUSED, test,
                                     _refusal(root, test, proc, runner, timeout)))

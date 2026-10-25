@@ -25,43 +25,15 @@ WHY THIS FILE EXISTS
   medians... never a single sample" (WAVE-B-BRIEFS.md).
 
 WHY NO CONSOLIDATION WAS APPLIED TO hooks/hooks.json
-  FENCE V7's mission also asks to "consolidate multi-process chains into one
-  deterministic dispatch per event ONLY where behavior equivalence is
-  provable." Investigation before writing any code here found that it is
-  NOT provable within this fence's ownership (hooks/, plus this file, plus
-  docs/evidence/v3/hook-performance.md; nothing else), because three
-  currently green files this fence does not own hard pin the current
-  multi-process shape:
-
-  1. tools/test_bm_consent.py: TelemetryEveryHookProgramPreConsentCase
-     declares MIN_WIRED_COMMAND_STRINGS = 7 and MIN_WIRED_PROGRAMS = 11 as
-     floors, in its own words "raising a floor is the only direction this
-     number is ever allowed to move." The live count of both, read fresh
-     from hooks/hooks.json by TestBlockersAreReal below, is EXACTLY 7 and
-     EXACTLY 11: zero headroom. Any hooks.json edit that removes or merges a
-     wired python3/sh invocation drops one of these counts and fails that
-     suite.
-  2. tools/test_bm_hookbench.py: test_the_stop_event_chains_four_programs_
-     under_one_shared_timeout asserts the Stop event wires at least 2
-     programs, read fresh from hooks/hooks.json by its own parser (which
-     only recognizes tools/ and scripts/ prefixed invocations, so a
-     consolidating dispatch script placed anywhere, including inside
-     hooks/, would not even register as a program and would fail this
-     assertion at 0, not merely drop below the floor).
-  3. The "four-copy law": scripts/install.py's hook_commands() function
-     documents itself, in its own comments, as a hand-maintained duplicate
-     of hooks/hooks.json's wiring that "must move in the same change", and
-     tools/test_bm_docs.py::TestHandWiringBlocksMatchInstaller parses the
-     hand-wiring JSON blocks in docs/QUICKSTART.md and docs/SETUP.md and
-     compares them, command text included, against scripts/install.py's
-     hook_groups(). None of those three files (install.py, QUICKSTART.md,
-     SETUP.md) are in this fence's ownership, so a real wiring change here
-     would leave them inconsistent with the documented invariant even where
-     no single automated assertion goes red today.
-
-  TestBlockersAreReal re-derives all three checks against the live files on
-  every run, so this reasoning is verified mechanically rather than trusted
-  as prose that can go stale.
+  FENCE V7 found three files outside its ownership pinning the multi
+  process shape: test_bm_consent.py's MIN_WIRED_* floors,
+  test_bm_hookbench.py's Stop >= 2 programs pin, and the four copy law
+  in scripts/install.py. D-13 (LAT0H, 2026-10-24) removed the first two
+  with this file's detect_blockers() and TestBlockersAreReal, which
+  re-derived them; the four copy law stands, enforced by
+  tools/test_bm_docs.py::TestHandWiringBlocksMatchInstaller. What still
+  pins the Stop shape is test_the_stop_chain_is_counted_as_five_real_
+  processes below, per command, until HD1 (one dispatcher per event).
 
 WHAT "PROJECTED" MEANS IN THE RECORD BELOW
   Since no wiring change was safe to apply, this file cannot report a real
@@ -107,9 +79,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
 SESSIONSTART = os.path.join(HERE, "bm_sessionstart.py")
-CONSENT_TEST = os.path.join(HERE, "test_bm_consent.py")
-HOOKBENCH_TEST = os.path.join(HERE, "test_bm_hookbench.py")
-INSTALL_PY = os.path.join(ROOT, "scripts", "install.py")
 
 # The chain table, imported rather than retyped, for the same reason
 # tools/bm_hookbench.py imports it: after the Windows port the Stop and
@@ -146,8 +115,7 @@ REPRODUCIBILITY_FACTOR = 3.0
 
 
 class PerfError(Exception):
-    """A measurement, or a blocker claim, could not be taken or verified
-    honestly. Never worked around."""
+    """A measurement could not be taken or verified honestly. Never worked around."""
 
 
 # ---------------------------------------------------------------------------
@@ -577,98 +545,6 @@ def projections(real_record, standalone):
 
 
 # ---------------------------------------------------------------------------
-# The blockers, re-derived from the live files rather than trusted as prose.
-# ---------------------------------------------------------------------------
-
-def _load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def detect_blockers():
-    """The three reasons no hooks/hooks.json wiring change was applied,
-    each checked against the actual file on disk right now. Raises
-    PerfError (a refusal, not a guess) if a file this depends on to explain
-    itself has changed shape in a way this cannot read."""
-    blockers = []
-    chains = read_hook_chains_raw()
-
-    # 1. tools/test_bm_consent.py's zero headroom floor.
-    consent_mod = _load_module("bm_test_consent_for_hookperf", CONSENT_TEST)
-    case = consent_mod.TelemetryEveryHookProgramPreConsentCase
-    live_command_strings = len(chains)
-    # Counted THROUGH the chain driver, using the consent suite's own
-    # counter rather than a second copy of the rule: after the 2026-08-17
-    # Windows port the Stop and PreCompact commands name one driver each,
-    # and a naive count would report 8 programs where 12 run, which would
-    # make this blocker's headroom look like it had opened up when nothing
-    # about the invariant changed.
-    live_programs = case.count_wired_programs(
-        [(g["event"], g["raw_command"]) for g in chains])
-    blockers.append({
-        "owner_files": ["tools/test_bm_consent.py"],
-        "invariant": ("MIN_WIRED_COMMAND_STRINGS=%d, MIN_WIRED_PROGRAMS=%d, "
-                     "documented as floors that may only move up"
-                     % (case.MIN_WIRED_COMMAND_STRINGS,
-                        case.MIN_WIRED_PROGRAMS)),
-        "live_value": ("hooks/hooks.json currently wires %d command "
-                       "string(s) and %d program(s)"
-                       % (live_command_strings, live_programs)),
-        "headroom": min(live_command_strings - case.MIN_WIRED_COMMAND_STRINGS,
-                        live_programs - case.MIN_WIRED_PROGRAMS),
-        "would_break": ("test_no_wired_command_of_any_module_writes_before_"
-                        "consent's floor assertions"),
-    })
-
-    # 2. tools/test_bm_hookbench.py's Stop >= 2 programs pin.
-    stop_groups = [g for g in hb.read_hook_chains() if g["event"] == "Stop"]
-    stop_programs = len(stop_groups[0]["programs"]) if stop_groups else 0
-    blockers.append({
-        "owner_files": ["tools/test_bm_hookbench.py"],
-        "invariant": ("test_the_stop_event_chains_four_programs_under_one_"
-                     "shared_timeout requires len(programs) >= 2"),
-        "live_value": "the Stop event currently wires %d program(s)" % stop_programs,
-        "headroom": stop_programs - 2,
-        "would_break": ("that assertion, and a dispatch script placed under "
-                        "hooks/ instead of tools/ would not even be counted "
-                        "by that suite's parser, reporting 0 rather than "
-                        "merely fewer"),
-    })
-
-    # 3. The four copy law.
-    with io.open(INSTALL_PY, encoding="utf-8") as handle:
-        install_text = handle.read()
-    present = "four-copy law" in install_text or "four copy law" in install_text
-    blockers.append({
-        "owner_files": ["scripts/install.py", "docs/QUICKSTART.md",
-                        "docs/SETUP.md"],
-        "invariant": ("scripts/install.py's hook_commands()/hook_groups() "
-                     "hand-duplicate hooks/hooks.json's wiring and are "
-                     "documented as needing to move together; "
-                     "tools/test_bm_docs.py::TestHandWiringBlocksMatchIn"
-                     "staller pins docs/QUICKSTART.md and docs/SETUP.md's "
-                     "hand-wiring blocks against install.py's hook_groups() "
-                     "command text"),
-        "live_value": ("the \"four-copy law\" comment is %s in "
-                       "scripts/install.py right now"
-                       % ("present" if present else
-                          "ABSENT; this reasoning may be stale and should "
-                          "be re-verified before being trusted")),
-        "headroom": None,
-        "would_break": ("no single automated assertion today for a "
-                        "shell-wrapper-only edit, but leaves install.py and "
-                        "the two docs pages inconsistent with the "
-                        "documented invariant, and breaks "
-                        "TestHandWiringBlocksMatchInstaller for any edit "
-                        "that changes which programs are wired or in what "
-                        "order"),
-    })
-    return blockers
-
-
-# ---------------------------------------------------------------------------
 # Tests.
 # ---------------------------------------------------------------------------
 
@@ -696,10 +572,16 @@ class TestManifestFanoutStatic(unittest.TestCase):
         same four programs cost half the processes. The pin exists so a
         change to the Stop wiring's SHAPE is caught here, where the
         arithmetic is spelled out, rather than silently changing what
-        docs/evidence/v3/hook-performance.md's fan-out table claims."""
+        docs/evidence/v3/hook-performance.md's fan-out table claims.
+
+        RE-PINNED 2026-10-24 per Stop command (D-13, LAT0H): f20374f06 put
+        the clock guard on Stop on purpose as a second, bare command (one
+        process) beside the chain driver (still 1 + 4 = 5). HD1, one
+        dispatcher per event, deferred to 1.1.9, re-pins this again."""
         stop = [g for g in read_hook_chains_raw() if g["event"] == "Stop"]
-        self.assertEqual(len(stop), 1)
-        self.assertEqual(count_real_processes(stop[0]["raw_command"]), 5)
+        counts = {g["raw_command"].split("/tools/")[-1].replace('"', ""):
+                  count_real_processes(g["raw_command"]) for g in stop}
+        self.assertEqual(counts, {"bm_clock_guard.py": 1, "bm_hookchain.py stop": 5})
 
     def test_the_precompact_chain_is_counted_as_three_real_processes(self):
         """One chain driver plus the two programs it runs: 1 + 2 = 3, down
@@ -1051,39 +933,6 @@ class TestProjectionFormulaOnFixedInputs(unittest.TestCase):
                     places=6, msg=where)
 
 
-class TestBlockersAreReal(unittest.TestCase):
-    """Mechanically re-verifies the module docstring's central claim: that
-    hooks/hooks.json is pinned by files this fence does not own, with zero
-    headroom, right now. If any of these ever go non-zero or the four-copy
-    law comment disappears, THIS test changes shape (not silently), which
-    is the point: the blocker claim is checked, not just narrated."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.blockers = detect_blockers()
-
-    def test_three_blockers_are_reported(self):
-        self.assertEqual(len(self.blockers), 3)
-
-    def test_the_consent_floor_has_zero_headroom_right_now(self):
-        row = self.blockers[0]
-        self.assertEqual(row["owner_files"], ["tools/test_bm_consent.py"])
-        self.assertEqual(
-            row["headroom"], 0,
-            "the consent test's wired-command/program floor is not at zero "
-            "headroom any more; re-check whether a safe hooks.json edit "
-            "has become possible (%r)" % row)
-
-    def test_the_hookbench_stop_pin_is_reported(self):
-        row = self.blockers[1]
-        self.assertEqual(row["owner_files"], ["tools/test_bm_hookbench.py"])
-        self.assertIn("Stop event currently wires", row["live_value"])
-
-    def test_the_four_copy_law_comment_is_still_present(self):
-        row = self.blockers[2]
-        self.assertIn("present", row["live_value"])
-
-
 # ---------------------------------------------------------------------------
 # Command line: a small --measure mode for producing evidence, on top of the
 # regression suite unittest.main() runs by default.
@@ -1123,7 +972,6 @@ def _cli_main(argv):
                     "section docstring in this file's source."),
         },
         "projected_single_process": projections(real, standalone),
-        "consolidation_blockers": detect_blockers(),
     }
     text = json.dumps(record, indent=2, sort_keys=True)
     if out:

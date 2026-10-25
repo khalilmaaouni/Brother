@@ -16,6 +16,8 @@ plugin/runtime/brother/core/receipt.py
 plugin/runtime/brother/core/repo_paths.py
 plugin/runtime/brother/core/run.py
 plugin/runtime/brother/core/state.py
+products/brothermode/tools/test_bm_hookbench.py
+products/brothermode/tools/test_bm_hookperf.py
 scripts/accept_delivery.py
 scripts/annotations_store.py
 scripts/autonomy_dial.py
@@ -41,6 +43,7 @@ scripts/continuity.py
 scripts/contract_check.py
 scripts/cursor_plugin_install.py
 scripts/cut.py
+scripts/cut_driver.py
 scripts/cut_preflight.py
 scripts/cut_rehearsal.py
 scripts/daybook.py
@@ -66,6 +69,7 @@ scripts/gauntlet_frozen.py
 scripts/gauntlet_memory_poisoning.py
 scripts/gen_door_table.py
 scripts/gen_readiness_board.py
+scripts/gen_release_plan.py
 scripts/git_location_guard.py
 scripts/graph_loop.py
 scripts/handover_ceremony.py
@@ -124,6 +128,7 @@ scripts/loop/or_ask.py
 scripts/loop/plan_lint.py
 scripts/loop/plan_path.py
 scripts/loop/plan_store.py
+scripts/loop/power_rule.py
 scripts/loop/proof_accept.py
 scripts/loop/proof_launch.py
 scripts/loop/proof_ledger.py
@@ -197,7 +202,9 @@ scripts/test_cursor_doc_release_refs.py
 scripts/test_cursor_hook_run.py
 scripts/test_cursor_plugin.py
 scripts/test_cut.py
+scripts/test_cut_app_approval.py
 scripts/test_cut_preflight.py
+scripts/test_cv1_cut_rehearsed.py
 scripts/test_daybook.py
 scripts/test_decide.py
 scripts/test_demo_torture.py
@@ -206,6 +213,7 @@ scripts/test_evidence_obligation.py
 scripts/test_export_public.py
 scripts/test_gen_readiness_board.py
 scripts/test_handover_ceremony.py
+scripts/test_hook_latency.py
 scripts/test_integrate.py
 scripts/test_land_batch_callsites.py
 scripts/test_loop_guard_race.py

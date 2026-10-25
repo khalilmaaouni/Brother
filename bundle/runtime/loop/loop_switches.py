@@ -4,7 +4,7 @@
 Each automatic stage plan E removed from the default path is OFF unless its variable says exactly "on". Unset, empty,
 unknown or misspelt values read OFF: an unproven stage that runs by accident spends money and time and decides nothing.
 """
-import os, re
+import os, re, shutil, subprocess, sys
 
 
 def probes_on(env=None):
@@ -76,6 +76,69 @@ def drop_run_knobs(env):
 #: one (2026-10-02, spec gate builder's report: suite_env passed them into every sandboxed suite).
 SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH", re.I)
 
+#: S6 (decision D12): where a real git is looked for after `xcrun -f git` (macOS) and the calling PATH.
+GIT_CANDIDATES = ("/Library/Developer/CommandLineTools/usr/bin/git", "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+                  "/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git")
+_REAL_GIT = []
+
+
+def git_link_dir():
+    """The one folder the real git is linked into: realgit-bin under the scratch root (BROTHER_SCRATCH, else
+    ~/.claude/brother-scratch), where the 1.1.8 night's launcher put it and the grader's sandbox ran it. Never under the
+    suite's HOME: callers pass homes that do not exist yet, and suite_env writes nothing there."""
+    root = os.environ.get("BROTHER_SCRATCH") or os.path.join(os.path.expanduser("~"), ".claude", "brother-scratch")
+    return os.path.join(root, "realgit-bin")
+
+
+def is_git_shim(path, platform=None):
+    """True for a path that is not a real git: empty, or on macOS anything under /usr/bin, where every developer tool is
+    one trampoline (one inode shared with make and python3) that calls xcrun and breaks git inside the grader's sandbox:
+    31 of 35 suites failed with it, 35 passed with the real git (D12)."""
+    if not path:
+        return True
+    return (platform or sys.platform) == "darwin" and os.path.realpath(path).startswith("/usr/bin/")
+
+
+def real_git():
+    """The real git binary, resolved once per process, or None when there is none."""
+    if _REAL_GIT:
+        return _REAL_GIT[0]
+    seen = []
+    if sys.platform == "darwin":
+        try:
+            r = subprocess.run(["xcrun", "-f", "git"], capture_output=True, text=True, timeout=20)
+            seen.append(r.stdout.strip() if r.returncode == 0 else "")
+        except (OSError, subprocess.SubprocessError):  # sbe: allow-silent the candidates below are tried next; none found returns None, which suite_env refuses
+            seen.append("")
+    seen += [shutil.which("git") or ""] + list(GIT_CANDIDATES)
+    for p in seen:
+        if p and os.path.isfile(p) and os.access(p, os.X_OK) and not is_git_shim(p):
+            _REAL_GIT.append(os.path.realpath(p))
+            return _REAL_GIT[0]
+    return None
+
+
+def _git_first(env):
+    """S6: the real git linked into git_link_dir(), that folder first on PATH (idempotent). No real git raises
+    LookupError: a suite whose git calls would hit the shim or nothing cannot be graded (NO-DATA, the grade refuses)."""
+    git = real_git()
+    if git is None:
+        raise LookupError("NO-DATA: no real git found (xcrun -f git, the PATH, %s), so no suite can be graded"
+                          % ", ".join(GIT_CANDIDATES))
+    link_dir = git_link_dir()
+    os.makedirs(link_dir, exist_ok=True)
+    link = os.path.join(link_dir, "git")
+    if os.path.realpath(link) != git:
+        if os.path.lexists(link):
+            os.remove(link)
+        try:
+            os.symlink(git, link)
+        except FileExistsError:   # a second suite under the same HOME linked it first
+            if os.path.realpath(link) != git:
+                raise
+    rest = [p for p in env.get("PATH", os.defpath).split(os.pathsep) if p and p != link_dir]
+    env["PATH"] = os.pathsep.join([link_dir] + rest)
+
 
 def suite_env(base, home):
     """The environment a model written suite runs under at landing: a fresh HOME and TMPDIR (grade_build.run does the
@@ -91,4 +154,5 @@ def suite_env(base, home):
     env.pop("BROTHER_RUN_DIR", None)
     env.pop("BROTHER_LOGIN_HOLD_FD", None)   # brother_login.HOLD_FD_VAR (S2 round 3): model written code is never told the holder
     for k in [k for k in env if k.startswith("GIT_") or SECRET_ENV.search(k)]: env.pop(k)  # git location variables (its git config calls would land in the live repo) and credential-shaped names
+    _git_first(env)   # S6: the real git first on PATH, never the xcrun shim (D12)
     return env

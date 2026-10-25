@@ -63,15 +63,15 @@ class Tree:
         with open(self.build, "w", encoding="utf-8") as fh:
             json.dump({"edits": edits, "tests": tests}, fh)
 
-    def run(self, py=sys.executable, env=None, timeout=90, build=None):
-        """(exit code, stdout) of the lander run as a command. Its stdin is a pipe held open for the whole run, so a
-        call that reads the lander's stdin blocks instead of seeing EOF; the lander's own process group is killed if
-        it outlives timeout, and the test then fails."""
+    def run(self, py=sys.executable, env=None, timeout=90, build=None, extra=()):
+        """(exit code, stdout) of the lander run as a command; `extra` are the lander's extra suite arguments. Its stdin
+        is a pipe held open for the whole run, so a call that reads the lander's stdin blocks instead of seeing EOF; the
+        lander's own process group is killed if it outlives timeout, and the test then fails."""
         with tempfile.TemporaryFile() as out:
-            return self._run(out, py, env, timeout, build)
+            return self._run(out, py, env, timeout, build, extra)
 
-    def _run(self, out, py, env, timeout, build):
-        p = subprocess.Popen([py, "-B", LANDER, build or self.build], cwd=self.dir, env=env or clean_env(),
+    def _run(self, out, py, env, timeout, build, extra=()):
+        p = subprocess.Popen([py, "-B", LANDER, build or self.build] + list(extra), cwd=self.dir, env=env or clean_env(),
                              stdin=subprocess.PIPE, stdout=out, stderr=subprocess.DEVNULL, start_new_session=True)
         try:
             rc = p.wait(timeout=timeout)
@@ -709,34 +709,39 @@ def loop_files():
 class NativeWorkerThroughTheGate(unittest.TestCase):
     """The real lander, a real git worktree copy and the real sandbox, on the real native_worker.py and its real suite. Before
     2026-10-14 EVERY build editing native_worker.py read RED (52 cases): the suite wrote the fixed /private/tmp tool folder
-    and started a sandbox inside the gate's sandbox, and neither can happen there."""
+    and started a sandbox inside the gate's sandbox, and neither can happen there.
+    D16 (1.1.8 stability, 2026-10-24): native_worker.py then became a path the landing trusts (grade_build.dest), so a
+    build editing it is refused before any suite runs, and the two cases written for an editable native_worker.py failed in
+    every release since 1.1.6 on empty output. The suite still runs inside the gate as the lander's extra suite, the route a
+    landing uses to name a suite, and a build of the trusted file is refused and changes nothing."""
 
     ANCHOR = "import contextlib, fcntl, hashlib, json, os, re, shutil, stat, subprocess, sys, tempfile, threading, time, uuid"
+    SUITE = "scripts/loop/test_native_worker.py"
 
-    def tree(self, replace):
-        files = loop_files()
-        t = Tree({}, files=files)
+    def tree(self, edit):
+        t = Tree({}, files=loop_files())
         self.addCleanup(t.close)
         with open(t.build, "w", encoding="utf-8") as fh:
-            json.dump({"edits": [{"path": NATIVE, "find": self.ANCHOR, "replace": replace}], "tests": []}, fh)
+            json.dump({"edits": [edit], "tests": []}, fh)
         return t
 
-    def test_an_unchanged_native_worker_passes_the_gate(self):
-        rc, out = self.tree(self.ANCHOR).run(timeout=600)
+    def test_the_native_worker_suite_passes_inside_the_gate(self):
+        t = self.tree({"path": "scripts/fx_native_probe.py", "new_file_content": "X = 1\n"})
+        rc, out = t.run(timeout=600, extra=[self.SUITE])
         self.assertEqual(rc, 0, out)
         self.assertIn("VERDICT SUITES GREEN", out)
         for label in ("py3 ", "py3.9"):
             self.assertTrue(any(l.startswith(label) and "test_native_worker.py" in l and "exit=0" in l and "OK" in l
                                 for l in out.splitlines()), (label, out))
 
-    def test_a_native_worker_that_really_breaks_its_suite_is_still_red(self):
-        t = self.tree(self.ANCHOR + "\nraise RuntimeError('a build that breaks the module')")
+    def test_a_build_of_the_trusted_native_worker_is_refused_and_changes_nothing(self):
+        t = self.tree({"path": NATIVE, "find": self.ANCHOR, "replace": self.ANCHOR + "\nraise RuntimeError('a build that breaks the module')"})
+        self.assertIn("never written by a build", land_apply.grade_build.dest(t.dir, NATIVE)[1] or "")
         rc, out = t.run(timeout=600)
         self.assertNotEqual(rc, 0, out)
-        self.assertIn("VERDICT RED", out)
-        self.assertTrue(any("test_native_worker.py" in l and "exit=" in l and "exit=0" not in l for l in out.splitlines()), out)
+        self.assertNotIn("VERDICT SUITES GREEN", out)
         with open(os.path.join(t.dir, NATIVE), encoding="utf-8") as fh:
-            self.assertNotIn("a build that breaks", fh.read(), "a RED build reaches nothing")
+            self.assertNotIn("a build that breaks", fh.read(), "a refused build reaches nothing")
 
 
 if __name__ == "__main__":

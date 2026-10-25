@@ -1292,5 +1292,45 @@ class R14HostileInputIsRefused(unittest.TestCase):
         self.assertIn("usage", out.getvalue())
 
 
+class ADeclaredHarness(Base):
+    """1.1.8 H3: a test the battery's EXEMPT register declares red by design passes this gate only when it is red in the
+    checkout too; red only on the export tree is still a hermeticity defect and is refused."""
+
+    def declare(self, text):
+        with open(os.path.join(self.root, "scripts", "test_battery_registration.py"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def run_with_rerun(self, rc):
+        from unittest import mock
+        r = Runner({"test_door.py": (1, "FAILED (failures=1)\n")})
+        again = subprocess.CompletedProcess([], rc, "FAILED\n" if rc else "OK\n", "")
+        with mock.patch.object(H, "_checkout_rerun", return_value=(again, None)):
+            return H.check(self.root, ["scripts/test_door.py"], r, build=self.ships("test_door.py"))
+
+    def test_declared_and_red_in_the_checkout_too_is_ok_and_says_so(self):
+        self.declare("EXEMPT = {'test_door.py': 'red by design while its unit is OPEN'}\n")
+        res = self.run_with_rerun(1)
+        self.assertEqual(res[0][0], H.OK)
+        self.assertIn("RED BY DESIGN as declared", res[0][2])
+        self.assertIn("red by design while its unit is OPEN", res[0][2])
+
+    def test_declared_but_green_in_the_checkout_is_still_refused(self):
+        self.declare("EXEMPT = {'test_door.py': 'red by design while its unit is OPEN'}\n")
+        self.assertEqual(self.run_with_rerun(0)[0][0], H.REFUSED)
+
+    def test_undeclared_and_red_in_both_is_refused(self):
+        self.declare("EXEMPT = {'test_other.py': 'red by design'}\n")
+        self.assertEqual(self.run_with_rerun(1)[0][0], H.REFUSED)
+
+    def test_a_register_that_is_not_a_literal_or_absent_declares_nothing(self):
+        self.assertEqual(H.declared_red(self.root, "scripts/test_door.py"), "")
+        self.declare("EXEMPT = dict(test_door='x')\n")
+        self.assertEqual(H.declared_red(self.root, "scripts/test_door.py"), "")
+        self.declare("EXEMPT = {'test_door.py': 3}\n")
+        self.assertEqual(H.declared_red(self.root, "scripts/test_door.py"), "")
+        self.declare("EXEMPT = {'test_door.py': 'x'\n")
+        self.assertEqual(H.declared_red(self.root, "scripts/test_door.py"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

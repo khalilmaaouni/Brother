@@ -365,17 +365,34 @@ class CY1b1AppApproval(Base):
         self.assertNotIn("export_public.py --push", runner.calls)
         self.assertEqual(self.calls(), [])
 
-    def test_the_shipped_key_is_the_placeholder(self):
-        # the file this tree ships is the placeholder: no cut until enrolled. docs/plan is not
-        # part of the public export, so the export tree has nothing to read: a named skip there
-        # (NO-DATA for this one fact), never a pass and never an error.
+    def test_the_shipped_pin_is_the_placeholder_or_an_enrolled_pin(self):
+        # the file this tree ships is one of two states and nothing else: the placeholder,
+        # which the cut refuses, or the owner's enrolled pin (exactly key_id and
+        # verifier_sha256), which the cut accepts. A failure names the state, never the
+        # pinned values. docs/plan is not part of the public export, so the export tree has
+        # nothing to read: a named skip there (NO-DATA for this one fact), never a pass and
+        # never an error.
         shipped = os.path.join(ROOT, "docs", "plan", "APPROVER-KEY.json")
         if not os.path.exists(shipped):
             self.skipTest("docs/plan/APPROVER-KEY.json is not shipped in this tree (export tree)")
-        with open(shipped) as fh:
-            self.assertEqual(json.load(fh), {"key_id": "NOT-ENROLLED"})
-            fh.seek(0)
-            self.assertEqual(C.parse_pin(fh.read()), ("", ""))
+        with open(shipped, encoding="utf-8") as fh:
+            self.hub = fh.read()
+        try:
+            data = json.loads(self.hub)
+        except ValueError:
+            data = None
+        # the pin as the cut reads it, hub/main carrying the same bytes as this tree
+        pin = C.approver_pin(ROOT, self.runner())
+        if data == {"key_id": "NOT-ENROLLED"}:
+            self.assertTrue(pin[:2] == ("", "") and self.refused(pin[2]),
+                            "the cut accepts the NOT-ENROLLED placeholder")
+            return
+        self.assertTrue(isinstance(data, dict)
+                        and sorted(data) == ["key_id", "verifier_sha256"],
+                        "the shipped pin is neither the placeholder nor exactly "
+                        "key_id and verifier_sha256 (values not printed)")
+        self.assertTrue(pin == (data["key_id"], data["verifier_sha256"], ""),
+                        "the cut refuses the shipped enrolled pin (values not printed)")
 
     def test_terminal_path_unchanged(self):
         runner = self.runner()

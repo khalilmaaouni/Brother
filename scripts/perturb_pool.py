@@ -331,6 +331,13 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
                 copier(source_root, copy)
                 os.makedirs(scratch)
             except (CopyFailed, OSError) as exc:
+                # the disk floor (W6) while a worker runs: its copy is removed when it ends, so the slice waits for that
+                # and the floor never moves (1.1.8 rehearsal, 2026-10-24: 30 rows NO-DATA at 15.0 GiB with five copies
+                # held). With nothing running, no space comes back, so it is NO-DATA as before.
+                if running and str(exc).startswith("W6"):
+                    waiting.insert(0, mine)
+                    say("workers: a work copy waits for disk (%s)" % exc)
+                    break
                 for file_rel, suite_rel in mine:
                     answers[(file_rel, suite_rel)] = (None, "no work copy: %s" % exc)
                 continue

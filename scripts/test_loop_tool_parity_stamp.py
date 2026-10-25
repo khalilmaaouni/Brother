@@ -102,5 +102,50 @@ class TestStampAwareDrift(unittest.TestCase):
         self.assertIn("FAIL drift    x.py", result.stdout)
 
 
+class TestExportTreeReadsTheStampSource(TestStampAwareDrift):
+    """The cut's export rows run this check from the export tree: a fresh repository holding the release's files and none
+    of the hub's history (1.1.1 and 1.1.8 cuts: loop-tool-parity FAIL drift on every loop file changed since the deploy).
+    The stamp names the checkout it deployed from (`source`), and that checkout can show the stamped revision."""
+
+    def setUp(self):
+        super().setUp()
+        self.export = os.path.join(self.box, "export")
+        shutil.copytree(os.path.join(self.source, "scripts"), os.path.join(self.export, "scripts"))
+        subprocess.run(["git", "-C", self.export, "init", "--quiet"], env=self.env, check=True, capture_output=True)
+
+    def stamp(self, revision, source=None):
+        with open(os.path.join(self.bin, ".deploy-stamp.json"), "w", encoding="utf-8") as handle:
+            json.dump({"schema": 1, "revision": revision, "source_dirty": False, "source": source}, handle)
+
+    def parity(self):
+        return subprocess.run([sys.executable, "-B", os.path.join(self.export, "scripts", "test_loop_tool_parity.py")],
+                              env=self.env, cwd=self.export, capture_output=True, text=True, timeout=120)
+
+    def test_1_copy_at_its_stamped_revision_is_not_a_drift(self):
+        self.stamp(self.revision_a, self.source)
+        result = self.parity()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("note revision  x.py", result.stdout)
+        self.assertNotIn("FAIL drift", result.stdout)
+
+    def test_5_a_stamp_source_that_is_gone_is_no_alibi(self):
+        self.stamp(self.revision_a, os.path.join(self.box, "gone"))
+        result = self.parity()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL drift    x.py", result.stdout)
+
+    def test_6_a_stamp_source_without_the_revision_is_no_alibi(self):
+        self.stamp(self.revision_a, self.export)
+        result = self.parity()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL drift    x.py", result.stdout)
+
+    def test_7_a_stamp_source_that_is_not_text_is_no_alibi(self):
+        self.stamp(self.revision_a, ["not", "a", "path"])
+        result = self.parity()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL drift    x.py", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

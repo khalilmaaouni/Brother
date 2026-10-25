@@ -16,7 +16,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BATTERIES = ("check_all.sh", "required_fast.sh")
-EXEMPT = {}  # scripts-relative path ("test_name.py" or "loop/test_name.py"): reason
+EXEMPT = {  # scripts-relative path ("test_name.py" or "loop/test_name.py"): reason
+}
 
 
 def registered_names(folder=HERE, batteries=BATTERIES):
@@ -58,7 +59,8 @@ class BatteryRegistration(unittest.TestCase):
                          'run_check "dotted" python3 -m unittest -v scripts.test_dotted\n'
                          '# run_check "c" python3 scripts/test_only_in_a_comment.py\n')
             open(os.path.join(d, "required_fast.sh"), "w").close()
-            self.assertEqual(unregistered(d), (["test_only_in_a_comment.py", "test_orphan.py"], []))
+            self.assertEqual(unregistered(d, exempt={}),   # a fixture folder: the live EXEMPT list is not its own
+                              (["test_only_in_a_comment.py", "test_orphan.py"], []))
             self.assertEqual(unregistered(d, exempt={"test_orphan.py": "r", "test_gone.py": "r"}),
                              (["test_only_in_a_comment.py"], ["test_gone.py"]))
             os.remove(os.path.join(d, "required_fast.sh"))
@@ -79,7 +81,7 @@ class BatteryRegistration(unittest.TestCase):
                          '# run_check "c" python3 -B scripts/loop/test_only_in_a_comment.py\n')
             with open(os.path.join(d, "required_fast.sh"), "w") as fh:
                 fh.write('run_check "dotted" python3 -m unittest scripts.loop.test_dotted\n')
-            self.assertEqual(unregistered(d),
+            self.assertEqual(unregistered(d, exempt={}),
                              (["loop/test_only_in_a_comment.py", "loop/test_orphan.py"], []))
             self.assertEqual(unregistered(d, exempt={"loop/test_orphan.py": "r", "loop/test_gone.py": "r"}),
                              (["loop/test_only_in_a_comment.py"], ["loop/test_gone.py"]))

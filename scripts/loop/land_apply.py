@@ -44,7 +44,8 @@ def selftest():
         e = suite_env({"HOME": "/Users/someone", "GIT_DIR": "/x/.git", "BROTHER_RUN_DIR": "/r", "PATH": "/bin"}, home)
         cases = [("HOME is the fresh directory, never the caller's", e["HOME"] == home and e["HOME"] != "/Users/someone"),
                  ("TMPDIR lives under that HOME", e["TMPDIR"].startswith(home)),
-                 ("git location variables and the run directory are dropped", "GIT_DIR" not in e and "BROTHER_RUN_DIR" not in e and e["PATH"] == "/bin"),
+                 ("git location variables and the run directory are dropped, the real git first on PATH (S6)",
+                  "GIT_DIR" not in e and "BROTHER_RUN_DIR" not in e and e["PATH"] == os.pathsep.join([_LS.git_link_dir(), "/bin"])),
                  ("the run's routing and scope never reach a suite, its program pins do",
                   not _LS.RUN_KNOBS & set(suite_env({"BROTHER_TRANSPORTS": "claude", "BROTHER_SCOPE": "x", "BROTHER_CLAUDE_BIN": "/c"}, home))
                   and suite_env({"BROTHER_CLAUDE_BIN": "/c"}, home)["BROTHER_CLAUDE_BIN"] == "/c")]

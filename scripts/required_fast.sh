@@ -406,6 +406,11 @@ run_check "mobile-workflow" python3 scripts/test_mobile_workflow.py -v
 run_check "mobile-design" python3 scripts/test_mobile_design.py -v
 run_check "surface"             /usr/bin/python3 -m unittest tests/test_surface.py
 run_check "bm-clock-guard"      python3 -B -m unittest products.brothermode.tools.test_bm_clock_guard products.brothermode.tools.test_bm_clock_guard_m12 products.brothermode.tools.test_bm_clock_guard_m13 products.brothermode.tools.test_bm_clock_guard_m14
+# LAT0H (1.1.8, D-13): the hook cost suites sat red 27 days because no gate ran them; serial on purpose (hookperf
+# asserts the run wrote nothing into this repository), pinned in scripts/test_required_fast_rows.py REQUIRED.
+run_check "bm-hookperf"         python3 -B products/brothermode/tools/test_bm_hookperf.py
+run_check "bm-hookbench"        python3 -B products/brothermode/tools/test_bm_hookbench.py
+run_check "hook-latency"        python3 -B scripts/test_hook_latency.py
 # L2b: plugin/runtime/brother's tests, absent from every gate until now
 # (docs/architecture/ONE-SYSTEM-WIRING-AUDIT.md). The 3 known real
 # multiprocess-fork files run isolated, in the full battery only; see
@@ -488,6 +493,13 @@ run_check "release-cut"         python3 scripts/test_cut.py
 # changed product files under unchanged versions and installed machines kept
 # the old code. Real temporary git repositories, no network. About 12 s here.
 run_check "plugin-bump-gate"    python3 scripts/test_plugin_bump_gate.py
+# The cut's phone code approval (CY1, 1.1.6). It ran in check_all.sh only, so
+# when the owner enrolled the approver key on 2026-10-23 the suite's shipped pin
+# test went red and the 1.1.7 cut, which runs this gate, never saw it. Hermetic
+# (scratch folders, a fake verifier, no network), about 4 s; serial, since
+# nobody has audited it for running side by side. Pinned by
+# scripts/test_required_fast_rows.py.
+run_check "cut-app-approval-self" python3 -B scripts/test_cut_app_approval.py
 # The Cursor package: the manifest, the Cursor marketplace, the hooks file
 # routed through the Cursor adapter, the rules, and a local install into a
 # temp dir. No binary is needed, so it earns the fast slice.

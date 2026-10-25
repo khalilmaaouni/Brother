@@ -763,6 +763,10 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # the landing gates and the push gate run from the tree with no sandbox (land_batch GATES, the hook)
                    "scripts/test_battery_registration.py", "scripts/system_doc.py", "scripts/bundle_runtime.py",
                    "scripts/pre_push_gate.py",
+                   # 1.1.8 H1: the product manifest gate and the two product scripts it runs (a build could neuter its own check)
+                   "scripts/product_manifests.py", "products/brothermode/scripts/checksums.sh",
+                   "products/brothermode/scripts/verify-install.sh", "products/brothersbe/scripts/checksums.sh",
+                   "products/brothersbe/scripts/verify-install.sh",
                    # run unsandboxed by the loop from the tree (tenth review 2026-10-02): the pre-commit check at every
                    # landing commit, the closer, the pass's sizing eval, the sentry and the diagnostician
                    "scripts/self_check_staged.py", "scripts/close_unit.py", "scripts/adaptive_sizing.py",
@@ -1990,8 +1994,10 @@ def mirror_matches(tracked_dir: str, installed_dir: str) -> list:
 
 # THE LEDGER IS IMPORTED BY NAME (2026-09-28): it was loaded by a computed file path, which the deploy freeze
 # cannot trace, so every deploy after P1.c landed was refused, and in the deployed layout that path pointed outside
-# the tool folder, so no claim was ever written. By name, the freeze ships prediction_ledger.py beside this file
-# and the import finds it there; in the repository it is found on scripts/. A ledger that cannot be imported is
+# the tool folder, so no claim was ever written. The freeze never shipped it beside this file: the bin carries
+# scripts/loop alone, so it sat only under candidate/scripts/ and every 1.1.7 grade lost its claims (S5, D10). The
+# deploy stage now places it here (deploy_stamped.place_grader_imports) and refuses a bin where this import fails;
+# in the repository it is found on scripts/. A ledger that cannot be imported is
 # None here, a NO-DATA, and never an import error that takes the judging tool down with it (P1.c behaviour 2).
 try:
     import prediction_ledger as _PREDICTION_LEDGER

@@ -103,6 +103,14 @@ class _FakePlanLint(object):
         return []
 
     @staticmethod
+    def _section(spec_text, sub):   # S3's shape_refusal reads the section's changed files; this pass judges load alone
+        return spec_text
+
+    @staticmethod
+    def write_paths(section):
+        return ["scripts/a_1.py"]
+
+    @staticmethod
     def lint_mode():
         return ("report", "")
 

@@ -79,6 +79,7 @@ def wrong_copy_installed(bin_dir=BIN, loop_dir=None, other_dir=None, referenced=
     loop_dir = loop_dir or REPO_DIRS[0]; other_dir = other_dir or REPO_DIRS[1]
     referenced = referenced_by_loop(loop_dir) if referenced is None else referenced   # scoped to what the loop RUNS: a
     out = []                                                                          # tool nobody in the loop names is not its business
+    placed = placed_beside(bin_dir)
     for name in sorted(os.listdir(other_dir)) if os.path.isdir(other_dir) else []:
         if not name.endswith((".py", ".sh")) or name not in referenced:
             continue
@@ -88,12 +89,29 @@ def wrong_copy_installed(bin_dir=BIN, loop_dir=None, other_dir=None, referenced=
         bb, ob = read(b), read(o)
         if bb is not None and bb == ob:
             l = read(os.path.join(loop_dir, name))
+            if l is None and name in placed:
+                continue   # S5: the stage put scripts/<name> beside the grader on purpose, and scripts/loop holds none
             if l is None or l != bb:
                 out.append((name, o))
     return out
 
 
 STAMP = ".deploy-stamp.json"
+
+
+def placed_beside(bin_dir=BIN):
+    """File names the stamp says the stage placed beside the grader from scripts/ (S5, deploy_stamped.place_beside_grader),
+    or an empty set when the stamp records none, cannot be read, or holds anything but a list of names: nothing is then
+    excused, so every such copy stays a wrong copy."""
+    try:
+        with open(os.path.join(bin_dir, STAMP), encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return set()
+    names = doc.get("beside") if isinstance(doc, dict) else None
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        return set()
+    return set(names)
 
 
 def pending_kernel(bin_dir=BIN):
@@ -141,14 +159,35 @@ def repo_rel(path):
     return None if rel == ".." or rel.startswith(".." + os.sep) else rel.replace(os.sep, "/")
 
 
-def versioned_at(revision, path):
+def stamped_source(bin_dir=BIN):
+    """The checkout the stamp says the executed directory was deployed from (deploy_stamped.py writes `source`), or
+    None when the stamp names none, names something that is not a directory, or cannot be read."""
+    try:
+        with open(os.path.join(bin_dir, STAMP), encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    source = doc.get("source") if isinstance(doc, dict) else None
+    return source if isinstance(source, str) and source and os.path.isdir(source) else None
+
+
+def versioned_at(revision, path, source=None):
     """The bytes of `path` (a file inside this repository) as committed at `revision`, or None when git
-    cannot show it (the revision is not in this repository, or the file did not exist there)."""
+    cannot show it (the revision is not in this repository, or the file did not exist there).
+    SOURCE, the stamp's own checkout, is asked second, with the same repository path: the cut's export rows run this
+    check from the export tree, a fresh repository with none of the hub's history, so the stamped revision was never
+    showable there and every loop file changed since the deploy read DRIFT (1.1.1 and 1.1.8 cuts). A source that cannot
+    show the revision is no alibi either."""
     rel = repo_rel(path)
     if rel is None:
         return None
-    shown = subprocess.run(["git", "-C", HERE, "show", "%s:%s" % (revision, rel)], capture_output=True)
-    return shown.stdout if shown.returncode == 0 else None
+    for root in (HERE, source):
+        if not root:
+            continue
+        shown = subprocess.run(["git", "-C", root, "show", "%s:%s" % (revision, rel)], capture_output=True)
+        if shown.returncode == 0:
+            return shown.stdout
+    return None
 
 
 def drifted():
@@ -180,6 +219,7 @@ def drifted():
     tools with one name is how the wrong one gets edited, but not a failure of this check."""
     out, at_revision = [], []
     revision = stamped_revision(BIN)   # BIN read now, not the default bound at import (a test rebinds it)
+    source = stamped_source(BIN)
     pend = pending_kernel(BIN)
     for name in sorted(set(n for d in REPO_DIRS if os.path.isdir(d) for n in os.listdir(d))):
         if not name.endswith((".py", ".sh")):
@@ -199,7 +239,7 @@ def drifted():
             entry = pend.get(repo_rel(canonical))
             if entry and entry.get("deployed_sha256") == _sha256(b_bytes) and entry.get("landed_sha256") == _sha256(a_bytes):
                 at_revision.append((name, "PENDING"))
-            elif revision is not None and versioned_at(revision, canonical) == b_bytes:
+            elif revision is not None and versioned_at(revision, canonical, source) == b_bytes:
                 at_revision.append((name, revision))
             else:
                 out.append((name, "differs"))

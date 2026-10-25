@@ -8,6 +8,7 @@ The sibling config files are individually renamed; an exception or failed
 parity restores the snapshot. This is not a power-loss transaction spanning
 four paths: the printed restore command is the recovery route after a crash.
 """
+import ast
 import fcntl
 import hashlib
 import json
@@ -419,6 +420,66 @@ def staging_sources(source, target, tree, revision, approved):
     return tree / "scripts/loop", plan
 
 
+#: S5 (decision D10, 1.1.8 stability): the bin carries scripts/loop alone, and grade_build.py imports some modules by
+#: name that live in scripts/ (prediction_ledger), so they reached the bin only under candidate/scripts/ and every
+#: 1.1.7 grade said the ledger could not be imported.
+GRADER = "grade_build.py"
+
+
+def _module_imports(path):
+    """Top level names PATH imports at module scope, read by parsing, never run: never inside a function or class, where
+    a module picks its own route (grade_build._terms_scan). A file that does not parse raises RuntimeError naming it."""
+    try:
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise RuntimeError("%s does not parse, so its imports cannot be placed: %s" % (Path(path).name, exc))
+    names, todo = [], list(tree.body)
+    while todo:
+        node = todo.pop(0)
+        if isinstance(node, ast.Import):
+            names += [a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.append(node.module.split(".")[0])
+        elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            todo += [c for c in ast.iter_child_nodes(node) if isinstance(c, (ast.stmt, ast.excepthandler))]
+    return names
+
+
+def grader_by_name_imports(tools, scripts):
+    """Module names the grader in TOOLS imports by name at module scope that SCRIPTS holds and TOOLS does not, with the
+    ones those import in turn, sorted. A tools folder with no grader names none (the staged canary, which grades,
+    refuses that tree); a grader or a placed module that does not parse raises RuntimeError."""
+    tools, scripts = Path(tools), Path(scripts)
+    if not (tools / GRADER).is_file():
+        return []
+    found, todo = set(), [tools / GRADER]
+    while todo:
+        for name in _module_imports(todo.pop()):
+            if name not in found and not (tools / (name + ".py")).exists() and (scripts / (name + ".py")).is_file():
+                found.add(name)
+                todo.append(scripts / (name + ".py"))
+    return sorted(found)
+
+
+def place_grader_imports(tools, stage):
+    """Copy every grader_by_name_imports module from the scripts/ folder above TOOLS into STAGE, then import each from
+    STAGE alone in a child (-I: no cwd, no PYTHON* variables, no user site). One that does not import refuses the
+    deploy, naming it, before the canary. Returns the placed file names, which the stamp records as `beside` so the
+    parity check knows each copy from scripts/ is there on purpose (test_loop_tool_parity.placed_beside)."""
+    tools, stage = Path(tools), Path(stage)
+    names = grader_by_name_imports(tools, tools.parent)
+    for name in names:
+        shutil.copy2(str(tools.parent / (name + ".py")), str(stage / (name + ".py")))
+    for name in names:
+        probe = subprocess.run([sys.executable, "-I", "-B", "-c",
+                                "import sys; sys.path.insert(0, sys.argv[1]); import " + name, str(stage)],
+                               cwd=str(stage), capture_output=True, text=True, timeout=120)
+        if probe.returncode != 0:
+            last = ((probe.stderr or probe.stdout).strip().splitlines() or ["no output"])[-1][:160]
+            raise RuntimeError("the staged bin cannot import %s beside %s (%s); target unchanged" % (name, GRADER, last))
+    return [name + ".py" for name in names]
+
+
 def stage_run(source, target, approved=False, expect_head=None):
     """Stage the next generation beside the target without touching it: snapshot, bin tools, configs, candidate and
     the kernel at this revision (A2.b), then the staged canary. Returns the run directory; its stage carries the stamp
@@ -461,6 +522,8 @@ def stage_run(source, target, approved=False, expect_head=None):
         for directory in (target, tools):
             # files and package directories alike, through the one copier every site shares (tool_stamp.copy_tools)
             tool_stamp.copy_tools(str(directory), str(stage), skip=(STAMP,))
+        placed = place_grader_imports(Path(tools), stage)   # S5 (D10): the grader's by name imports from scripts/
+        print("GRADER IMPORTS %s" % (", ".join(placed) or "none"), flush=True)
         for name in CONFIGS:
             src = source_plan / name
             if name == "loop-canary.json" and not src.exists():
@@ -488,7 +551,7 @@ def stage_run(source, target, approved=False, expect_head=None):
     deployed.update(hashes(plan))
     # "source" is the checkout the bin's programs resolve their code root from (model_router.stamp_root, C13)
     write_json(stage / STAMP, {"schema": 1, "revision": revision, "source_dirty": dirty, "source": str(source),
-                              "files": deployed, "rollback": str(backup), "kernel": kernel,
+                              "files": deployed, "rollback": str(backup), "kernel": kernel, "beside": placed,
                               "kernel_dir": str(kernel_dir), "pending_kernel": pending, "kernel_overlay": overlay})
     print("STAGED %s" % run, flush=True)
     return run

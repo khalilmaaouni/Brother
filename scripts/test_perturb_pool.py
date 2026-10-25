@@ -183,12 +183,33 @@ class ThePool(Base):
     def test_a_copy_that_cannot_be_made_is_no_data_for_its_rows_never_a_skip(self):
         def copier(src, dest):
             if dest.endswith("copy1"):
-                raise PP.CopyFailed("W6: disk floor")
+                raise PP.CopyFailed("W2: the copy path contains /tmp")
             PP.make_copy(src, dest, floor_gib=0)
         out, seen = self.run_pool(lambda rows: [[f, s, True, "red"] for f, s in rows], copier)
         self.assertEqual(len(out), 3, "a row was dropped")
         self.assertEqual([v for _, _, v, _ in out], [True, None, True])
         self.assertIn("no work copy", out[1][3])
+        self.assertEqual(len(seen), 1)
+
+    def test_a_disk_refusal_while_a_worker_runs_waits_for_its_copy_to_go(self):
+        # 1.1.8 rehearsal, 2026-10-24: copy W6 read 15.0 GiB under the 15 GiB floor while five workers held copies, and 30
+        # rows read NO-DATA; each worker's copy is removed when it ends, so the slice is measured after one does
+        def copier(src, dest):
+            if dest.endswith("copy1"):
+                raise PP.CopyFailed("W6: NO-DATA: 15.0 GiB free under the pool, floor is 15")
+            PP.make_copy(src, dest, floor_gib=0)
+        out, seen = self.run_pool(lambda rows: [[f, s, True, "red"] for f, s in rows], copier)
+        self.assertEqual([v for _, _, v, _ in out], [True, True, True])
+        self.assertEqual(len(seen), 2)
+
+    def test_a_disk_refusal_with_nothing_running_is_no_data(self):
+        def copier(src, dest):
+            if not dest.endswith("copy0"):
+                raise PP.CopyFailed("W6: NO-DATA: 14.0 GiB free under the pool, floor is 15")
+            PP.make_copy(src, dest, floor_gib=0)
+        out, seen = self.run_pool(lambda rows: [[f, s, True, "red"] for f, s in rows], copier)
+        self.assertEqual([v for _, _, v, _ in out], [True, None, True])
+        self.assertIn("no work copy: W6", out[1][3])
         self.assertEqual(len(seen), 1)
 
     def test_a_worker_that_dies_mid_list_is_no_data_for_what_it_never_answered(self):
