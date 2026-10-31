@@ -11,8 +11,16 @@
 # never counted as a pass.
 #
 # Exit 0 when no check fails and every missing result is allowed by its
-# evidence obligation. Required missing evidence blocks without changing its verdict. Target: well under 5 minutes wall clock (measured ~90s on this
-# machine, 2026-09-03).
+# evidence obligation. Required missing evidence blocks without changing its verdict.
+# WALL CLOCK, measured and not hoped: 8 minutes 1 second on this machine on 2026-10-29
+# (69 rows, log kept in that session's scratch), and over the 144 whole gate records
+# carrying a duration up to 2026-10-26, shortest 6.9, median 15.3, longest 52.8 minutes
+# (docs/plan/runs/2026-10-25-night-119/MEASURED-CORRECTIONS-2026-10-26.md). The line that
+# stood here from 2026-09-03 to 2026-10-29 read "well under 5 minutes (measured ~90s)": 0 of
+# those 144 runs met it, so it was a target written as a measurement. The target is still
+# 5 minutes; every landing pays the gap until the serial phase below is audited row by
+# row and the audited rows join the parallel case (the longest parallel row is brother-run
+# at 123 seconds, so the parallel phase alone fits the target).
 
 cd "$(dirname "$0")/.." || exit 1
 
@@ -449,6 +457,16 @@ run_check "packs"               python3 scripts/test_packs.py -v
 # scenario sweep (about 4,300 scenarios) took over 120 seconds on this
 # machine, well past this script's own budget, and check_all.sh runs it.
 run_check "no-data-semantics"   python3 scripts/test_battery_verdict.py -v
+# The journey walker's selftest BELONGS HERE and is deliberately absent, pending the owner's
+# decision on the kernel. It was added by his ruling 2026-10-26, ran green as a row (PASS, exit 0, 0s,
+# REQUIRED_FOR_MERGE/ALLOWED), and was REVERTED the same day for a consequence nobody had priced:
+# scripts/kernel_closure.py builds the judge kernel from THIS FILE'S run_check rows, so any row here
+# conscripts its script into the kernel, and kernel_closure.txt's stamp moves only on the owner's
+# approval batched with the cut y. The row made kernel-closure-list red, and a red row here withholds
+# the whole gate record from EVERY tree on the branch, which stops the mechanism by which any unit
+# closes. Re-land this one line once he approves the kernel addition:
+#   run_check "journey-walker-selftest" python3 scripts/journey/run_journey.py --selftest
+# Full account: docs/plan/runs/2026-10-25-night-119/DECISION-FAST-LANE-WALKER-ROW-2026-10-26.md
 # Its static half runs here. Dropping the whole file left its two source
 # lints (a PASS-capable pair returner outside every registry, a report print
 # that skips say()) looked at by nothing per PR, and six reds sat on main for
@@ -473,6 +491,15 @@ run_check "brothersbe-verify-install"  sh -c 'cd products/brothersbe && sh scrip
 # the first thing an outside reader runs, so it earns a place in the cheap
 # slice rather than only in the full battery.
 run_check "readme-honesty"      python3 scripts/test_readme_honesty.py
+# Every release note has its README "What changed in" section. Registered
+# 2026-10-23 after 1.1.7 shipped without one: the test ran only in
+# check_all.sh, so no landing and no cut asked it. It owes a section only for
+# a version whose docs/releases/1.1.x.md is in the tree, never for the
+# declared or the next version: a tree before a cut holds no note for the
+# version being cut, so it stays green, while cut_v1.0.0.sh writes that note
+# before cut.py runs this gate on the bumped tree, so a cut (or its
+# rehearsal) missing its own section is refused before the tag. Sub-second.
+run_check "readme-changed-sections" python3 -B scripts/test_readme_changed_sections.py
 run_check "codex-doc-release-refs" python3 scripts/test_codex_doc_release_refs.py
 run_check "cursor-doc-release-refs" python3 scripts/test_cursor_doc_release_refs.py
 run_check "no-promise" python3 -B scripts/test_no_promise_to_cut_version.py
@@ -557,6 +584,16 @@ if [ -f docs/plan/READINESS-ROADMAP-2026-08-29.json ]; then
 else
   run_check "readiness-board"   sh -c 'echo "NO-DATA: this tree carries no docs/plan/READINESS-ROADMAP-2026-08-29.json, a private hub file the public export never ships"; exit 2'
   run_check "board-status"      sh -c 'echo "NO-DATA: this tree carries no docs/plan/READINESS-ROADMAP-2026-08-29.json, a private hub file the public export never ships"; exit 2'
+fi
+# A unit whose gate can NEVER answer is indistinguishable from one still in
+# progress, which is how PROOF1 and DOOR1 each sat OPEN for two days with all
+# their work landed (0/5, 2026-10-29). This row refuses a new one, refuses a DONE
+# unit whose gate cannot pass, and refuses a baseline entry that has started
+# passing, so docs/plan/UNGATED-UNITS.json can only shrink.
+if [ -f docs/plan/BROTHER-1.1.9-WBS.json ]; then
+  run_check "plan-gates-can-pass" python3 -B scripts/plan_gates_can_pass.py
+else
+  run_check "plan-gates-can-pass" sh -c 'echo "NO-DATA: this tree carries no docs/plan/BROTHER-1.1.9-WBS.json, a private hub file the public export never ships"; exit 2'
 fi
 run_check "daybook"             python3 scripts/test_daybook.py
 run_check "handover-ceremony"   python3 scripts/test_handover_ceremony.py

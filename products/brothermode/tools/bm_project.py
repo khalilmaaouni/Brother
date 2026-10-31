@@ -187,6 +187,7 @@ Python 3.9, standard library only. No network. No subprocess.
 No em or en dashes anywhere in this file, its comments, or its output.
 """
 
+import ast
 import importlib.util
 import io
 import json
@@ -2098,7 +2099,7 @@ def _grounding_gate(project_id, contract_path, answer_path):
              % project_id)
         return None
     try:
-        schema = cc.load_json(cc.DEFAULT_SCHEMA, "schema")
+        schema = cc.load_json(cc.default_schema(), "schema")
         written = cc.load_json(contract_path, "record")
     except cc.NoData as exc:
         _err("cannot deliver %s: NO-DATA: %s" % (project_id, exc))
@@ -2190,7 +2191,7 @@ def _mark_contract_delivered(path, contract, answers):
         problems = ["NO-DATA: scripts/contract_check.py is not on disk"]
     else:
         try:
-            schema = cc.load_json(cc.DEFAULT_SCHEMA, "schema")
+            schema = cc.load_json(cc.default_schema(), "schema")
             written = cc.load_json(path, "record")
             problems = cc.check(written, schema)
         except cc.NoData as exc:
@@ -2719,12 +2720,75 @@ def _npm_has_test_script(root):
     return bool(str(scripts.get("test") or "").strip())
 
 
+#: FIRST1.d (REQ-FIRST1D-01): the two command shapes a generated check may
+#: take, kept as templates so the generator never hardcodes an interpreter
+#: for a file that interpreter does not actually run.
+_RUNNER_SELF = "python3 %s"
+_RUNNER_PYTEST = "python3 -m pytest -q %s"
+
+
+def _runs_itself(tree):
+    """Does this file run its own tests when executed as a script? True only
+    for a module level `if __name__ == "__main__"` block, which is the one
+    thing that makes a plain interpreter run actually run anything."""
+    for node in tree.body:
+        if not isinstance(node, ast.If):
+            continue
+        names = [n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)]
+        texts = [n.value for n in ast.walk(node.test)
+                 if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        if "__name__" in names and "__main__" in texts:
+            return True
+    return False
+
+
+def _defines_tests(tree):
+    """Does this file define anything a test runner would collect? A function
+    whose name starts with test (walked, so a method inside a case class
+    counts) or a class whose name starts with Test."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name.startswith("test"):
+            return True
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            return True
+    return False
+
+
+def _test_file_runner(full_path):
+    """The command template that actually RUNS this test file, or None.
+
+    WHY THIS EXISTS, measured: the generator below used to write
+    `python3 <file>` for every test file it found. On a pytest style file
+    that imports the module and exits 0 whatever the code does, so the check
+    could not fail, and the receipt still read a pass for a file nothing had
+    run (V-main: the vacuous probe printed DONE PASS=1). Naming the runner is
+    the fix at the source, because the command is what decides.
+
+    A file that runs itself keeps the plain interpreter. A file that defines
+    tests but runs nothing gets the runner that collects them. A file that
+    defines no test, and a file that does not parse, both return None, which
+    is NO-DATA: no check is written for them at all. Never a pass."""
+    try:
+        with io.open(full_path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=full_path)
+    except (IOError, OSError, SyntaxError, ValueError):
+        return None
+    if _runs_itself(tree):
+        return _RUNNER_SELF
+    if _defines_tests(tree):
+        return _RUNNER_PYTEST
+    return None
+
+
 def _repo_success_checks(lead, root):
     """One runnable check per way this repository already documents its
     own tests, each in the command shape that repository itself uses:
     `make test` for a Makefile test target, `npm test` for a package.json
-    test script, `python3 <path>` for a test_*.py suite file (the shape
-    every suite in this estate is run with), and `python3 -m unittest
+    test script, the file's own RUNNER for a test_*.py suite file (see
+    _test_file_runner: the interpreter alone for a file that runs itself,
+    the collecting runner for a file that only defines tests, and no check
+    at all for a file no runner here can name), and `python3 -m unittest
     discover <dir>` for a tests/ directory bm_lead.py's own _test_suites
     found that holds no test_*.py file already covered above.
 
@@ -2753,8 +2817,11 @@ def _repo_success_checks(lead, root):
         pass
     covered = set()
     for rel in sorted(files):
+        runner = _test_file_runner(os.path.join(root, rel))
+        if runner is None:
+            continue        # NO-DATA: no runner can be named, so no check is written
         checks.append({"id": _contract_slug(rel),
-                       "command": "python3 %s" % rel,
+                       "command": runner % rel,
                        "expect": "exit-0"})
         covered.add(os.path.dirname(rel))
     for rel, count in lead._test_suites(root):
@@ -2793,6 +2860,9 @@ def _check_evidence_path(root, command):
         except OSError:  # sbe: allow-silent inaccessible discovery directory has no representative file
             pass
         return None
+    pytest_prefix = _RUNNER_PYTEST[:_RUNNER_PYTEST.index("%s")]
+    if command.startswith(pytest_prefix):
+        return command[len(pytest_prefix):]
     if command.startswith("python3 "):
         return command[len("python3 "):]
     return None
@@ -2809,8 +2879,18 @@ def _check_receipts(root, checks):
     exactly that ("this file exists, this many lines"), in the
     file:<path>:<start>-<end> grammar scripts/receipt_check.py resolves.
     It is never a claim that the check has RUN, let alone passed a real
-    execution -- verdict PASS here means the observation passed, not the
-    suite. A command _check_evidence_path cannot resolve to a file (the
+    execution. THE VERDICT USED TO SAY PASS ANYWAY, which is the whole
+    defect: the docstring knew and the data did not, so anything reading
+    the record saw PASS for a check nobody had run. The journey row
+    C.no-pass-for-unrun-check measured it on 2026-10-25 and again on
+    2026-10-29 ("1 of 1 commanded check(s) carry a PASS whose only
+    evidence is the source range"). A COMMANDED check whose command has
+    not been run now reads NO-DATA, which is this estate's own word for
+    exactly this state: the evidence has not arrived yet, so it is never
+    a pass and never a hard block. The observation itself is unchanged
+    and still true, and still lives in the ref.
+
+    A command _check_evidence_path cannot resolve to a file (the
     --answer path's own typed command) gets no receipt at all, since
     nothing was observed for it beyond the person's own word."""
     out = []
@@ -2829,9 +2909,12 @@ def _check_receipts(root, checks):
             # (receipt_check's own resolve_receipt would refuse any
             # start it was given), so there is nothing true to claim.
             continue
+        # NO-DATA, not PASS: nothing here ran the check. The schema's own
+        # enum carries the word, and additionalProperties is false, so the
+        # verdict is the only place this fact can live.
         out.append({"id": c["id"], "path": rel,
                     "ref": "file:%s:1-%d" % (rel, nlines),
-                    "verdict": "PASS"})
+                    "verdict": "NO-DATA"})
     return out
 
 
@@ -2892,15 +2975,45 @@ def _affected_products(root):
     return products
 
 
+#: contract_check.py as the CHECKOUT carries it: products/brothermode/tools sits
+#: three levels under the repository root and the checker lives in scripts/.
+CONTRACT_CHECK_CHECKOUT = os.path.normpath(os.path.join(
+    HERE, "..", "..", "..", "scripts", "contract_check.py"))
+#: The same module as an INSTALLED runtime carries it. scripts/bundle_runtime.py
+#: already packages contract_check.py (it is a DATA_FILES reader, which is how
+#: its schema is copied flat beside it), and it lands at
+#: bundle/runtime/contract_check.py while this tool lands at
+#: bundle/runtime/hooks/brothermode/tools/bm_project.py. So it is three levels up
+#: from HERE there too, flat rather than under scripts/.
+#:
+#: WITHOUT THIS the checker is unreachable on every real install and `adopt` can
+#: never verify a contract. Measured 2026-10-29 by walking journey J2 on a clean
+#: HOME with no ~/.claude/bin: row A.adopt-exits-0 read "FAIL ... the installed
+#: bm_project.py adopt exited 2: bm_project: NO-DATA: scripts/contract_check.py
+#: is not on disk beside this tool, so the record was written but never
+#: checked". The code was honest about not knowing; it was looking in the one
+#: place an installed tool never has.
+CONTRACT_CHECK_INSTALLED = os.path.normpath(os.path.join(
+    HERE, "..", "..", "..", "contract_check.py"))
+
+
 def _contract_checker():
-    """scripts/contract_check.py, loaded BY PATH exactly the way _load
-    above loads a sibling module, so adopt can refuse to leave a record
-    the estate's own checker rejects. None when it is not on disk (a
-    packaged install that ships the tools without the scripts
-    directory), which is a NO-DATA, never a pass."""
-    path = os.path.normpath(os.path.join(
-        HERE, "..", "..", "..", "scripts", "contract_check.py"))
-    if not os.path.isfile(path):
+    """contract_check.py, loaded BY PATH exactly the way _load above loads a
+    sibling module, so adopt can refuse to leave a record the estate's own
+    checker rejects.
+
+    Two candidates, the checkout's and the installed runtime's, in that order,
+    mirroring contract_check.default_schema()'s own DEFAULT_SCHEMA then
+    INSTALLED_SCHEMA pattern rather than inventing a second idiom for the same
+    packaging problem.
+
+    None when it is on disk in NEITHER place, which is a NO-DATA and never a
+    pass: a contract nobody could check is not a checked contract.
+    """
+    for path in (CONTRACT_CHECK_CHECKOUT, CONTRACT_CHECK_INSTALLED):
+        if os.path.isfile(path):
+            break
+    else:
         return None
     try:
         spec = importlib.util.spec_from_file_location("contract_check", path)
@@ -3154,7 +3267,7 @@ def cmd_adopt(argv):
              "checked; run the checker yourself before relying on it")
         return 2
     try:
-        schema = cc.load_json(cc.DEFAULT_SCHEMA, "schema")
+        schema = cc.load_json(cc.default_schema(), "schema")
         written = cc.load_json(out, "record")
     except cc.NoData as exc:
         _err("bm_project: NO-DATA: %s" % exc)
@@ -3201,11 +3314,150 @@ def cmd_adopt(argv):
 # dispatch
 # ---------------------------------------------------------------------------
 
+def _load_setup():
+    """scripts/setup.py loaded by path, the same shape tools/bm_telemetry.py
+    uses for the same module: setup.py is the ONE place the consent config
+    schema, its reader and its arming write live, and a second copy here
+    would be a second writer of the one file that records consent."""
+    try:
+        root = os.path.dirname(HERE)
+        spec = importlib.util.spec_from_file_location(
+            "bm_setup_for_consent", os.path.join(root, "scripts", "setup.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod, None
+    except Exception as e:                       # an unloadable setup arms nothing
+        return None, repr(e)
+
+
+def _answered_from_outside(mod):
+    """The person's own answer, or None when they have not given one.
+
+    Read from consent_answer_path. The design is that the write guard and the
+    Write hook deny that folder to the session, which is what would make an
+    answer there evidence of a person rather than of whatever is running. That
+    denial is HD1.d and HD1 is OPEN, so today this reads a file a session could
+    have written itself: see the note in setup.py's consent_answer_path, and the
+    line _record_consent prints when it arms.
+
+    A value that is neither yes nor no comes back as it was read, so the
+    caller refuses it with the usage line instead of guessing which was
+    meant."""
+    try:
+        with io.open(mod.consent_answer_path(), encoding="utf-8") as fh:
+            raw = fh.read().strip().lower()
+    except (IOError, OSError):
+        return None
+    return raw or None
+
+
+def _a_person_is_here():
+    """Is there a human at a terminal right now?
+
+    Both ends are a TTY and they are the SAME terminal. A session with a pipe
+    on either end, or with two unrelated terminals, is not a person, and it
+    fails closed on any error because an environment this cannot read must
+    never be mistaken for a person.
+
+    WHAT THIS DOES NOT DO, named because a security review named it on
+    2026-10-29 and because this file's own check proves it: a caller that
+    allocates a pty owns both ends and passes here. scripts/test_consent_gate.py
+    does exactly that on purpose, so the case that proves the gate accepts a
+    real person is also the demonstration of its limit. A nonce typed back
+    through the terminal would not help, since whoever owns the pty master can
+    read the nonce. The only sound answer is a channel the session's own tool
+    layer refuses, which is HD1.d, and it is not built. So this REFUSES THE
+    OBVIOUS CASE (an argv answer with no terminal, which is what REQ-FIRST1C-05
+    names) and is not proof of a human being."""
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
+        return os.ttyname(sys.stdin.fileno()) == os.ttyname(sys.stdout.fileno())
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def cmd_consent(argv):
+    """`consent`: ask the one question, or record the one answer.
+
+    REQ-FIRST1C-04: asked a second time, this prints the answer already on
+    disk and asks nothing. REQ-FIRST1C-05: `consent yes` typed as an argument
+    by an agent with no terminal is refused, and the refusal says how a
+    person answers. Nothing here writes the arming record itself; only
+    setup.py's answer_consent does."""
+    mod, err = _load_setup()
+    if mod is None:
+        _err("bm_project: consent: scripts/setup.py could not be loaded (%s), "
+             "so nothing can be asked and nothing is armed." % err)
+        return 1
+    armed = mod.consented_fence_mode()
+    if armed:
+        _out("consent: answered yes already. The write gate runs %s." % armed)
+        _out("Lessons: %s" % mod.lessons_root())
+        _out("To answer again: %s --reconfigure"
+             % os.path.join(os.path.dirname(HERE), "scripts", "setup.py"))
+        return 0
+    filed = _answered_from_outside(mod)
+    if filed is not None and filed not in ("yes", "no"):
+        _err("bm_project: consent: %s holds %r. The only answers are yes and no."
+             % (mod.consent_answer_path(), filed))
+        return 2
+    if filed == "no":
+        _out("consent: answered no already. Nothing has been written.")
+        _out("To answer again, write yes into %s" % mod.consent_answer_path())
+        return 0
+    if argv:
+        if argv[0] not in ("yes", "no"):
+            _err("bm_project: consent: unknown answer %r. Usage: consent [yes|no]"
+                 % argv[0])
+            return 2
+        if not _a_person_is_here():
+            _err("bm_project: consent: refused. An answer typed as an argument "
+                 "with no terminal is not a person's answer, and this is the one "
+                 "question an agent may not answer for you.")
+            _err("  A person answers by running `consent yes` in their own "
+                 "terminal, or by writing yes into %s" % mod.consent_answer_path())
+            return 1
+        return _record_consent(mod, argv[0] == "yes")
+    if filed == "yes":
+        return _record_consent(mod, True)
+    _out(mod.consent_question())
+    _out("")
+    _out("Answer in your own terminal: consent yes")
+    _out("Or write yes into %s" % mod.consent_answer_path())
+    return 0
+
+
+def _record_consent(mod, yes):
+    """The one place this tool calls the arming write, so that a no can be
+    seen to write nothing: answer_consent(False) returns {} and touches no
+    file, and this prints that rather than a success it did not have."""
+    cfg = mod.answer_consent(yes)
+    if not yes:
+        _out("consent: no. Nothing has been written.")
+        return 0
+    if not cfg:
+        _err("bm_project: consent: the arming write returned nothing, so "
+             "nothing is armed.")
+        return 1
+    _out("consent: yes. The write gate runs %s." % cfg.get("fence_mode"))
+    _out("Lessons: %s" % cfg.get("lessons_root"))
+    # Said at the moment of arming, not buried in a document: until HD1.d denies
+    # the answer folder to the session, this answer is not tamper proof, and a
+    # control that only reports has to say which one it is.
+    _out("Note: this answer is not yet tamper proof. The folder a person answers "
+         "in is not denied to a session until HD1.d lands, and a caller that "
+         "allocates its own terminal passes the person check. Re-answer any time "
+         "with --reconfigure.")
+    return 0
+
+
 COMMANDS = {
     "start": cmd_start,
     "status": cmd_status,
     "list": cmd_list,
     "adopt": cmd_adopt,
+    "consent": cmd_consent,
     "next": cmd_next,
     "task": cmd_task,
     "forecast": cmd_forecast,

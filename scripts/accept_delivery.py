@@ -200,6 +200,75 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
     return True, path
 
 
+def reject(name, ref, rejected_by, rejected_at, recorded_by, delegation=None,
+           words=None, directory=None, cwd=None):
+    """Write one rejection. Returns (True, path) on success or (False, reason).
+
+    THE OTHER ANSWER, and it has to leave a record. A refusal nobody wrote down is
+    indistinguishable from nobody having been asked, so a run that was looked at and
+    turned down reads exactly like a run that was ignored. The entry carries
+    `verdict: "rejected"` and names who refused and when.
+
+    IT PUSHES NOTHING, and `cwd` is why that is worth stating rather than assuming.
+    This records WHERE the run was so the refusal can be found again, and that is the
+    whole of what it does with it: no remote is contacted, no commit is made, nothing
+    is pushed. A refusal that changed the world would be an acceptance under another
+    name. The journey row A.reject-pushes-nothing observes that against a real remote.
+
+    NO accepted_at FIELD, deliberately. per_week counts from accepted_at and load_all
+    sorts by it, so a rejection carrying one would be counted as a delivery accepted
+    that week. Absent, it is skipped by the count and sorts first, with no change to
+    either function.
+
+    THE SAME PERSON GATE AS record(). An agent-recorded refusal needs a named
+    delegation, because refusing on somebody's behalf is as much their decision as
+    accepting on it."""
+    directory = directory or DELIVERIES_DIR
+    if recorded_by not in ("person", "agent"):
+        return False, "recorded_by must be 'person' or 'agent', not %r" % recorded_by
+    if recorded_by == "agent" and not (delegation and str(delegation).strip()):
+        return False, ("an agent-recorded rejection requires --delegation "
+                       "\"<the exact sentence the founder said>\"")
+    for label, value in (("name", name), ("ref", ref),
+                         ("rejected_by", rejected_by)):
+        if not (value and str(value).strip()):
+            return False, "%s is required and was %r" % (label, value)
+    try:
+        parse_iso(rejected_at)
+    except ValueError:
+        return False, "rejected_at %r is not a valid ISO date" % rejected_at
+    entry = {
+        "name": str(name).strip(),
+        "ref": str(ref).strip(),
+        "rejected_by": str(rejected_by).strip(),
+        "rejected_at": str(rejected_at).strip(),
+        "recorded_by": recorded_by,
+        "verdict": "rejected",
+    }
+    if recorded_by == "agent":
+        entry["delegation"] = str(delegation).strip()
+    if words and str(words).strip():
+        entry["words"] = str(words).strip()
+    if cwd:
+        # The home directory collapsed back to ~, through the same helper
+        # run_identity already uses: a delivery record is a shareable artifact, and
+        # an absolute path carries the account name of whoever happened to run it.
+        # Flagged by a security review on 2026-10-29 and correct: the record names a
+        # location, never one account's spelling of it.
+        entry["cwd"] = _tilde(os.path.abspath(str(cwd)))
+    path = record_path(ref, directory)
+    os.makedirs(directory, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False, ("delivery %r already answered (%s): a second answer is "
+                       "refused, not overwritten" % (ref, path))
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(entry, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return True, path
+
+
 def write_pattern_from_acceptance(ref, accepted_by, accepted_at, words,
                                   record_file, pattern_root=None):
     """The good-outcome half of the learning loop (roadmap learning_loop
@@ -824,6 +893,14 @@ def resolve_receipt(run_dir, project_cwd, ref, directory=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--reject", action="store_true",
+                    help="record the OTHER answer: this run's receipt is refused. Uses "
+                         "the same --name, --ref, --accepted-by, --accepted-at and "
+                         "--recorded-by fields, whose names are historical and cover "
+                         "both answers; the record itself says rejected_by and "
+                         "rejected_at, so nothing on disk is ambiguous. It writes a "
+                         "record and nothing else: no remote is contacted and nothing "
+                         "is pushed.")
     ap.add_argument("--list", action="store_true",
                     help="print recorded acceptances and the per-week count")
     ap.add_argument("--name", help="the delivery's plain-language name")
@@ -907,6 +984,28 @@ def main(argv=None):
         else:
             for (year, week), count in sorted(weeks.items()):
                 print("week %d-W%02d: %d accepted" % (year, week, count))
+        return 0
+
+    if args.reject:
+        # The refusal path, ahead of every acceptance-only requirement below: a
+        # rejection cites no run receipt and carries no per-file checks, because
+        # there is nothing being claimed as proven.
+        gaps = [flag for flag, val in (("--name", args.name), ("--ref", args.ref),
+                                       ("--accepted-by", args.accepted_by),
+                                       ("--accepted-at", args.accepted_at),
+                                       ("--recorded-by", args.recorded_by))
+                if not (val or "").strip()]
+        if gaps:
+            ap.error("recording a rejection requires %s (no field is ever defaulted "
+                     "or inferred)" % ", ".join(gaps))
+        ok, out = reject(name=args.name, ref=args.ref,
+                         rejected_by=args.accepted_by, rejected_at=args.accepted_at,
+                         recorded_by=args.recorded_by, delegation=args.delegation,
+                         words=args.words, directory=args.dir, cwd=os.getcwd())
+        if not ok:
+            print("accept-delivery: refused: %s" % out, file=sys.stderr)
+            return 2
+        print(out)
         return 0
 
     missing = [flag for flag, val in (("--name", args.name), ("--ref", args.ref),

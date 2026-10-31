@@ -244,7 +244,15 @@ class ConflictsAndRefusals(unittest.TestCase):
         return runner, merges
 
     def test_a_merge_failure_that_is_not_a_lock_is_not_retried(self):
+        # A REAL conflict now: a lane name that does not resolve is refused before any merge is
+        # tried (HD1.f, nothing is merged by name; scripts/test_integrate_commit_gate.py pins that).
         repo = canon()
+        lanes = W.Lanes(repo, ["A"])
+        lane_commit(lanes.path_for("A"), {"lib.py": 'GREETING = "lane"\n'}, "A")
+        with open(os.path.join(repo, "lib.py"), "w", encoding="utf-8") as fh:
+            fh.write('GREETING = "canonical moved"\n')
+        subprocess.run(["git", "commit", "-qam", "canonical moved"], cwd=repo,
+                       capture_output=True, check=True)
         merges = []
 
         def runner(cmd):
@@ -253,8 +261,8 @@ class ConflictsAndRefusals(unittest.TestCase):
                 merges.append(proc.returncode)
             return proc
         with mock.patch.object(I, "INDEX_LOCK_BACKOFF_S", 0.01):
-            r = I.integrate_one(repo, "lane/NOT-A-BRANCH",
-                                {"id": "N", "done_check": "true"}, runner=runner)
+            r = I.integrate_one(repo, "lane/A",
+                                {"id": "A", "done_check": "true"}, runner=runner)
         self.assertEqual(r["verdict"], I.CONFLICT, r)
         self.assertEqual(len(merges), 1, merges)
 

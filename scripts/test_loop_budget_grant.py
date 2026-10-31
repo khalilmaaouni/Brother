@@ -40,7 +40,7 @@ def selftest() -> int:
     entry = data.get("projects", {}).get("Brother", {})
     if not isinstance(entry, dict):
         return 1
-    hard = entry.get("session_hard")
+    hard = entry.get("hard_out")
     if hard != 3000100:
         return 1
     until = entry.get("until")
@@ -85,17 +85,17 @@ class GrantBlockTest(_Scratch):
         block = self.block(tokens=5000000, spent=1000000)
         self.assertEqual(block["until"], FUTURE)
         self.assertIn(WORDS, block["reason"])
-        self.assertEqual(block["session_hard"], 6000000)
-        self.assertEqual(block["session_soft"], 4000000)
-        self.assertEqual(block["daily_hard"], 6000000)
-        self.assertEqual(block["daily_soft"], 4000000)
+        self.assertEqual(block["hard_out"], 6000000)
+        self.assertEqual(block["soft_out"], 4000000)
+        self.assertEqual(block["daily_hard_out"], 6000000)
+        self.assertEqual(block["daily_soft_out"], 4000000)
         self.assertEqual(sorted(block), sorted(grant.BLOCK_KEYS))
         self.assertNotIn("override", block)
 
     def test_soft_is_floored_at_spent(self):
         block = self.block(tokens=500000, spent=1000000)
-        self.assertEqual(block["session_hard"], 1500000)
-        self.assertEqual(block["session_soft"], 1000000)
+        self.assertEqual(block["hard_out"], 1500000)
+        self.assertEqual(block["soft_out"], 1000000)
 
     def test_a_past_until_refuses(self):
         now = time.time()
@@ -148,7 +148,7 @@ class ApplyGrantTest(_Scratch):
         first = self.read_config()
         grant.apply_grant(self.config, ["A"], self.block(tokens=9000))
         self.assertEqual(self.read_config(), first)
-        self.assertEqual(json.loads(first)["projects"]["A"]["session_hard"], 1009000)
+        self.assertEqual(json.loads(first)["projects"]["A"]["hard_out"], 1009000)
 
     def test_a_corrupt_config_refuses(self):
         for text in ("not json {", "[1, 2]", '"x"', '{"projects": []}', ""):
@@ -177,7 +177,7 @@ class ApplyGrantTest(_Scratch):
         past = dict(self.block(), until=_iso(time.time() - HOUR))
         with_override = dict(self.block(), override=True)
         no_reason = dict(self.block(), reason="")
-        bool_hard = dict(self.block(), session_hard=True)
+        bool_hard = dict(self.block(), hard_out=True)
         for block in (past, with_override, no_reason, bool_hard, {}, None, [1]):
             with self.assertRaises(ValueError, msg=repr(block)):
                 grant.apply_grant(self.config, ["A"], block)
@@ -210,7 +210,7 @@ class MainTest(_Scratch):
         code, out, _ = self.run_main()
         self.assertEqual(code, 0)
         self.assertIn("guard selftest: NO-DATA", out)
-        self.assertEqual(json.loads(self.read_config())["projects"]["Brother"]["session_hard"], 3000100)
+        self.assertEqual(json.loads(self.read_config())["projects"]["Brother"]["hard_out"], 3000100)
         # A guard whose selftest reads the granted config and passes.
         self.write_guard("import json\nCONFIG = None\n"
                          "def selftest():\n"
@@ -291,7 +291,7 @@ class RunGrantTest(_Scratch):
         self.write_guard(RUN_GUARD)
         self.write_config(json.dumps({
             "override": None,
-            "projects": {"Brother": {"session_hard": 42}},
+            "projects": {"Brother": {"hard_out": 42}},
         }))
         run_block = grant.grant_block(WORDS, 3000000, FUTURE, 100, time.time())
         self.write_run_grant(json.dumps({"projects": {"Brother": run_block}}))
@@ -299,17 +299,17 @@ class RunGrantTest(_Scratch):
         self.assertEqual(code, 0, err)
         self.assertIn("guard selftest: PASS", out)
         saved = json.loads(self.read_config())
-        self.assertEqual(saved["projects"]["Brother"]["session_hard"], 3000100)
+        self.assertEqual(saved["projects"]["Brother"]["hard_out"], 3000100)
         self.assertEqual(saved["projects"]["Brother"]["until"], FUTURE)
         run_saved = json.loads(self.read_run_grant())
-        self.assertEqual(run_saved["projects"]["Brother"]["session_hard"], 3000100)
+        self.assertEqual(run_saved["projects"]["Brother"]["hard_out"], 3000100)
 
     def test_a_run_grant_with_a_wrong_ceiling_is_refused(self):
         self.write_guard(RUN_GUARD)
         self.write_config('{"override": null}')
         run_block = grant.grant_block(WORDS, 3000000, FUTURE, 100, time.time())
-        run_block["session_hard"] = 42
-        run_block["session_soft"] = 42
+        run_block["hard_out"] = 42
+        run_block["soft_out"] = 42
         self.write_run_grant(json.dumps({"projects": {"Brother": run_block}}))
         grant_before = self.read_run_grant()
         config_before = self.read_config()
@@ -361,7 +361,7 @@ class RunGrantTest(_Scratch):
         self.assertIn("selftest", err)
         self.assertEqual(self.read_config(), config_before)
         saved = json.loads(self.read_config())
-        self.assertEqual(saved["projects"]["Brother"]["session_hard"], 7000100)
+        self.assertEqual(saved["projects"]["Brother"]["hard_out"], 7000100)
         self.assertEqual(os.listdir(empty_run), [])
 
     def test_a_torn_run_grant_refuses_and_leaves_it_whole(self):
@@ -401,6 +401,33 @@ class HostileInputTest(unittest.TestCase):
                     except (ValueError, LookupError, SystemExit, grant.GrantRefused):
                         pass
         self.assertEqual(os.listdir(home), [])
+
+
+class TheKeysAreTheDeployedReaders(unittest.TestCase):
+    """R1 (2026-10-30): a grant is applied only if the guard that enforces it reads the keys this tool writes.
+    The pin below is the deployed reader's LIMIT_KEYS; when the reader is on this machine it is read as a literal
+    and compared too, and a reader that cannot be read says NO-DATA in the message and still holds the pin."""
+
+    PIN = ("soft_out", "hard_out", "daily_soft_out", "daily_hard_out")
+
+    def test_the_block_carries_the_readers_limit_keys(self):
+        import ast
+        self.assertEqual(sorted(grant.BLOCK_KEYS[:4]), sorted(self.PIN))
+        path = os.path.expanduser("~/.claude/hooks/spend_guard.py")
+        live = None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in tree.body:
+                if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "LIMIT_KEYS" for t in node.targets):
+                    live = tuple(ast.literal_eval(node.value))
+        except (OSError, SyntaxError, ValueError):
+            live = None
+        if live is None:
+            print("NO-DATA: the deployed reader %s could not be read here, so only the pin was compared" % path)
+            return
+        self.assertEqual(sorted(live), sorted(self.PIN), "the deployed reader's LIMIT_KEYS moved; move the pin and the block with it")
+
 
 
 if __name__ == "__main__":

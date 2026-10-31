@@ -17,7 +17,7 @@ concurrency:
 jobs:
   prove:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install Claude Code CLI
@@ -26,4 +26,36 @@ jobs:
         run: |
           sh scripts/bundle-install-smoke.sh --github 2>&1 | tail -30
           exit "${PIPESTATUS[0]}"
+        shell: bash
+
+      # JT0.c: the Linux half of the X01 cut gate. PATH MODE on this checkout, not
+      # --github: --github installs the PUBLISHED tag, and the point of a cut gate is
+      # to walk the candidate in hand. The smoke step above keeps --github on purpose,
+      # because its own question is about the published install.
+      #
+      # WHAT A GREEN STEP HERE DOES AND DOES NOT MEAN. The run log IS the record, and
+      # RDM1.b reads it. A row with no measurement yet reads NO-DATA and the walker
+      # exits 2; this step does not fail on that, because a rubric cell nobody can
+      # measure is not a failure of the leg. It is also NOT A PASS, and RDM1.b must
+      # read the rows rather than this step's colour. Only a real FAIL, exit 1, is
+      # failed here.
+      - name: Journey J1 and J2 on the checked out tree, path mode
+        run: |
+          set -o pipefail
+          python3 scripts/journey/run_journey.py --selftest
+          for J in J1 J2; do
+            echo "=== $J ==="
+            set +e
+            python3 scripts/journey/run_journey.py --journey "$J" --tree . 2>&1 | tail -40
+            code=${PIPESTATUS[0]}
+            set -e
+            echo "$J exit $code"
+            if [ "$code" = "1" ]; then
+              echo "FAIL: $J had an expected row that did not read PASS"
+              exit 1
+            fi
+            if [ "$code" = "2" ]; then
+              echo "NO-DATA: $J could not be walked or carries rows nothing measures yet; this is not a pass"
+            fi
+          done
         shell: bash

@@ -1,6 +1,10 @@
 {
  "files": [
   {
+   "name": "CLAUDE.md",
+   "sha256": "e23cc47346d2e6b72896b412f89ae5346d1cec700c4f7de8391994da56fd1a62"
+  },
+  {
    "name": "adapter_conformance.py",
    "sha256": "b4808e92a502d132211d779d0f0bd78497029cf94c05ad319618492750e40540"
   },
@@ -50,7 +54,7 @@
   },
   {
    "name": "brother_login.py",
-   "sha256": "df98d0efd4fc23dea0ec9cbe6bb8fa3f5dde9c45714c9de1e8cf529d544c3a7a"
+   "sha256": "729825bf7abb49169e4d3b59e32b8648fe56066c5dfb0cadad8cb6d547d0d503"
   },
   {
    "name": "brother_night_tick.py",
@@ -82,7 +86,7 @@
   },
   {
    "name": "commit_scan.py",
-   "sha256": "fe3dd4a88d0cba8661b38b0c986d9fa297f29ff50801b1c0409031e8011fc9c7"
+   "sha256": "adaaff05a79ab3faa9e9eff37c02213159a546591d218a21a9f7e12aa0d5808e"
   },
   {
    "name": "deploy_stamped.py",
@@ -170,7 +174,7 @@
   },
   {
    "name": "land_batch.py",
-   "sha256": "161defff11011d986a659f97efcd798b057f9e717ed6bdd65d71a04c24065914"
+   "sha256": "76e6ffb6b2d8322fd57f2610bff086227c9dc9f3fe5e45868445073bcea8f13c"
   },
   {
    "name": "land_fuzz_child.py",
@@ -270,7 +274,7 @@
   },
   {
    "name": "native_worker.py",
-   "sha256": "875d328f480799777038ee3cdb74053faf39b23a3a51e831196c5f278f8f9098"
+   "sha256": "e1accaf7ecb941ce63605a59d655e0e4b02128ea5ef9931360b53966316d8fe0"
   },
   {
    "name": "or_ask.py",
@@ -386,7 +390,7 @@
   },
   {
    "name": "secret_scan.py",
-   "sha256": "7d73475a76ff1a6ffb8aaa89a714fddb5aff36a10d81b09007a63512837a9465"
+   "sha256": "74a6afb1393690efede6d5cda7c10bc93466b7405e3edb0055f1c0fdbe490764"
   },
   {
    "name": "self_check.py",
@@ -398,7 +402,7 @@
   },
   {
    "name": "slicer.py",
-   "sha256": "50b9bc7fb7e48a24c9334ac79c8e8aa61c8136b87f59bcff0554e9e2a1b2e588"
+   "sha256": "8caf374d5dca79d865a5b5e67cbab155e762c044cdf158dd3a85607ed2dd7f64"
   },
   {
    "name": "spec_accept.py",
@@ -590,11 +594,11 @@
   },
   {
    "name": "test_land_batch_bl_owns.py",
-   "sha256": "87c2dbb8fa0585cdfd3de9571fc0440cc7a3682352a8d865bc001a726a1bd9ab"
+   "sha256": "bb366039c2e1d40ad068c85ad1d26f3fc8d0e023812f68cd7ff61215f7325dc2"
   },
   {
    "name": "test_land_batch_bl_owns_plan.py",
-   "sha256": "c5709e17239c9aecccb67b9ff227e8546e663af52885a415fe23f1dd77206c89"
+   "sha256": "c879debfb726f1970aa0eae8076203908444d3fbfde16402a8036e7d5fe3a28b"
   },
   {
    "name": "test_land_batch_closure.py",
@@ -614,15 +618,15 @@
   },
   {
    "name": "test_land_batch_landings.py",
-   "sha256": "b96abbcfce364e2b78701aad632c50b301453b79b8af2125e0c1cc465853411b"
+   "sha256": "dabf71a611164a7d1ba02e58571d9891b20fdff2c7dfba35a39ce1976b89d1c1"
   },
   {
    "name": "test_land_batch_mirror.py",
-   "sha256": "977a37e2d5658c5d3d8f42a8ea39762abb931948edf331339b42efd7cfef8642"
+   "sha256": "6072661af3a4ffd1790b02d38e2bcde799d8f98525293160f2932c9813fe0c31"
   },
   {
    "name": "test_land_batch_rejection_fact.py",
-   "sha256": "8c5426cf2a6a6b23441a56b0adea659157a6c48968eec220c817d9503818810b"
+   "sha256": "8e072142d638dbb35c720da941d00033804bd358c4a0873c3a68afa293a8f6a3"
   },
   {
    "name": "test_land_batch_whole_gate.py",
@@ -922,7 +926,7 @@
   },
   {
    "name": "test_secret_scan.py",
-   "sha256": "0bb1d944c6afd1bba083b434fba8de138d99debfd4778d3904227d35e03aa3ee"
+   "sha256": "38d18055f98a14771f4ce41cd392c24fc1b8c9ba62a03243285035ac3f153aa5"
   },
   {
    "name": "test_sibling_new.py",

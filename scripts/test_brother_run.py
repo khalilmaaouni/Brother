@@ -82,6 +82,16 @@ _LOAD02_ENV_VARS = ("BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_L
 
 
 def setUpModule():
+    # PC1H.b: every finished run appends one row to <HOME>/.brother/runs-index.jsonl
+    # (proof_card.update_index), and the subprocesses this module launches inherit
+    # HOME. Pinned to a fresh temp directory for the whole module, before any
+    # subprocess is built, so a gate run never writes a test run into the owner's
+    # real index, where his status line would show it. Removed at module teardown.
+    _home = tempfile.mkdtemp(prefix="brother-test-home-")
+    unittest.addModuleCleanup(shutil.rmtree, _home, ignore_errors=True)
+    _pin_home = mock.patch.dict(os.environ, {"HOME": _home})
+    _pin_home.start()
+    unittest.addModuleCleanup(_pin_home.stop)
     # Test-owned disk premise: worker admission reads this host's free
     # disk, so a full disk would otherwise read as a failing suite.
     from hermetic_worker_env import worker_environment
@@ -2151,11 +2161,21 @@ class TheProofCardIsWrittenAfterTheReceipt(unittest.TestCase):
 
     def test_the_card_files_land_next_to_the_receipt_and_print(self):
         import proof_card
+        # CARD1.a: the default print is the short card; the full title is
+        # printed only under --full. A second fresh fixture, since the first
+        # run settles its Work document.
+        short_repo, short_run_dir = self._fresh_fixture("proof-card-short")
+        _br.run_loop = self._one_unit_done_loop(short_repo)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            _br.main(["ignored", "--resume", short_run_dir, "--cwd", short_repo])
+        self.assertIn("PROOF CARD:", out.getvalue(), out.getvalue())
+        self.assertNotIn(proof_card.TITLE, out.getvalue(), out.getvalue())
         repo, run_dir = self._fresh_fixture("proof-card")
         _br.run_loop = self._one_unit_done_loop(repo)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            _br.main(["ignored", "--resume", run_dir, "--cwd", repo])
+            _br.main(["ignored", "--resume", run_dir, "--cwd", repo, "--full"])
         printed = out.getvalue()
         self.assertIn(proof_card.TITLE, printed, printed)
         card_txt = os.path.join(run_dir, _br.PROOF_CARD_DIRNAME, _br.PROOF_CARD_TEXT_FILENAME)
@@ -2672,15 +2692,40 @@ class DependencyMutationStampsTheRealFact(unittest.TestCase):
     def test_a_test_that_passes_without_the_guard_is_stamped_exit_0(self):
         doc, claims, test_rev = self._doc_and_claims(TEST_ANY_TYPEERROR)
         stamped = _br._stamp_dependency_mutations(doc, claims, self.repo)
+        # PROOF1.a: the dependency entry is unchanged and the self entry is
+        # new. This unit changed only test_it.py, so there is no non test file
+        # to revert and the self entry is NO-DATA by design, never exit 0.
         self.assertEqual(stamped["test"], [{
             "unit": "guard", "files": ["mathlib.py"], "revision": test_rev,
-            "exit_code": 0, "stderr": "", "note": ""}])
+            "exit_code": 0, "stderr": "", "note": ""},
+            {"unit": "test", "kind": "self", "files": [], "revision": test_rev,
+             "exit_code": None, "stderr": "",
+             "note": "no non test file changed by this unit, so there was "
+                     "nothing to revert and no re-run was made"}])
         with open(doc, encoding="utf-8") as fh:
             rows = {r["id"]: r for r in json.load(fh)["rows"]}
-        self.assertNotIn(_br.CHECK_WITHOUT_FIELD, rows["guard"])
+        # PROOF1.a: guard declares no dependency, and it used to get no field
+        # at all, which is how a one unit task's check was never shown to
+        # exercise anything. It now carries exactly one entry, its own.
+        guard_entries = rows["guard"][_br.CHECK_WITHOUT_FIELD]
+        self.assertEqual(len(guard_entries), 1, guard_entries)
+        self.assertEqual(guard_entries[0]["kind"], "self")
+        self.assertEqual(guard_entries[0]["unit"], "guard")
         receipts = RD.receipts_for({"rows": list(rows.values())}, claims, [])
+        # PROOF1 (D9, 2026-10-29): guard moved from "verified" to "no-data",
+        # and the new value is the truthful one. guard's done_check is
+        # `python3 -c 'import mathlib'` and its change is a TypeError guard
+        # inside mathlib.py, so the self revert re-runs that import with the
+        # guard put back to R0 and it still exits 0: the check cannot tell the
+        # guarded module from the unguarded one. That is exactly the hollow
+        # green PROOF1 exists to refuse, and this fixture used to ratify it.
+        # The STAMP this test is named for is unchanged above; the receipt half
+        # is pinned in scripts/test_receipt_door.py, as the class docstring
+        # already says.
         self.assertEqual([r["state"] for r in receipts],
-                         ["verified", "no-data"])
+                         ["no-data", "no-data"])
+        self.assertIn("the check still passes with this unit's own change",
+                      receipts[0]["reason"])
         self.assertIn("guard's change to mathlib.py reverted",
                       receipts[1]["reason"])
 
@@ -2691,8 +2736,20 @@ class DependencyMutationStampsTheRealFact(unittest.TestCase):
         with open(doc, encoding="utf-8") as fh:
             record = json.load(fh)
         receipts = RD.receipts_for(record, claims, [])
+        # PROOF1 (D9, 2026-10-29): guard moved from "verified" to "no-data",
+        # and the new value is the truthful one. guard's done_check is
+        # `python3 -c 'import mathlib'` and its change is a TypeError guard
+        # inside mathlib.py, so the self revert re-runs that import with the
+        # guard put back to R0 and it still exits 0: the check cannot tell the
+        # guarded module from the unguarded one. That is exactly the hollow
+        # green PROOF1 exists to refuse, and this fixture used to ratify it.
+        # The STAMP this test is named for is unchanged above; the receipt half
+        # is pinned in scripts/test_receipt_door.py, as the class docstring
+        # already says.
         self.assertEqual([r["state"] for r in receipts],
-                         ["verified", "verified"])
+                         ["no-data", "verified"])
+        self.assertIn("the check still passes with this unit's own change",
+                      receipts[0]["reason"])
 
     def test_the_throwaway_worktree_is_gone_and_canonical_is_untouched(self):
         doc, claims, test_rev = self._doc_and_claims(TEST_ANY_TYPEERROR)
@@ -5213,11 +5270,18 @@ class ADependencyStampedWithNoFileIsNeverReRun(unittest.TestCase):
             "guard": {"state": "done", "evidence": {"canonical_rev": "abc"}},
             "test": {"state": "done", "evidence": {"canonical_rev": "def"}}}
         stamped = _br._stamp_dependency_mutations(doc, claims, self.tmp)
+        # PROOF1.a: every DONE row also carries its own self entry now, so
+        # this list is the dependency entry AND the self one. The dependency
+        # entry below is unchanged, character for character.
         self.assertEqual(stamped["test"], [{
             "unit": "guard", "files": [], "revision": "def",
             "exit_code": None, "stderr": "",
             "note": "its dependency guard changed no file, so nothing shows "
-                    "the check exercises it"}])
+                    "the check exercises it"},
+            {"unit": "test", "kind": "self", "files": [], "revision": "def",
+             "exit_code": None, "stderr": "",
+             "note": "no non test file changed by this unit, so there was "
+                     "nothing to revert and no re-run was made"}])
         with open(doc, encoding="utf-8") as fh:
             record = json.load(fh)
         receipts = RD.receipts_for(record, claims, [])

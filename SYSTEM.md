@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 546 |
-| Parts with a purpose written in the file | 543 |
-| Parts with a suite wired into the battery | 475 |
-| Checks in the battery | 1360 |
+| Parts | 551 |
+| Parts with a purpose written in the file | 548 |
+| Parts with a suite wired into the battery | 480 |
+| Checks in the battery | 1402 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -27,7 +27,7 @@ undocumented corners looks complete and is not.
 | Part | What it is for | What proves it |
 |---|---|---|
 | `acc6_restore_evidence` | ACC6.a's read only reader for the enterprise restore | `acc6-restore-evidence-self` |
-| `accept_delivery` | the human decision node the roadmap's H2 hole names. | `accept-delivery-self` |
+| `accept_delivery` | the human decision node the roadmap's H2 hole names. | `accept-delivery-self`, `bundle-runtime-self` |
 | `acceptance` | Acceptance harness for the eleven capability areas (G1-M3.2 of | `acceptance`, `acceptance-self` |
 | `acceptance_1` | Acceptance test for capability area 1: time to first useful action | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
 | `acceptance_10` | Acceptance test for capability area 10: everyday editor conveniences | `acceptance`, `acceptance-self`, `system-doc-current`, `system-doc-self` |
@@ -73,6 +73,7 @@ undocumented corners looks complete and is not.
 | `brief_optimizer_score` | Mechanically score baseline + candidate_a + candidate_b of gen_briefs.py | **NO-DATA**, nothing in the battery runs it |
 | `brother_antigravity_hook` | Brother Antigravity hook adapter: translate Antigravity protojson | `brother-antigravity-hook-self`, `bundle-runtime-self` |
 | `brother_approve_build` | brother-approve build: compile the cut's approval verifier, sign it hardened, install it, and enroll once. | **NO-DATA**, nothing in the battery runs it |
+| `brother_hook` | .py: one process runs every handler of a hook event (HD1.c). | `bundle-runtime-self` |
 | `brother_install` | A2: one tool that takes a Codex home from an unknown state to Brother's | `adapter-conformance-self`, `brother-install-self`, `host-live-proof-self`, `keep-current-self`, `provider-adapter-self` |
 | `brother_pass` | One command a session with NO history can run: read the whole loop's state from disk and name the ONE next action. | `brother-pass-self` |
 | `brother_paths` | C3: the one place Brother resolves its plugin root, its config directory, | `brother-paths-self` |
@@ -182,6 +183,7 @@ undocumented corners looks complete and is not.
 | `donecheck_acc2` | the closing check for ACC2, the parallel fast gate. | `donecheck-acc2-modes` |
 | `donecheck_acc8_retention` | the closing check of ACC8. Reads the current | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_bl` | The done check for unit BL, brother.loop, covering ALL EIGHT sub units. | **NO-DATA**, nothing in the battery runs it |
+| `donecheck_cycles119` | Done check: the REAL 1.1.9 plan's dependency graph has no cycle, so some order can execute it. | `donecheck-cycles119-py39`, `donecheck-cycles119-self` |
 | `donecheck_l2` | L2's done check: EVERY finding in the wiring audit names file:line, and either its real caller or a pasted grep. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_l2b` | L2b's done check: plugin/runtime/brother is wired into the fast gate, and the gate still fits its budget. | **NO-DATA**, nothing in the battery runs it |
 | `donecheck_l5d` | L5d's done check: the gate's real wall clock time, measured on a QUIET machine, with its cause named. | `perf-audit-run-self` |
@@ -252,6 +254,7 @@ undocumented corners looks complete and is not.
 | `generic_skills_adapter` | DOM-50.08, one capability registry decides what | `generic_skills_adapter-self` |
 | `git_location_guard` | .py: name, remove and refuse the git location variables, | `git-location-config`, `git-location-guard-self` |
 | `git_worktree_guard` | Pre-tool-use guard for git worktree safety. | `git-worktree-guard-self` |
+| `go_no_go_119` | The 1.1.9 go / no-go decision, as rows a machine reads. No judgement calls. | `go-no-go-119-decisions`, `go-no-go-119-decisions-py39`, `go-no-go-119-self` |
 | `golden_master_contract` | WBS-40.01 Golden Master Contract: validate a golden-master record against | `golden-master-contract-self` |
 | `golden_master_quality_claims` | WBS-50.04 MDM quality claims. The roadmap's own words (docs/plan, WBS-50.04): | `golden-master-quality-claims-self` |
 | `grade_build` | judge a build before anything it says is allowed to execute. | `grade-build-self`, `spec-gate-conflict`, `spec-precheck-self` |
@@ -424,6 +427,7 @@ undocumented corners looks complete and is not.
 | `perturb_pool` | .py (C0.4a): the release note's perturbation rows, each run in a | `perturb-pool-self` |
 | `plan_briefs` | PG1.e: one brief per sub unit from the writer batch file, dispatched at full width, the report filed by script. | `plan-briefs-py39`, `plan-briefs-self`, `plan-pipeline-py39`, `plan-pipeline-self` |
 | `plan_clock` | PG1.g: the plan pipeline's four bars, read from real timestamps, never from a report. | `plan-clock-py39`, `plan-clock-self` |
+| `plan_gates_can_pass` | Refuse a plan that contains a unit whose gate CANNOT POSSIBLY PASS. | `plan-gates-can-pass-self` |
 | `plan_gen` | PG1.b: one command builds the next release plan from the closing ceremony's seed. | `plan-gen-py39`, `plan-gen-self`, `plan-pipeline-py39`, `plan-pipeline-self` |
 | `plan_lanes` | is a set of owned files LOOP work or HAND work? The 1.1.8 council's split rule (DECISIONS-118 C1), as | `plan-lanes-py39`, `plan-lanes-self` |
 | `plan_pipeline` | PG1.f: the one command from the closing ceremony's seed to a loop that is building. | `plan-pipeline-py39`, `plan-pipeline-self` |
@@ -482,6 +486,7 @@ undocumented corners looks complete and is not.
 | `release_note_perturb` | every file the release note names really goes red. | `release-note-perturb`, `release-note-perturb-self` |
 | `release_notes_stamped` | .py: refuses while any shipped release note still | `release-notes-stamped` |
 | `release_state_tracker` | Release State Tracker (WBS-30.09): TestFlight / release-state evidence. | `release-state-tracker-self` |
+| `release_window_clock_rows` | No gate row may go red on a DATE that falls inside the release window. | `go-no-go-119-decisions`, `go-no-go-119-decisions-py39`, `go-no-go-119-self`, `release-window-clock-rows-self` |
 | `repeat_control` | does a shown lesson actually stop the same failure happening again. | `repeat-control-tests` |
 | `repeat_rate_page` | writes docs/benchmarks/REPEAT-RATE.md, the public page | `repeat-rate-page-self` |
 | `report_complexity_gate_experiment` | Reports the treatment-vs-control agreement rate for one complexity-gate | **NO-DATA**, nothing in the battery runs it |
@@ -623,6 +628,31 @@ undocumented corners looks complete and is not.
 - `new-label-readers`: `python3 -B scripts/test_new_label_readers.py`
 - `unit-runner-screen-rules`: `python3 -B scripts/test_unit_runner_screen_rules.py`
 - `fabrication-scan`: `python3 -B scripts/fabrication_scan.py --selftest`
+- `release-window-clock-rows-self`: `python3 -B scripts/release_window_clock_rows.py --selftest`
+- `go-no-go-119-self`: `python3 -B scripts/go_no_go_119.py --selftest`
+- `go-no-go-119-decisions`: `python3 -B scripts/test_go_no_go_119.py`
+- `go-no-go-119-decisions-py39`: `/usr/bin/python3 -B scripts/test_go_no_go_119.py`
+- `six-verbs-only-self`: `python3 -B scripts/journey/check_six_verbs_only.py --selftest`
+- `vacuous-not-pass-self`: `python3 -B scripts/journey/check_vacuous_not_pass.py --selftest`
+- `consent-gate`: `python3 -B scripts/test_consent_gate.py --selftest`
+- `accept-from-door`: `python3 -B scripts/test_accept_from_door.py`
+- `guards-for-strangers`: `python3 -B scripts/test_guards_for_strangers.py`
+- `notes`: `python3 -B scripts/test_notes.py`
+- `end-card`: `python3 -B scripts/test_end_card.py`
+- `cut-gates-119`: `python3 -B scripts/test_cut_gates_119.py`
+- `cut-resume-119`: `python3 -B scripts/test_cut_resume.py`
+- `cut-driver-ubuntu-gate`: `python3 -B scripts/test_cut_driver_ubuntu_gate.py`
+- `integrate-commit-gate`: `python3 -B scripts/test_integrate_commit_gate.py`
+- `bundle-hooks-derivations`: `python3 -B scripts/test_bundle_hooks_derivations.py`
+- `brother-hook-deadline`: `python3 -B scripts/test_brother_hook_deadline.py`
+- `proof-source-behaviour`: `python3 -B scripts/test_proof_source_behaviour.py`
+- `contract-coverage`: `python3 -B scripts/test_contract_coverage.py --selftest`
+- `accept-route-self`: `python3 -B scripts/journey/check_accept_route.py --selftest`
+- `end-card-self`: `python3 -B scripts/journey/check_end_card.py --selftest`
+- `hook-cost-self`: `python3 -B scripts/journey/check_hook_cost.py --selftest`
+- `one-proof-source-self`: `python3 -B scripts/journey/check_one_proof_source.py --selftest`
+- `plan-gates-can-pass-self`: `python3 -B scripts/plan_gates_can_pass.py --selftest`
+- `readiness-gate-clock-binding`: `python3 -B scripts/test_readiness_gate_clock_binding.py`
 - `preflight-lint`: `python3 -B scripts/loop_preflight_lint.py --max 2`
 - `contract-roundtrip`: `python3 -B scripts/contract_roundtrip.py --selftest`
 - `grade-shortcircuit`: `python3 -B scripts/test_grade_shortcircuit.py`
@@ -1119,6 +1149,22 @@ undocumented corners looks complete and is not.
 - `cut-heartbeat-py39`: `/usr/bin/python3 -B scripts/test_cut_heartbeat.py`
 - `cut-local-rehearsal-self`: `python3 -B scripts/test_cut_local_rehearsal.py`
 - `cut-local-rehearsal-py39`: `/usr/bin/python3 -B scripts/test_cut_local_rehearsal.py`
+- `donecheck-cycles119-self`: `python3 -B scripts/test_donecheck_cycles119.py`
+- `donecheck-cycles119-py39`: `/usr/bin/python3 -B scripts/test_donecheck_cycles119.py`
+- `plan-119-acyclic`: `python3 -B scripts/test_plan_119.py Acyclic`
+- `plan-119-acyclic-py39`: `/usr/bin/python3 -B scripts/test_plan_119.py Acyclic`
+- `plan-119-guards`: `python3 -B scripts/test_plan_119.py Guards`
+- `plan-119-guards-py39`: `/usr/bin/python3 -B scripts/test_plan_119.py Guards`
+- `journey-row-data`: `python3 -B scripts/test_journey_rows.py`
+- `journey-row-data-py39`: `/usr/bin/python3 -B scripts/test_journey_rows.py`
+- `plan-119-landed`: `python3 -B scripts/test_plan_119.py LandedLabels`
+- `plan-119-landed-py39`: `/usr/bin/python3 -B scripts/test_plan_119.py LandedLabels`
+- `journey-harness-self`: `python3 -B scripts/journey/test_run_journey.py`
+- `journey-harness-py39`: `/usr/bin/python3 -B scripts/journey/test_run_journey.py`
+- `journey-walker-selftest`: `python3 -B scripts/journey/run_journey.py --selftest`
+- `inherited-red-self`: `python3 -B scripts/test_inherited_red.py`
+- `inherited-red-py39`: `/usr/bin/python3 -B scripts/test_inherited_red.py`
+- `land-batch-selftest`: `python3 -B scripts/loop/land_batch.py --selftest`
 - `donecheck-114-loop-self`: `python3 -B scripts/test_donecheck_114_loop.py`
 - `donecheck-114-loop-py39`: `/usr/bin/python3 -B scripts/test_donecheck_114_loop.py`
 - `donecheck-114-cut-self`: `python3 -B scripts/test_donecheck_114_cut.py`
@@ -1829,6 +1875,7 @@ undocumented corners looks complete and is not.
 - `capture-l5d-quiet-self`: `python3 scripts/test_capture_l5d_quiet.py`
 - `capture-l4-measurement-self`: `python3 -B scripts/capture_l4_measurement.py --selftest`
 - `commit-scan-fx072-self`: `python3 scripts/loop/test_commit_scan_fx072.py`
+- `commit-scan-range`: `python3 -B scripts/test_commit_scan_range.py`
 - `l5a4-self`: `python3 -B -m unittest plugin.runtime.brother.core.test_l5a4`
 - `l5a5-self`: `python3 -B -m unittest plugin.runtime.brother.core.test_l5a5`
 - `l5a-mutation-probe-self`: `python3 -B scripts/test_l5a_mutation_probe.py`

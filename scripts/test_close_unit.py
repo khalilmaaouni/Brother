@@ -41,6 +41,17 @@ class TheExitCodeDecides(unittest.TestCase):
     def test_the_quote_carries_the_result_lines(self):
         self.assertIn("Ran 29 tests", C.verdict(0, "noise\nRan 29 tests in 0.1s\nOK\nmore noise")[1])
 
+    def test_a_journey_walk_row_is_quoted(self):
+        """A journey walk prints one row per rubric cell, "PASS     C.one-proof-source   V05   PASS: ...",
+        and the closer quoted none of them: PC1H and CARD1 closed on 2026-10-29 with "printed: no result
+        line", a DONE with no quoted output, which this estate calls a claim. The row shape is a verdict
+        word, spaces, the row id."""
+        out = ("installing the candidate\nPASS     C.one-proof-source                 V05   PASS: one renderer\n"
+               "identity candidate=abc installed=abc\n")
+        ok, quoted = C.verdict(0, out)
+        self.assertTrue(ok)
+        self.assertIn("C.one-proof-source", quoted)
+
     def test_a_selftest_result_line_is_quoted(self):
         # 2026-09-24 22:52: H6 closed on land_batch --selftest, which printed "selftest: 66 cases, OK", and its
         # evidence read "printed: no result line"; six board rows carried the same gap.
@@ -400,6 +411,19 @@ class ACloseNeverErasesAConcurrentWriter(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("nothing to close", r.stdout)
 
+    def test_a_done_check_changed_while_it_ran_never_closes_on_the_old_check(self):
+        """Reproduced 2026-10-30: the closer ran old_check.py, the plan's done_check became new_check.py while it ran,
+        and the close callback wrote DONE anyway. THE done_check FIELD IS THE CHECK: a DONE justified by a command the
+        plan no longer names is a claim about a check nobody can re-run from the record."""
+        def retarget(store, p):
+            store.update_units(p, {"A": lambda u: dict(u, done_check="python3 -B new_check.py")})
+        code, out, final = self.race(retarget)
+        self.assertNotEqual(final["state"], "DONE", out)
+        self.assertNotIn("UNIT DONE", final["evidence"])
+        self.assertEqual(final["done_check"], "python3 -B new_check.py")
+        self.assertIn("done_check changed", out)
+        self.assertEqual(code, 1, out)
+
     def test_a_unit_another_closer_closed_meanwhile_is_left_as_it_closed_it(self):
         def other_closer(store, p):
             store.update_units(p, {"A": lambda u: dict(u, state="DONE", evidence=u["evidence"] + " UNIT DONE by the other closer.")})
@@ -407,6 +431,27 @@ class ACloseNeverErasesAConcurrentWriter(unittest.TestCase):
         self.assertEqual(final["evidence"].count("UNIT DONE"), 1, final["evidence"])
         self.assertIn("NOT CLOSED", out)
         self.assertEqual(code, 1, out)
+
+
+class AFrozenHarnessThatDriftedNeverCloses(unittest.TestCase):
+    """Readiness finding c (2026-10-29): the plan's harness_sha256 pins were read by nothing at close, so a
+    frozen harness edited to pass went green silently. The closer now refuses a unit whose pinned harness
+    file no longer has the pinned digest, and a pin naming a missing file refuses too (NO-DATA is not a pass)."""
+
+    def test_a_drifted_pin_refuses_and_an_intact_pin_does_not(self):
+        import hashlib, tempfile
+        with tempfile.TemporaryDirectory(prefix="pin-") as d:
+            path = os.path.join(d, "test_x.py")
+            with open(path, "w") as fh:
+                fh.write("print('x')\n")
+            good = hashlib.sha256(open(path, "rb").read()).hexdigest()
+            self.assertEqual("", C.harness_drift({"id": "U", "harness_sha256": {path: good}}))
+            with open(path, "a") as fh:
+                fh.write("# edited\n")
+            self.assertIn("drift", C.harness_drift({"id": "U", "harness_sha256": {path: good}}))
+            self.assertIn("missing", C.harness_drift({"id": "U", "harness_sha256": {os.path.join(d, "gone.py"): good}}))
+            self.assertEqual("", C.harness_drift({"id": "U"}))
+            self.assertIn("unreadable", C.harness_drift({"id": "U", "harness_sha256": "not a map"}))
 
 
 class ThePlanIsNeverHalfWritten(unittest.TestCase):

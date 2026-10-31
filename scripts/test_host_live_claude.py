@@ -37,6 +37,11 @@ def _line(event, script, hook_id, subtype="hook_response", **extra):
 
 
 REAL = os.path.join(HERE, "fixtures", "hp1-real-2026-10-04")
+#: The plugin root of the candidate that real run was recorded on: its hooks/hooks.json is bundle/hooks/hooks.json at
+#: 27e669a34, the last change before the 2026-10-04 run (4 SessionStart and 3 Stop commands, the per handler shape). The
+#: live bundle wires one dispatcher command per event since HD1.e, so the recording is judged against the hook file it
+#: ran on, never the one that replaced it.
+REAL_ROOT = os.path.join(REAL, "candidate")
 
 
 def _count_sessions(rows, event):
@@ -249,7 +254,7 @@ class TestHostLiveClaude(unittest.TestCase):
     def test_real_2_1_286_stream_is_read_and_agrees_with_its_witness_rows(self):
         stream = self._real("claude-stream.jsonl")
         rows = [json.loads(line) for line in self._real("claude-trace-rows.jsonl").splitlines()]
-        events = hc.parse_hook_events(stream)
+        events = hc.parse_hook_events(stream, REAL_ROOT)
         self.assertEqual(len(events), 12)   # 4 SessionStart hooks x 3 sessions, started and response lines share a hook_id
         self.assertEqual({(e["host_reported"], e["event"], e["command"]) for e in events}, {("ok", "SessionStart", None)})
         by_session = {}
@@ -266,10 +271,10 @@ class TestHostLiveClaude(unittest.TestCase):
     def test_real_stream_with_one_hook_line_lost_is_red(self):
         lines = self._real("claude-stream.jsonl").splitlines(True)
         rows = [json.loads(line) for line in self._real("claude-trace-rows.jsonl").splitlines()]
-        events = hc.parse_hook_events(b"".join(lines[1:]))   # the first hook's started line gone, its response kept
+        events = hc.parse_hook_events(b"".join(lines[1:]), REAL_ROOT)   # the first hook's started line gone, its response kept
         self.assertEqual(len(events), 12)
         cut = [line for line in lines if b'"hook_id": "2b33aee9' not in line]   # every line of one hook gone
-        events = hc.parse_hook_events(b"".join(cut))
+        events = hc.parse_hook_events(b"".join(cut), REAL_ROOT)
         for e in events:
             e["run_id"] = rows[0]["run_id"]
         ok, why = hc.crosscheck(rows, events)
@@ -282,7 +287,7 @@ class TestHostLiveClaude(unittest.TestCase):
         return lines, rows
 
     def _judged(self, lines, rows):
-        events = hc.parse_hook_events(b"".join(lines))
+        events = hc.parse_hook_events(b"".join(lines), REAL_ROOT)
         for e in events:
             e["run_id"] = rows[0]["run_id"]
         return hc.crosscheck(rows, events)
@@ -295,8 +300,10 @@ class TestHostLiveClaude(unittest.TestCase):
 
     def test_shipped_counts_read_the_candidates_hook_file(self):
         counts = hc.shipped_counts(hc.BUNDLE)
-        self.assertEqual((counts["SessionStart"], counts["Stop"]), (4, 3))
+        self.assertEqual((counts["SessionStart"], counts["Stop"]), (1, 1))   # HD1.e: one dispatcher command per event
         self.assertNotIn("PreToolUse", counts)   # a matcher event fires per tool call, never a fixed set
+        counts = hc.shipped_counts(REAL_ROOT)
+        self.assertEqual((counts["SessionStart"], counts["Stop"]), (4, 3))   # the candidate the real run was recorded on
 
     def test_real_stream_with_a_shipped_hook_swapped_for_a_foreign_one_is_red(self):
         lines, rows = self._real_run()

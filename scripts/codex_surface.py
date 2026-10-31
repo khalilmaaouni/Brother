@@ -152,7 +152,7 @@ VERBS = (
      "report. For a delivery, add `--assurance` to the receipt_door.py --verdict command below and report "
      "all five gate lines."
      " Give the loop's morning report from `runtime/loop/loop_report.py --since-hours N` in the report shape (key takeaway, actions, blockers, next steps, facilitators) before any handover pack."
-     " When a done note exists, run `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/jev_door.py\" deliver --note <the note file> --quotes yes|no` (yes when the note quotes a verifying command run after the last edit) and show its one line under the report. It is recorded, never acted on, and never changes whether the work is done."),
+     " When a done note exists, run `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/jev_door.py\" deliver --note <the note file> --quotes yes|no` (yes when the note quotes a verifying command run after the last edit) and show its one line under the report. It is recorded, never acted on, and never changes whether the work is done. Then ASK THE ONE QUESTION and record the answer, because a run nobody answered is not delivered: `python3 \"${BROTHER_PLUGIN_ROOT}/runtime/accept_delivery.py\" --name <the delivery> --ref <what it points at> --accepted-by <the person> --accepted-at <today> --recorded-by person --run-dir <the run directory>` accepts this run's receipt (`${CLAUDE_PLUGIN_ROOT}` under Claude Code), and the same command with `--reject` refuses it. Ask, never answer: an agent records an answer only under a named delegation, and a refusal is written down exactly like an acceptance, so a run that was looked at and turned down never reads like one nobody looked at."),
     ("help",
      "Use when someone asks what Brother does, how to use it, whether the install is healthy, or whether a "
      "newer release exists. Explains in plain language and checks the install; never prints a menu of skills. "
@@ -423,9 +423,9 @@ def render_retired_table(root):
         "",
         "Release 1.1.1 ships one door and six verbs (`brother-start`, `brother-status`, `brother-next`, "
         "`brother-review`, `brother-deliver`, `brother-help`). Every skill name 1.1.0 shipped still works "
-        "for one release: typed as it was under Claude Code (`/brother:<old name>`, a moved command that "
-        "prints the pointer and routes), as an argument to the door (`/brother <old name> <outcome>`), or "
-        "as a word in the request under Codex and Antigravity. The door says one line, `<old name> is now "
+        "for one release, as an argument to the door (`/brother <old name> <outcome>`) or "
+        "as a word in the request under Codex and Antigravity. The per-name commands 1.1.0 shipped "
+        "are gone, so there is nothing to type with a colon. The door says one line, `<old name> is now "
         "/brother <verb>` (on a host without slash commands: `<old name> is now the brother-<verb> skill "
         "(in Claude Code: /brother <verb>)`), then routes as that verb with the words the Now column gives. "
         "A name with one of these prefixes that is not in this table is unknown: the door says so and asks "
@@ -470,8 +470,12 @@ def expected(root):
     files[RETIRED_TABLE] = render_retired_table(root)
     for stem in sorted(REAL_CONTENT_REFERENCES):
         files["%s/%s.md" % (REFERENCES, stem)] = mirror_real(root, stem)
-    for name, verb in RETIRED:
-        files["%s/%s.md" % (COMMANDS, name)] = render_stub(name, verb, root)
+    #: DOOR1.a (owner AC4, 2026-10-23): NO MOVED COMMAND SHIPS. Measured on the 1.1.7 install and
+    #: again before this change: 49 files in bundle/commands, 48 of them Moved stubs, and the
+    #: retired names were typed 0 times in 60 days. RETIRED itself stays, because
+    #: render_retired_table above and the verb skill footers read it, and an old name typed AS AN
+    #: ARGUMENT to the door still routes through that table. render_stub is left in place: its only
+    #: caller was here, and retiring dead code is DEAD1's scope, not this unit's.
     return files
 
 
@@ -557,9 +561,13 @@ def _run(args, root):
             for problem in problems:
                 print("codex_surface: DRIFT: %s" % problem)
             return 1
-        print("codex_surface: bundle carries %d verb skills, %d door references and %d moved commands, "
-              "%d 1.1.0 names routed" % (len(VERBS), 1 + len(REAL_CONTENT_REFERENCES), len(RETIRED),
-                                         len(RETIRED)))
+        #: DOOR1.a: no moved command ships, so the summary counts the ROUTED NAMES rather than
+        #: claiming files that are not there. A summary line that reports 48 moved commands over a
+        #: tree carrying none is a false claim in the generator's own voice.
+        generated_commands = sum(1 for path in expected(root) if path.startswith(COMMANDS + "/"))
+        print("codex_surface: bundle carries %d verb skills, %d door references and %d generated "
+              "command(s), %d 1.1.0 names routed through the table"
+              % (len(VERBS), 1 + len(REAL_CONTENT_REFERENCES), generated_commands, len(RETIRED)))
         return 0
     changed = generate(root)
     print("codex_surface: wrote %d file(s)" % len(changed))

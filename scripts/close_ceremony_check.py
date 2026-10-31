@@ -69,6 +69,78 @@ def _boxed():
         return False
 
 
+#: The repository a pack is a close OF. A pack names the commits it closed
+#: over; this is the tree those shas are resolved against.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_SHA = re.compile(r"\b[0-9a-f]{9,40}\b")
+
+
+def pack_describes_branch(pack, start, repo):
+    """(moved, note): does this pack still describe the branch it closed?
+
+    WHY. Measured three times (2026-10-20, 2026-10-21, 2026-10-25): this row
+    turned every tree red because HOURS had passed, on trees nobody touched,
+    in the middle of a cut. The pack's age is not the property anyone cares
+    about. The property is whether the pack still DESCRIBES the branch: a
+    pack written two days ago over a branch that has not moved since is a
+    correct description, and a pack written an hour ago over a branch that
+    has moved twenty commits since is not.
+
+    `moved` is False only when the newest sha the pack names resolves here
+    and no commit has landed on HEAD since it. Anything this cannot read
+    (no sha, no git, a sha from another repository, a detached or unborn
+    HEAD) returns True, so an unreadable pack keeps the old, stricter
+    age rule rather than earning a pass from a failed measurement.
+
+    Bounded on purpose: one rev-parse per candidate sha and one rev-list
+    --count. This gate once scanned 1.1 GB of history to prove one close
+    (vault, 2026-09-14); nothing here walks history.
+    """
+    import subprocess
+    if not start:
+        return True, "the pack names no START-HERE, so no sha to compare"
+    try:
+        with open(os.path.join(pack, start), encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return True, "START-HERE unreadable (%s)" % exc
+
+    def git(*args):
+        return subprocess.run(["git", "-C", repo] + list(args),
+                              capture_output=True, text=True, timeout=30)
+
+    head = git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        return True, "HEAD does not resolve in %s" % os.path.basename(repo)
+    best = None
+    for raw in dict.fromkeys(_SHA.findall(text)):
+        got = git("rev-parse", "--verify", "--quiet", raw + "^{commit}")
+        if got.returncode != 0 or not got.stdout.strip():
+            continue
+        sha = got.stdout.strip()
+        anc = git("merge-base", "--is-ancestor", sha, "HEAD")
+        if anc.returncode != 0:
+            continue
+        count = git("rev-list", "--count", "%s..HEAD" % sha)
+        if count.returncode != 0:
+            continue
+        try:
+            behind = int(count.stdout.strip())
+        except ValueError:
+            continue
+        if best is None or behind < best[0]:
+            best = (behind, raw)
+    if best is None:
+        return True, "no sha the pack names resolves to an ancestor of HEAD here"
+    behind, raw = best
+    if behind == 0:
+        return False, ("the pack names %s, which is HEAD: the branch has not moved since the "
+                       "pack was written, so the pack still describes it" % raw)
+    return True, ("the pack's newest named commit %s is %d commit(s) behind HEAD, so the pack "
+                  "no longer describes the branch: write a pack for the current tip" % (raw, behind))
+
+
 def newest_pack(root):
     dirs = [os.path.join(root, d) for d in os.listdir(root)
             if os.path.isdir(os.path.join(root, d))]
@@ -120,6 +192,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=ROOT)
     ap.add_argument("--max-age-hours", type=float, default=MAX_AGE_HOURS)
+    ap.add_argument("--repo", default=REPO,
+                    help="the repository the pack's commit shas are resolved against")
+    ap.add_argument("--age-binding", choices=("change", "clock"), default="change",
+                    help="change (default): a pack over the age bar is stale only when the "
+                         "branch has moved since the pack was written. clock: the old rule, "
+                         "where the hours alone decide.")
     ap.add_argument("--terms", default=hps.TERMS_FILE,
                     help="private terms list (default: %s)" % hps.TERMS_FILE)
     ap.add_argument("--no-cache", action="store_true",
@@ -178,9 +256,14 @@ def main(argv=None):
         "should keep it out of the handover root" % os.path.basename(pack))
 
     if is_pack and age_h > args.max_age_hours:
-        problems.append("pack %s is %.1f hours old, over the %.0f hour "
-                        "freshness bar: a stale pack cannot green a new close"
-                        % (os.path.basename(pack), age_h, args.max_age_hours))
+        moved, note = pack_describes_branch(pack, start, args.repo)
+        if args.age_binding == "clock" or moved is not False:
+            problems.append("pack %s is %.1f hours old, over the %.0f hour "
+                            "freshness bar: a stale pack cannot green a new close (%s)"
+                            % (os.path.basename(pack), age_h, args.max_age_hours, note))
+        else:
+            print("pack %s is %.1f hours old, over the %.0f hour bar, and is NOT counted "
+                  "stale: %s" % (os.path.basename(pack), age_h, args.max_age_hours, note))
     if is_pack and start is None:
         problems.append("no 01-START-HERE.md in the pack")
     if is_pack and not has_board:

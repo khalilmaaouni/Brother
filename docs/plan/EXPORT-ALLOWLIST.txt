@@ -91,6 +91,7 @@ docs/releases
 # records under docs/deliveries and the toy run in the README has one
 # there. Both scanned clean of private terms before adding.
 docs/CHARTER.md
+docs/limits.md
 # Added 2026-09-05, required-fast row: docs/CHARTER.md itself names
 # `docs/MERGE-PLAN.md` as the record of the founder's 2026-08-22 decisions,
 # and a fresh public clone had no such file to open. Read in full before

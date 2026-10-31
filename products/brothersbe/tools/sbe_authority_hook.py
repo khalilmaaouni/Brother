@@ -376,9 +376,10 @@ def refusal_reason(target, surface, live_tasks):
     declare this path, or none is open at all), the path, and a recovery
     action that actually works."""
     if live_tasks:
-        names = ", ".join(sorted(str(t.get("id") or "(unnamed task)") for t in live_tasks))
-        task_state = ("%d open task(s) exist (%s) and none declares %s in its ownedPaths"
-                      % (len(live_tasks), names, target))
+        # A count, never the ids: a refusal is read by whoever the agent shows
+        # it to, and a task id names someone else's work.
+        task_state = ("%d open task(s) exist and none declares %s in its ownedPaths"
+                      % (len(live_tasks), target))
     else:
         task_state = "no task is open"
     return (

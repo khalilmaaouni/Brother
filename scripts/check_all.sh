@@ -366,6 +366,35 @@ run_check "grade-build-screen-rules" python3 -B scripts/test_grade_build_screen_
 run_check "new-label-readers" python3 -B scripts/test_new_label_readers.py
 run_check "unit-runner-screen-rules" python3 -B scripts/test_unit_runner_screen_rules.py
 run_check "fabrication-scan" python3 -B scripts/fabrication_scan.py --selftest
+run_check "release-window-clock-rows-self" python3 -B scripts/release_window_clock_rows.py --selftest
+run_check "go-no-go-119-self" python3 -B scripts/go_no_go_119.py --selftest
+run_check "go-no-go-119-decisions" python3 -B scripts/test_go_no_go_119.py
+run_check "go-no-go-119-decisions-py39" /usr/bin/python3 -B scripts/test_go_no_go_119.py
+run_check "six-verbs-only-self" python3 -B scripts/journey/check_six_verbs_only.py --selftest
+run_check "vacuous-not-pass-self" python3 -B scripts/journey/check_vacuous_not_pass.py --selftest
+run_check "consent-gate" python3 -B scripts/test_consent_gate.py --selftest
+# The 1.1.9 frozen harnesses (HARN1: written before the code, red by assertion while their
+# unit is OPEN, green once it closes; scripts/test_plan_119.py holds them to that bar).
+# Registered 2026-10-29 the day they were written, so test_battery_registration never
+# finds a harness no battery runs.
+run_check "accept-from-door"      python3 -B scripts/test_accept_from_door.py
+run_check "guards-for-strangers"  python3 -B scripts/test_guards_for_strangers.py
+run_check "notes"                 python3 -B scripts/test_notes.py
+run_check "end-card"              python3 -B scripts/test_end_card.py
+run_check "cut-gates-119"         python3 -B scripts/test_cut_gates_119.py
+run_check "cut-resume-119"        python3 -B scripts/test_cut_resume.py
+run_check "cut-driver-ubuntu-gate" python3 -B scripts/test_cut_driver_ubuntu_gate.py
+run_check "integrate-commit-gate" python3 -B scripts/test_integrate_commit_gate.py
+run_check "bundle-hooks-derivations" python3 -B scripts/test_bundle_hooks_derivations.py
+run_check "brother-hook-deadline" python3 -B scripts/test_brother_hook_deadline.py
+run_check "proof-source-behaviour" python3 -B scripts/test_proof_source_behaviour.py
+run_check "contract-coverage" python3 -B scripts/test_contract_coverage.py --selftest
+run_check "accept-route-self" python3 -B scripts/journey/check_accept_route.py --selftest
+run_check "end-card-self" python3 -B scripts/journey/check_end_card.py --selftest
+run_check "hook-cost-self" python3 -B scripts/journey/check_hook_cost.py --selftest
+run_check "one-proof-source-self" python3 -B scripts/journey/check_one_proof_source.py --selftest
+run_check "plan-gates-can-pass-self" python3 -B scripts/plan_gates_can_pass.py --selftest
+run_check "readiness-gate-clock-binding" python3 -B scripts/test_readiness_gate_clock_binding.py
 run_check "preflight-lint" python3 -B scripts/loop_preflight_lint.py --max 2
 run_check "contract-roundtrip" python3 -B scripts/contract_roundtrip.py --selftest
 run_check "grade-shortcircuit" python3 -B scripts/test_grade_shortcircuit.py
@@ -1860,6 +1889,32 @@ run_check "cut-heartbeat-self" python3 -B scripts/test_cut_heartbeat.py
 run_check "cut-heartbeat-py39" /usr/bin/python3 -B scripts/test_cut_heartbeat.py
 run_check "cut-local-rehearsal-self" python3 -B scripts/test_cut_local_rehearsal.py
 run_check "cut-local-rehearsal-py39" /usr/bin/python3 -B scripts/test_cut_local_rehearsal.py
+run_check "donecheck-cycles119-self" python3 -B scripts/test_donecheck_cycles119.py
+run_check "donecheck-cycles119-py39" /usr/bin/python3 -B scripts/test_donecheck_cycles119.py
+run_check "plan-119-acyclic" python3 -B scripts/test_plan_119.py Acyclic
+run_check "plan-119-acyclic-py39" /usr/bin/python3 -B scripts/test_plan_119.py Acyclic
+run_check "plan-119-guards" python3 -B scripts/test_plan_119.py Guards
+run_check "plan-119-guards-py39" /usr/bin/python3 -B scripts/test_plan_119.py Guards
+# The journey harness grades every unit's access claim, and until this row nothing graded the
+# harness's OWN row data: a row's measurement could be deleted, pointed at this tree instead of
+# the install, stripped of its refusals or replaced by a program that always exits 0, with every
+# unit done check staying green. Measured: 10 of 10 such mutations caught, 0 survivors.
+run_check "journey-row-data" python3 -B scripts/test_journey_rows.py
+run_check "journey-row-data-py39" /usr/bin/python3 -B scripts/test_journey_rows.py
+run_check "plan-119-landed" python3 -B scripts/test_plan_119.py LandedLabels
+run_check "plan-119-landed-py39" /usr/bin/python3 -B scripts/test_plan_119.py LandedLabels
+# JT0: the journey harness. All five classes are green since JT0.b, JT0.d and JT0.e landed, so the
+# file leaves test_battery_registration.EXEMPT and is run here like any other check.
+run_check "journey-harness-self" python3 -B scripts/journey/test_run_journey.py
+run_check "journey-harness-py39" /usr/bin/python3 -B scripts/journey/test_run_journey.py
+run_check "journey-walker-selftest" python3 -B scripts/journey/run_journey.py --selftest
+# S2.a: the inherited red rule on gate rows. Its five classes are green since S2.a landed, so the
+# harness leaves test_battery_registration.EXEMPT and runs here. land_batch's own selftest joins it
+# because that is where the rule's logic is actually tested: of ten scoped mutations to it, the
+# harness caught none and this selftest caught eight, and nothing was running it.
+run_check "inherited-red-self" python3 -B scripts/test_inherited_red.py
+run_check "inherited-red-py39" /usr/bin/python3 -B scripts/test_inherited_red.py
+run_check "land-batch-selftest" python3 -B scripts/loop/land_batch.py --selftest
 run_check "donecheck-114-loop-self" python3 -B scripts/test_donecheck_114_loop.py
 run_check "donecheck-114-loop-py39" /usr/bin/python3 -B scripts/test_donecheck_114_loop.py
 run_check "donecheck-114-cut-self" python3 -B scripts/test_donecheck_114_cut.py
@@ -2721,6 +2776,9 @@ run_check "grade-build-guard" python3 scripts/test_grade_build_guard.py
 run_check "probe-build-guard" python3 scripts/test_probe_build_guard.py
 run_check "runner-pool-guard" python3 scripts/test_runner_pool_guard.py
 run_check "run-window-guard" python3 scripts/test_run_window_guard.py
+#: SLICE1: the battery runs the GREEN class by name, not the whole file. CommentRuns is SLICE1.a's
+#: done check and is red until that unit lands, and a permanently red row here would refuse every
+#: landing on this branch to express one unfinished unit (the delivery laws, 2026-09-21).
 run_check "slicer-guard" python3 scripts/test_slicer_guard.py
 run_check "install-loop-tools-self" python3 scripts/test_install_loop_tools.py
 run_check "prediction-ledger-fail-direction-self" python3 scripts/test_prediction_ledger_fail_direction.py
@@ -2963,6 +3021,7 @@ run_check "perf-audit-run-self" python3 -B scripts/perf_audit_run.py --selftest
 run_check "capture-l5d-quiet-self" python3 scripts/test_capture_l5d_quiet.py
 run_check "capture-l4-measurement-self" python3 -B scripts/capture_l4_measurement.py --selftest
 run_check "commit-scan-fx072-self" python3 scripts/loop/test_commit_scan_fx072.py
+run_check "commit-scan-range" python3 -B scripts/test_commit_scan_range.py
 run_check "l5a4-self" python3 -B -m unittest plugin.runtime.brother.core.test_l5a4
 run_check "l5a5-self" python3 -B -m unittest plugin.runtime.brother.core.test_l5a5
 # the L5a mutation probe (threshold 10): unmutated green first, red only on the named test's assertion (2026-09-30)

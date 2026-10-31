@@ -119,32 +119,50 @@ def _hook_commands(path):
     return commands
 
 
+def _event_commands(path):
+    """{event: [command, ...]} of one hooks.json; ValueError as _hook_commands raises it."""
+    _hook_commands(path)   # the shape check, one place
+    with open(path, "rb") as fh:
+        events = json.loads(fh.read().decode("utf-8"))["hooks"]
+    return {event: [h["command"] for g in groups for h in g["hooks"]] for event, groups in events.items()}
+
+
 def hooks_row(root):
-    """hooks-guarded: every command of bundle/hooks/hooks.json runs through the guard, and their count equals the
-    count the products register (23 of 23 on 2026-10-06), so a dropped or an unwrapped hook is a FAIL. A products
-    file that cannot be read leaves the expected count unknown, NO-DATA; a bundle file that cannot be read is FAIL."""
+    """hooks-guarded: since HD1.e every event of bundle/hooks/hooks.json has exactly one command, the dispatcher given
+    that event's name, which runs each handler from the dispatch table of bundle/runtime/hooks/HOOKS-MANIFEST.json and
+    asks hook_guard.py per handler; the table holds as many rows as the products register (23 on 2026-10-30) and wires
+    the same events, so a dropped handler, a handler wired past the dispatcher or a second command is a FAIL. A
+    products file that cannot be read leaves the expected count unknown, NO-DATA; a bundle hooks file or manifest that
+    cannot be read is FAIL."""
     bar = "hooks-guarded"
     try:
         import bundle_runtime as B
+        D = B._bh()   # the dispatcher's own names, loaded the way the generator loads them (no second kernel root)
         product_total = 0
         for product in B.HOOK_PRODUCTS:
             product_total += len(_hook_commands(
                 os.path.join(root, "products", product, "hooks", B.PRODUCT_HOOKS_JSON_NAME)))
-        guarded = re.compile(r'^python3 "\$\{CLAUDE_PLUGIN_ROOT\}/runtime/hooks/'
-                             + re.escape(B.HOOK_GUARD_NAME) + r'" ')
         bundle_path = os.path.join(root, "bundle", "hooks", B.HOOKS_JSON_NAME)
+        manifest_path = os.path.join(root, "bundle", "runtime", "hooks", B.HOOKS_MANIFEST_NAME)
     except Exception as exc:
         return _row(bar, NO_DATA, "the product hook count could not be established: %s" % exc)
     if product_total == 0:
         return _row(bar, NO_DATA, "the products register no hook command, so there is nothing to guard")
     try:
-        commands = _hook_commands(bundle_path)
+        events = _event_commands(bundle_path)
     except ValueError as exc:
         return _row(bar, FAIL, "the bundle hooks file is not readable as hooks: %s" % exc)
-    wrapped = [c for c in commands if guarded.match(c)]
-    detail = "%d of %d bundle hook commands run through %s; the products register %d" % (
-        len(wrapped), len(commands), B.HOOK_GUARD_NAME, product_total)
-    if len(wrapped) == len(commands) == product_total:
+    try:
+        with open(manifest_path, "rb") as fh:
+            table = json.loads(fh.read().decode("utf-8"))[D.TABLE_KEY]
+        rows = sum(len(v) for v in table.values())
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return _row(bar, FAIL, "the dispatch table is not readable: %s" % exc)
+    want = lambda event: 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/%s" %s' % (D.DISPATCHER_NAME, event)
+    dispatched = [e for e, cmds in events.items() if cmds == [want(e)]]
+    detail = "%d of %d bundle hook events run one %s command; its table holds %d handlers, the products register %d" % (
+        len(dispatched), len(events), D.DISPATCHER_NAME, rows, product_total)
+    if events and len(dispatched) == len(events) and set(events) == set(table) and rows == product_total:
         return _row(bar, PASS, detail)
     return _row(bar, FAIL, detail)
 

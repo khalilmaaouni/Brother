@@ -5,6 +5,7 @@ here runs a real cut, rehearsal, export, push, tag or gh call.
 
 Python 3.9, standard library only. No network. No em or en dashes.
 """
+import hashlib
 import io
 import json
 import os
@@ -340,15 +341,29 @@ class TheWait(Fixture):
 
 BUMP = "%s: the version bump and the regenerated manifests" % V
 NOTE = "%s: the export manifest that describes the tree and the note it ships" % V
+# RDM1.b: the cut phase reads the Linux half of X01 from the newest virgin-install run log. The candidate's
+# manifest bytes, the run list and a finished log that walked J1 and J2 on exactly that manifest, every row PASS.
+MANIFEST_BYTES = b'{"fixture": "the candidate manifest"}\n'
+MANIFEST_SHA = hashlib.sha256(MANIFEST_BYTES).hexdigest()
+GH_STAMP = "-".join(["2026", "10", "29"]) + "T" + ":".join(["10", "00", "00"]) + ".1Z"     # gh prefixes each line
+UBUNTU_LOG = "".join("prove\tJourney\t%s %s\n" % (GH_STAMP, ln) for j in ("J1", "J2") for ln in (
+    "=== %s ===" % j, "PASS     A.row   atom   ok", "identity candidate=%s installed=%s" % (MANIFEST_SHA, MANIFEST_SHA),
+    "%s exit 0" % j))
 CUT_OK = [("_covering_record", (0, "OK\n")),
           ("scripts/cut.py", (0, "gates...\nDONE: cut %s pushed: a, b\n" % V)),
-          ("ls-remote origin", (0, "%s\trefs/tags/v%s\n" % ("1" * 40, V)))]
+          ("ls-remote origin", (0, "%s\trefs/tags/v%s\n" % ("1" * 40, V))),
+          ("databaseId,status,createdAt", (0, json.dumps([{"databaseId": 7, "status": "completed", "createdAt": "t"}]))),
+          ("run view 7", (0, UBUNTU_LOG))]
 
 
 class TheAdoptAndCutPhases(Fixture):
     def cut_commits(self, *subjects):
         """Commits on top of the candidate, kept reachable by a ref but off main; returns the tip."""
         git(self.root, "checkout", "-q", "--detach")
+        manifest = os.path.join(self.root, "bundle", "runtime")
+        os.makedirs(manifest, exist_ok=True)
+        with open(os.path.join(manifest, "RUNTIME-" + "MANIFEST.json"), "wb") as fh:
+            fh.write(MANIFEST_BYTES)
         for i, subject in enumerate(subjects):
             with open(os.path.join(self.root, "c%d.txt" % i), "w") as fh:
                 fh.write(subject)

@@ -28,6 +28,7 @@ Python 3, standard library only. No network.
 import ast
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -57,10 +58,12 @@ TAIL_CHARS = 2000
 #: Seconds one command may take. Past this the code is 124, the shell's own.
 RUN_TIMEOUT = 180
 
-#: Where the private terms live. Overridable in the environment so a test and a
-#: host can point at their own list; an unreadable file fails CLOSED.
+#: The ONE private list, the same file every other gate on this machine reads.
+#: Kept unexpanded and expanded at call time, so it follows HOME rather than
+#: freezing whatever HOME was at import. Overridable in the environment so a
+#: test and a host can point at their own list; an unreadable file fails CLOSED.
 PRIVATE_NAMES_ENV = "BROTHER_PRIVATE_NAMES"
-PRIVATE_NAMES_DEFAULT = os.path.expanduser("~/.claude/private_names.txt")
+PRIVATE_NAMES_DEFAULT = "~/.brothersbe-private-names"
 
 
 class _Slot(object):
@@ -304,45 +307,56 @@ def apply(root, items, problems, label):
     return applied
 
 
-def _private_terms():
-    """The private terms, or None when the names file cannot be read."""
-    raw_path = os.environ.get(PRIVATE_NAMES_ENV) or PRIVATE_NAMES_DEFAULT
+def _terms_scan():
+    """scripts/private_terms_scan.py, the ONE reader of the private list
+    (load_terms) and the one set of readings a term is looked for in
+    (text_views). Found beside this file, which is where it ships. Its folder
+    is on sys.path for this one import only, so a caller's own copies of
+    shared names keep winning. No scanner means no screen, which private_hits
+    counts as a hit rather than as a clean text.
+    """
+    module = sys.modules.get("private_terms_scan")
+    if module is not None:
+        return module
+    where = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, where)
     try:
-        with open(raw_path, "rb") as handle:
-            raw = handle.read()
-    except OSError:
-        return None
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-    terms = []
-    for line in text.splitlines():
-        term = line.strip()
-        if not term or term.startswith("#"):
-            continue
-        terms.append(term)
-    return terms
+        import private_terms_scan as module
+    finally:
+        sys.path.remove(where)
+    return module
 
 
 def private_hits(text):
     """How many private terms text carries. Fails CLOSED.
 
-    An unreadable names file is an unknown list, so the count is positive and a
-    caller that tests for a positive count blocks. A value that is not a string
-    is a hit too: an unknown text is not a clean text.
+    Every term comes from the one private list, read by
+    private_terms_scan.load_terms: no term is written in this file (PRIV1,
+    2026-10-18, a term written into code is a term the code publishes). A term
+    counts as a WHOLE WORD in any case, in every reading
+    private_terms_scan.text_views gives (escapes decoded, adjacent literals
+    joined), and a term the list stores in CAPITALS also counts wherever it
+    appears in capitals, inside a longer word too: that is the anywhere reach
+    this screen had while it matched a bare substring, kept so that reading the
+    one list weakens nothing.
+
+    An unreadable or empty list, a scanner that cannot be imported, and a text
+    that is not a string each count as a hit: an unknown text is not a clean
+    text, and an unknown list is not an empty one.
     """
     if not isinstance(text, str):
         return 1
-    terms = _private_terms()
-    if terms is None:
+    try:
+        scan = _terms_scan()
+        names = scan.load_terms(os.path.expanduser(
+            os.environ.get(PRIVATE_NAMES_ENV) or PRIVATE_NAMES_DEFAULT))
+    except Exception:   # ImportError, OSError, a list that is not UTF-8: an unknown list blocks
         return 1
-    lowered = text.lower()
-    hits = 0
-    for term in terms:
-        if term.lower() in lowered:
-            hits += 1
-    return hits
+    if not names:
+        return 1
+    return max(sum(len(re.findall(r"(?<![a-z])" + re.escape(n.lower()) + r"(?![a-z])", view.lower()))
+                   + (view.count(n) if n.isupper() else 0) for n in names)
+               for view in scan.text_views(text))
 
 
 def _words(text):

@@ -9,18 +9,20 @@ contained under tempfile.mkdtemp(), and nothing here touches this
 repository's own store, the founder's home, or the real vault.
 
 WHAT THIS SUITE IS ACTUALLY DEFENDING (docs/STATUS-LINE.md, the design's
-2026-08-05 "answer 7"):
+2026-08-05 "answer 7", as changed by PC1H.b):
 
-  1. The happy path prints ONE plain language line, built from the same
-     fields the founder's own status view uses, and nothing else.
-  2. FAIL SILENT IS ABSOLUTE. Every way this script can fail (no
-     BrotherMode project here, no store yet, setup not consented, a
-     malformed or empty stdin payload, ambiguous or missing projects, a
-     corrupt store, an exception raised deep inside the real collector)
-     prints NOTHING and exits 0. Nothing here is allowed to leak a
-     traceback into a founder's terminal.
-  3. The script writes NOTHING, ever: running it against a real project
-     leaves the project folder byte for byte as it found it.
+  1. The happy path prints ONE plain language line: the newest finished run
+     from the run index (~/.brother/runs-index.jsonl), dated, in the
+     engine's own result words, and nothing else. No index prints the
+     NO-DATA line; a torn last line is skipped.
+  2. The store is never loaded: the source never names it and a real run
+     opens no store file and no sibling tool.
+  3. FAIL SILENT stays absolute for every path that still exists: setup not
+     consented, a malformed or empty stdin payload, a proof_card.py that
+     cannot be loaded, an exception inside the index reader. Each prints
+     NOTHING and exits 0. Nothing here may leak a traceback into a
+     founder's terminal.
+  3b. The script writes NOTHING, ever.
   4. The footerLinksRegexes pattern this project tells a founder to paste
      into his own settings actually matches the trace tag shape
      tools/bm_lead.py really prints, and does not fire on ordinary prose.
@@ -82,7 +84,6 @@ def _load_optional(name):
 
 
 bst = _load_optional("bm_statusline")
-bs = _load_optional("bm_store")
 bl = _load_optional("bm_lead")
 
 
@@ -100,11 +101,6 @@ def _write_consented_config(path, vault):
                    "privacy_notice_version": "2026-08-01",
                    "installation_mode": "clone",
                    "security_mode": "standard"}, fh)
-
-
-def _actor(name="coordinator"):
-    return {"actor_type": "model", "actor_name": name,
-            "session_id": "sess-statusline"}
 
 
 def _insight(**kw):
@@ -136,78 +132,38 @@ def _key_decision(**kw):
 
 
 # ---------------------------------------------------------------------------
-# 1. one_line() as a pure function: no store, no stdin, just the shape
-#    collect_status hands it.
+# 1. A throwaway HOME with a consented config and, per test, a run index.
 # ---------------------------------------------------------------------------
 
-class TestOneLinePureFunction(unittest.TestCase):
+RESULT = ("BROTHER RESULT: DONE | units=3 PASS=3 FAIL=0 NO-DATA=0 | "
+          "release=NOT_REQUESTED | next=review-receipt")
+RESULT_LINE = ("DONE | units=3 PASS=3 FAIL=0 NO-DATA=0 | "
+               "release=NOT_REQUESTED | next=review-receipt")
 
-    def setUp(self):
-        self.assertIsNotNone(
-            bst, "tools/bm_statusline.py does not exist yet, so nothing in "
-                "this file can run.")
-
-    def test_progress_and_a_waiting_decision(self):
-        fields = [("Goal", "ship it", []),
-                  ("Progress", "2 of 5 tasks accepted", []),
-                  ("Decision needed", "the payment approach", [])]
-        self.assertEqual(bst.one_line(fields),
-                         "2 of 5 tasks accepted, decision waiting")
-
-    def test_progress_and_no_decision(self):
-        fields = [("Progress", "3 of 3 tasks accepted", []),
-                  ("Decision needed", "none", [])]
-        self.assertEqual(bst.one_line(fields),
-                         "3 of 3 tasks accepted, no decision waiting")
-
-    def test_decision_needed_absent_from_the_fields_reads_as_none(self):
-        fields = [("Progress", "nothing planned yet", [])]
-        self.assertEqual(bst.one_line(fields),
-                         "nothing planned yet, no decision waiting")
-
-    def test_no_progress_at_all_prints_nothing(self):
-        fields = [("Decision needed", "the payment approach", [])]
-        self.assertIsNone(bst.one_line(fields))
-
-    def test_blank_progress_prints_nothing(self):
-        fields = [("Progress", "   ", []), ("Decision needed", "none", [])]
-        self.assertIsNone(bst.one_line(fields))
-
-
-# ---------------------------------------------------------------------------
-# 2. A real throwaway project, a real store, main() driven end to end.
-# ---------------------------------------------------------------------------
 
 class StatuslineCase(unittest.TestCase):
-    """A throwaway project root, a consented config, and (per test, on
-    request) a real store. Nothing here is created eagerly: a test that
-    wants "no store exists yet" must be able to ask for exactly that, so
+    """A throwaway HOME, a consented config, and (per test, on request) a
+    run index at <HOME>/.brother/runs-index.jsonl. Nothing is created
+    eagerly: a test that wants "no index yet" asks for exactly that, so
     setUp only prepares the folders and the environment."""
 
-    ENV_KEYS = ("BROTHERME_CONFIG", "BROTHERMODE_ROOT", "BROTHERMODE_VIEW",
-                "BROTHERMODE_VAULT", "BROTHERMODE_NO_BELL", "HOME")
+    ENV_KEYS = ("BROTHERME_CONFIG", "HOME")
 
     def setUp(self):
         self.assertIsNotNone(
             bst, "tools/bm_statusline.py does not exist yet, so nothing in "
                 "this file can run.")
         self.tmp = tempfile.mkdtemp(prefix="bm-statusline-")
-        self.root = os.path.join(self.tmp, "project")
         self.home = os.path.join(self.tmp, "home")
-        os.makedirs(self.root)
+        self.project = os.path.join(self.tmp, "project")
         os.makedirs(self.home)
-        self.vault = os.path.join(self.home, "Vault")
+        os.makedirs(self.project)
         self.config = os.path.join(self.tmp, "cfg", "config.json")
-        _write_consented_config(self.config, self.vault)
+        _write_consented_config(self.config, os.path.join(self.home, "Vault"))
         self._env_backup = {k: os.environ.get(k) for k in self.ENV_KEYS}
         os.environ["BROTHERME_CONFIG"] = self.config
-        os.environ["BROTHERMODE_ROOT"] = self.root
-        os.environ.pop("BROTHERMODE_VIEW", None)
-        os.environ.pop("BROTHERMODE_NO_BELL", None)
-        os.environ["BROTHERMODE_VAULT"] = self.vault
         os.environ["HOME"] = self.home
         self._cwd_backup = os.getcwd()
-        self.actor = _actor()
 
     def tearDown(self):
         os.chdir(self._cwd_backup)
@@ -224,38 +180,27 @@ class StatuslineCase(unittest.TestCase):
         os.environ["BROTHERME_CONFIG"] = os.path.join(self.tmp,
                                                       "missing.json")
 
-    # -- seeding, against a real writable Store -------------------------
+    def index_path(self):
+        return os.path.join(self.home, ".brother", "runs-index.jsonl")
 
-    def make_store(self, root=None):
-        return bs.Store(root or self.root)
+    def add_row(self, when, run_dir=None, result=RESULT):
+        """Append one index row the way proof_card.update_index writes it:
+        a leading newline, one JSON object, a trailing newline."""
+        os.makedirs(os.path.dirname(self.index_path()), exist_ok=True)
+        row = {"run_dir": run_dir or self.project, "result": result,
+               "time": when}
+        with io.open(self.index_path(), "ab") as fh:
+            fh.write(("\n" + json.dumps(row) + "\n").encode("utf-8"))
 
-    def seed(self, store, pid="p1", goal="a booking page my customers "
-                                          "can use"):
-        stamp = bs.now_iso()
-        store.upsert_project(
-            {"project_id": pid, "name": "widget", "goal": goal,
-             "created_at": stamp, "updated_at": stamp}, self.actor)
-        return pid
-
-    def make_task(self, store, task_id, pid="p1", **kw):
-        row = {"task_id": task_id, "project_id": pid,
-              "title": "wire the form", "status": "ready"}
-        row.update(kw)
-        store.create_task(row, self.actor)
-        return row
-
-    def record_decision(self, store, pid="p1", **kw):
-        return store.record_insight(pid, _key_decision(**kw), self.actor)
-
-    # -- driving main() in process ----------------------------------------
+    def add_torn_tail(self):
+        with io.open(self.index_path(), "ab") as fh:
+            fh.write(b'{"run_dir": "/x", "res')
 
     def run_main(self, payload_text):
         """Feed `payload_text` (a str, or None for a closed empty stdin) to
-        bst.main() and return (stdout_text, exit_code). Reloads
-        tools/bm_statusline.py fresh for every call, the same reason
-        tools/bm_hookbench.py purges sys.modules between repetitions: this
-        script's own _load calls are not cached anywhere, so a fresh
-        module object is the honest way to prove each run starts cold."""
+        a freshly loaded bm_statusline.main() and return (stdout_text,
+        exit_code). A fresh module object per call is the honest way to
+        prove each run starts cold."""
         mod = _load("bm_statusline")
         real_stdin = sys.stdin
         sys.stdin = io.StringIO(payload_text or "")
@@ -269,58 +214,100 @@ class StatuslineCase(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. The happy path.
+# 2. The happy path: the line is the newest index row, nothing else.
 # ---------------------------------------------------------------------------
 
-class TestHappyPathEndToEnd(StatuslineCase):
+class TestTheLineIsTheNewestRunIndexRow(StatuslineCase):
 
-    def test_progress_and_no_decision(self):
-        store = self.make_store()
-        try:
-            pid = self.seed(store)
-            self.make_task(store, "t1", pid, status="accepted")
-            self.make_task(store, "t2", pid, status="accepted")
-            self.make_task(store, "t3", pid, status="ready")
-        finally:
-            store.close()
-        out, code = self.run_main(json.dumps({"cwd": self.root}))
+    def test_the_newest_row_prints_as_a_dated_result_line(self):
+        self.add_row(100, run_dir=os.path.join(self.tmp, "gone"))
+        self.add_row(200)
+        out, code = self.run_main(json.dumps({"cwd": self.project}))
         self.assertEqual(code, 0)
-        self.assertEqual(out, "2 of 3 tasks accepted, no decision waiting\n")
+        self.assertEqual(out, "1970-01-01 %s\n" % RESULT_LINE)
 
-    def test_a_key_decision_flips_the_line_to_decision_waiting(self):
-        store = self.make_store()
-        try:
-            pid = self.seed(store)
-            self.make_task(store, "t1", pid, status="accepted")
-            self.record_decision(store, pid)
-        finally:
-            store.close()
-        out, code = self.run_main(json.dumps({"cwd": self.root}))
-        self.assertEqual(code, 0)
-        self.assertTrue(out.endswith("decision waiting\n"), repr(out))
-        self.assertNotIn("none", out)
+    def test_a_row_for_a_deleted_run_folder_is_marked_missing(self):
+        self.add_row(200, run_dir=os.path.join(self.tmp, "gone"))
+        out, _code = self.run_main("{}")
+        self.assertEqual(
+            out, "1970-01-01 %s (run folder missing)\n" % RESULT_LINE)
 
-    def test_the_workspace_current_dir_shape_also_works(self):
-        """docs/STATUS-LINE.md tells the founder to paste his own settings
-        block; the real payload Claude Code sends carries `cwd` at the top
-        level (verified against the statusline contract), which is the
-        only field this script reads to find the project. This just proves
-        a plain `cwd` payload, the documented minimum, is enough."""
-        store = self.make_store()
-        try:
-            pid = self.seed(store)
-            self.make_task(store, "t1", pid, status="accepted")
-        finally:
-            store.close()
-        out, code = self.run_main(json.dumps({
-            "cwd": self.root, "session_id": "abc", "model": {"id": "x"}}))
+    def test_the_payload_folder_does_not_matter(self):
+        """The index is per user, not per project: a payload naming a
+        folder with no project in it prints the same line."""
+        self.add_row(200)
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        os.makedirs(elsewhere)
+        out, _code = self.run_main(json.dumps({"cwd": elsewhere,
+                                               "session_id": "abc"}))
+        self.assertEqual(out, "1970-01-01 %s\n" % RESULT_LINE)
+
+    def test_a_torn_last_line_is_skipped_and_the_line_still_prints(self):
+        self.add_row(200)
+        self.add_torn_tail()
+        out, code = self.run_main("{}")
         self.assertEqual(code, 0)
-        self.assertEqual(out, "1 of 1 tasks accepted, no decision waiting\n")
+        self.assertEqual(out, "1970-01-01 %s\n" % RESULT_LINE)
+
+
+class TestNoIndexIsNoData(StatuslineCase):
+
+    def test_an_absent_index_prints_the_no_data_line_and_exits_zero(self):
+        out, code = self.run_main("{}")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "NO-DATA: no run recorded yet\n")
+
+    def test_an_index_that_is_only_a_torn_line_is_no_data_too(self):
+        os.makedirs(os.path.dirname(self.index_path()))
+        self.add_torn_tail()
+        out, _code = self.run_main("{}")
+        self.assertEqual(out, "NO-DATA: no run recorded yet\n")
 
 
 # ---------------------------------------------------------------------------
-# 4. Fail silent, every path. Every case here asserts the exact same two
-#    things: empty stdout, exit code 0.
+# 3. The store is never loaded.
+# ---------------------------------------------------------------------------
+
+class TestTheStoreIsNeverLoaded(StatuslineCase):
+
+    def test_the_source_never_names_the_store(self):
+        self.assertNotIn("bm_store", _read(STATUSLINE_FILE))
+
+    def test_a_run_opens_no_store_file_and_no_sibling_tool(self):
+        """A Python audit hook (a subprocess, so the hook cannot leak into
+        this test process) records every file one real run opens: none is
+        bm_store.py, bm_lead.py or a store.sqlite3."""
+        self.add_row(200)
+        code = (
+            "import sys, runpy\n"
+            "opened = []\n"
+            "def hook(name, args):\n"
+            "    if name == 'open':\n"
+            "        opened.append(str(args[0]))\n"
+            "sys.addaudithook(hook)\n"
+            "try:\n"
+            "    runpy.run_path(%r, run_name='__main__')\n"
+            "except SystemExit:\n"
+            "    pass\n"
+            "sys.stderr.write('OPENED ' + repr(opened))\n" % STATUSLINE_FILE)
+        import ast
+        import subprocess
+        out = subprocess.run(
+            [sys.executable, "-B", "-c", code], input="{}", text=True,
+            capture_output=True, cwd=self.project,
+            env=dict(os.environ, HOME=self.home,
+                     BROTHERME_CONFIG=self.config))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        opened = ast.literal_eval(out.stderr.split("OPENED ", 1)[1])
+        for path in opened:
+            for forbidden in ("bm_store", "bm_lead", "store.sqlite3"):
+                self.assertNotIn(forbidden, path)
+        self.assertIn(self.index_path(), opened)
+
+
+# ---------------------------------------------------------------------------
+# 4. Fail silent, every path that still holds. Every case here asserts the
+#    exact same two things: empty stdout, exit code 0.
 # ---------------------------------------------------------------------------
 
 class TestFailSilentPaths(StatuslineCase):
@@ -330,101 +317,68 @@ class TestFailSilentPaths(StatuslineCase):
         self.assertEqual(out, "")
         self.assertEqual(code, 0)
 
-    def test_no_store_at_all(self):
-        """The env root exists (BROTHERMODE_ROOT resolves it), but
-        bs.Store was never constructed, so there is no store.sqlite3 on
-        disk: ReadOnlyStore refuses 'no-store'."""
-        self._assert_silent(json.dumps({"cwd": self.root}))
-
-    def test_consent_missing_even_with_a_real_store(self):
-        store = self.make_store()
-        try:
-            self.seed(store)
-        finally:
-            store.close()
+    def test_consent_missing_even_with_an_index(self):
+        self.add_row(200)
         self.unconsent()
-        self._assert_silent(json.dumps({"cwd": self.root}))
+        self._assert_silent(json.dumps({"cwd": self.project}))
 
     def test_malformed_json_on_stdin(self):
+        self.add_row(200)
         self._assert_silent("{not json at all")
 
     def test_empty_stdin(self):
+        self.add_row(200)
         self._assert_silent("")
         self._assert_silent(None)
 
     def test_stdin_json_that_is_not_an_object(self):
-        self._assert_silent(json.dumps(["cwd", self.root]))
+        self.add_row(200)
+        self._assert_silent(json.dumps(["cwd", self.project]))
         self._assert_silent(json.dumps(42))
         self._assert_silent(json.dumps(None))
 
-    def test_missing_fields_falls_back_to_cwd_and_still_stays_silent(self):
-        """A payload with none of the fields this script reads: it falls
-        back to os.getcwd(), which here is a folder holding no
-        BrotherMode project at all."""
-        empty_dir = os.path.join(self.tmp, "elsewhere")
-        os.makedirs(empty_dir)
-        os.chdir(empty_dir)
-        os.environ.pop("BROTHERMODE_ROOT", None)
-        self._assert_silent(json.dumps({}))
-
-    def test_two_projects_is_ambiguous_and_silent(self):
-        store = self.make_store()
-        try:
-            self.seed(store, pid="p1")
-            self.seed(store, pid="p2")
-        finally:
-            store.close()
-        self._assert_silent(json.dumps({"cwd": self.root}))
-
-    def test_zero_projects_is_silent(self):
-        self.make_store().close()
-        self._assert_silent(json.dumps({"cwd": self.root}))
-
-    def test_a_corrupt_store_file_is_silent(self):
-        store = self.make_store()
-        try:
-            self.seed(store)
-        finally:
-            store.close()
-        store_path = bs.store_path(self.root)
-        with io.open(store_path, "wb") as fh:
-            fh.write(b"not a sqlite database")
-        self._assert_silent(json.dumps({"cwd": self.root}))
-
-    def test_an_exception_raised_deep_inside_the_real_collector_is_silent(self):
-        """Exception injection through the REAL call path: a real store, a
-        real project, a real bs.ReadOnlyStore open, and then
-        bl.collect_status itself raises. Proves main()'s one broad guard
-        catches a failure that has nothing to do with consent, the store,
-        or the payload, not only the refusal-shaped ones exercised above."""
-        store = self.make_store()
-        try:
-            self.seed(store)
-        finally:
-            store.close()
-
-        real_bl = _load("bm_lead")
-
-        def _boom(_store, _project_id):
-            raise RuntimeError("injected failure for the fail silent test")
-
-        real_bl.collect_status = _boom
-
-        def _patched_load(name):
-            if name == "bm_lead":
-                return real_bl
-            return _load(name)
-
+    def test_an_unloadable_proof_card_is_silent(self):
+        """The index reader lives in scripts/proof_card.py; a copy of this
+        tool with none beside it prints nothing rather than a traceback."""
+        self.add_row(200)
         mod = _load("bm_statusline")
-        with mock.patch.object(mod, "_load", side_effect=_patched_load):
-            real_stdin = sys.stdin
-            sys.stdin = io.StringIO(json.dumps({"cwd": self.root}))
-            out = io.StringIO()
-            try:
+        real_stdin = sys.stdin
+        sys.stdin = io.StringIO("{}")
+        out = io.StringIO()
+        try:
+            with mock.patch.object(mod, "_load_proof_card",
+                                   return_value=None):
                 with contextlib.redirect_stdout(out):
                     code = mod.main()
-            finally:
-                sys.stdin = real_stdin
+        finally:
+            sys.stdin = real_stdin
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(code, 0)
+
+    def test_an_exception_raised_inside_the_index_reader_is_silent(self):
+        """Exception injection through the REAL call path: the real
+        proof_card loads, and its read_index itself raises. main()'s one
+        broad guard catches a failure that has nothing to do with consent
+        or the payload."""
+        self.add_row(200)
+        mod = _load("bm_statusline")
+        card = mod._load_proof_card()
+        self.assertIsNotNone(card)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("injected failure for the fail silent test")
+
+        real_stdin = sys.stdin
+        sys.stdin = io.StringIO("{}")
+        out = io.StringIO()
+        try:
+            with mock.patch.object(card, "read_index", _boom), \
+                    mock.patch.object(mod, "_load_proof_card",
+                                      return_value=card):
+                with contextlib.redirect_stdout(out):
+                    code = mod.main()
+        finally:
+            sys.stdin = real_stdin
         self.assertEqual(out.getvalue(), "")
         self.assertEqual(code, 0)
 
@@ -443,24 +397,18 @@ class TestNeverWritesAFile(StatuslineCase):
                 found.append((os.path.relpath(p, root), os.path.getsize(p)))
         return sorted(found)
 
-    def test_running_main_leaves_the_project_folder_byte_for_byte(self):
-        store = self.make_store()
-        try:
-            pid = self.seed(store)
-            self.make_task(store, "t1", pid, status="accepted")
-            self.record_decision(store, pid)
-        finally:
-            store.close()
-        before = self._snapshot(self.root)
-        out, code = self.run_main(json.dumps({"cwd": self.root}))
+    def test_running_main_leaves_home_and_project_byte_for_byte(self):
+        self.add_row(200)
+        self.add_torn_tail()
+        before = self._snapshot(self.tmp)
+        out, code = self.run_main(json.dumps({"cwd": self.project}))
         self.assertEqual(code, 0)
         self.assertTrue(out)
-        after = self._snapshot(self.root)
-        self.assertEqual(before, after,
-                         "bm_statusline.py changed a file under the "
-                         "project root; it must only ever read")
+        self.assertEqual(before, self._snapshot(self.tmp),
+                         "bm_statusline.py changed a file; it must only "
+                         "ever read")
         self.assertFalse(
-            os.path.isfile(os.path.join(self.root, "PROJECT-VIEW.html")),
+            os.path.isfile(os.path.join(self.project, "PROJECT-VIEW.html")),
             "bm_statusline.py must never trigger bm-view render's write "
             "path")
 

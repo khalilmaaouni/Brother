@@ -33,7 +33,13 @@ import time
 
 SOFT_GAP = 2000000
 REASON_PREFIX = "loop budget grant, owner words: "
-BLOCK_KEYS = ("session_hard", "session_soft", "daily_hard", "daily_soft", "until", "reason")
+#: THE DEPLOYED READER'S OWN KEYS (R1, reproduced 2026-10-30): the guard that enforces a grant is
+#: ~/.claude/hooks/spend_guard.py and it reads LIMIT_KEYS = soft_out, hard_out, daily_soft_out,
+#: daily_hard_out. This file wrote session_hard, session_soft, daily_hard, daily_soft, so a 20M grant
+#: "applied" by this tool loaded as the 600,000 default in the real worker: a grant that reads applied
+#: and is not. test_loop_budget_grant.py compares these names with the deployed reader's when it is on
+#: this machine, and with this pin always.
+BLOCK_KEYS = ("hard_out", "soft_out", "daily_hard_out", "daily_soft_out", "until", "reason")
 _DIGITS = re.compile(r"^[0-9]+$")
 
 
@@ -82,8 +88,8 @@ def grant_block(words, tokens, until, spent, now):
         raise GrantRefused("until is not after now: %r" % until)
     hard = spent + tokens
     soft = max(spent, hard - SOFT_GAP)
-    return {"session_hard": hard, "session_soft": soft,
-            "daily_hard": hard, "daily_soft": soft,
+    return {"hard_out": hard, "soft_out": soft,
+            "daily_hard_out": hard, "daily_soft_out": soft,
             "until": until, "reason": REASON_PREFIX + words}
 
 

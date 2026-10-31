@@ -1171,6 +1171,9 @@ def emit_row(name, argv, key, home, verdict, seconds, text):
     why = CR.validate_row(row)
     if why:
         raise ValueError(why)
+    # CUT1.b: the row carries the one evidence key, so a later reader under another interpreter or environment
+    # runs it again instead of reusing it
+    row[CR.ROW_INPUTS_FIELD] = CR.row_inputs_key(key)
     directory = CR.evidence_dir()
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "row-%s-%s-%s-%d.log"
@@ -2092,9 +2095,165 @@ def _remote_tag_exists(tag, remote=None, root=None, runner=None,
                     % (tag, "does" if exists else "does not", remote))
 
 
+PUBLISH_SCHEMA = "cut1.publish.1"
+TAG_NAME_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]{0,99}")
+
+
+def _publish_record(path):
+    """(record or None, '') or (None, reason) for an unreadable one."""
+    if not os.path.exists(path):
+        return None, ""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "the publish record %s is unreadable (%s)" % (path, exc)
+    if not isinstance(data, dict) or data.get("schema") != PUBLISH_SCHEMA \
+            or data.get("state") not in ("intent", "pushed"):
+        return None, "the publish record %s is not a %s record" % (
+            path, PUBLISH_SCHEMA)
+    return data, ""
+
+
+def _tagging_commit(text, tag):
+    """The 40 hex commit of exactly one `TAGGING <commit> <tag>` line the
+    exporter printed before its tag push, else None."""
+    found = re.findall(r"^TAGGING ([0-9a-f]{40}) %s$" % re.escape(tag),
+                       text or "", re.M)
+    return found[0] if len(found) == 1 else None
+
+
+def _write_publish(path, tag, state, commit="", note=""):
+    """Atomic; '' or the reason it could not be written, naming the record.
+    `commit` is the commit this run made the tag at, '' while unknown."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = "%s.tmp-%d" % (path, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"schema": PUBLISH_SCHEMA, "tag": tag, "state": state,
+                       "commit": commit or "", "note": note,
+                       "at": time.time()}, fh, sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except OSError as exc:
+        return "the publish record %s could not be written (%s)" % (path, exc)
+    return ""
+
+
+def _remote_commit(ls_remote, tag):
+    """(peeled commit or None, '') from ls_remote(tag), None meaning no tag
+    there; ('', reason) when the remote cannot be read (ls_remote raised) or
+    answers anything but None or 40 hex."""
+    try:
+        got = ls_remote(tag)
+    except Exception as exc:  # noqa: BLE001 - an unreadable remote is unknown
+        return "", "the remote cannot be read (%s: %s)" % (
+            type(exc).__name__, str(exc)[:160])
+    if got is None or (isinstance(got, str) and CR.SHA_RE.fullmatch(got)):
+        return got, ""
+    return "", "the remote read answered %r, not a commit or nothing" % (got,)
+
+
+def _ask(reader):
+    """The 40 hex commit a reader answers now, else None (never raises)."""
+    try:
+        got = reader()
+    except Exception:  # noqa: BLE001 - an unknown commit never reconciles
+        return None
+    return got if isinstance(got, str) and CR.SHA_RE.fullmatch(got) else None
+
+
+def publish_tag(tag, commit, push, ls_remote, state_dir):
+    """CUT1.e: (PUSHED | REUSED | FAIL, detail) for publishing `tag` at
+    `commit`, one recorded transaction under `state_dir`. ls_remote(tag)
+    answers the peeled commit the remote's tag points at, or None.
+
+    `commit` is 40 hex, or a reader (a callable) for a run that learns its
+    commit during the push (the exporter names it just before its tag push);
+    the reader is asked whenever the commit is needed and the commit it gives
+    is RECORDED, so a restart of the same run reuses its own tag.
+
+    Before the push the remote is read. A tag of this name there is this
+    run's only at the commit this state folder recorded for it (and, when the
+    run can claim a commit now, only when the claim is that commit): then
+    REUSED, no push. Any other tag of the name is FOREIGN and FAILS closed,
+    nothing pushed, never adopted by name or by a claim alone. Otherwise the intent is recorded and push(tag,
+    commit) runs. After a failed push (an exception or any answer but the int
+    0) the remote is read again and the result reads PUSHED (reconciled, never
+    pushed a second time) ONLY when the remote's tag points at this run's
+    commit; nothing there, or a remote that cannot be read, FAILS closed with
+    no retry. A pushed state that cannot be written answers FAIL naming the
+    record, never PUSHED or REUSED over a record saying otherwise, and never
+    pushes again. An unreadable record is FAIL."""
+    if not isinstance(tag, str) or not TAG_NAME_RE.fullmatch(tag) \
+            or not (callable(commit) or (
+                isinstance(commit, str) and CR.SHA_RE.fullmatch(commit))) \
+            or not isinstance(state_dir, str) or not state_dir \
+            or not callable(push) or not callable(ls_remote):
+        return "FAIL", ("publish_tag needs a tag name, a 40 hex commit (or "
+                        "its reader), a state folder and two callables; "
+                        "nothing pushed")
+    path = os.path.join(state_dir, "publish-%s.json" % tag)
+    record, why = _publish_record(path)
+    if why:
+        return "FAIL", why + "; nothing pushed until it is read"
+    reader = commit if callable(commit) else (lambda: commit)
+    there, why = _remote_commit(ls_remote, tag)
+    if why:
+        return "FAIL", why + "; nothing pushed"
+    if there:
+        # a tag there is this run's only by this state folder's record of the
+        # commit it pushed; a claim alone never adopts a tag, and a claim that
+        # differs from the record is another commit's
+        claim = _ask(reader)
+        mine = (record or {}).get("commit") or ""
+        if not mine or there != mine or (claim is not None and claim != mine):
+            return "FAIL", ("%s is foreign: the remote's tag points at %s, not "
+                            "this run's commit %s; it is never moved or "
+                            "adopted, nothing pushed"
+                            % (tag, there[:12], (mine or "unknown")[:12]))
+        if record is None or record["state"] != "pushed" \
+                or record.get("commit") != there:
+            why = _write_publish(path, tag, "pushed", there, "already there")
+            if why:
+                return "FAIL", why + "; the tag is not recorded as this run's"
+        return "REUSED", ("%s is on the remote at this run's commit %s: not "
+                          "pushed again" % (tag, there[:12]))
+    why = _write_publish(path, tag, "intent", _ask(reader) or "")
+    if why:
+        return "FAIL", why + "; nothing pushed"
+    try:
+        rc = push(tag, commit if isinstance(commit, str) else None)
+        failed = "" if type(rc) is int and rc == 0 else (
+            "the push answered %r" % (rc,))
+    except Exception as exc:  # noqa: BLE001 - a raising push is a failed push
+        failed = "the push raised %s: %s" % (type(exc).__name__, str(exc)[:160])
+    made = _ask(reader)
+    if not failed:
+        why = _write_publish(path, tag, "pushed", made or "")
+        if why:
+            return "FAIL", why + "; the push landed once and is never pushed again"
+        return "PUSHED", "pushed %s at %s" % (tag, (made or "unknown")[:12])
+    there, why = _remote_commit(ls_remote, tag)
+    if why or not there:
+        return "FAIL", ("%s and %s; failed closed, never pushed a second time"
+                        % (failed, why or "the remote shows no %s" % tag))
+    if made is not None and there == made:
+        why = _write_publish(path, tag, "pushed", made, "reconciled: " + failed)
+        if why:
+            return "FAIL", why + "; reconciled on the remote, never pushed again"
+        return "PUSHED", ("%s, but %s is on the remote at this run's commit: "
+                          "reconciled, not pushed again" % (failed, tag))
+    return "FAIL", ("%s, and %s on the remote points at %s, not this run's "
+                    "commit %s: foreign or unprovable, never adopted"
+                    % (failed, tag, there[:12], (made or "unknown")[:12]))
+
+
 def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
               own_uuid=None, resume_sha=None, heartbeat=None,
-              notes_file=None, notes_sha256=None, approved_sha=""):
+              notes_file=None, notes_sha256=None, approved_sha="",
+              approve=None):
     """Everything between the claim and the release of the fence. Returns
     (exit_code, evidence_or_None, park_note): evidence only when the tag
     was pushed and reproduced. `heartbeat` (R3) is threaded through every
@@ -2177,6 +2336,11 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
                 % (approved_sha, cut_head))
         print("approved from the app for v%s at %s, rehearsed by %s; %s"
               % (version, cut_head, record, APPROVAL_RESIDUAL))
+    elif approve is not None:
+        # CUT1.c: the app route without a launch line: the line is asked for
+        # now that the chain reads READY, and read from --approval-file below
+        print("ready for the app approval of v%s at %s, rehearsed by %s; %s"
+              % (version, cut_head, record, APPROVAL_RESIDUAL))
     elif not yes:
         try:
             answer = ask(question_text(version, cut_head, record,
@@ -2213,9 +2377,90 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
         print(why)
         return EXIT_REFUSED, None, ("refused before the push, nothing "
                                     "pushed: %s" % why)
-    push_ok, lines, local_commit = export_public_push(
-        root, version, runner, heartbeat=heartbeat, rehearsal_record=record,
-        canary_record=canary_record)
+    if approve is not None:
+        # CUT1.c: the owner's line is spent here, after every check that can
+        # still refuse, and before the one irreversible step; the fence that
+        # guards the push is claimed only after it (cut_mode's approve)
+        spent, claimed = approve(cut_head)
+        if spent != EXIT_OK:
+            return spent, None, ("refused at the approval, nothing pushed "
+                                 "and nothing claimed: no line arrived, the "
+                                 "line was not spent, or the verifier "
+                                 "refused it")
+        heartbeat = claimed if claimed is not None else heartbeat
+    # CUT1.e: the tag push is one recorded transaction: the intent is
+    # recorded first, a tag already on the remote is never adopted, and a
+    # failed push is read back from the remote, never pushed twice
+    pushed = {}
+
+    def push(tag, commit):
+        pushed["result"] = export_public_push(
+            root, version, runner, heartbeat=heartbeat,
+            rehearsal_record=record, canary_record=canary_record)
+        return 0 if pushed["result"][0] else 1
+
+    def ls_remote(tag):
+        """The commit the remote tag peels to, None when there is none;
+        raises when the remote cannot be read."""
+        proc = _run(["git", "ls-remote", EP.DEFAULT_REMOTE,
+                     "refs/tags/%s" % tag, "refs/tags/%s^{}" % tag], root,
+                    runner, timeout=REMOTE_TAG_EXISTS_TIMEOUT_S)
+        if proc.returncode != 0:
+            raise OSError("git ls-remote exited %d" % proc.returncode)
+        rows = dict((ref, sha) for sha, _tab, ref in (
+            l.partition("\t") for l in (proc.stdout or "").splitlines()
+            if l.strip()))
+        return (rows.get("refs/tags/%s^{}" % tag)
+                or rows.get("refs/tags/%s" % tag))
+    def tagging():
+        """The commit this run's export made the tag at: its TAGGED: line on
+        a push that landed, else the TAGGING line it printed just before its
+        tag push; None before the push, or when it named none."""
+        result = pushed.get("result")
+        if result is None:
+            return None
+        return result[2] or _tagging_commit("\n".join(result[1]),
+                                            "v%s" % version)
+    # one transaction per candidate: a restart of this cut at this commit
+    # reads the same record. The exporter tags the pull request merge commit
+    # it makes itself, so the commit is learnt during the push and recorded;
+    # any other tag of the name is foreign, and a failed push reconciles only
+    # against the commit its TAGGING line named
+    publish_dir = os.path.join(CR.evidence_dir(), "publish-%s-%s" % (
+        version, cut_head[:12]))
+    published, detail = publish_tag("v%s" % version, tagging, push,
+                                    ls_remote, publish_dir)
+    print("publish v%s: %s: %s" % (version, published, detail))
+    if published == "REUSED":
+        # CUT1.e: an earlier attempt of this cut already published the tag
+        # at the commit its record names: nothing is pushed, the chain goes
+        # on to reproduce and release it
+        rec, _why = _publish_record(os.path.join(publish_dir,
+                                                 "publish-v%s.json" % version))
+        pushed["result"] = (True, ["export_public --push: not run, %s"
+                                   % detail], (rec or {}).get("commit") or None)
+    if "result" not in pushed:
+        return EXIT_REFUSED, None, ("refused before the push, nothing "
+                                    "pushed: %s" % detail)
+    push_ok, lines, local_commit = pushed["result"]
+    if published == "FAIL" and push_ok:
+        # CUT1.e: the tag landed but its pushed state could not be recorded;
+        # a cut that cannot record its own publication stops here
+        _print(lines)
+        stop = ("STOP: v%s was pushed but %s; read the record before "
+                "anything else, the push is never repeated" % (version, detail))
+        print(stop)
+        return EXIT_REFUSED, None, stop
+    if not push_ok and tagging() is None:
+        # CUT1.e: the exporter prints TAGGING just before its tag push; no
+        # such line means it stopped before the tag push, so there is
+        # nothing of this run's to reconcile
+        print("no TAGGING line for v%s: the exporter stopped before its tag "
+              "push, nothing to reconcile" % version)
+    if published == "PUSHED" and not push_ok:
+        # CUT1.e: the push failed after its tag landed at this run's own
+        # commit: reconciled, so the chain goes on to reproduce it
+        push_ok, local_commit = True, tagging()
     _print(lines)
     attempts = [l for l in lines if l.startswith(RERUN_PREFIXES)]
     if not push_ok:
@@ -2365,7 +2610,7 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
                       "<sha256 of that body>"))))
         print(gh_note)
     evidence = "cut %s pushed: %s" % (version, ", ".join(passed))
-    if approved_sha:
+    if approved_sha or approve is not None:
         evidence += "; approved from the app (%s)" % APPROVAL_RESIDUAL
     if force is not None:
         evidence += "; forced over live fences: %s" % force
@@ -2703,7 +2948,7 @@ def _approve_check(line):
 
 
 def approval_refusal(line, version, head, root, runner=None, check=None,
-                     now=None):
+                     now=None, pin=None, spend=True):
     """'' only when `line` is `cy1.approval.1 VERSION SHA STEP KEYID HMAC`
     with VERSION the cut version, SHA equal to `head` (40 hex), STEP no more
     than APPROVAL_MAX_AGE_S old and not in the future, KEYID equal to the key
@@ -2711,7 +2956,10 @@ def approval_refusal(line, version, head, root, runner=None, check=None,
     there, and `check(line)` (default: the verifier, which spends the line,
     so it runs last) answers the int 0. Anything else, a raising or silent
     verifier included, is the refusal in words, which never carries the line
-    or an exception's text."""
+    or an exception's text. CUT1.c: `pin` is a (key id, verifier sha256)
+    already read from hub/main by approver_pin, so a second call reads no
+    second copy; `spend` False is the verify half: every check above the
+    verifier runs and the line is NOT spent."""
     if not isinstance(line, str) or not line.strip():
         return "NO-DATA: --approval needs the one line brother-approve printed"
     m = APPROVAL_RE.fullmatch(line)
@@ -2735,7 +2983,8 @@ def approval_refusal(line, version, head, root, runner=None, check=None,
     if now - started > APPROVAL_MAX_AGE_S:
         return ("NO-DATA: the approval is older than %d minutes; ask the owner "
                 "for a new code" % (APPROVAL_MAX_AGE_S // 60))
-    pinned, pinned_sha, why = approver_pin(root, runner)
+    pinned, pinned_sha, why = (tuple(pin) + ("",)) if pin else approver_pin(
+        root, runner)
     if why:
         return why
     if l_key != pinned:
@@ -2747,6 +2996,8 @@ def approval_refusal(line, version, head, root, runner=None, check=None,
                 "(sha256 %s, pinned %s); nothing pushed"
                 % (APPROVE_BIN, APPROVER_KEY_REF, actual or "unreadable",
                    pinned_sha))
+    if not spend:
+        return ""
     try:
         rc = (check or _approve_check)(line)
     except Exception as exc:  # noqa: BLE001 - a silent verifier refuses
@@ -2760,6 +3011,130 @@ def approval_refusal(line, version, head, root, runner=None, check=None,
                 "commit; ask the owner for a new code"
                 % (rc if type(rc) is int else type(rc).__name__))
     return ""
+
+
+class AppApproval(object):
+    """CUT1.c: the default approval store, over the brother-approve verifier.
+    verify runs every check approval_refusal makes except the verifier, so it
+    spends nothing; spend runs them again (the line's 5 minute lifetime and
+    its commit binding unchanged, so a line that aged past it while the chain
+    ran is refused, not stretched), refuses a HEAD that moved from the one it
+    names, then asks the verifier, which spends the line once. hub/main's pin
+    is read once per store; cut_mode records each attempt
+    (_record_approval)."""
+
+    def __init__(self, root, runner=None, check=None):
+        self.root, self.runner, self.check, self.pin = root, runner, check, None
+
+    def _pin(self):
+        if self.pin is None:
+            key, sha, why = approver_pin(self.root, self.runner)
+            if why:
+                return why
+            self.pin = (key, sha)
+        return ""
+
+    def verify(self, line, version, head):
+        return self._pin() or approval_refusal(
+            line, version, head, self.root, self.runner, pin=self.pin,
+            spend=False)
+
+    def spend(self, line, version, head):
+        proc = _run(["git", "rev-parse", "HEAD"], self.root, self.runner)
+        now = (proc.stdout or "").strip() if proc.returncode == 0 else ""
+        if now != head:
+            return ("NO-DATA: HEAD is %s, not the approved %s; the approval "
+                    "is not spent" % (now or "unreadable", head))
+        why = self._pin() or approval_refusal(
+            line, version, head, self.root, self.runner, check=self.check,
+            pin=self.pin)
+        return why
+
+
+APPROVAL_FILE_WAIT_S = 600
+APPROVAL_FILE_POLL_S = 2
+
+
+def wait_for_approval_line(path, version, head, timeout_s=None, poll_s=None,
+                           clock=None, sleep=None):
+    """CUT1.c: the owner's app line for exactly `head`, asked for once the
+    chain reads READY and read from the file `path` he writes it into; '' when
+    nothing arrives within timeout_s (the cut then parks, spending nothing,
+    and names the one command that resumes it). The line is never printed."""
+    timeout_s = APPROVAL_FILE_WAIT_S if timeout_s is None else timeout_s
+    poll_s = APPROVAL_FILE_POLL_S if poll_s is None else poll_s
+    clock = clock or time.monotonic
+    sleep = sleep or time.sleep
+    print(app_question_text(version, head))
+    print("WAITING FOR APPROVAL: write the one line brother-approve verify "
+          "printed into %s (waits %ds)" % (path, timeout_s), flush=True)
+    deadline = clock() + timeout_s
+    while clock() < deadline:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read().strip()
+        except OSError:
+            text = ""
+        if text:
+            print("approval line read from %s" % path)
+            return text.splitlines()[0]
+        sleep(poll_s)
+    print("NO-DATA: no approval line in %s within %ds; nothing spent, nothing "
+          "claimed, nothing pushed. Resume with: python3 scripts/cut.py "
+          "--version %s --resume %s --approval-file %s"
+          % (path, timeout_s, version, head, path))
+    return ""
+
+
+def _record_approval(version, head, route, outcome):
+    """CUT1.c: one line per approval attempt in the cut evidence folder
+    (commit, route, outcome, time; never the line). A record that cannot be
+    written is said, never fatal."""
+    try:
+        directory = CR.evidence_dir()
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "approval-%s.jsonl" % version), "a",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps({"schema": "cut1.approval.1", "head": head,
+                                 "route": route, "outcome": outcome,
+                                 "at": time.time()}, sort_keys=True) + "\n")
+    except OSError as exc:
+        print("the approval record was not written (%s)" % type(exc).__name__)
+
+
+def run_approved_cut(line, version, head, approval, ready):
+    """CUT1.c: verify the owner's line first (a refusal spends nothing and
+    exits non zero), then ask ready() for (verdict, detail), and only on PASS
+    spend the line, exactly once. A FAIL, a raising ready() or a refused spend
+    spends nothing more and exits non zero. Prints each refusal; 0 only when
+    the line was spent for this version and this head."""
+    try:
+        why = approval.verify(line, version, head)
+    except Exception as exc:  # noqa: BLE001 - a store that raises refuses
+        why = "NO-DATA: the approval could not be verified (%s)" % (
+            type(exc).__name__)
+    if why != "":
+        print(why if isinstance(why, str) and why else
+              "NO-DATA: the approval store answered %r" % (why,))
+        return EXIT_NODATA
+    try:
+        verdict, detail = ready()
+    except Exception as exc:  # noqa: BLE001 - unknown readiness is not ready
+        verdict, detail = "FAIL", "readiness raised %s" % type(exc).__name__
+    if verdict != "PASS":
+        print("not ready, the approval is not spent: %s" % (detail,))
+        return EXIT_REFUSED
+    try:
+        why = approval.spend(line, version, head)
+    except Exception as exc:  # noqa: BLE001 - a raising spend refuses
+        why = ("NO-DATA: the approval could not be spent (%s); the line "
+               "counts as spent: ask the owner for a new code"
+               % type(exc).__name__)
+    if why != "":
+        print(why if isinstance(why, str) and why else
+              "NO-DATA: the approval store answered %r" % (why,))
+        return EXIT_NODATA
+    return EXIT_OK
 
 
 def remote_write_tail(text):
@@ -3016,7 +3391,7 @@ def cold_refusal(version, resume_sha, cold):
 
 def cut_mode(root, version, bm, paths, force, yes, ask, runner=None,
              resume_sha=None, notes_file=None, notes_sha256=None,
-             approved_sha="", cold=None):
+             approved_sha="", cold=None, approval=None):
     # CS12.b: main says whether the owner named --cold (True or False) on the real command line; a caller that
     # passes nothing (None) is not asking for the gate. ponytail: only main calls this, and main asks unless a
     # runner was injected (the tests' seam, never the command line), so the gate sits on the one real door
@@ -3043,65 +3418,126 @@ def cut_mode(root, version, bm, paths, force, yes, ask, runner=None,
     session = new_run_session()
     print("cut run identity: %s (every store change this run makes uses it)"
           % session)
-    if force is not None:
-        # The cut takes precedence: park every live overlap BEFORE the
-        # cut's own claim (bm_store refuses an overlapping claim). Only
-        # ever with the operator's explicit --force-conflicts REASON.
+
+    def park():
+        """EXIT_OK, or the refusal code. The cut takes precedence: park every
+        live overlap BEFORE the cut's own claim (bm_store refuses an
+        overlapping claim). Only ever with the operator's explicit
+        --force-conflicts REASON."""
+        if force is None:
+            return EXIT_OK
         conflicts, why = live_conflicts(root, bm_mod, bm_path, paths, runner)
         if conflicts is None:
             print(why)
             print("REFUSED: cannot park what cannot be read, nothing claimed")
             return EXIT_REFUSED
-        if conflicts:
-            _print(conflict_lines(conflicts))
-            dead, why = dead_owner_uuids(root, bm_path, runner)
-            if dead is None:
-                print(why)
-                print("REFUSED: owner liveness could not be read, nothing "
-                      "adopted, parked or claimed")
-                return EXIT_REFUSED
-            ok, lines = park_conflicts(root, bm_path, conflicts, version,
-                                       force, runner, dead=dead,
-                                       session=session)
-            _print(lines)
-            if not ok:
-                return EXIT_REFUSED
-            print("force-conflicts: adopted and parked %d dead-owner "
-                  "fence(s), reason: %s"
-                  % (len(conflicts), force))
-        else:
+        if not conflicts:
             print("force-conflicts: no live fence overlaps, nothing to park")
-    uuid, store_version, lines = claim_fence(root, bm_path, version, paths,
-                                             runner, session=session)
-    _print(lines)
-    if uuid is None:
-        return EXIT_REFUSED
-    # R3: one Heartbeat for the whole run, refreshing this fence's own
-    # updated_at (bm_stall.py's heartbeat evidence) at every step boundary
-    # and at most every HEARTBEAT_INTERVAL_S during a long one. Its own
-    # `version` tracks every successful beat, so release_fence below must
-    # release against heartbeat.version, never the claim's own stale
-    # store_version, once a single beat has landed.
-    heartbeat = Heartbeat(root, bm_path, uuid, store_version, runner=runner)
-    code = EXIT_REFUSED
+            return EXIT_OK
+        _print(conflict_lines(conflicts))
+        dead, why = dead_owner_uuids(root, bm_path, runner)
+        if dead is None:
+            print(why)
+            print("REFUSED: owner liveness could not be read, nothing "
+                  "adopted, parked or claimed")
+            return EXIT_REFUSED
+        ok, lines = park_conflicts(root, bm_path, conflicts, version,
+                                   force, runner, dead=dead,
+                                   session=session)
+        _print(lines)
+        if not ok:
+            return EXIT_REFUSED
+        print("force-conflicts: adopted and parked %d dead-owner "
+              "fence(s), reason: %s" % (len(conflicts), force))
+        return EXIT_OK
+
+    fence = {}
+
+    def claim():
+        """EXIT_OK with fence filled, or EXIT_REFUSED. R3: one Heartbeat for
+        the rest of the run, refreshing this fence's own updated_at
+        (bm_stall.py's heartbeat evidence) at every step boundary and at most
+        every HEARTBEAT_INTERVAL_S during a long one. Its own `version`
+        tracks every successful beat, so release_fence below must release
+        against heartbeat.version, never the claim's own stale
+        store_version, once a single beat has landed."""
+        uuid, store_version, lines = claim_fence(root, bm_path, version,
+                                                 paths, runner,
+                                                 session=session)
+        _print(lines)
+        if uuid is None:
+            return EXIT_REFUSED
+        fence["uuid"] = uuid
+        fence["heartbeat"] = Heartbeat(root, bm_path, uuid, store_version,
+                                       runner=runner)
+        return EXIT_OK
+
+    approve = None
+    code = park()
+    if code != EXIT_OK:
+        return code
+    if approval is None:
+        # the owner's terminal y: the fence is claimed before the chain, as
+        # it always was
+        code = claim()
+        if code != EXIT_OK:
+            return code
+    else:
+        # CUT1.c: the app route. The chain only reads and rehearses, so it
+        # runs unfenced; once it reads READY the owner's line (given at
+        # launch, or read from --approval-file now) is verified and spent
+        # through run_approved_cut, and only then is the fence claimed to
+        # guard the one mutation, the publish. A fabricated line, a late
+        # failure or a moved HEAD therefore claims nothing and spends nothing.
+        store, line, wait_path = approval
+
+        def approve(cut_head):
+            got = line
+            route = "launch line" if line is not None else "approval file"
+            if got is None:
+                got = wait_for_approval_line(wait_path, version, cut_head)
+                if not got:
+                    _record_approval(version, cut_head, route, "no line")
+                    return EXIT_NODATA, None
+            head = approved_sha or cut_head
+
+            def ready():
+                if cut_head != head:
+                    return "FAIL", "the chain left %s, the approval names %s" % (
+                        cut_head, head)
+                return "PASS", "the chain is ready at %s" % cut_head
+            spent = run_approved_cut(got, version, head, store, ready)
+            _record_approval(version, cut_head, route,
+                             "spent" if spent == EXIT_OK else "not spent")
+            if spent != EXIT_OK:
+                return spent, None
+            if claim() != EXIT_OK:
+                return EXIT_REFUSED, None
+            return EXIT_OK, fence["heartbeat"]
     evidence = None
     note = "cut.py left without recording why (crash)"
     try:
         code, evidence, note = run_chain(root, version, bm, paths, force,
-                                         yes, ask, runner, own_uuid=uuid,
+                                         yes, ask, runner,
+                                         own_uuid=fence.get("uuid"),
                                          resume_sha=resume_sha,
-                                         heartbeat=heartbeat,
+                                         heartbeat=fence.get("heartbeat"),
                                          notes_file=notes_file,
                                          notes_sha256=notes_sha256,
-                                         approved_sha=approved_sha)
+                                         approved_sha=approved_sha,
+                                         approve=approve)
     except KeyboardInterrupt:
         code, evidence, note = 130, None, "interrupted mid-chain"
         print("interrupted")
     finally:
-        # Every exit path releases the fence; a failing release is shouted
-        # by release_fence but never changes the exit code of the cut.
-        release_fence(root, bm_path, uuid, heartbeat.version, evidence,
-                      note or "no reason recorded", runner, session=session)
+        # Every exit path releases a fence this run claimed; a failing
+        # release is shouted by release_fence but never changes the exit
+        # code of the cut.
+        if fence:
+            release_fence(root, bm_path, fence["uuid"],
+                          fence["heartbeat"].version, evidence,
+                          note or "no reason recorded", runner,
+                          session=session)
     return code
 
 
@@ -4015,6 +4451,14 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
                           "docs/plan/APPROVER-KEY.json; replaces the "
                           "terminal question, never with --check, --shadow, "
                           "--finish-release, --yes or --answer-file")
+    ap.add_argument("--approval-file", metavar="PATH", default=None,
+                     help="CUT1.c: the app route without a launch line: once "
+                          "the chain reads READY the cut asks for the "
+                          "approval of the exact commit it left and reads "
+                          "the one line brother-approve verify printed from "
+                          "PATH, waiting a bounded time; never with "
+                          "--approval, --check, --shadow, --finish-release, "
+                          "--yes or --answer-file")
     ap.add_argument("--release-notes-file", metavar="PATH", default=None,
                      help="R4: the body file for `gh release create "
                           "--notes-file`, run only after a successful push. "
@@ -4083,6 +4527,14 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
                   "not with --check, --shadow, --finish-release, --yes or "
                   "--answer-file")
             return EXIT_NODATA
+    if args.approval_file is not None and (
+            args.approval is not None or args.check or args.shadow
+            or args.finish_release is not None or args.yes
+            or args.answer_file is not None or not args.approval_file.strip()):
+        print("NO-DATA: --approval-file names the file a real cut reads its "
+              "app line from at READY, alone: not with --approval, --check, "
+              "--shadow, --finish-release, --yes or --answer-file")
+        return EXIT_NODATA
     if args.local and (not args.check or args.resume is not None):
         print("NO-DATA: --local only means something with --check, and not "
               "with --resume")
@@ -4108,7 +4560,8 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     # CV1.e: a real cut takes no answer file and reads its one answer from
     # the owner's terminal; --check (the dry run) pushes nothing and never
     # asks, so the rehearsal's own --check without a terminal still runs.
-    refusal = "" if args.approval is not None else answer_file_refusal(
+    refusal = "" if args.approval is not None or args.approval_file \
+        is not None else answer_file_refusal(
         args.answer_file, args.check, _stdin_is_tty())
     if refusal:
         print(refusal)
@@ -4214,24 +4667,34 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
         return check_mode(root, version, bm, paths, args.force_conflicts,
                           runner, notes_file=notes_file,
                           full_chain=args.full_chain, local=args.local)
-    approved_sha = ""
+    approved_sha, approval = "", None
     if args.approval is not None:
-        # CY1.b: checked before the fence, so a refused line claims nothing;
-        # the verifier spends it, and run_chain still requires the commit it
+        # CY1.b: verified before the fence, so a refused line claims nothing.
+        # CUT1.c: verified, NOT spent: cut_mode spends it through
+        # run_approved_cut only once the chain reads ready, so a late failure
+        # costs the owner no code; run_chain still requires the commit it
         # names to be the one the chain leaves and the rehearsal covers.
         proc = _run(["git", "rev-parse", "HEAD"], root, runner)
         head = (proc.stdout or "").strip() if proc.returncode == 0 else ""
-        refusal = approval_refusal(args.approval[0], version, head, root,
-                                   runner)
+        store = AppApproval(root, runner)
+        refusal = store.verify(args.approval[0], version, head)
         if refusal:
             print(refusal)
             return EXIT_NODATA
-        approved_sha = head
-        print("approval line checked for v%s at %s" % (version, head))
+        approved_sha, approval = head, (store, args.approval[0], None)
+        print("approval line verified for v%s at %s; it is spent only once "
+              "the chain reads ready" % (version, head))
+    elif args.approval_file is not None:
+        # CUT1.c: the line is asked for at READY, for the commit the chain
+        # leaves, so a long chain never races its 5 minute lifetime
+        approval = (AppApproval(root, runner), None,
+                    os.path.abspath(args.approval_file))
+        print("the app approval is asked for once the chain reads ready, and "
+              "read from %s" % approval[2])
     return cut_mode(root, version, bm, paths, args.force_conflicts,
                     args.yes, ask, runner, resume_sha=args.resume,
                     notes_file=notes_file, notes_sha256=notes_sha256,
-                    approved_sha=approved_sha,
+                    approved_sha=approved_sha, approval=approval,
                     cold=bool(args.cold) if runner is None else None)
 
 

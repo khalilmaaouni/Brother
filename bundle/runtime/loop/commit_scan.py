@@ -2,7 +2,15 @@
 """GATE, not a report: scan the STAGED diff's ADDED lines; exit 1 on any hit so a chained commit cannot run.
 
 usage (repo root): commit_scan.py && git commit ...      Prints counts only, never the matched text.
+           history: commit_scan.py --log <rev-range>        Every commit of the range, its diff and its message, one at a
+                    time, so a value added in one commit and removed in a later one is still seen; a refused commit is
+                    named by its first 12 characters. A range with no commit is NO-DATA.
            check: commit_scan.py --selftest
+
+EXIT STATUS: 0 clean, 1 a hit, 2 NO-DATA (nothing read, or the scan could not run), 3 the ONLY hit is the private terms
+count and a text that names nothing draws the same hit, which means this machine has no private terms list or no term
+scanner (grade_build.private_hits fails closed), so the reading says nothing about the content. 3 is still not zero:
+`commit_scan.py && git commit` stops on it, and a caller that wants to treat it as "private terms: NO-DATA" must say so.
 
 WHY THE PATTERNS ARE WRITTEN WITH \\x ESCAPES. This file must contain the literals it forbids in
 order to forbid them, and a scanner that matches its own source refuses every commit that touches
@@ -61,6 +69,21 @@ def scan(added):
             "long dashes": len(DASHES.findall(added)),
             "attribution": len(ATTRIBUTION.findall(added)),
             "private terms": G.private_hits(added)}
+
+
+#: A text that names nothing. A private terms hit on THIS text is the machine's, not the content's.
+PROBE = "a probe text that names nothing"
+UNJUDGEABLE = 3
+
+
+def exit_status(hits):
+    """0 clean, 1 a hit, 3 when private terms is the only nonzero count and PROBE draws a hit too."""
+    if not any(hits.values()):
+        return 0
+    if hits["private terms"] > 0 and not any(v for k, v in hits.items() if k != "private terms") \
+            and G.private_hits(PROBE) > 0:
+        return UNJUDGEABLE
+    return 1
 
 
 def selftest():
@@ -226,9 +249,67 @@ def staged_diff():
     return r.stdout, None
 
 
+def _git_text(args):
+    """(stdout, None) or (None, why); pinned like staged_diff, and a failing git is NO-DATA."""
+    try:
+        r = subprocess.run(["git", "-c", "core.quotePath=false"] + args, capture_output=True, text=True,
+                           encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        return None, "git %s could not run (%s)" % (args[0], type(exc).__name__)
+    if r.returncode != 0:
+        return None, "git %s exited %d" % (args[0], r.returncode)
+    return r.stdout, None
+
+
+def log_main(rev_range):
+    """Scan every commit of `rev_range` on its own, oldest first. The staged diff is the NET change, so a secret
+    committed and then removed inside one range never appears in it; each commit's own diff and message do."""
+    if S is None:
+        print("NO-DATA: secret_scan could not be loaded (%s), so nothing was scanned" % SECRET_SCAN_ERROR)
+        return 2
+    if not rev_range or rev_range.startswith("-"):
+        print("NO-DATA: the revision range is empty or starts with a dash")
+        return 2
+    listed, why = _git_text(["rev-list", "--reverse", rev_range, "--"])
+    if why:
+        print("NO-DATA: %s, so the range was not read" % why)
+        return 2
+    ids = listed.split()
+    if not ids:
+        print("NO-DATA: no commit in %s" % rev_range)
+        return 2
+    total = {}
+    for sha in ids:
+        message, why = _git_text(["log", "-1", "--format=%B", sha, "--"])
+        # --no-textconv and --text: a textconv driver replaces a file's content with its own output, and a file git
+        # takes for binary (a NUL byte, a -diff attribute) prints only "Binary files differ"; either way the added
+        # bytes would never reach the scan. A "Binary files" line that survives anyway is NO-DATA, never a pass.
+        patch, why2 = _git_text(["show", "--no-color", "--no-ext-diff", "--no-textconv", "--text", "-m",
+                                 "--format=", sha, "--"])
+        if why or why2:
+            print("NO-DATA: %s, so commit %s was not read" % (why or why2, sha[:12]))
+            return 2
+        if re.search(r"^Binary files .* differ$", patch, re.M):
+            print("NO-DATA: commit %s has a file git would not show as text, so it was not scanned" % sha[:12])
+            return 2
+        hits = scan(added_text(patch) + "\n" + message)
+        if exit_status(hits) == 1:
+            print("refused commit %s: %s" % (sha[:12], " ".join("%s=%d" % kv for kv in hits.items())))
+        for key, value in hits.items():
+            total[key] = total.get(key, 0) + value
+    code = exit_status(total)
+    if code == UNJUDGEABLE:
+        print("private terms: NO-DATA, this machine cannot judge them")
+    print(" ".join("%s=%d" % kv for kv in total.items()))
+    return code
+
+
 def main():
     if "--selftest" in sys.argv:
         return selftest()
+    if "--log" in sys.argv:
+        at = sys.argv.index("--log")
+        return log_main(sys.argv[at + 1] if at + 1 < len(sys.argv) else "")
     if S is None:
         print("NO-DATA: secret_scan could not be loaded (%s), so nothing was scanned"
               % SECRET_SCAN_ERROR)
@@ -246,8 +327,11 @@ def main():
     counts_line = " ".join("%s=%d" % kv for kv in hits.items())
     if names:
         print("secret shapes: " + ", ".join(names))
+    code = exit_status(hits)
+    if code == UNJUDGEABLE:
+        print("private terms: NO-DATA, this machine cannot judge them")
     print(counts_line)
-    return 1 if any(hits.values()) else 0
+    return code
 
 
 if __name__ == "__main__":

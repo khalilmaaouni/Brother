@@ -2612,7 +2612,17 @@ def _fixture_repo(tmp, git=True, suite=True):
         os.makedirs(os.path.join(work, "scripts"))
         with io.open(os.path.join(work, "scripts", "test_x.py"), "w",
                      encoding="utf-8") as fh:
-            fh.write("print('ok')\n")
+            # FIRST1.d (D12, 2026-10-29): a real self running suite, not
+            # `print('ok')`. The old fixture defined no test and ran nothing,
+            # so `python3 scripts/test_x.py` exited 0 whatever the code did:
+            # the fixture was itself the vacuous check this unit refuses, and
+            # the twelve cases below were green on a file that could not fail.
+            # The generated command is unchanged (_runs_itself keeps the plain
+            # interpreter for a file that runs its own tests), which is why
+            # the assertion naming it needs no edit.
+            fh.write("import unittest\n\n\nclass TestX(unittest.TestCase):\n"
+                     "    def test_ok(self):\n        self.assertEqual(1, 1)\n"
+                     "\n\nif __name__ == '__main__':\n    unittest.main()\n")
     if git:
         bare = os.path.join(tmp, "widget-service.git")
         subprocess.run(["git", "init", "--bare", "-q", bare],

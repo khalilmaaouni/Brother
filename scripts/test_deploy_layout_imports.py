@@ -76,12 +76,14 @@ class DeployedImports(unittest.TestCase):
 
     def test_a_placed_module_brings_what_it_imports(self):
         # the ledger importing a second scripts/ module needs that one beside the grader too, or its import fails there
+        self.assertTrue(hasattr(DS, "grader_by_name_imports"), "deploy_stamped has no grader_by_name_imports")
         with tempfile.TemporaryDirectory() as d:
             loop, scripts = self.layout(d, "import ledger_a\n", {"ledger_a.py": "import ledger_b\n", "ledger_b.py": "X = 1\n"})
             self.assertEqual(DS.grader_by_name_imports(loop, scripts), ["ledger_a", "ledger_b"])
 
     def test_a_function_scope_import_keeps_its_own_route(self):
         # grade_build._terms_scan imports private_terms_scan inside a function, from a folder it puts on sys.path itself
+        self.assertTrue(hasattr(DS, "grader_by_name_imports"), "deploy_stamped has no grader_by_name_imports")
         with tempfile.TemporaryDirectory() as d:
             loop, scripts = self.layout(d, "import ledger_a\ndef scan():\n    import own_route\n",
                                         {"ledger_a.py": "X = 1\n", "own_route.py": "Y = 2\n"})

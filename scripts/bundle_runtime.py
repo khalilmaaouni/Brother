@@ -90,12 +90,13 @@ products/brothersbe/hooks/hooks.json name, plus every local module or
 sibling script each one reaches (the same closure walk compute_closure
 already does for brother_run.py, generalized in _closure_from_entries to
 start from more than one entry file), into bundle/runtime/hooks/<product>/
-tools/, and writes bundle/hooks/hooks.json: the union of both products'
-hooks.json, brothermode's own event order first then brothersbe's, every
-`${CLAUDE_PLUGIN_ROOT}/tools/` rewritten to
-`${CLAUDE_PLUGIN_ROOT}/runtime/hooks/<product>/tools/` so the mirrored copy
-is what actually runs, and every command wrapped by the double-fire guard
-(runtime/hooks/hook_guard.py, docs/architecture/ADR-ONE-PLUGIN-HOOKS.md).
+tools/, and writes bundle/hooks/hooks.json: since HD1.e ONE command per
+event, runtime/hooks/brother_hook.py given the event's name, which runs the
+union of both products' handlers (brothermode's own event order first then
+brothersbe's) from the dispatch table in HOOKS-MANIFEST.json, each from its
+mirrored copy under runtime/hooks/<product>/tools/, and asks the double-fire
+guard (runtime/hooks/hook_guard.py, docs/architecture/ADR-ONE-PLUGIN-HOOKS.md)
+per handler; hook_guard.py stays the spawn path it falls back to.
 
 WHY A SEPARATE MANIFEST (bundle/runtime/hooks/HOOKS-MANIFEST.json) RATHER
 THAN ADDING TO RUNTIME-MANIFEST.json's OWN "files" LIST: ManifestMatchesThe
@@ -112,13 +113,31 @@ Python 3, standard library only. No network.
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 
+
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _bh():
+    """scripts/brother_hook.py (the dispatcher: the class rule and the table rows), loaded by this
+    file's own path on first use. A module-level import only resolved when scripts/ was on sys.path
+    and failed for every importer of bundle_runtime run from elsewhere, or from a scripts folder
+    copied without the dispatcher, that never touches the hook functions."""
+    mod = sys.modules.get("brother_hook")
+    if mod is None:
+        spec = importlib.util.spec_from_file_location("brother_hook", os.path.join(HERE, "brother_hook.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["brother_hook"] = mod
+        spec.loader.exec_module(mod)
+    return mod
+
+
 REPO_ROOT = os.path.dirname(HERE)
 SCRIPTS_DIR = HERE
 PRODUCTS_DIR = os.path.join(REPO_ROOT, "products")
@@ -130,7 +149,12 @@ ENTRY = "brother_run.py"
 #: can name in its done_check.
 #: dream_bridge.py is a support root too: nothing in the runner imports it,
 #: and an installed copy without it has no way to reach the learning recorder.
-SUPPORT_ENTRIES = ("native_evidence.py", "mobile_workflow.py", "mobile_design.py",
+#: ACC1: accept_delivery.py joins these so an INSTALLED plugin carries the accept
+#: route. Without it the tool exists only in a checkout, and a stranger who
+#: finishes a run has nothing to accept or refuse through, which is what the
+#: journey row A.accept-recorded measured.
+SUPPORT_ENTRIES = ("accept_delivery.py",
+                   "native_evidence.py", "mobile_workflow.py", "mobile_design.py",
                    "dream_bridge.py", "jev_status.py", "jev_door.py",
                    "jev_start_refusal.py")
 MANIFEST_NAME = "RUNTIME-MANIFEST.json"
@@ -668,42 +692,182 @@ def _hook_guard_src(scripts_dir=SCRIPTS_DIR):
     return os.path.join(scripts_dir, HOOK_GUARD_NAME)
 
 
+def _dispatcher_src(scripts_dir=SCRIPTS_DIR):
+    return os.path.join(scripts_dir, _bh().DISPATCHER_NAME)
+
+
+#: The HOOKS-MANIFEST.json key holding the Codex table (codex_hooks_table).
+CODEX_TABLE_KEY = "codex"
+
+
+def _matcher_union(matchers):
+    """One matcher that selects every tool any of `matchers` selects: "" (every
+    tool) when one of them is empty or "*", else their alternatives joined by |,
+    each once, in first seen order. The dispatcher compares each row's own
+    matcher again (brother_hook._matches), so a wider union only costs a start."""
+    out = []
+    for m in matchers:
+        if m in ("", "*"):
+            return ""
+        for alt in (m.split("|") if re.fullmatch(r"[A-Za-z0-9_|]+", m) else [m]):
+            if alt not in out:
+                out.append(alt)
+    return "|".join(out)
+
+
 def merged_hooks_doc(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
-    """bundle/hooks/hooks.json's content (see HOOKS_JSON_NAME): the union
-    of every named
-    product's own hooks.json, each command rewritten to its mirrored
-    location, `products`' own order preserved (brothermode's event order
-    first, then any event brothersbe alone carries); within one event,
-    brothermode's matcher groups first, then brothersbe's. A product
-    carrying no hooks.json contributes nothing."""
-    docs = [(p, d) for p, d in
-           ((p, _load_hooks_json(p, products_dir)) for p in products)
-           if d is not None]
-    order = []
-    for _, doc in docs:
-        for event in doc.get("hooks", {}):
-            if event not in order:
-                order.append(event)
+    """bundle/hooks/hooks.json's content (see HOOKS_JSON_NAME), HD1.e: ONE
+    synchronous command per event, the dispatcher given the event's name
+    (`python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brother_hook.py" <Event>`),
+    which runs every authored handler of that event from the dispatch table in
+    HOOKS-MANIFEST.json (dispatch_table, the per handler rows of the product
+    hooks.json files). Events in dispatch_table order (brothermode's event order
+    first, then any event brothersbe alone carries). The one entry carries the
+    union of the rows' matchers, the event's class (deny when any row is deny)
+    and the largest timeout a row names (the dispatcher answers at 0.8 of it,
+    brother_hook.event_budget); no timeout when no row names one. A product
+    carrying no hooks.json contributes nothing; an event that is not a Claude
+    Code hook event or a matcher that is not a string is refused, never shipped."""
     merged = {}
-    for event in order:
-        groups = []
-        for product, doc in docs:
-            for group in doc.get("hooks", {}).get(event, []):
-                new_group = {k: v for k, v in group.items() if k != "hooks"}
-                new_group["hooks"] = [
-                    dict(h, command=_rewrite_plugin_root_command(
-                        h.get("command", ""), product, event,
-                        group.get("matcher", "")))
-                    for h in group.get("hooks", [])]
-                groups.append(new_group)
-        merged[event] = groups
+    for event, rows in dispatch_table(products, products_dir).items():
+        if event not in HOOK_EVENTS:
+            raise ValueError("%r is not a Claude Code hook event" % (event,))
+        if not rows:
+            continue
+        if any(not isinstance(r["matcher"], str) for r in rows):
+            raise ValueError("%s: a matcher that is not a string" % event)
+        entry = {"type": "command",
+                 "class": "deny" if any(r["class"] == "deny" for r in rows) else "advisory",
+                 "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/%s" %s'
+                            % (_bh().DISPATCHER_NAME, event)}
+        timeouts = [r["timeout"] for r in rows if "timeout" in r]
+        if timeouts:
+            entry["timeout"] = max(timeouts)
+        group = {}
+        matcher = _matcher_union([r["matcher"] for r in rows])
+        if matcher:
+            group["matcher"] = matcher
+        group["hooks"] = [entry]
+        merged[event] = [group]
     return {"hooks": merged}
+
+
+#: handler_class is defined once, in the dispatcher that reads it at run time, so
+#: the class this generator writes and the class the dispatcher judges by can
+#: never be two functions (HD1.a).
+def handler_class(entry):
+    return _bh().handler_class(entry)
+
+
+
+def dispatch_table(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR):
+    """{event: [row, ...]}: every authored handler of every named product, in
+    `products` order within an event, each row carrying its class. This is the
+    table brother_hook.py runs from. A handler whose command is not the shape
+    the dispatcher can run is refused here, never shipped as a silent gap."""
+    table = {}
+    for product in products:
+        doc = _load_hooks_json(product, products_dir)
+        for event, rows in (_bh().rows_from_doc(doc, product).items() if doc else ()):
+            for row in rows:
+                if row["tool"] is None:
+                    raise ValueError("%s %s: a handler command the dispatcher cannot run"
+                                     % (product, event))
+            table.setdefault(event, []).extend(rows)
+    return table
+
+
+#: How Cursor's own event vocabulary carries Brother's handlers. Cursor names its
+#: events differently from Claude Code, fires some handlers on two of them, and runs
+#: none of the others, so the choice of which handler is wired where is authored here,
+#: once, and bundle/cursor-hooks/hooks.json is DERIVED from this and the dispatch table
+#: (cursor_hooks_doc); a hand edit of that file fails check_hooks. Each row: the Claude
+#: event whose handler this is, the Cursor event, Cursor's matcher ("" for none), the
+#: product and tool, the handler's arguments, and Cursor's timeout in seconds.
+CURSOR_WIRING = (
+    ("SessionStart", "sessionStart", "", "brothermode", "bm_sessionstart.py", (), 30),
+    ("SessionStart", "sessionStart", "", "brothermode", "bm_vault.py", ("refresh",), 30),
+    ("SessionStart", "sessionStart", "", "brothersbe", "sbe_sessionstart.py", (), 30),
+    ("SessionEnd", "sessionEnd", "", "brothermode", "bm_telemetry.py", ("outcomes-append",), 30),
+    ("SessionEnd", "sessionEnd", "", "brothersbe", "sbe_telemetry.py", ("outcomes-append",), 30),
+    ("Stop", "stop", "", "brothermode", "bm_hookchain.py", ("stop",), 30),
+    ("Stop", "stop", "", "brothersbe", "sbe_session_reconcile.py", (), 30),
+    ("PreCompact", "preCompact", "", "brothermode", "bm_hookchain.py", ("precompact",), 60),
+    ("PreCompact", "preCompact", "", "brothersbe", "sbe_autosave.py", ("precompact",), 120),
+    ("PreToolUse", "preToolUse", "Write|Edit|Delete|Shell", "brothermode", "bm_fence_hook.py", (), 10),
+    ("PreToolUse", "preToolUse", "Write|Edit|Delete", "brothersbe", "sbe_fence_hook.py", (), 10),
+    ("PreToolUse", "beforeShellExecution", "", "brothermode", "bm_session_cap.py", (), 10),
+    ("PreToolUse", "beforeShellExecution", "", "brothersbe", "sbe_bash_write_guard.py", (), 10),
+    ("PostToolUse", "postToolUse", "Shell", "brothermode", "bm_bash_audit.py", ("post",), 15),
+    ("PostToolUse", "afterShellExecution", "", "brothermode", "bm_bash_audit.py", ("post",), 15),
+    ("PreToolUse", "afterFileEdit", "", "brothermode", "vault_recall_hook.py", ("check",), 10),
+)
+#: Cursor runs every wired handler through this one adapter of the brothermode product.
+CURSOR_ADAPTER = "brothermode/tools/bm_cursor_hook.py"
+CURSOR_HOOKS_TAIL = os.path.join("cursor-hooks", PRODUCT_HOOKS_JSON_NAME)
+
+
+def cursor_hooks_doc(merged, table=None):
+    """bundle/cursor-hooks/hooks.json's content: CURSOR_WIRING rendered for the
+    products the dispatch table holds, kept only for a Claude event `merged` wires.
+    A wired handler the table does not hold is a stale wiring and raises: the file
+    is never shipped naming a tool that is gone. Pure: same answer twice, `merged`
+    and `table` untouched."""
+    table = dispatch_table() if table is None else table
+    products = set(r["product"] for rows in table.values() for r in rows)
+    events = merged.get("hooks", {}) if isinstance(merged, dict) else {}
+    hooks = {}
+    for claude, cursor, matcher, product, tool, args, timeout in CURSOR_WIRING:
+        if product not in products or claude not in events:
+            continue
+        if not any(r["tool"] == "%s/tools/%s" % (product, tool) and r["args"] == list(args)
+                   for r in table.get(claude, [])):
+            raise ValueError("CURSOR_WIRING wires %s %s %s, which %s does not hold"
+                             % (cursor, tool, list(args), claude))
+        root = "${PLUGIN_ROOT}/runtime/hooks/"
+        command = 'python3 "%s%s" %s --run "%s%s/tools/%s"' % (
+            root, CURSOR_ADAPTER, cursor, root, product, tool)
+        entry = {"command": " ".join([command] + list(args))}
+        if matcher:
+            entry["matcher"] = matcher
+        entry["timeout"] = timeout
+        hooks.setdefault(cursor, []).append(entry)
+    return {"hooks": hooks}
+
+
+def codex_hooks_table(merged, table=None):
+    """The handlers a Codex install can carry: every dispatch row of an event Codex
+    knows (codex_hooks_install.CODEX_EVENTS) that `merged` wires, as a list of rows
+    in table order, each naming its event. Pure, like cursor_hooks_doc."""
+    import codex_hooks_install
+    table = dispatch_table() if table is None else table
+    events = merged.get("hooks", {}) if isinstance(merged, dict) else {}
+    return [dict(row, event=event) for event, rows in table.items()
+            if event in codex_hooks_install.CODEX_EVENTS and event in events for row in rows]
+
+
+def _cursor_bytes(products, products_dir):
+    table = dispatch_table(products, products_dir)
+    doc = cursor_hooks_doc(merged_hooks_doc(products, products_dir), table)
+    return (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+
+
+def _product_hooks_src(product, products_dir):
+    return os.path.join(products_dir, product, "hooks", PRODUCT_HOOKS_JSON_NAME)
+
+
+def _product_hooks_dst(product, runtime_dir):
+    """Where a product's own hooks.json is mirrored: what brother_hook.py reads
+    to find an event's guards when HOOKS-MANIFEST.json cannot be read."""
+    return os.path.join(runtime_dir, "hooks", product, *_bh().MIRROR_TAIL)
 
 
 def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                           runtime_dir=RUNTIME_DIR, scripts_dir=SCRIPTS_DIR):
     files = [{"path": HOOK_GUARD_NAME,
-              "sha256": _sha256(_read_bytes(_hook_guard_src(scripts_dir)))}]
+              "sha256": _sha256(_read_bytes(_hook_guard_src(scripts_dir)))},
+             {"path": _bh().DISPATCHER_NAME,
+              "sha256": _sha256(_read_bytes(_dispatcher_src(scripts_dir)))}]
     for product in products:
         tools_dir, closure = compute_hook_closure(product, products_dir,
                                                   runtime_dir)
@@ -717,9 +881,16 @@ def _hooks_manifest_bytes(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                                             *tail.split("/")))
             files.append({"path": "%s/%s" % (product, tail),
                          "sha256": _sha256(data)})
+        if os.path.isfile(_product_hooks_src(product, products_dir)):
+            files.append({"path": "%s/%s" % (product, "/".join(_bh().MIRROR_TAIL)),
+                         "sha256": _sha256(_read_bytes(_product_hooks_src(product, products_dir)))})
     files.sort(key=lambda f: f["path"])
     return (json.dumps({"generated_by": "scripts/bundle_runtime.py",
-                        "products": list(products), "files": files},
+                        "products": list(products), "files": files,
+                        _bh().TABLE_KEY: dispatch_table(products, products_dir),
+                        CODEX_TABLE_KEY: codex_hooks_table(
+                            merged_hooks_doc(products, products_dir),
+                            dispatch_table(products, products_dir))},
                        indent=1, sort_keys=True) + "\n").encode("utf-8")
 
 
@@ -772,9 +943,16 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                                *tail.split("/"))
             if _write_if_changed(dst, data):
                 changed.append("runtime/hooks/%s/%s" % (product, tail))
+        if os.path.isfile(_product_hooks_src(product, products_dir)):
+            if _write_if_changed(_product_hooks_dst(product, runtime_dir),
+                                 _read_bytes(_product_hooks_src(product, products_dir))):
+                changed.append("runtime/hooks/%s/%s" % (product, "/".join(_bh().MIRROR_TAIL)))
     guard_dst = os.path.join(runtime_dir, "hooks", HOOK_GUARD_NAME)
     if _write_if_changed(guard_dst, _read_bytes(_hook_guard_src(scripts_dir))):
         changed.append("runtime/hooks/" + HOOK_GUARD_NAME)
+    dispatcher_dst = os.path.join(runtime_dir, "hooks", _bh().DISPATCHER_NAME)
+    if _write_if_changed(dispatcher_dst, _read_bytes(_dispatcher_src(scripts_dir))):
+        changed.append("runtime/hooks/" + _bh().DISPATCHER_NAME)
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if _write_if_changed(manifest_path,
                          _hooks_manifest_bytes(products, products_dir,
@@ -785,6 +963,9 @@ def generate_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
     if _write_if_changed(hooks_json_path,
                          _hooks_json_bytes(products, products_dir)):
         changed.append("hooks/" + HOOKS_JSON_NAME)
+    if _write_if_changed(os.path.join(bundle_dir, CURSOR_HOOKS_TAIL),
+                         _cursor_bytes(products, products_dir)):
+        changed.append(CURSOR_HOOKS_TAIL.replace(os.sep, "/"))
     return hook_counts, changed
 
 
@@ -842,6 +1023,24 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
                 problems.append("runtime/hooks/%s/%s: bundle/runtime copy "
                                 "does not match its products/ source"
                                 % (product, tail))
+        src = _product_hooks_src(product, products_dir)
+        if os.path.isfile(src):
+            dst = _product_hooks_dst(product, runtime_dir)
+            if not os.path.isfile(dst):
+                problems.append("runtime/hooks/%s/%s: missing from bundle/runtime"
+                                % (product, "/".join(_bh().MIRROR_TAIL)))
+            elif _read_bytes(src) != _read_bytes(dst):
+                problems.append("runtime/hooks/%s/%s: bundle/runtime copy does not "
+                                "match its products/ source"
+                                % (product, "/".join(_bh().MIRROR_TAIL)))
+    dispatcher_dst = os.path.join(runtime_dir, "hooks", _bh().DISPATCHER_NAME)
+    if not os.path.isfile(dispatcher_dst):
+        problems.append("runtime/hooks/%s: missing from bundle/runtime"
+                        % _bh().DISPATCHER_NAME)
+    elif _read_bytes(dispatcher_dst) != _read_bytes(_dispatcher_src(scripts_dir)):
+        problems.append("runtime/hooks/%s: bundle/runtime copy does not match "
+                        "scripts/%s" % (_bh().DISPATCHER_NAME,
+                                        _bh().DISPATCHER_NAME))
     manifest_path = os.path.join(runtime_dir, "hooks", HOOKS_MANIFEST_NAME)
     if not os.path.isfile(manifest_path):
         problems.append("runtime/hooks/%s: missing" % HOOKS_MANIFEST_NAME)
@@ -858,6 +1057,13 @@ def check_hooks(products=HOOK_PRODUCTS, products_dir=PRODUCTS_DIR,
         problems.append("hooks/%s: stale, does not match a fresh "
                         "generation from the products' own hooks.json"
                         % HOOKS_JSON_NAME)
+    cursor_path = os.path.join(bundle_dir, CURSOR_HOOKS_TAIL)
+    if not os.path.isfile(cursor_path):
+        problems.append("cursor-hooks/%s: missing" % PRODUCT_HOOKS_JSON_NAME)
+    elif _read_bytes(cursor_path) != _cursor_bytes(products, products_dir):
+        problems.append("cursor-hooks/%s: stale, does not match a fresh generation "
+                        "from CURSOR_WIRING and the products' own hooks.json"
+                        % PRODUCT_HOOKS_JSON_NAME)
     # DECISION 2026-09-30 (see HOOKS_JSON_NAME above): a file at the retired
     # name means the generator, or a bad merge, moved the hooks back to a
     # path Claude Code never loads, which ships a plugin with no hooks.
@@ -1424,7 +1630,8 @@ def main(argv=None):
             print("bundle_runtime: bundle/runtime matches scripts/ for all "
                   "%d closure file(s) and %d data file(s), bundle/codex-skills "
                   "matches bundle/skills, bundle/hooks/%s matches "
-                  "%d hook command(s) across %d product(s), and the optional "
+                  "%d hook handler(s) across %d product(s), dispatched by one "
+                  "command per event, and the optional "
                   "MCP mirror matches products/%s"
                   % (len(closure), len(compute_data_files(closure)),
                      HOOKS_JSON_NAME, total_hook_commands, len(HOOK_PRODUCTS),
@@ -1454,8 +1661,8 @@ def main(argv=None):
         print("bundle_runtime: no changes; bundle/runtime already matches "
               "scripts/ for %d closure file(s) and %d data file(s)"
               % (len(closure), len(compute_data_files(closure))))
-    print("bundle_runtime: bundle/hooks/%s carries %d hook "
-          "command(s) across %d product(s) (%s)"
+    print("bundle_runtime: bundle/hooks/%s dispatches %d hook "
+          "handler(s) across %d product(s) (%s), one command per event"
           % (HOOKS_JSON_NAME, sum(hook_counts.values()), len(hook_counts),
              ", ".join("%s=%d" % (p, n) for p, n in hook_counts.items())))
     return 0

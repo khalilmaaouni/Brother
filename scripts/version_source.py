@@ -65,6 +65,15 @@ def repo_root():
     return Path(__file__).resolve().parent.parent
 
 
+#: S12: what a release line may carry. X.Y.Z is a release. X.Y.Z-dev is a line IN DEVELOPMENT, which
+#: exists because every loop tool change on a line carrying the released number reads as runtime drift,
+#: and the 1.1.8 line hit exactly that. ONE pattern, used by the command line that accepts a version and
+#: by the documentation carrier that reads one back, so the two can never disagree about what a version
+#: is. Only -dev is a suffix: a source that accepts an arbitrary tail cannot tell a development line
+#: from a typo. The cut refuses a -dev version by its own rule (scripts/cut.py), so a development line
+#: cannot be cut; the cut writes the release over it.
+VERSION_SRC = r"[0-9]+\.[0-9]+\.[0-9]+(?:-dev)?"
+VERSION_RE = re.compile(r"^%s$" % VERSION_SRC)
 MARKETPLACE_REL = ".claude-plugin/marketplace.json"
 CURSOR_MARKETPLACE_REL = ".cursor-plugin/marketplace.json"
 
@@ -177,7 +186,7 @@ def umbrella_carriers(root):
         bundle_json_carrier("bundle/%s/%s" % (host, BUNDLE_MANIFEST_NAME))
 
     versioning_path = root / "docs" / "VERSIONING.md"
-    pattern = re.compile(r"Current version: ([0-9]+\.[0-9]+\.[0-9]+)\.")
+    pattern = re.compile(r"Current version: (%s)\." % VERSION_SRC)
 
     def get_versioning():
         if not versioning_path.is_file():
@@ -568,8 +577,8 @@ def main(argv=None):
     if args.write:
         if not args.version:
             parser.error("--write requires --version X.Y.Z")
-        if not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", args.version):
-            parser.error("--version must be X.Y.Z")
+        if not VERSION_RE.match(args.version):
+            parser.error("--version must be X.Y.Z or X.Y.Z-dev")
         return run_write(root, args.version)
 
     return run_check(root)

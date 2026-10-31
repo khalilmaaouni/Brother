@@ -1093,6 +1093,120 @@ class VersionAfterBump(unittest.TestCase):
         self.assertIn("not run", rows["virgin-gate"][1])
 
 
+class TheX01RowJudgesTheClaimedRows(unittest.TestCase):
+    """D1 and D2 (2026-10-29): the cut line claims the rows its kept units own. Before 2026-10-30 check_x01 read
+    every row, so four J1 rows owned by slipped work read NO-DATA and refused a cut the release decision passed.
+    Without a plan or without journey_rows every row is still judged (the frozen RDM1 harness pins that)."""
+
+    def tree(self, rows_j1, claims=None):
+        import hashlib, json, tempfile, shutil
+        root = tempfile.mkdtemp(prefix="x01-claimed-")
+        self.addCleanup(shutil.rmtree, root, True)
+        manifest = "{}\n"
+        want = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+        os.makedirs(os.path.join(root, "bundle", "runtime"))
+        with open(os.path.join(root, "bundle", "runtime", "RUNTIME-MANIFEST.json"), "w") as fh:
+            fh.write(manifest)
+        os.makedirs(os.path.join(root, "docs", "plan"))
+        for journey, rows in (("J1", rows_j1), ("J2", {"D.end-card-six-lines": "PASS"})):
+            with open(os.path.join(root, "docs", "plan", "JOURNEY-%s.json" % journey), "w") as fh:
+                json.dump({"journey": journey, "host": "macos", "clean_home": True, "identity": want,
+                           "candidate_identity": want, "claude_bin": [], "rows": rows}, fh)
+        if claims is not None:
+            with open(os.path.join(root, "docs", "plan", "BROTHER-1.1.9-WBS.json"), "w") as fh:
+                json.dump({"units": [], "journey_rows": claims}, fh)
+        return root
+
+    def test_an_unclaimed_nodata_row_does_not_refuse(self):
+        import cut_preflight as P
+        root = self.tree({"A.first": "PASS", "Z.slipped": "NO-DATA"},
+                         claims={"A.first": "J1", "D.end-card-six-lines": "J2"})
+        verdict, name, detail = P.check_x01(root)
+        self.assertEqual((verdict, name), (P.OK, "x01-macos"), detail)
+        self.assertIn("claims", detail)
+
+    def test_a_claimed_nodata_row_refuses(self):
+        import cut_preflight as P
+        root = self.tree({"A.first": "PASS", "Z.slipped": "NO-DATA"},
+                         claims={"A.first": "J1", "Z.slipped": "J1", "D.end-card-six-lines": "J2"})
+        verdict, name, detail = P.check_x01(root)
+        self.assertEqual(verdict, P.REFUSED, detail)
+        self.assertIn("Z.slipped", detail)
+
+    def test_a_claimed_row_the_record_lacks_refuses(self):
+        import cut_preflight as P
+        root = self.tree({"A.first": "PASS"}, claims={"A.first": "J1", "Q.never": "J1", "D.end-card-six-lines": "J2"})
+        verdict, name, detail = P.check_x01(root)
+        self.assertEqual(verdict, P.REFUSED, detail)
+        self.assertIn("Q.never", detail)
+
+    def test_a_plan_claiming_no_row_of_a_journey_refuses(self):
+        import cut_preflight as P
+        root = self.tree({"A.first": "PASS"}, claims={"D.end-card-six-lines": "J2"})
+        verdict, name, detail = P.check_x01(root)
+        self.assertEqual(verdict, P.REFUSED, detail)
+        self.assertIn("JOURNEY-J1.json", detail)
+
+    def test_no_plan_judges_every_row(self):
+        import cut_preflight as P
+        root = self.tree({"A.first": "PASS", "Z.slipped": "NO-DATA"})
+        verdict, name, detail = P.check_x01(root)
+        self.assertEqual(verdict, P.REFUSED, detail)
+        self.assertIn("Z.slipped", detail)
+
+
+class TheHandReMeasureIsTheOneMeasurement(unittest.TestCase):
+    """remeasure_scores derives a journey's score from its cells, two per row, after check_re_measure's own
+    validation; remeasure_journeys adds a claimed journey that has a walk record to X01's two."""
+
+    def tree(self, claims=None, cells=None):
+        import hashlib, json, tempfile, shutil
+        root = tempfile.mkdtemp(prefix="remeasure-one-")
+        self.addCleanup(shutil.rmtree, root, True)
+        manifest = "{}\n"
+        want = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+        os.makedirs(os.path.join(root, "bundle", "runtime"))
+        with open(os.path.join(root, "bundle", "runtime", "RUNTIME-MANIFEST.json"), "w") as fh:
+            fh.write(manifest)
+        os.makedirs(os.path.join(root, "docs", "plan"))
+        rows = {"J1": ["a", "b"], "J2": ["c"], "J4": ["d", "e", "f"]}
+        for journey, ids in rows.items():
+            with open(os.path.join(root, "docs", "plan", "JOURNEY-%s.json" % journey), "w") as fh:
+                json.dump({"journey": journey, "host": "macos", "clean_home": True, "identity": want,
+                           "candidate_identity": want, "claude_bin": [], "walked_by": "seat-jt0",
+                           "rows": {r: "PASS" for r in ids}}, fh)
+        if claims is not None:
+            with open(os.path.join(root, "docs", "plan", "BROTHER-1.1.9-WBS.json"), "w") as fh:
+                json.dump({"units": [], "journey_rows": claims}, fh)
+        if cells is None:
+            cells = {"%s/%s" % (j, r): {"score": 1, "evidence": "by hand"} for j, ids in rows.items() for r in ids}
+        with open(os.path.join(root, "docs", "plan", "REMEASURE-1.1.9.json"), "w") as fh:
+            json.dump({"candidate_identity": want, "seat": "seat-two", "cells": cells}, fh)
+        return root
+
+    def test_without_a_plan_x01s_two_journeys_are_re_measured(self):
+        import cut_preflight as P
+        root = self.tree()
+        self.assertEqual(P.remeasure_journeys(root), ["J1", "J2"])
+        scores, why = P.remeasure_scores(root, "1.1.9")
+        self.assertEqual(scores, {"J1": (2, 4), "J2": (1, 2)}, why)
+
+    def test_a_claimed_journey_with_a_record_joins_the_re_measure(self):
+        import cut_preflight as P
+        root = self.tree(claims={"a": "J1", "c": "J2", "d": "J4", "z": "J9"})
+        self.assertEqual(P.remeasure_journeys(root), ["J1", "J2", "J4"])
+        scores, why = P.remeasure_scores(root, "1.1.9")
+        self.assertEqual(scores.get("J4"), (3, 6), why)
+
+    def test_a_cell_above_two_refuses_the_whole_record(self):
+        import cut_preflight as P
+        cells = {"J1/a": {"score": 3, "evidence": "x"}, "J1/b": {"score": 2, "evidence": "x"},
+                 "J2/c": {"score": 2, "evidence": "x"}}
+        scores, why = P.remeasure_scores(self.tree(cells=cells), "1.1.9")
+        self.assertEqual(scores, {})
+        self.assertIn("not scored 0, 1 or 2", why)
+
+
 class TheNoCutCommitRow(unittest.TestCase):
     """CR1.a (measured on the 1.1.2 real cut): the release branch kept the
     cut's own two commits after a stopped push, the fix landed on top, and the
@@ -1372,6 +1486,19 @@ class ThePoolCopyIsUnderTheOneScratchRoot(_Scratch):
     # REQ-CS8-A01
     def test_a_pool_under_its_floor_is_refused_inside_make_copy(self):
         self.assertEqual(PP.DISK_FLOOR_GIB, 15)
+
+    def test_an_owner_named_floor_is_read_and_named_in_the_row(self):
+        """2026-10-30: BROTHER_DISK_FLOOR_GIB in the command's environment lowers or raises the floor; the row says so."""
+        with mock.patch.object(PP, "DISK_FLOOR_GIB", PP.disk_floor_gib({"BROTHER_DISK_FLOOR_GIB": "13"})):
+            verdict, name, detail = P.check_pool_floor(free=13.5)
+            self.assertEqual(("OK", "perturb-floor"), (verdict, name), detail)
+            self.assertIn("BROTHER_DISK_FLOOR_GIB=13", detail)
+            verdict, name, detail = P.check_pool_floor(free=12.9)
+            self.assertEqual("REFUSED", verdict, detail)
+            self.assertIn("13 GiB floor", detail)
+        verdict, name, detail = P.check_pool_floor(free=14.9)
+        self.assertEqual("REFUSED", verdict, detail)
+        self.assertNotIn("override", detail)
         dest = os.path.join(self.root, "copy0")
         with mock.patch.object(PP, "_git", side_effect=AssertionError("a copy was started")):
             with self.assertRaises(PP.CopyFailed) as ctx:

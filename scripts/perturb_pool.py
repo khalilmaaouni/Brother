@@ -43,7 +43,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: Written BESIDE the copy, never inside it: an untracked file inside would
 #: make the clone's own git status dirty, and a suite may look at that.
 MARKER_SUFFIX = ".made-by-perturb-pool"
-DISK_FLOOR_GIB = 15
+DEFAULT_DISK_FLOOR_GIB = 15
+
+
+def disk_floor_gib(env=None):
+    """The pool's disk floor in GiB: 15 by default, or BROTHER_DISK_FLOOR_GIB when the owner names another floor
+    explicitly in the command (2026-10-30, his words "Just work with 13GB": the override is read from the command's
+    environment so the transcript and the preflight's own row carry it). An integer from 1 to 999; anything else is
+    the default, and 0 is not accepted: a floor that can be switched off is no floor."""
+    raw = ((env if env is not None else os.environ).get("BROTHER_DISK_FLOOR_GIB") or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_DISK_FLOOR_GIB
+    return value if 1 <= value <= 999 else DEFAULT_DISK_FLOOR_GIB
+
+
+DISK_FLOOR_GIB = disk_floor_gib()
 FORBIDDEN_PATH_TEXT = "/tmp"
 
 

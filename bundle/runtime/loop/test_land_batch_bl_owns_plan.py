@@ -29,7 +29,11 @@ NEW2 = "scripts/loop/test_new_tool.py"
 U1 = {"id": UNIT, "sub_units": [SUB], "spec": "docs/spec-u1.md", "evidence": "", "state": "OPEN",
       "done_check": "python3 scripts/test_u1a.py", "owns": []}
 BL = {"id": "BL", "sub_units": [], "evidence": "BL base.", "state": "OPEN", "owns": [OLD]}
-FAIL_GATE = {"scripts/test_battery_registration.py": "import sys\nsys.exit(1)\n"}
+#: S2 (2026-10-25): the tree's gate is GREEN and the BUILD breaks it, so the row is red because of
+#: this build. A gate script committed permanently broken is red on the base too, which the landing
+#: now reads as BASE-RED and does not hold, so such a fixture would stop testing a gate refusal.
+GREEN_GATE = {"scripts/test_battery_registration.py": "import sys\nsys.exit(0)\n"}
+BREAK_GATE = {"path": "scripts/test_battery_registration.py", "new_file_content": "import sys\nsys.exit(1)\n"}
 
 
 def text(units):
@@ -202,7 +206,7 @@ class Landing(unittest.TestCase):
 
     # ---- a later refusal takes the owns entry back from the plan it was written to
     def test_a_gate_refusal_takes_the_launch_wbs_entry_back_byte_for_byte(self):
-        fx = self.fixture(tree_files=FAIL_GATE, edits=[{"path": NEW, "new_file_content": "print('tool')\n"}])
+        fx = self.fixture(tree_files=GREEN_GATE, edits=[{"path": NEW, "new_file_content": "print('tool')\n"}, BREAK_GATE])
         rc, out = fx.land()
         self.assert_every_plan_as_committed(fx, rc, out, LAUNCH, RUN)
 
@@ -214,7 +218,7 @@ class Landing(unittest.TestCase):
         self.assert_every_plan_as_committed(fx, rc, out, LAUNCH, RUN)
 
     def test_a_gate_refusal_of_two_new_files_takes_both_back(self):
-        fx = self.fixture(tree_files=FAIL_GATE, edits=[{"path": NEW, "new_file_content": "print('tool')\n"}, {"path": NEW2, "new_file_content": "print('t')\n"}])
+        fx = self.fixture(tree_files=GREEN_GATE, edits=[BREAK_GATE, {"path": NEW, "new_file_content": "print('tool')\n"}, {"path": NEW2, "new_file_content": "print('t')\n"}])
         rc, out = fx.land()
         self.assert_every_plan_as_committed(fx, rc, out, LAUNCH, RUN)
 

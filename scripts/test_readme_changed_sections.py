@@ -139,6 +139,16 @@ class Shapes(unittest.TestCase):
         text = "## What changed in 1.1.5\nfive\n## What changed in 1.1.4\nfour\n## Next\nafter\n"
         self.assertEqual(section(text, "1.1.4"), "four")
 
+    def test_a_tree_before_the_cut_owes_no_section_for_the_version_being_cut(self):
+        # the required_fast.sh row: no 1.1.8 note yet, so a README without a 1.1.8 section is whole
+        self._fs(["1.1.6.md", "1.1.7.md"], b"## What changed in 1.1.7\n## What changed in 1.1.6\n")
+        self.assertEqual(problems("releases", "README.md"), [])
+
+    def test_the_note_the_cut_writes_makes_its_section_owed(self):
+        # cut_v1.0.0.sh has written docs/releases/1.1.8.md: the same README now falls short
+        self._fs(["1.1.6.md", "1.1.7.md", "1.1.8.md"], b"## What changed in 1.1.7\n## What changed in 1.1.6\n")
+        self.assertEqual(problems("releases", "README.md"), ["no '## What changed in 1.1.8' section"])
+
     def test_a_readme_that_is_not_utf8_fails(self):
         self._fs(["1.1.4.md"], b"\xff\xfe## What changed in 1.1.4\n")
         with self.assertRaises(UnicodeDecodeError):

@@ -5,6 +5,7 @@
         "hooks": [
           {
             "type": "command",
+            "class": "advisory",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_sessionstart.py\""
           }
         ]
@@ -15,6 +16,7 @@
         "hooks": [
           {
             "type": "command",
+            "class": "advisory",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_telemetry.py\" outcomes-append"
           }
         ]
@@ -25,11 +27,13 @@
         "hooks": [
           {
             "type": "command",
+            "class": "advisory",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_autosave.py\" precompact",
             "timeout": 120
           },
           {
             "type": "command",
+            "class": "advisory",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_telemetry.py\" precompact-brief"
           }
         ]
@@ -41,6 +45,7 @@
         "hooks": [
           {
             "type": "command",
+            "class": "deny",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_authority_hook.py\""
           }
         ]
@@ -50,6 +55,7 @@
         "hooks": [
           {
             "type": "command",
+            "class": "deny",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_fence_hook.py\""
           }
         ]
@@ -59,6 +65,7 @@
         "hooks": [
           {
             "type": "command",
+            "class": "deny",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_bash_write_guard.py\""
           }
         ]
@@ -69,6 +76,7 @@
         "hooks": [
           {
             "type": "command",
+            "class": "advisory",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/tools/sbe_session_reconcile.py\""
           }
         ]

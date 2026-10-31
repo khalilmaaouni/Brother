@@ -1,0 +1,246 @@
+{
+ "J1": {
+  "rows": [
+   {
+    "atoms": [
+     "U01",
+     "U02",
+     "A07"
+    ],
+    "id": "A.first-screen-paths-exist",
+    "measured_by": "FRUN1.a, which makes the printed setup command absolute and runnable from a scratch folder; until then nothing here measures whether the first screen's paths exist"
+   },
+   {
+    "atoms": [
+     "U05",
+     "U07"
+    ],
+    "id": "D.no-internal-names",
+    "measured_by": "FRUN1.f, whose second requirement is that no session start line names an internal product; measured 2026-10-25 as still false, 3 occurrences in sbe_telemetry.py"
+   },
+   {
+    "atoms": [
+     "U08",
+     "U04"
+    ],
+    "id": "D.doctor-fixes-work",
+    "measured_by": "FRUN1.c and FRUN1.f, which build doctor's remediation from the setup helper and stop it naming a retired plugin"
+   },
+   {
+    "atoms": [
+     "U03",
+     "U07",
+     "W01"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_six_verbs_only.py"
+    ],
+    "id": "D.six-verbs-only",
+    "measured_by": "DOOR1, which stops the 48 moved command shims being generated so the skill list a stranger sees is the six verbs"
+   },
+   {
+    "atoms": [
+     "U02",
+     "V05"
+    ],
+    "id": "D.readme-claims-executed",
+    "measured_by": "README118, which ties every README claim to the one claims register with an open marker"
+   }
+  ],
+  "title": "install: a stranger installs Brother and reaches a first screen"
+ },
+ "J2": {
+  "rows": [
+   {
+    "atoms": [
+     "U01",
+     "W03"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "-c",
+     "import os,subprocess,sys\ncfg=os.environ.get('CLAUDE_CONFIG_DIR') or ''\nif not os.path.isdir(cfg): sys.exit('REFUSED: CLAUDE_CONFIG_DIR %r is not a directory, so no install can be walked' % cfg)\ntool=''\nfor base,_d,files in os.walk(cfg):\n    if 'bm_project.py' in files: tool=os.path.join(base,'bm_project.py'); break\nif not tool: sys.exit('REFUSED: no bm_project.py under the installed config, so the intake command a stranger is told to run is not installed at all')\nhome=os.environ.get('HOME') or ''\nwork=os.path.join(home,'journey-intake')\nos.makedirs(work,exist_ok=True)\nsubprocess.run(['git','init','-q','.'],cwd=work,capture_output=True,text=True)\nwith open(os.path.join(work,'mathlib.py'),'w') as fh: fh.write('def add(a, b):\\n    return a + b\\n')\nwith open(os.path.join(work,'test_mathlib.py'),'w') as fh: fh.write('import mathlib\\n\\ndef test_add():\\n    assert True\\n')\nr=subprocess.run([sys.executable,'-B',tool,'adopt','--ask','make the add function handle two strings','--out',os.path.join(work,'contract.json')],cwd=work,capture_output=True,text=True)\nsaid=(r.stdout+r.stderr).strip().splitlines()\nprint('the installed %s adopt exited %d: %s' % (os.path.basename(tool),r.returncode,said[-1][:150] if said else '(no output)'))\nsys.exit(0 if r.returncode==0 else 1)"
+    ],
+    "id": "A.adopt-exits-0",
+    "measures": "the documented intake command exits 0 on the INSTALLED plugin. FAIL on 1.1.7: it exits 2 with scripts/contract_check.py is not on disk beside this tool. FIRST1 owns the fix."
+   },
+   {
+    "atoms": [
+     "V02",
+     "V09"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "-c",
+     "import json,os,subprocess,sys\ncfg=os.environ.get('CLAUDE_CONFIG_DIR') or ''\nif not os.path.isdir(cfg): sys.exit('REFUSED: CLAUDE_CONFIG_DIR %r is not a directory, so no install can be walked' % cfg)\ntool=''\nfor base,_d,files in os.walk(cfg):\n    if 'bm_project.py' in files: tool=os.path.join(base,'bm_project.py'); break\nif not tool: sys.exit('REFUSED: no bm_project.py under the installed config, so no intake record can be read')\nhome=os.environ.get('HOME') or ''\nwork=os.path.join(home,'journey-unrun')\nos.makedirs(work,exist_ok=True)\nsubprocess.run(['git','init','-q','.'],cwd=work,capture_output=True,text=True)\nwith open(os.path.join(work,'mathlib.py'),'w') as fh: fh.write('def add(a, b):\\n    return a + b\\n')\nwith open(os.path.join(work,'test_mathlib.py'),'w') as fh: fh.write('import mathlib\\n\\ndef test_add():\\n    assert True\\n')\nout=os.path.join(work,'contract.json')\nsubprocess.run([sys.executable,'-B',tool,'adopt','--ask','make the add function handle two strings','--out',out],cwd=work,capture_output=True,text=True)\nif not os.path.isfile(out): sys.exit('REFUSED: intake left no record at %s, so there is nothing to judge' % out)\ntry:\n    with open(out,encoding='utf-8') as fh: rec=json.load(fh)\nexcept (OSError,ValueError) as exc: sys.exit('REFUSED: the intake record could not be read: %s' % exc)\ncommanded={c.get('id') for c in (rec.get('success_checks') or []) if isinstance(c,dict) and c.get('command')}\nif not commanded: sys.exit('REFUSED: the intake record declares no commanded check, so there is no claimed pass to judge; a repository with no checks must never read as a pass here')\nbad=[r for r in (rec.get('receipts') or []) if isinstance(r,dict) and r.get('id') in commanded and r.get('verdict')=='PASS' and str(r.get('ref','')).startswith('file:')]\nfor r in bad: print('PASS claimed for a check nothing ran: id=%s ref=%s' % (r.get('id'),r.get('ref')))\nprint('%d of %d commanded check(s) carry a PASS whose only evidence is the source range' % (len(bad),len(commanded)))\nsys.exit(1 if bad else 0)"
+    ],
+    "id": "C.no-pass-for-unrun-check",
+    "measures": "no commanded check carries a PASS whose only evidence is its own source range. FAIL on 2026-10-25 on this tree: intake writes verdict PASS for test_mathlib.py with ref file:test_mathlib.py:1-4 and runs nothing. FIRST1 owns the fix."
+   },
+   {
+    "atoms": [
+     "V01",
+     "V09"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_vacuous_not_pass.py"
+    ],
+    "id": "C.vacuous-single-unit-not-pass",
+    "measured_by": "PROOF1. A unit whose test is assert True must not read DONE PASS, which needs a whole run through the door. The zero model route needs an outcome contract the documented intake cannot produce on an install, which is this journey's own A.adopt-exits-0."
+   },
+   {
+    "atoms": [
+     "U06",
+     "U03"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_end_card.py"
+    ],
+    "id": "D.end-card-six-lines",
+    "measured_by": "CARD1. There is no end card without a run, and the run is blocked on the same contract as C.vacuous-single-unit-not-pass. Measured by hand on 1.1.7: 120 lines."
+   },
+   {
+    "atoms": [
+     "U03",
+     "U06"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_hook_cost.py"
+    ],
+    "id": "B.hook-cost-under-1.1.4",
+    "measured_by": "HD1. The 2026-10-23 re-measure's own method says only an interleaved pair under one load is a comparison (1.1.4 771 ms and 930 ms against 1.1.7 1,274 ms and 1,296 ms), so a single timed run here would be a number, not a measurement; the shipped hook_latency.py row reads NO-DATA until HD1 for the same reason."
+   }
+  ],
+  "title": "first goal: a stranger describes an outcome in plain words and gets honest proof"
+ },
+ "J4": {
+  "rows": [
+   {
+    "atoms": [
+     "V05"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_one_proof_source.py"
+    ],
+    "id": "C.one-proof-source",
+    "measured_by": "PC1. Judging one proof source needs two that could disagree, which needs a run and its receipt; blocked on the same contract as the J2 run rows."
+   },
+   {
+    "atoms": [
+     "W12",
+     "U04"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_accept_route.py",
+     "--row",
+     "accept"
+    ],
+    "id": "A.accept-recorded",
+    "measured_by": "ACC1. Measured 2026-10-25: 0 installed skills, commands or hooks name an accept route, so there is nothing to accept through. Counting those files is REFUSED as the measurement: it would go green on a mention, with no acceptance ever recorded."
+   },
+   {
+    "atoms": [
+     "W12",
+     "W06"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_accept_route.py",
+     "--row",
+     "reject"
+    ],
+    "id": "A.reject-pushes-nothing",
+    "measured_by": "ACC1. There is no reject route to exercise, so nothing here can observe whether a refusal pushes; an absent route must not read as a refusal that pushed nothing."
+   }
+  ],
+  "title": "review and accept: a person reads one honest verdict and can accept or refuse it"
+ },
+ "J5": {
+  "rows": [
+   {
+    "atoms": [
+     "W09",
+     "C03"
+    ],
+    "check": [
+     "python3",
+     "-B",
+     "-c",
+     "import json,os,subprocess,sys\nbad=[n for n in ('BROTHERMODE_VAULT_ROOT','BM_VAULT_ROOT','BROTHERMODE_VAULT') if os.environ.get(n)]\nif bad: sys.exit('REFUSED: %s set, so this would measure the maintainer vault, not a stranger one' % ', '.join(bad))\nhome=os.environ.get('HOME') or ''\nif not os.path.isdir(home): sys.exit('REFUSED: HOME %r is not a directory, so there is no fresh home to walk' % home)\nvault=os.path.join(home,'journey-vault')\nos.makedirs(vault,exist_ok=True)\ns=subprocess.run([sys.executable,'-B','products/brothermode/scripts/setup.py','--vault',vault,'--mode','plugin','--accept-notice'],capture_output=True,text=True)\nif s.returncode: sys.exit('REFUSED: setup exited %d, so nothing recorded a vault to compare: %s' % (s.returncode,(s.stdout+s.stderr).strip()[-200:]))\nr=subprocess.run([sys.executable,'-B','products/brothermode/tools/bm_vault.py','resolve'],capture_output=True,text=True)\ntry: d=json.loads(r.stdout)\nexcept ValueError: sys.exit('REFUSED: resolve printed no JSON, so the folder it reads is unknown: %r' % r.stdout[:200])\nroot=d.get('root')\nsame=bool(root) and os.path.realpath(root)==os.path.realpath(vault)\nprint('setup recorded %s; recall reads %s (%s)' % (vault,root,d.get('verdict')))\nsys.exit(0 if d.get('verdict')=='PASS' and same else 1)"
+    ],
+    "id": "A.setup-vault-is-recall-vault",
+    "measures": "setup.py records a vault folder and bm_vault.py resolve reads the same folder, with the vault variables unset. FAIL on 2026-10-25 on this tree: setup exits 0 writing $HOME/.brotherme/config.json while resolve reads $CLAUDE_CONFIG_DIR/bm_vault.json and answers NO-DATA, no vault root configured. VRT1 and VRT2 are the units that make it PASS."
+   },
+   {
+    "atoms": [
+     "C04"
+    ],
+    "id": "C.forget-removes-every-root",
+    "measured_by": "FOOT1H, which gives door.py a forget routed over every root docs/DATA.md lists, and decides the person-only route the yes is taken on. Until both exist this row is NO-DATA: a check written now would have to invent the root list it judges FOOT1H against, and an automated walker cannot spend a yes that FOOT1H exists to refuse it."
+   }
+  ],
+  "title": "memory: a stranger's notes land in one folder, and one word removes what Brother wrote"
+ },
+ "_note": [
+  "JT0's row set: one row per rubric cell of the 2026-10-18 first hour rubric, walked on a FRESH",
+  "INSTALL by scripts/journey/run_journey.py. A row declares the atom ids it answers for and, when a",
+  "real measurement exists, the argv that measures it.",
+  "A ROW WITH NO CHECK READS NO-DATA, NEVER PASS. Several J1 rows are made true and made measurable",
+  "by units that have not landed (DOOR1 for the six verb door, README118 for the claims register,",
+  "FRUN1 for the first screen's own paths and names). Pointing those rows at the nearest existing",
+  "tool would be worse than leaving them unmeasured: scripts/gen_door_table.py --check is a real flag",
+  "and it measures whether the door TABLE is fresh, which is not whether the door shows six verbs.",
+  "That substitution is the green-but-hollow class the delivery laws name, so each such row carries",
+  "measured_by instead, naming the unit that will bring its measurement with it.",
+  "J5's first row CARRIES A REAL MEASUREMENT, and it lives in the row because a row's only",
+  "measurement seam is an argv list and JT0.e changes one file. It REFUSES, rather than quietly",
+  "unsetting, when any of the three vault variables is inherited: measured 2026-10-25 on this",
+  "machine, where the owner's BROTHERMODE_VAULT makes resolve answer PASS on the owner's own vault,",
+  "so a row that merely ran resolve would read PASS here and FAIL for a stranger. A refusal exits",
+  "non zero, which reads FAIL and never PASS.",
+  "J5's second row stays unmeasured ON PURPOSE, and the reason is measured rather than assumed:",
+  "forget has no declared root list to check against (docs/DATA.md is absent, and door.py defines",
+  "neither forget nor data_roots, 0 occurrences of each on 2026-10-25), and the person-only yes it",
+  "will take does not exist yet either. Writing a check now would grade FOOT1H against a root list",
+  "this file invented, which is the same hollow class as pointing a row at the nearest real flag.",
+  "ATOM IDS COME FROM THE CROSSWALK, NEVER FROM THIS FILE'S IMAGINATION. The per journey sets are",
+  "BENCHMARK-CROSSWALK.md's own table (J2: U01, U03, U06, W03, E01, V01, V02, V09; J4: U04, U09, W06,",
+  "W12, V05; J5: W09, C03, C04) and each id's meaning is the 77 atom scorecard's own row. Which row",
+  "inside a journey carries which of its atoms is an ASSIGNMENT made here and checkable against those",
+  "two sources; it is not itself a measurement. J5's ids were wrong when first written (A07 and S04 are",
+  "in no register, only in one seat's log) and are corrected here.",
+  "J2 CARRIES TWO REAL CHECKS. A.adopt-exits-0 runs the INSTALLED bm_project.py, found BY NAME under",
+  "the installed config rather than at a hardcoded cache path, in a throwaway git repository shaped like",
+  "the README's toy one. Running the repository's own copy instead would read PASS and hide the shipped",
+  "defect: measured 2026-10-25, adopt exits 0 from this tree, where contract_check.py sits beside it,",
+  "and that adjacency is exactly what a plugin install does not reproduce.",
+  "C.no-pass-for-unrun-check reads the record intake wrote and fails when a commanded check carries a",
+  "PASS whose only evidence is a file: range, which is the source of the test rather than a run of it.",
+  "The receipt contract's own words are that a check carries the command that ran it and that command's",
+  "exit code, so a source range is not one. It REFUSES when the record declares no commanded check at",
+  "all, because a repository with no checks must never read as a pass here.",
+  "THE OTHER SIX ROWS ARE NO-DATA, each naming the unit that brings its measurement and the reason it",
+  "cannot be walked yet. Five of them need a whole run through the door, and the zero model route for",
+  "that (brother_run.py --plan with --contract, which its own help calls the route inside a coding",
+  "session where a nested headless model command cannot run) needs a contract the documented intake",
+  "cannot produce on an install, which is this journey's own A row. A.accept-recorded could be faked",
+  "by counting installed files that name an accept route (measured 2026-10-25: 0 in skills, commands",
+  "and hooks), and that count would go green the moment any skill mentioned the route while no",
+  "acceptance had ever been recorded, so it is refused as the hollow substitution this file warns about."
+ ]
+}

@@ -5972,6 +5972,16 @@ def cmd_record_result(argv):
 _STATUS_FLAGS = ("project", "json", "raw")
 
 
+def _last_run_line():
+    """PC1.c: the last run line, from bm_sessionstart.last_run_line, the ONE
+    function session start prints it from, so the two surfaces cannot
+    disagree. "" when there is none or the module will not load."""
+    try:
+        return _load("bm_sessionstart").last_run_line()
+    except Exception:  # sbe: allow-silent an optional line; status prints without it
+        return ""
+
+
 def cmd_status(argv):
     """One screen, read only: run id and state, the outcome and done
     definition, a unit count by status, the OPEN dispatch id for any unit
@@ -6051,6 +6061,9 @@ def cmd_status(argv):
                 cp.get("controller_id")))
     else:
         _out("last checkpoint: (none recorded)")
+    run_line = _last_run_line()
+    if run_line:
+        _out(run_line)
     return EXIT_OK
 
 

@@ -1123,6 +1123,144 @@ def neighbour_verdict(red_with_build, red_on_base):
     return "NO-DATA"
 
 
+def _raising_opener(*_a, **_k):
+    """An opener that always fails, so base_red_alert's unwritable path is exercised rather than argued about."""
+    raise OSError("the alert file cannot be written")
+
+
+def gate_row_verdict(red_with_build, red_on_base):
+    """REQ-S2A-01: a GATE ROW red with the build is the build's fault only when it was green on the base.
+    The gate row twin of neighbour_verdict, and deliberately a SEPARATE function: the neighbour rule holds
+    an INHERITED row, this one does not hold a BASE-RED row at all, so one function serving both would have
+    to carry the polarity in its caller and the caller is where that distinction gets lost.
+
+    BASE-RED when red on both: the row was already rotten, so it does not hold an unrelated landing and
+    raises one alert instead. RED when red with the build and green on the base: the build broke it, which
+    still refuses. NO-DATA when the base run could not be read, which HOLDS: an unknown base is the one
+    case where the permissive path must never be taken. Every branch is its own return line, so each
+    mutation target occurs once."""
+    if not isinstance(red_with_build, bool):
+        return "NO-DATA"
+    if red_with_build is False:
+        return "GREEN"
+    if red_on_base is None:
+        return "NO-DATA"
+    if not isinstance(red_on_base, bool):
+        return "NO-DATA"
+    if red_on_base is False:
+        return "RED"
+    if red_on_base is True:
+        return "BASE-RED"
+    return "NO-DATA"
+
+
+#: one line per (night, row), under a gitignored folder ON PURPOSE: an alert the landing's own stray path
+#: check could see would make the landing refuse itself for leaving it.
+BASE_RED_ALERTS = os.path.join(os.path.dirname(os.path.dirname(BIN)), ".sbe", "base-red-alerts.jsonl")
+
+
+def base_red_alert(name, date, path=BASE_RED_ALERTS, opener=None):
+    """REQ-S2A-03: record that a gate row was tolerated, ONCE for this row this night. True when the night
+    already carries this row's alert or this call wrote it; False when it could not be written.
+
+    FAIL DIRECTION, and it decides the caller's behaviour: False means the row HOLDS. Tolerating a red row
+    is only safe because it leaves a trace, so no trace means no permission. A name or date that is not a
+    non empty string is False for the same reason, never a silent pass."""
+    if not isinstance(name, str) or not name:
+        return False
+    if not isinstance(date, str) or not date:
+        return False
+    line = json.dumps({"date": date, "row": name}, sort_keys=True)
+    opener = opener or open
+    try:
+        if os.path.isfile(path):
+            with opener(path, "r") as fh:
+                for existing in fh:
+                    if existing.strip() == line:
+                        return True        # already alerted for this row tonight: once per night, not once per pass
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with opener(path, "a") as fh:
+            fh.write(line + "\n")
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def gate_row_outcome(name, red_on_base, date, build_fault="", alert=None):
+    """THE LANDING'S DECISION for one gate row that is red with the build, as a pure function:
+    ("refuse", word) | ("tolerate", word) | ("hold", word).
+
+    IT EXISTS AS A FUNCTION ON PURPOSE. This file's own recorded lesson is that its selftest covered
+    pure helpers and never main(), so eleven mutations to the bisect, both quarantine writers, the commit
+    scan gate and the push parity survived a green suite. The permissive decision this unit adds is the
+    last thing that should live only in main(), so it lives here and main() becomes a thin loop over it.
+
+    "tolerate" is the one permissive answer and it is reachable only when the row was red on the base AND
+    the alert was written: tolerating a red row is safe only because it leaves a trace, so a failed alert
+    degrades to "hold". Everything unreadable holds."""
+    alert = alert or base_red_alert
+    red, base_fault = red_on_base if isinstance(red_on_base, tuple) and len(red_on_base) == 2 else (None, "")
+    word = gate_row_verdict(True, red)
+    if word == "RED":
+        return "refuse", word
+    #: NO SEPARATE "word is not BASE-RED" GUARD HERE, ON PURPOSE. The signature test below holds every
+    #: one of those words already, because gate_base_red pairs every None verdict with an empty
+    #: signature, so a second guard for the same property would survive its own mutation and be
+    #: untested. This file's own lesson, applied: one defence, one test.
+    #: THE SAME RED, NOT ANY RED. Red on both is only an INHERITED red when it is the same failure. A base
+    #: that is red for defect X while this build broke the row with defect Y is a build that broke
+    #: something, and tolerating it because the row happened to be red already is the exact hole this
+    #: unit's own harness warns about. An empty signature on either side holds.
+    if not isinstance(build_fault, str) or not build_fault or base_fault != build_fault:
+        return "hold", "NO-DATA"
+    if not alert(name, date):
+        return "hold", "NO-DATA"        # no trace, no permission
+    return "tolerate", word
+
+
+def gate_base_red(tree, argv, runner, exists=os.path.isfile):
+    """(red, signature): True when this gate row is red in the base tree, False when green, None when it
+    could not be read, paired with the base run's own first failure so the caller can insist the base
+    failed the SAME way the build run did. Every None case carries an empty signature.
+    The tree travels through cwd, never through argv, the same way base_run_red carries it. The row's
+    REGENERATE step is deliberately not run here: the question is whether the row was already red before
+    the build, and a generator rerun in the base tree would answer a different one while writing files."""
+    if not isinstance(tree, str) or not tree:
+        return None, ""
+    if not isinstance(argv, (list, tuple)) or not argv:
+        return None, ""
+    if not all(isinstance(a, str) for a in argv):
+        return None, ""
+    if not callable(runner) or not callable(exists):
+        return None, ""
+    script = next((a for a in argv[1:] if a.endswith(".py") or a.endswith(".sh")), None)
+    if script is None or not exists(os.path.join(tree, script)):
+        return None, ""    # a row the base tree never had is not the build's fault
+    old = os.getcwd()
+    try:
+        os.chdir(tree)
+        r = runner(list(argv))
+        rc = r.returncode
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None, ""
+    finally:
+        os.chdir(old)
+    if isinstance(rc, bool) or not isinstance(rc, int):
+        return None, ""
+    #: AN INFRASTRUCTURE FAILURE IS NOT A RED ROW. boxed exits 125 when the sandbox refuses and sh exits
+    #: 124 when the group outlives its timeout, and either would otherwise read as "the row was already
+    #: red" and TOLERATE a build that really did break it. This is the fail open direction on the one
+    #: permissive path in the landing, so every one of these holds instead.
+    said = (getattr(r, "stdout", "") or "") + "\n" + (getattr(r, "stderr", "") or "")
+    if rc in (124, 125) or "SANDBOX REFUSED" in said or "NO-DATA" in said:
+        return None, ""
+    if rc == 0:
+        return False, ""
+    return True, first_failure(said)
+
+
 def base_tree(runner, env, tmp_root=None, rev="HEAD"):
     """rev's files (HEAD by default; the hub head for the driver's reconcile push) in a fresh temp dir, with
     GIT_INDEX_FILE and GIT_WORK_TREE set in a COPY of env so the computed paths travel through env and never
@@ -2442,6 +2580,55 @@ def _selftest_body():
                   and neighbour_verdict(True, None) == "NO-DATA" and neighbour_verdict(True, 0) == "NO-DATA"
                   and neighbour_verdict(True, 1) == "NO-DATA" and neighbour_verdict(True, "x") == "NO-DATA"
                   and neighbour_verdict(None, False) == "NO-DATA" and neighbour_verdict(False, None) != "RED"))
+    cases.append(("S2.a gate_row_verdict: red on both is BASE-RED; red with the build and green on the base stays RED; every unreadable base is NO-DATA and never BASE-RED",
+                  gate_row_verdict(True, True) == "BASE-RED" and gate_row_verdict(True, False) == "RED"
+                  and gate_row_verdict(True, None) == "NO-DATA" and gate_row_verdict(True, 0) == "NO-DATA"
+                  and gate_row_verdict(True, 1) == "NO-DATA" and gate_row_verdict(True, "x") == "NO-DATA"
+                  and gate_row_verdict(True, []) == "NO-DATA" and gate_row_verdict(True, {}) == "NO-DATA"
+                  and gate_row_verdict(None, True) == "NO-DATA" and gate_row_verdict(False, True) == "GREEN"))
+    cases.append(("S2.a base_red_alert writes one line per row per night, is idempotent on the second call, and is False when it cannot be written, because no trace means no permission",
+                  (lambda d: (base_red_alert("row-x", "2026-01-01", os.path.join(d, "a.jsonl")) is True
+                              and base_red_alert("row-x", "2026-01-01", os.path.join(d, "a.jsonl")) is True
+                              and sum(1 for _ in open(os.path.join(d, "a.jsonl"))) == 1
+                              and base_red_alert("row-y", "2026-01-01", os.path.join(d, "a.jsonl")) is True
+                              and sum(1 for _ in open(os.path.join(d, "a.jsonl"))) == 2
+                              and base_red_alert("row-x", "2026-01-02", os.path.join(d, "a.jsonl")) is True
+                              and sum(1 for _ in open(os.path.join(d, "a.jsonl"))) == 3
+                              and base_red_alert("", "2026-01-01", os.path.join(d, "a.jsonl")) is False
+                              and base_red_alert("row-x", "", os.path.join(d, "a.jsonl")) is False
+                              and base_red_alert("row-x", "2026-01-01", os.path.join(d, "a.jsonl"),
+                                                 opener=_raising_opener) is False))(tempfile.mkdtemp(prefix="s2-alert-"))))
+    yes = lambda n, d: True
+    cases.append(("S2.a gate_row_outcome is the DECISION and lives on the tested surface, not in main(): the SAME red on both tolerates, a build's own red refuses, every unreadable base holds, and a BASE-RED whose alert could not be written HOLDS because no trace means no permission",
+                  gate_row_outcome("r", (True, "sig"), "2026-01-01", "sig", alert=yes) == ("tolerate", "BASE-RED")
+                  and gate_row_outcome("r", (False, ""), "2026-01-01", "sig", alert=yes) == ("refuse", "RED")
+                  and gate_row_outcome("r", (None, ""), "2026-01-01", "sig", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", None, "2026-01-01", "sig", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", (0, ""), "2026-01-01", "sig", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", ("x", ""), "2026-01-01", "sig", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", (True, "sig"), "2026-01-01", "sig", alert=lambda n, d: False) == ("hold", "NO-DATA")))
+    cases.append(("S2.a A DIFFERENT RED IS NOT AN INHERITED RED: the base must have failed the SAME way as the build run, or the row holds, because a base red for one defect while the build broke the row with another is a build that broke something",
+                  gate_row_outcome("r", (True, "other"), "2026-01-01", "sig", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", (True, ""), "2026-01-01", "sig", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", (True, "sig"), "2026-01-01", "", alert=yes) == ("hold", "NO-DATA")
+                  and gate_row_outcome("r", (True, "sig"), "2026-01-01", None, alert=yes) == ("hold", "NO-DATA")))
+    def _ran(rc, out="", err=""):
+        return lambda a: type("R", (), {"returncode": rc, "stdout": out, "stderr": err})()
+    cases.append(("S2.a gate_base_red is NO-DATA for hostile input and for a row the base tree never had, never a green that would make the row BASE-RED",
+                  gate_base_red(None, ["python3", "x.py"], lambda a: None)[0] is None
+                  and gate_base_red("/tmp", None, lambda a: None)[0] is None
+                  and gate_base_red("/tmp", [], lambda a: None)[0] is None
+                  and gate_base_red("/tmp", ["python3", 5], lambda a: None)[0] is None
+                  and gate_base_red("/tmp", ["python3", "x.py"], "not callable")[0] is None
+                  and gate_base_red("/tmp", ["python3", "absent.py"], lambda a: None, exists=lambda p: False)[0] is None
+                  and gate_base_red("/tmp", ["python3", "x.py"], _ran(True), exists=lambda p: True)[0] is None))
+    cases.append(("S2.a AN INFRASTRUCTURE FAILURE IN THE BASE RUN IS NOT A RED ROW: a sandbox refusal (125), a timeout (124) and any SANDBOX REFUSED or NO-DATA marker all hold, because reading them as an inherited red would TOLERATE a build that really broke the row",
+                  gate_base_red("/tmp", ["python3", "x.py"], _ran(125), exists=lambda p: True)[0] is None
+                  and gate_base_red("/tmp", ["python3", "x.py"], _ran(124), exists=lambda p: True)[0] is None
+                  and gate_base_red("/tmp", ["python3", "x.py"], _ran(1, err="SANDBOX REFUSED: no profile"), exists=lambda p: True)[0] is None
+                  and gate_base_red("/tmp", ["python3", "x.py"], _ran(1, out="NO-DATA: nothing to read"), exists=lambda p: True)[0] is None
+                  and gate_base_red("/tmp", ["python3", "x.py"], _ran(0), exists=lambda p: True) == (False, "")
+                  and gate_base_red("/tmp", ["python3", "x.py"], _ran(1, out="FAIL: test_x (m.T)\nAssertionError: no"), exists=lambda p: True)[0] is True))
     cases.append(("H1.b gates_text refuses a red or held that is not a list of strings and never reads them as green",
                   gates_text([], []) == "green" and gates_text(None, []) == "NO-DATA" and gates_text([], None) == "NO-DATA"
                   and gates_text([], 5) == "NO-DATA" and gates_text([1], []) == "NO-DATA"))
@@ -2944,6 +3131,7 @@ def main():
               "removed %d created path(s) | log %s" % (exc, t, c, logp)); return 1
     held = []
     reds = []   # (test path, dotted, python, name): red WITH the build, judged against the base once the copy is gone
+    gate_reds = []   # S2.a: (gate name, argv): the same deferral for GATE ROWS, judged against the base below
     try:
         for name, cmd, regen, outputs in ordered:
             t0 = time.time(); argv = [sys.executable, "-B"] + cmd
@@ -2972,7 +3160,10 @@ def main():
                     record_gate(os.environ.get("BROTHER_RUN_DIR", ""), "landing." + name, 1, (time.time() - t0) * 1000); red.append(name); continue
                 r = boxed(argv, log, 2400, env, cwd=copy); note_check(checks, cmds, name, list(r.args), r.returncode)
             record_gate(os.environ.get("BROTHER_RUN_DIR", ""), "landing." + name, r.returncode, (time.time() - t0) * 1000)
-            if r.returncode: red.append(name); faults[name] = first_failure((r.stdout or "") + "\n" + (r.stderr or ""))
+            # S2.a: NOT red.append here any more. A gate row red with the build is judged against the base
+            # below, once the copy is gone, exactly as a red neighbour already is; only then is it known
+            # whether this build broke the row or merely inherited a row that was already rotten.
+            if r.returncode: gate_reds.append((name, list(argv))); faults[name] = first_failure((r.stdout or "") + "\n" + (r.stderr or ""))
         # G12 (L20, L21): the deploy's own freeze closure and tool parity on a scratch stage of this candidate; a refusal is
         # a red gate, so it takes the gates' refusal path below (revert, quarantine, diagnosis note, bisect)
         deploy_red, deploy_ran = deploy_gate(copy, attributed & changed_paths(), log, env)
@@ -3026,6 +3217,31 @@ def main():
             t, c = revert(attributed & changed_paths(), log)
             print("REFUSED: a base rerun changed the frozen copy the commit and push checks run from; nothing committed, "
                   "reverted %d tracked and removed %d created path(s); STATUS left unchanged | log %s" % (t, c, logp)); return 1
+    # S2.a: THE GATE ROWS' BASE JUDGEMENT. A row red both before and after this build reads BASE-RED: it does
+    # not hold an unrelated landing and it raises one alert for the night. A row the build broke stays RED and
+    # still refuses. A base that cannot be read, or an alert that cannot be written, HOLDS: this is the one
+    # permissive path in the landing, and it is permissive only while it leaves a trace.
+    # ITS OWN BASE TREE, never the frozen copy the neighbours reuse: a gate row can write where it runs, and the
+    # frozen copy is the tree the commit and push checks run from next. One extra checkout against the footprint
+    # law, taken deliberately, and dropped immediately.
+    if gate_reds:
+        gate_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        gate_base = base_tree(runner, env)
+        for name, argv in gate_reds:
+            #: THE SAME BUDGET THE BUILD RUN GOT (2400). A shorter one makes a slow row time out on the
+            #: base, which would have read as an inherited red and tolerated a build that broke it.
+            on_base = (None, "") if gate_base is None else gate_base_red(gate_base, argv, lambda a: boxed(a, log, 2400, env))
+            action, word = gate_row_outcome(name, on_base, gate_date, faults.get(name, ""))
+            if action == "refuse":
+                red.append(name)
+            elif action == "tolerate":
+                print("GATE    %s BASE-RED: red before this build and after it, so it holds nothing here; "
+                      "alerted once for %s in %s" % (name, gate_date, BASE_RED_ALERTS))
+                faults.pop(name, None)      # not this build's fault, so it never feeds the diagnosis or the bisect
+            else:
+                held.append((name, word))
+        if gate_base is not None:
+            drop_base_tree(gate_base)
     date = datetime.datetime.now().strftime("%Y-%m-%d"); closed = []; lines = {}
     for sub in landed:
         u = unit_of(sub, plan); line = evidence_line(sub, date, facts[sub][0], facts[sub][1], head)

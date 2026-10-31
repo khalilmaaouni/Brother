@@ -63,8 +63,10 @@ prompt). Kill by PID after printing the target.
   splitting the command across two calls, which is why this is written down.
   Skipping the regeneration entirely leaves `scripts/doctor.py` check 9 FAILing,
   and no test catches it.
-- Push policy: direct to main. Every gate (secret scan, dash scan, green
-  tests, command verification) stays mandatory.
+- Push policy (reconciled 2026-10-30 with the current integration owner): never direct to main from this
+  product checkout. Work lands by a branch from the release line (today `plan/1.1.9-line-2026-10-25`,
+  written by one coordinator session), through the whole gate and the push gate; see the root `CLAUDE.md`.
+  Every gate (secret scan, dash scan, green tests, command verification) stays mandatory.
 - Two-host law (founder order 2026-08-16, amended the same day when the
   target was constrained to GitHub or Bitbucket): every development,
   past and forward, works on GitHub AND Bitbucket Cloud by default.
@@ -81,11 +83,12 @@ prompt). Kill by PID after printing the target.
   azure-pipelines.yml stay in the tree as dormant and no Azure work is
   scheduled; the flip condition is the founder naming a client on Azure
   again.
-- Merge-to-main default (founder order 2026-08-15): every session merges
-  its finished work to main before it ends; worktree agent deltas are
-  folded by the orchestrator, re-gated on the committed tree, and pushed.
-  Work that cannot merge yet is NAMED in the session's handover pack close
-  report at the exact step it stopped, never left silently in a worktree.
+- Merge default (founder order 2026-08-15, reconciled 2026-10-30): every session's finished work reaches
+  the release line before it ends, by a branch the coordinator session lands through the gate; worktree
+  agent deltas are folded by that coordinator, re-gated on the committed tree, and pushed. Work that
+  cannot land yet is NAMED in the session's handover pack close report at the exact step it stopped,
+  never left silently in a worktree. The baton ceremony below still governs how a session opens,
+  resumes and closes with verification; only the destination of the merge moved to the release line.
 
 ## The baton ceremony, both halves (ratified 2026-08-11)
 

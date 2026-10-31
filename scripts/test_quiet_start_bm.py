@@ -82,17 +82,22 @@ def started_programs(env, first_run, reconcile=(0, ""), outputs=None):
     mod._load_bm_repo_scope = lambda: None
     out = io.StringIO()
     old_env, old_stdin = dict(os.environ), sys.stdin
-    try:
-        for name in mod.VERBOSE_SWITCHES:
-            os.environ.pop(name, None)
-        os.environ.update(env)
-        sys.stdin = io.StringIO("{}")
-        with contextlib.redirect_stdout(out):
-            code = mod.main()
-    finally:
-        os.environ.clear()
-        os.environ.update(old_env)
-        sys.stdin = old_stdin
+    # PC1.c: session start now prints the last run line from ~/.brother, so a quiet start is judged under an EMPTY
+    # HOME of its own. Under the machine's real HOME these cases would judge the runs this machine happens to have
+    # finished, not the product. A caller that names its own HOME in `env` keeps it.
+    with tempfile.TemporaryDirectory(prefix="quiet-start-home-") as empty_home:
+        try:
+            for name in mod.VERBOSE_SWITCHES:
+                os.environ.pop(name, None)
+            os.environ["HOME"] = empty_home
+            os.environ.update(env)
+            sys.stdin = io.StringIO("{}")
+            with contextlib.redirect_stdout(out):
+                code = mod.main()
+        finally:
+            os.environ.clear()
+            os.environ.update(old_env)
+            sys.stdin = old_stdin
     if code != 0:
         raise AssertionError("main() exited %r" % code)
     return seen, out.getvalue()

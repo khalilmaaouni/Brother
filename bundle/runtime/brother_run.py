@@ -617,20 +617,66 @@ def check_contract(path):
     return 0, record, []
 
 
+def _command_key(command):
+    """A command's IDENTITY: its tokens, with every token that names a path
+    collapsed through realpath, so `./t.py` and `sub/../t.py` are one command
+    and not two (REQ-FIRST1HA-02).
+
+    Pure, and it reads the filesystem only through os.path.realpath, which
+    answers for a path that does not exist too, so two runs give the same key
+    whatever is on disk (REQ-FIRST1HA-04). An unparseable command falls back
+    to its whitespace split rather than raising: a command nobody can lex is
+    still a command somebody wrote, and refusing here would turn a quoting
+    mistake into a crash."""
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError:
+        tokens = (command or "").split()
+    out = []
+    for tok in tokens:
+        out.append(os.path.realpath(tok) if os.sep in tok or tok.endswith(".py")
+                   else tok)
+    return tuple(out)
+
+
+def covers(done_check, command, declared=()):
+    """Does `done_check` run `command`? Exactly two ways say yes.
+
+    THE SAME COMMAND, compared through _command_key. Or a SUPERSET THE UNIT
+    DECLARED, named in its own `covers` list, which is the unit saying out loud
+    that its longer command runs the contract's shorter one.
+
+    WHY NOT A PREFIX, which is what this replaced (line 641 on the base,
+    `dc.startswith(command)`): `python3 -m pytest -q test_mathlib.py -k reject`
+    starts with `python3 -m pytest -q test_mathlib.py` and runs ONE selected
+    test, so a filter that selects a single vacuous case satisfied a contract
+    that asked for the whole file. Measured as V-main: the vacuous probe
+    printed DONE PASS=1. An addition that narrows what runs is not coverage,
+    and an addition that widens it is coverage only when somebody declares it,
+    because nothing here can tell the two apart from the text alone."""
+    if not command:
+        return False
+    key = _command_key(command)
+    if _command_key(done_check) == key:
+        return True
+    for d in (declared or ()):
+        if _command_key(d) == key:
+            return True
+    return False
+
+
 def unmet_contract_checks(contract, units):
     """A-prime amendment 2, the plan half: the ids of the contract's
     `success_checks` whose command no unit of the plan actually runs.
 
     A contract promises what would prove the outcome; a plan that never runs
-    those commands cannot deliver that proof, however green it goes. A check
-    counts as covered when its command IS a unit's done_check or is the START
-    of one, so a unit may add its own arguments or chain a second command
-    after it, and may not quietly substitute a different command for it.
+    those commands cannot deliver that proof, however green it goes. Coverage
+    is decided by `covers` above: the exact command, or a superset the unit
+    declared in its own `covers` list. Never a prefix.
 
     Empty list means the plan runs every check the contract promised.
     """
-    done_checks = [(u.get("done_check") or "").strip()
-                   for u in units if isinstance(u, dict)]
+    rows = [u for u in units if isinstance(u, dict)]
     missing = []
     for check in contract.get("success_checks") or []:
         if not isinstance(check, dict):
@@ -638,7 +684,8 @@ def unmet_contract_checks(contract, units):
         command = (check.get("command") or "").strip()
         if not command:
             continue
-        if not any(dc.startswith(command) for dc in done_checks):
+        if not any(covers((u.get("done_check") or "").strip(), command,
+                          u.get("covers") or ()) for u in rows):
             missing.append((check.get("id", "?"), command))
     return missing
 
@@ -4821,6 +4868,77 @@ def _check_without(cwd, unit_rev, dep_rev, files, command, runner=None,
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _self_revert_files(row):
+    """This unit's own NON TEST files, the set a self revert puts back.
+
+    Only the change is reverted and the unit's own tests are KEPT. Reverting
+    the test too would re-run a check that is not there, which reads as a
+    broken check rather than as a check that does not cover its change.
+
+    A test file is one whose own basename says so (a test_ prefix, or a _test
+    suffix before the extension) or one inside a directory called tests.
+    Nothing here opens the file: a name is all there is before the revert, and
+    a wrong guess in this direction KEEPS a file rather than reverting it,
+    which can only make the re-run harder to pass, never easier."""
+    files = row.get("files_changed_by_unit")
+    if not isinstance(files, list):
+        return []
+    kept = []
+    for raw in files:
+        path_str = str(raw)
+        parts = path_str.replace("\\", "/").split("/")
+        name = parts[-1]
+        stem = name[:-3] if name.endswith(".py") else name
+        if name.startswith("test_") or stem.endswith("_test"):
+            continue
+        if "tests" in parts[:-1]:
+            continue
+        kept.append(path_str)
+    return kept
+
+
+def _stamp_self_revert(row, revision, cwd, runner=None):
+    """One CHECK_WITHOUT_FIELD entry of kind "self": this row's own done_check
+    re-run with this row's own non test files put back to how they stood
+    before this row landed.
+
+    THE HOLE THIS CLOSES. The sibling below only ever asked whether a check
+    covers what it DEPENDS on, so a DONE row declaring no dependency was never
+    re-run at all and its check was never shown to exercise anything. That is
+    where the vacuous probe walked through: an assert True test over a comment
+    only diff read DONE PASS, and no rule above it had anything to read.
+
+    Re-uses _check_without rather than inventing a second way to re-run a
+    check at a revision, with this row's OWN revision in both positions, so
+    the files go back to revision^1.
+
+    exit_code None always carries a note saying why, and never reads as a
+    pass. NO COMMAND IS RUN when there is nothing to revert: a row whose only
+    change is a test file is noted and left at exit_code None, because a 0
+    there would read as a check that passes with its own change reverted."""
+    files = _self_revert_files(row)
+    command = str(row.get("done_check") or "").strip()
+    entry = {"unit": row.get("id"), "kind": receipt_door.SELF_REVERT_KIND,
+             "files": files, "revision": revision, "exit_code": None,
+             "stderr": "", "note": ""}
+    if not files:
+        entry["note"] = receipt_door.NOTHING_TO_REVERT
+        return entry
+    if not revision:
+        entry["note"] = "this unit's own integrated revision is not recorded"
+        return entry
+    if not command:
+        entry["note"] = "no done_check was recorded for this unit"
+        return entry
+    seen = {}
+    code, note = _check_without(cwd, revision, revision, files, command,
+                                runner, capture=seen)
+    entry["exit_code"] = code
+    entry["note"] = note
+    entry["stderr"] = seen.get("stderr", "")
+    return entry
+
+
 def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
                                 runner=None):
     """THE LAST SELF-CERTIFICATION HOLE THE CRITICS COULD NAME (EVAD run 4
@@ -4868,8 +4986,13 @@ def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
     the behaviour), and None with a `note` means the re-run could not be
     made. receipt_door.receipts_for
     reads exactly this and nothing else. Idempotent: a row already stamped
-    (a resumed run) is left alone; a row with no dependency gets nothing,
-    and reads exactly as it did before this existed."""
+    (a resumed run) is left alone.
+
+    AND ONE MORE ENTRY FOR EVERY DONE ROW (PROOF1.a), kind "self", from
+    _stamp_self_revert above: this row's own check re-run with this row's own
+    non test files reverted. Every DONE row now gets at least that one entry,
+    so a row with no dependency no longer gets nothing, which is the state
+    that let a check prove nothing and still read PASS."""
     with open(record_path, "r", encoding="utf-8") as fh:
         doc = json.load(fh)
     rows = doc.get("rows") or doc.get("units") or []
@@ -4885,7 +5008,11 @@ def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
     for row in rows:
         uid = row.get("id")
         deps = [str(d) for d in (row.get("depends_on") or [])]
-        if row.get("status") != "DONE" or not deps:
+        if row.get("status") != "DONE":
+            # EVERY DONE row is re-run, the rows with no depends_on included
+            # (PROOF1.a). The old condition also skipped a row with an empty
+            # depends_on, so a one unit task got no re-run at all and nothing
+            # showed its check exercised the work.
             continue
         if CHECK_WITHOUT_FIELD in row:
             continue
@@ -4939,6 +5066,24 @@ def _stamp_dependency_mutations(record_path, claims, cwd, log=None,
                             ", ".join(files),
                             "exited %d" % code if code is not None
                             else "%s, %s" % (NODATA, note)))
+        entries.append(_stamp_self_revert(row, unit_rev, cwd, runner))
+        if log is not None:
+            mine = entries[-1]
+            code = mine.get("exit_code")
+            own = ", ".join(mine.get("files") or [])
+            if not own:
+                # NOTHING WAS RE-RUN, so the line must not say it was. The
+                # sibling branch above draws the same distinction, and saying
+                # "re-run ... NO-DATA" here would report a run that never
+                # happened.
+                log.note("brother_run: %s's check was not re-run with its own "
+                         "change reverted: %s" % (uid, mine.get("note")))
+            else:
+                log.note("brother_run: %s's check re-run at %s with its OWN "
+                         "change to %s reverted: %s"
+                         % (uid, (unit_rev or "")[:12] or NODATA, own,
+                            "exited %d" % code if code is not None
+                            else "%s, %s" % (NODATA, mine.get("note"))))
         row[CHECK_WITHOUT_FIELD] = entries
         stamped[uid] = entries
         touched = True
@@ -6263,6 +6408,10 @@ def _main(argv=None):
                     help="the old silence: no progress line while a piece of "
                          "work runs, and no durations of earlier runs on the "
                          "intent screen. The report at the end is unchanged")
+    ap.add_argument("--full", action="store_true",
+                    help="print the full 19 row proof card at the end instead "
+                         "of the six line card (the card on disk is always "
+                         "the full one)")
     ap.add_argument("--runs-root",
                     help="where the run's Work document and claim store live "
                          "(under docs/plan/runs). In a checkout of the Brother "
@@ -6289,6 +6438,7 @@ def _main(argv=None):
                          "same refusal the merge would give later after "
                          "every worker had spent its attempts")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    run_started = time.time()   # the end card counts ledger rows from here
 
     if args.unfinished:
         return _unfinished_main(args)
@@ -7016,10 +7166,10 @@ def _main(argv=None):
     if fast_route_used:
         plan_source = "planner skipped: %s" % fast_reason
     elif fast_reason:
-        plan_source = ("exactly as the planning model wrote it (fast route "
-                       "not taken: %s)" % fast_reason)
+        plan_source = ("exactly as %s wrote it (fast route not taken: %s)"
+                       % (receipt_door.PLAN_AUTHOR, fast_reason))
     else:
-        plan_source = "exactly as the planning model wrote it"
+        plan_source = "exactly as %s wrote it" % receipt_door.PLAN_AUTHOR
     summary_blocks.append(
         "This is what this run is about to act on before anything is "
         "claimed or run, one line per piece of work, %s:\n\n%s"
@@ -7836,7 +7986,10 @@ def _main(argv=None):
         with open(os.path.join(card_dir, PROOF_CARD_JSON_FILENAME), "w",
                  encoding="utf-8") as fh:
             json.dump(card_fields, fh, indent=1, sort_keys=True)
-        print(card_text)
+        # CARD1.a: six lines unless --full asks for the 19 row card (the file
+        # above is always the full one). The parked pieces are `waiting`.
+        print(card_text if args.full else
+              proof_card.render_short(card_fields, waiting, since=run_started))
     except Exception as exc:  # noqa: BLE001, the card is best effort
         log.note("brother_run: the proof card could not be rendered for "
                 "%s (%s); the run's own exit code is unaffected"
@@ -7846,6 +7999,14 @@ def _main(argv=None):
     # line, appended to run.log and printed past the echo escape.
     result = format_result_line(conclusion)
     log.note(result)
+    # PC1H.b: one row in the run index, the moment the result line is in
+    # run.log (update_index reads it from there), so status, the controller and
+    # session start never seed or scan anything. Returns False rather than
+    # raising; a run whose row could not be written says so in its log and its
+    # exit code stays what the delivery decided.
+    if not proof_card.update_index(run_dir):
+        log.note("brother_run: the run index row could not be written for %s"
+                 % run_dir)
     _print_result_line(result)
     if receipt_path:
         print("brother_run: receipt: %s" % receipt_path)

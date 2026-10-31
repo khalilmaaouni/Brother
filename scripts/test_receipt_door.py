@@ -2299,8 +2299,14 @@ def _seed_two_unit_run(case, run_dir):
     claims_path = os.path.join(run_dir, "claims.json")
     claim, problem = claim_store.acquire(claims_path, "A", "workerA")
     case.assertTrue(claim, problem)
+    # A's first attempt FAILED, which is why the second one exists. This
+    # carried evidence={} until PROOF1.d, and that made the fixture model a
+    # state the engine must never produce: a unit in repair_history with no
+    # recorded failure anywhere, which is the defect PROOF1's REQ-PROOF1D-02
+    # names. The docstring above always said A was "repaired once then
+    # delivered"; now the record says so too.
     claim_store.release(claims_path, "A", "workerA", state="active",
-                        evidence={})
+                        evidence={"exit_code": 1})
     claim, problem = claim_store.acquire(claims_path, "A", "workerA")
     case.assertTrue(claim, problem)
     journal.append(run_dir, "attempt.traced",
@@ -3811,6 +3817,16 @@ def setUpModule():
     # then ends as NO_DATA at launch instead of reaching the real bridge.
     import shutil
     from unittest import mock
+    # PC1H.b: every finished run appends one row to <HOME>/.brother/runs-index.jsonl
+    # (proof_card.update_index), and the subprocesses this module launches inherit
+    # HOME. Pinned to a fresh temp directory for the whole module, before any
+    # subprocess is built, so a gate run never writes a test run into the owner's
+    # real index, where his status line would show it. Removed at module teardown.
+    _home = tempfile.mkdtemp(prefix="brother-test-home-")
+    unittest.addModuleCleanup(shutil.rmtree, _home, ignore_errors=True)
+    _pin_home = mock.patch.dict(os.environ, {"HOME": _home})
+    _pin_home.start()
+    unittest.addModuleCleanup(_pin_home.stop)
     import jev_decide
     import jev_seam
     root = tempfile.mkdtemp(prefix="brother-jev-seams-test-")
