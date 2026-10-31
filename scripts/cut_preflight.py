@@ -666,9 +666,12 @@ def check_pool_floor(root=None, free=None):
         return (NODATA, "perturb-floor", "free space is unreadable")
     if not perturb_pool.valid_reading(reading):
         return (NODATA, "perturb-floor", "the free reading is invalid")
-    if reading < perturb_pool.DISK_FLOOR_GIB:
-        return (REFUSED, "perturb-floor", "%.1f GiB free is under the %d GiB floor" % (reading, perturb_pool.DISK_FLOOR_GIB))
-    return (OK, "perturb-floor", "free space is at or above the %d GiB floor" % perturb_pool.DISK_FLOOR_GIB)
+    floor = perturb_pool.DISK_FLOOR_GIB
+    named = "" if floor == perturb_pool.DEFAULT_DISK_FLOOR_GIB else (
+        " (BROTHER_DISK_FLOOR_GIB=%d, the owner's override of the %d GiB default)" % (floor, perturb_pool.DEFAULT_DISK_FLOOR_GIB))
+    if reading < floor:
+        return (REFUSED, "perturb-floor", "%.1f GiB free is under the %d GiB floor%s" % (reading, floor, named))
+    return (OK, "perturb-floor", "free space is at or above the %d GiB floor%s" % (floor, named))
 
 
 #: FC1.a (2026-10-11): a NO-DATA row spares the expensive rows exactly as a
@@ -890,6 +893,216 @@ def check_version_after_bump(root, version, runner=None):
     return NODATA, VERSION_ROW, "the version rule exited %d: %s" % (proc.returncode, _last(proc))
 
 
+
+#: RDM1 (2026-10-29), the owner's cut gate AC2 of 2026-10-23: three rows that read a tree's records, never run a
+#: gate. Every unreadable or unknown input REFUSES; a record that does not exist yet REFUSES too, never passes.
+README_ROW = "readme-section"
+X01_ROW = "x01-macos"
+MEASURE_ROW = "hand-re-measure"
+JOURNEYS = ("J1", "J2")
+MANIFEST_REL = os.path.join("bundle", "runtime", "RUNTIME-MANIFEST.json")
+#: the first release each gate is asked of: the README section rule is the 1.1 line's (docs/releases/1.1.*.md), the
+#: journey records and the hand re-measure exist from 1.1.9.
+README_SINCE = (1, 1, 0)
+JOURNEY_SINCE = (1, 1, 9)
+
+
+def check_readme_section(root, version):
+    """RDM1.a: the README of `root` carries `## What changed in <version>`, by the rule of
+    scripts/test_readme_changed_sections.py (a heading inside a code fence or of a longer version does not
+    count). The 1.1.7 cut shipped without its section. A README that is missing or not UTF-8 refuses."""
+    _require_text(root, "root")
+    _require_text(version, "version")
+    try:
+        import test_readme_changed_sections as rule  # lazy: the rule lives in one place
+    except ImportError as exc:
+        return NODATA, README_ROW, "the README rule cannot be loaded (%s)" % exc
+    try:
+        text = rule.read_readme(os.path.join(root, "README.md"))
+    except (OSError, UnicodeDecodeError) as exc:
+        return REFUSED, README_ROW, "README.md cannot be read as UTF-8 text (%s)" % type(exc).__name__
+    if rule.missing_sections(text, [version]):
+        return REFUSED, README_ROW, "README.md has no '## What changed in %s' section" % version
+    return OK, README_ROW, "README.md carries the '## What changed in %s' section" % version
+
+
+def candidate_identity(root):
+    """The sha256 of root's bundle runtime manifest, the identity go_no_go_119.py and the journey walker bind a
+    record by; '' when it cannot be read."""
+    import hashlib
+    try:
+        with open(os.path.join(root, MANIFEST_REL), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _read_record(path):
+    """(dict, '') or (None, why): a JSON object, or the reason there is none."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except FileNotFoundError:
+        return None, "%s does not exist" % os.path.basename(path)
+    except (OSError, ValueError) as exc:    # UnicodeDecodeError is a ValueError
+        return None, "%s cannot be read (%s)" % (os.path.basename(path), type(exc).__name__)
+    if not isinstance(doc, dict):
+        return None, "%s is not a JSON object" % os.path.basename(path)
+    return doc, ""
+
+
+def claimed_rows(root):
+    """{journey: set of row ids} the release plan's journey_rows claims, or None when no plan carries that key.
+
+    D1 and D2 (2026-10-29, the rule go_no_go_119.row_journeys_fresh already applies): the cut line claims the rows
+    its kept units own, so a row a slipped unit owns is not judged. Without a readable plan or without the key the
+    answer is None and every row is judged: unknown closes the gate, it never opens it."""
+    try:
+        import release_window_clock_rows as clock
+        path = clock.release_plan_path(root)
+        if not path:
+            return None
+        with open(path, encoding="utf-8") as fh:
+            plan = json.load(fh)
+    except (ImportError, OSError, ValueError, TypeError):
+        return None
+    claims = plan.get("journey_rows") if isinstance(plan, dict) else None
+    if not isinstance(claims, dict):
+        return None
+    out = {}
+    for rid, journey in claims.items():
+        if isinstance(rid, str) and isinstance(journey, str):
+            out.setdefault(journey, set()).add(rid)
+    return out
+
+
+def _journey_problem(doc, journey, want, claimed=None):
+    """The first reason a macOS journey record cannot stand for the candidate `want`, or ''. With `claimed` (the
+    row ids the release claims for this journey) only those rows are judged, and a claimed row the record lacks
+    refuses; with None every row is judged."""
+    if doc.get("journey") != journey:
+        return "names journey %r" % (doc.get("journey"),)
+    if doc.get("host") != "macos":      # a missing or other host (ubuntu included) never stands in
+        return "host is %r, not 'macos'" % (doc.get("host"),)
+    if doc.get("identity") != want or doc.get("candidate_identity") != want:
+        return "is for another commit (identity %.12s, candidate %.12s, want %.12s)" % (
+            doc.get("identity"), doc.get("candidate_identity"), want)
+    if doc.get("clean_home") is not True:
+        return "does not claim a clean home"
+    bins = doc.get("claude_bin")
+    if not isinstance(bins, list):
+        return "carries no claude_bin list, so a .claude/bin in the walk's HOME is unknown"
+    if bins:
+        return "its HOME held a .claude/bin (%.80s)" % ", ".join(str(b) for b in bins)
+    rows = doc.get("rows")
+    if not isinstance(rows, dict) or not rows:
+        return "carries no rows"
+    if claimed is not None:
+        if not claimed:
+            return "is claimed for no row by the release plan, so nothing in it can pass X01"
+        missing = sorted(r for r in claimed if r not in rows)
+        if missing:
+            return "lacks claimed row(s): %.120s" % ", ".join(missing)
+        rows = {k: v for k, v in rows.items() if k in claimed}
+    bad = sorted(str(k) for k, v in rows.items() if v != "PASS")
+    if bad:
+        return "rows not PASS: %.120s" % ", ".join(bad)
+    return ""
+
+
+def check_x01(root):
+    """RDM1.b, the macOS half of X01: J1 and J2 on a clean macOS home, bound to the candidate being cut, every row
+    PASS, no .claude/bin. The Linux half is cut_driver's (ubuntu_x01_gate). One refusal names the first reason."""
+    _require_text(root, "root")
+    want = candidate_identity(root)
+    if not want:
+        return NODATA, X01_ROW, "%s cannot be read, so the candidate has no identity" % MANIFEST_REL
+    claims = claimed_rows(root)
+    for journey in JOURNEYS:
+        name = "JOURNEY-%s.json" % journey
+        doc, why = _read_record(os.path.join(root, "docs", "plan", name))
+        if doc is None:
+            return REFUSED, X01_ROW, why
+        problem = _journey_problem(doc, journey, want, None if claims is None else claims.get(journey, set()))
+        if problem:
+            return REFUSED, X01_ROW, "%s %s" % (name, problem)
+    judged = "every row" if claims is None else "the rows the release plan claims"
+    return OK, X01_ROW, "J1 and J2 are PASS on a clean macOS home for candidate %.12s (%s)" % (want, judged)
+
+
+def remeasure_journeys(root):
+    """The journeys the hand re-measure must score: J1 and J2 (X01's two) plus every journey the release plan
+    claims a row of and that has a record under docs/plan. The release publishes what it measured of what it
+    claims, so a claimed journey with a walk record is re-measured too; without a plan it is J1 and J2."""
+    out = list(JOURNEYS)
+    for journey in sorted(claimed_rows(root) or {}):
+        if journey not in out and os.path.isfile(os.path.join(root, "docs", "plan", "JOURNEY-%s.json" % journey)):
+            out.append(journey)
+    return out
+
+
+def remeasure_scores(root, version):
+    """({journey: (total, maximum)}, '') derived from the hand re-measure record after the exact validation
+    check_re_measure applies, or ({}, why) when it does not stand. THE ONE MEASUREMENT CONTRACT (2026-10-30): the
+    published rubric is cells of 0 to 2 per journey row, so a journey's score is the sum of its cells out of two per
+    row; this is the only derivation, read by cut_preflight and by go_no_go_119.row_claims_match_measured alike,
+    so valid evidence satisfies both and nothing else counts as a score."""
+    verdict, _name, detail = check_re_measure(root, version)
+    if verdict != OK:
+        return {}, detail
+    doc, _why = _read_record(os.path.join(root, "docs", "plan", "REMEASURE-%s.json" % version))
+    scores = {}
+    for journey in remeasure_journeys(root):
+        rec, _why = _read_record(os.path.join(root, "docs", "plan", "JOURNEY-%s.json" % journey))
+        rows = sorted(rec["rows"])
+        total = sum(doc["cells"]["%s/%s" % (journey, rid)]["score"] for rid in rows)
+        scores[journey] = (total, 2 * len(rows))
+    return scores, ""
+
+
+def check_re_measure(root, version):
+    """RDM1.c: docs/plan/REMEASURE-<version>.json for this candidate names a seat that is not the one that walked
+    the journeys, and scores every row of every re-measured journey (remeasure_journeys) with its evidence (score
+    0, 1 or 2, an int, never a bool)."""
+    _require_text(root, "root")
+    _require_text(version, "version")
+    want = candidate_identity(root)
+    if not want:
+        return NODATA, MEASURE_ROW, "%s cannot be read, so the candidate has no identity" % MANIFEST_REL
+    name = "REMEASURE-%s.json" % version
+    doc, why = _read_record(os.path.join(root, "docs", "plan", name))
+    if doc is None:
+        return REFUSED, MEASURE_ROW, why
+    if doc.get("candidate_identity") != want:
+        return REFUSED, MEASURE_ROW, "%s is for another candidate" % name
+    seat = doc.get("seat")
+    if not isinstance(seat, str) or not seat.strip():
+        return REFUSED, MEASURE_ROW, "%s names no seat" % name
+    cells = doc.get("cells")
+    if not isinstance(cells, dict):
+        return REFUSED, MEASURE_ROW, "%s carries no cells" % name
+    wanted = []
+    for journey in remeasure_journeys(root):
+        rec, why = _read_record(os.path.join(root, "docs", "plan", "JOURNEY-%s.json" % journey))
+        if rec is None or not isinstance(rec.get("rows"), dict) or not rec["rows"]:
+            return REFUSED, MEASURE_ROW, "the J%s record to re-measure cannot be read (%s)" % (journey[1:], why or "no rows")
+        walker = rec.get("walked_by")
+        if not isinstance(walker, str) or not walker.strip():
+            return REFUSED, MEASURE_ROW, "JOURNEY-%s.json names no walked_by, so the seat cannot be told apart" % journey
+        if walker.strip().lower() == seat.strip().lower():
+            return REFUSED, MEASURE_ROW, "seat %r walked the journeys and may not re-measure them" % seat
+        wanted.extend("%s/%s" % (journey, rid) for rid in sorted(rec["rows"]))
+    for cell in wanted:
+        entry = cells.get(cell)
+        score = entry.get("score") if isinstance(entry, dict) else None
+        evidence = entry.get("evidence") if isinstance(entry, dict) else None
+        if isinstance(score, bool) or not isinstance(score, int) or score not in (0, 1, 2):
+            return REFUSED, MEASURE_ROW, "cell %s is not scored 0, 1 or 2" % cell
+        if not isinstance(evidence, str) or not evidence.strip():
+            return REFUSED, MEASURE_ROW, "cell %s carries no evidence" % cell
+    return OK, MEASURE_ROW, "seat %r scored all %d cells of %s with evidence" % (
+        seat.strip(), len(wanted), " and ".join(remeasure_journeys(root)))
+
 NO_CUT_COMMIT_NAME = "no-cut-commit"
 
 
@@ -971,6 +1184,14 @@ def run_all(root, version, horizon_hours=DEFAULT_HORIZON_HOURS, remote=None,
         check_changelog_text(root, previous_cut_commit(root, version), runner),
         check_public_remote(root, version, remote, runner),
     ]
+    # RDM1: the README, X01 and re-measure rows are asked of the lines that have their records (a version that does
+    # not parse is asked all three: unknown BLOCKS, it is never skipped). Older lines carry no rows, not OK rows.
+    asked = version_tuple(version)
+    if asked is None or asked >= README_SINCE:
+        results.append(check_readme_section(root, version))
+    if asked is None or asked >= JOURNEY_SINCE:
+        results.append(check_x01(root))
+        results.append(check_re_measure(root, version))
     results.extend(check_machine_rows(root, runner, home))
     # CS8.b: the pool runs in step 2b of a full cut. A cheap-only preflight (the one a resumed cut asks, which skips 2b)
     # never uses the pool, so it never refuses a cut for the pool's disk.

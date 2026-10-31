@@ -155,7 +155,10 @@ def verdict(returncode, output):
     # slid past. Keeping only the NO-DATA lines, when any are present, is additive: the exit code still decides
     # ok, only the quoted reason widens.
     lines = [l.strip() for l in (output or "").splitlines()
-             if l.startswith(("Ran ", "OK", "FAILED", "ERROR", "selftest:", "PASS:", "FAIL:", "NO-DATA:", "GREEN:", "RED:")) or l.strip() in ("OK", "PASS", "FAIL")]
+             if l.startswith(("Ran ", "OK", "FAILED", "ERROR", "selftest:", "PASS:", "FAIL:", "NO-DATA:", "GREEN:", "RED:",
+                              #: a journey walk's row: the verdict word, spaces, the row id (2026-10-29: two units
+                              #: closed on walks with "no result line" quoted, which is a DONE with no evidence)
+                              "PASS  ", "FAIL  ", "NO-DATA  ")) or l.strip() in ("OK", "PASS", "FAIL")]
     nodata = [l for l in lines if l.startswith("NO-DATA:")]
     if nodata:
         lines = nodata
@@ -282,6 +285,28 @@ def preflight_refusal(base):
     return "the builder preflight refused (exit %d): %s" % (r.returncode, (said or ["no output"])[-1][:200])
 
 
+def harness_drift(unit):
+    """'' when every frozen harness the unit pins (harness_sha256: {path: sha256}) still has its pinned digest, else
+    the reason the unit must not close. Readiness finding c (2026-10-29): the pins were read by nothing at close, so a
+    harness edited to pass went green silently, which defeats the whole red first rule. A pin that is not a map is
+    unreadable and refuses; a pinned file that is missing refuses; NO-DATA is never a pass."""
+    import hashlib
+    pins = unit.get("harness_sha256") if isinstance(unit, dict) else None
+    if pins is None:
+        return ""
+    if not isinstance(pins, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in pins.items()):
+        return "its harness_sha256 pin is unreadable (not a map of path to digest)"
+    for path, want in sorted(pins.items()):
+        try:
+            with open(path, "rb") as fh:
+                got = hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            return "its frozen harness %s is missing, so the pin cannot be checked" % path
+        if got != want:
+            return "its frozen harness %s has drifted from its pin (HARN1): the harness, not the code, was changed" % path
+    return ""
+
+
 def unlisted_spec_subs(unit):
     """Sub unit ids the unit's own spec defines (`## <id>.N` headings) that its plan row neither lists in sub_units
     nor names anywhere else (a removal is recorded in the row's text, as L0's evidence records L0.3 and L0.4).
@@ -362,6 +387,10 @@ def main(argv=None):
         if uid not in closable(plan, landed_subs(plan)):
             print("%-5s not closable: a sub unit is unlanded, it is already DONE or RETIRED, or it has no done_check" % uid)
             continue
+        drift = harness_drift(unit)
+        if drift:
+            print("%-5s NOT CLOSED: %s" % (uid, drift))
+            continue
         forgot = unlisted_spec_subs(unit)
         if forgot:
             print("%-5s NOT CLOSED: its spec defines sub unit(s) the plan neither lists nor records as removed: %s"
@@ -385,17 +414,27 @@ def main(argv=None):
         # THE REASON, not only the mechanism: the done_check verbatim and the exit code the PROCESS really
         # returned, so a reader can re-run the exact command that justified this DONE instead of trusting it.
         because = "%s exit %d" % (cmd, r.returncode)
-        closed.append((uid, unit.get("state"), evidence_line(uid, stamp, cmd, quoted), because, quoted))
+        closed.append((uid, unit.get("state"), evidence_line(uid, stamp, cmd, quoted), because, quoted, cmd))
     # BY UNIT, UNDER A LOCK, FROM THE FRESH RECORD (finding 1, 2026-09-27). The plan copy above was read before a
     # done_check that can run for forty minutes; evidence built from it erased a receipt another writer committed
     # meanwhile. Each close is now a function applied to the unit RE-READ under the lock, and a unit that is already
     # DONE there, or no longer has every sub unit landed, is left exactly as the other writer left it.
-    done, gone = [], []
+    # THE done_check FIELD IS THE CHECK (reproduced 2026-10-30): a unit whose done_check changed while the old one ran
+    # is left open too. The command that passed is not the command the plan names now, so a DONE written over it
+    # would rest on a check nobody can re-run from the record; `moved` names those units so the log says why.
+    done, gone, moved = [], [], []
 
-    def close(uid, line, because):
+    def close(uid, line, because, ran):
         def apply(unit):
             if unit.get("state") == "DONE" or uid not in closable({"units": [unit]}, landed_subs({"units": [unit]})):
                 gone.append(uid)
+                return unit
+            now = unit.get("done_check")
+            if not isinstance(now, str) or now.strip() != ran:
+                moved.append(uid)
+                return unit
+            if harness_drift(unit):   # re-read under the lock: a harness edited while the check ran is a drift too
+                moved.append(uid)
                 return unit
             unit["state"] = "DONE"
             unit["state_at"] = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -404,10 +443,14 @@ def main(argv=None):
             return provenance.apply(unit, "close_unit.py", because=because)
         return apply
     if closed:
-        plan_store.update_units(PLAN, {uid: close(uid, line, because) for uid, _, line, because, _ in closed})
-    for uid, was, _, because, quoted in closed:
+        plan_store.update_units(PLAN, {uid: close(uid, line, because, ran) for uid, _, line, because, _, ran in closed})
+    for uid, was, _, because, quoted, _ran in closed:
         if uid in gone:
             print("%-5s NOT CLOSED: re-read under the lock, it is already DONE or a sub unit is no longer landed" % uid)
+            continue
+        if uid in moved:
+            print("%-5s NOT CLOSED: its done_check changed while the check ran, so the check that passed is not the "
+                  "check the plan names now; run the closer again" % uid)
             continue
         # The board is current state and the next writer overwrites it, so the TRANSITION also goes to the
         # append only journal, after the write it describes. Its verdict is deliberately not checked: journal()

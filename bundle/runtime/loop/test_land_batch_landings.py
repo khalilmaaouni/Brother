@@ -1086,7 +1086,11 @@ class Landings(unittest.TestCase):
     # writer appended under the plan lock while the gates ran, and the clean tree hid the loss
     def test_a_refused_landing_keeps_evidence_another_writer_appended_under_the_plan_lock(self):
         gate, start = self.outside(CONCURRENT_EVIDENCE_APPEND, gate_rc=1, said="registration red after a concurrent evidence append")
-        f = self.fixture(tree_files={"scripts/test_battery_registration.py": gate})
+        # S2 (2026-10-25): the tree's gate is GREEN and this build installs the failing one, so the row
+        # is red because of the build. A permanently broken gate script is red on the base too, which
+        # the landing reads as BASE-RED and does not hold.
+        f = self.fixture(tree_files={"scripts/test_battery_registration.py": GREEN})
+        f.edits({"edits": [{"path": "scripts/test_battery_registration.py", "new_file_content": gate}], "tests": []})
         start(f)
         rc, out = f.land()
         self.assertIn("registration red after a concurrent evidence append", open(max(glob.glob(os.path.join(
@@ -1099,7 +1103,9 @@ class Landings(unittest.TestCase):
         self.assertEqual(f.rev(BRANCH, cwd=f.hub), f.base, "nothing reached the remote")
 
     def test_a_refused_landing_with_no_other_writer_leaves_the_plan_as_committed(self):
-        f = self.fixture(tree_files={"scripts/test_battery_registration.py": "import sys\nprint('registration red')\nsys.exit(1)\n"})
+        f = self.fixture(tree_files={"scripts/test_battery_registration.py": GREEN})
+        f.edits({"edits": [{"path": "scripts/test_battery_registration.py",
+                            "new_file_content": "import sys\nprint('registration red')\nsys.exit(1)\n"}], "tests": []})
         rc, out = f.land()
         self.assertIn("REFUSED: nothing committed", out)
         self.assertNotEqual(rc, 0, out)

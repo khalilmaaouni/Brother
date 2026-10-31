@@ -48,6 +48,30 @@ def components():
 _TRACKED = None
 
 
+def release_plan_owned():
+    """Every file a unit of any BROTHER-<x.y.z>-WBS.json names in its owns or harness lists. A plan that cannot be
+    read contributes nothing (an unreadable plan never widens what is owned)."""
+    out = set()
+    for path in sorted(glob.glob("docs/plan/BROTHER-*-WBS.json")):
+        try:
+            doc = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        units = list(doc.get("units", [])) if isinstance(doc, dict) else []
+        # a unit the plan moved to the next release by decision keeps its files in the tree and owns them until
+        # that release's plan takes them (the plan's `moved` record; a slipped unit's files are NOT owned)
+        moved = (doc.get("moved") or {}).get("units", {}) if isinstance(doc, dict) else {}
+        units += [v for v in moved.values()] if isinstance(moved, dict) else []
+        for u in units:
+            if not isinstance(u, dict):
+                continue
+            for key in ("owns", "harness"):
+                for f in u.get(key) or []:
+                    if isinstance(f, str):
+                        out.add(f)
+    return out
+
+
 def tracked(path):
     global _TRACKED
     if _TRACKED is None:
@@ -81,7 +105,10 @@ def main():
 
     owns = set(unit.get("owns") or [])
     found = components()
-    unowned = [f for f in found if f not in owns]
+    # OTHER PLANS OWN LOOP FILES TOO (2026-10-30): a release plan's unit may own a loop file or pin a loop harness
+    # (the 1.1.9 plan's LOOP1 owns scripts/test_loop_delivery.py). BL's completeness still binds BL's own list
+    # (absent and uncommitted below read BL's owns alone); "unowned" means no unit of ANY plan names the file.
+    unowned = [f for f in found if f not in owns and f not in release_plan_owned()]
     uncommitted = [f for f in sorted(owns) if not tracked(f)]
     missing = [f for f in sorted(owns) if not os.path.isfile(f)]
 

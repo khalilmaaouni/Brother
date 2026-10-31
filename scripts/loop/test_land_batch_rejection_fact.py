@@ -132,8 +132,11 @@ class GatesAlone(Harness, unittest.TestCase):
 
     def test_a_gate_that_is_not_a_neighbour_names_its_own_failing_test(self):
         red = "print('FAIL: test_registered (m.T)')\nprint('AssertionError: suite not registered')\nraise SystemExit(1)\n"
-        f = self.fixture(tree_files={"scripts/test_battery_registration.py": red})
-        self.refused(f, {"edits": [{"path": "docs/landed-u1a.txt", "new_file_content": "landed\n"}], "tests": []})
+        # S2 (2026-10-25): GREEN in the tree, red installed by the build, so the row is this build's
+        # fault; a permanently broken gate script reads BASE-RED and holds nothing.
+        f = self.fixture(tree_files={"scripts/test_battery_registration.py": "import sys\nsys.exit(0)\n"})
+        self.refused(f, {"edits": [{"path": "docs/landed-u1a.txt", "new_file_content": "landed\n"},
+                                   {"path": "scripts/test_battery_registration.py", "new_file_content": red}], "tests": []})
         note = self.note(f)
         self.assertRegex(note, r"^LANDING REFUSAL 1 \(gates\) sig=[0-9a-f]{12}: ", note)
         self.assertIn("test_registered", note)

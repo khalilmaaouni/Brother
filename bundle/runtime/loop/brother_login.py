@@ -30,6 +30,7 @@ Test: python3 -B scripts/loop/test_brother_login.py (a fake claude and a fake re
 import errno
 import fcntl
 import hmac
+import json
 import math
 import os
 import pty
@@ -46,6 +47,7 @@ import struct
 import subprocess
 import sys
 import termios
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -178,6 +180,103 @@ def age_line(saved_at, now, lifetime_s, warn_s):
     if left < warn_s:
         return line + " Renew within %d days: run brother-login." % math.ceil(left / 86400)
     return line
+
+
+#: CUT1.d: ONE coordinator per login scope. RENEW_REUSE_S is how long a renewal answers every consumer that waited on
+#: the lock (the same actor twice included) without a second refresh; a choice, not a measurement, kept well under the
+#: shortest token lifetime it could cover.
+RENEW_REUSE_S = 60
+SCOPE_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+PARK_PROMPT = ("Brother's %s login cannot be renewed here (%s). Run brother-login (python3 scripts/loop/brother_login.py) "
+               "in Terminal; the run then resumes from its checkpoint.")
+#: the four places a sign in can fail, in the order a detail is matched against them; anything else is the provider
+AUTH_CLASSES = (("Keychain", re.compile(r"keychain|unlock", re.I)),
+                ("signing", re.compile(r"codesign|signing|code identity|reader", re.I)),
+                ("Brother approval", re.compile(r"brother-approve|approval|authenticator", re.I)))
+_SECRETISH = re.compile(r"sk-[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{32,}")
+
+
+def auth_class(detail):
+    """provider login, Keychain, signing or Brother approval: where a failed sign in failed, from its words."""
+    text = detail if isinstance(detail, str) else ""
+    for name, pattern in AUTH_CLASSES:
+        if pattern.search(text):
+            return name
+    return "provider login"
+
+
+def _scrub(text):
+    """A detail with anything shaped like a token or a code removed: none is ever written or printed."""
+    return _SECRETISH.sub("[removed]", text if isinstance(text, str) else repr(text))[:300]
+
+
+def _read_login_state(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}   # sbe: allow-silent missing or corrupt reads as no record: the refresher runs, nothing reads RENEWED
+
+
+def _write_login_state(path, data):
+    tmp = "%s.tmp-%d-%d" % (path, os.getpid(), threading.get_ident())
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def refresh_once(scope, refresher, state_dir, attempts=2, notify=None):
+    """(verdict, detail): RENEWED, PARKED, or the refresher's own failure. One file lock per scope under state_dir, so
+    any number of concurrent consumers cause one refresher call: a renewal younger than RENEW_REUSE_S answers every
+    later consumer without a second one. refresher() answers (verdict, detail): RENEWED, EXPIRED (cannot be renewed
+    here), or anything else for a failure worth trying again, up to `attempts` calls. EXPIRED writes one park record
+    (its class, never a token or a code) and calls notify(prompt) ONCE, naming brother-login; a parked scope still
+    asks the refresher on every call, reads PARKED without a new prompt while it stays EXPIRED, and a RENEWED answer
+    clears the park. A refresher that raises is a failure, never a renewal."""
+    if not isinstance(scope, str) or not SCOPE_RE.fullmatch(scope) or not callable(refresher) \
+            or not isinstance(state_dir, str) or not state_dir or isinstance(attempts, bool) \
+            or not isinstance(attempts, int) or attempts < 1:
+        return "FAIL", "refresh_once needs a scope name, a refresher, a state folder and attempts of 1 or more"
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        lock = open(os.path.join(state_dir, "login-%s.lock" % scope), "a")
+    except OSError as exc:
+        return "FAIL", "the login lock cannot be opened in %s (%s)" % (state_dir, type(exc).__name__)
+    path = os.path.join(state_dir, "login-%s.json" % scope)
+    with lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)   # released when the file closes
+        rec = _read_login_state(path)
+        now = CLOCK()
+        at = rec.get("at")
+        if rec.get("state") == "renewed" and isinstance(at, (int, float)) and not isinstance(at, bool) \
+                and 0 <= now - at < RENEW_REUSE_S:
+            return "RENEWED", "renewed %d s ago by another consumer of %s" % (now - at, scope)
+        verdict, detail = "FAIL", "the refresher never answered"
+        for _ in range(attempts):
+            try:
+                got = refresher()
+            except Exception as exc:   # sbe: allow-silent a raising refresher is a failure, named by its type only
+                got = ("FAIL", "the refresher raised %s" % type(exc).__name__)
+            if not (isinstance(got, (tuple, list)) and len(got) == 2 and isinstance(got[0], str)):
+                got = ("FAIL", "the refresher answered %r, not (verdict, detail)" % (type(got).__name__,))
+            verdict, detail = got[0], _scrub(got[1])
+            if verdict in ("RENEWED", "EXPIRED"):
+                break
+        try:
+            if verdict == "RENEWED":
+                _write_login_state(path, {"state": "renewed", "at": now})
+                return "RENEWED", detail
+            if verdict == "EXPIRED":
+                if rec.get("state") != "parked":
+                    cls = auth_class(detail)
+                    _write_login_state(path, {"state": "parked", "at": now, "class": cls, "detail": detail})
+                    if notify is not None:
+                        notify(PARK_PROMPT % (scope, cls))
+                return "PARKED", detail
+        except OSError as exc:
+            return "FAIL", "%s, and the login record could not be written (%s)" % (detail, type(exc).__name__)
+        return verdict, detail
 
 
 def with_login(scrubbed_env, value=None):

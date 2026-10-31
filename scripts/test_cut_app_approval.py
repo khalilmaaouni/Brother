@@ -24,6 +24,7 @@ refuses anything else. hub/main's copy of the pin is the scripted answer to
 Python 3.9, standard library only. No network. No em or en dashes.
 """
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -249,9 +250,28 @@ class CY1b1AppApproval(Base):
                          D.cut_command("/wt", RV, HEAD, "/b.md", ""))
         # the phase dispatcher hands the line to the cut phase
         seen[:] = []
+        # RDM1.b: the dispatcher first reads the Linux half of X01, so the worktree carries a manifest and
+        # the runner answers gh with a finished run whose J1 and J2 name that manifest, every row PASS.
+        manifest = b'{"fixture": "the candidate manifest"}\n'
+        ident = hashlib.sha256(manifest).hexdigest()
+        stamp = "-".join(["2026", "10", "29"]) + "T" + ":".join(["10", "00", "00"]) + ".1Z"
+        gh_log = "".join("prove\tJourney\t%s %s\n" % (stamp, ln) for j in ("J1", "J2") for ln in (
+            "=== %s ===" % j, "PASS     A.row   atom   ok", "identity candidate=%s installed=%s" % (ident, ident),
+            "%s exit 0" % j))
+        os.makedirs(os.path.join(self.scratch, "bundle", "runtime"))
+        with open(os.path.join(self.scratch, "bundle", "runtime", "RUNTIME-" + "MANIFEST.json"), "wb") as fh:
+            fh.write(manifest)
+
+        def gated(cmd, cwd, stream=False):
+            if "databaseId,status,createdAt" in " ".join(cmd):
+                return 0, json.dumps([{"databaseId": 7, "status": "completed", "createdAt": "t"}])
+            if cmd[1:4] == ["run", "view", "7"]:
+                return 0, gh_log
+            return drive(cmd, cwd, stream)
+
         state = {"tip": HEAD, "worktree": self.scratch}
         verdict, _, _ = D._run_phase("cut", state, self.root, RV, "/b.md",
-                                     drive, False, "hub", 1,
+                                     gated, False, "hub", 1,
                                      approval=line())
         self.assertEqual(verdict, "PASS")
         self.assertEqual(seen[0][-2:], ["--approval", line()])

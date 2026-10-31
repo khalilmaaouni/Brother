@@ -2,6 +2,10 @@
  "entry": "brother_run.py",
  "files": [
   {
+   "path": "accept_delivery.py",
+   "sha256": "60a78c7a940810b4ad4a97ea82e074ff451d2c91a3705ef6aa8de918ed578f4e"
+  },
+  {
    "path": "annotations_store.py",
    "sha256": "5f0e834dfc4b08dab3e96fa4fa61becb97d95baaccf1b916b3e74a8ab663eac5"
   },
@@ -23,7 +27,7 @@
   },
   {
    "path": "brother_run.py",
-   "sha256": "a6b2210664a0206166b6c595f37f97eaf316826dbac28326f0f4ec7c7ea39fd9"
+   "sha256": "7cd6eb363918c5f68e558396cc18654def2c196b4a2ff9c22639629fa6c6d8b7"
   },
   {
    "path": "brother_state.py",
@@ -107,7 +111,7 @@
   },
   {
    "path": "integrate.py",
-   "sha256": "322bae6ebac47b957e22d99bf4565e30c28370b3f5845ac691a402f5c6093a74"
+   "sha256": "20d2c51a2a824ff813a1f84507140eb0047b6c44e24f8fdeec4d9a84256bee50"
   },
   {
    "path": "jev_calibration.py",
@@ -274,16 +278,20 @@
    "sha256": "d55b0981b76b6bcb73acc617ed2be596429761143e2a2de09e96b6cd5b6e8cd3"
   },
   {
+   "path": "pattern_note.py",
+   "sha256": "465aecff29fa92d4de104b38639b7575c8ee03ca0b00d41caaa757f53aea8fc9"
+  },
+  {
    "path": "preflight_snapshot.py",
    "sha256": "5fa9917c7c65d01b83d6c29ed3013e6d9967849aa46283e624c75d0d56d05ac3"
   },
   {
    "path": "proof_card.py",
-   "sha256": "18fb77e7a904c53dadb3d8caeaa47d63b79fb502ec483519f653254add03c658"
+   "sha256": "b1eeb6add676fe6d173431eca7d8816f5262fb0819f2277be89f68dba9be0667"
   },
   {
    "path": "receipt_door.py",
-   "sha256": "1ce894d57d6f63a29a01cb9021d52c11363f1e8625d462972b1b5e9d8dec4f06"
+   "sha256": "3e49ca29cad3761a87f6a777384d38aef33cdd71f80d1a742007a20551399efc"
   },
   {
    "path": "resource_gate.py",
@@ -327,6 +335,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v1.0.17-3857-gd5599b20d",
- "source_revision": "d5599b20d1616342a581295f627ef8e94273c30e"
+ "source_describe": "v1.0.17-4224-g6882fd169-dirty",
+ "source_revision": "6882fd16941ce24c2a2ad3609b03c3b13dcfe8fb"
 }

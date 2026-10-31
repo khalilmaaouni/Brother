@@ -72,6 +72,74 @@ CARRIED_FIELDS = ("origin_record", "origin_stamp")
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
 EXPORT_TREE_RE = re.compile(r"^EXPORT-TREE: ([0-9a-f]{40})$", re.M)   # the one line cut_preflight and export_public print
 
+# CUT1.b: evidence is keyed by everything that decides its verdict: the candidate (a commit, or a row's export tree
+# id), the checker (the cut's own judging scripts as on disk), the policy (what must pass), the interpreter and the
+# environment. evidence_key is the ONE key function: the driver's phase entries and the rehearsal rows carry it.
+INPUT_FIELDS = ("candidate", "checker", "policy", "interpreter", "environment")
+CHECKER_FILES = ("scripts/cut.py", "scripts/cut_driver.py", "scripts/cut_ready.py", "scripts/cut_preflight.py",
+                 "scripts/cut_rehearsal.py", "scripts/export_public.py")
+POLICY_FILES = ("scripts/required_fast.sh", "docs/plan/APPROVER-KEY.json", "docs/plan/BROTHER-%s-WBS.json")
+ENV_VARS = ("HOME", "BROTHER_CUT_TEST", "BROTHER_CUT_EVIDENCE_DIR", "BROTHER_SCRATCH")
+ROW_INPUTS_FIELD = "inputs_key"   # optional on a row: a row written before CUT1 has none and keeps its tree key rule
+
+
+def evidence_key(inputs):
+    """The sha256 of the named inputs, or None when they are unknown: not a dict, no candidate, a field outside
+    INPUT_FIELDS, or a value that is not non empty text. None is never a key, so it never matches anything."""
+    if not isinstance(inputs, dict) or not inputs.get("candidate") or set(inputs) - set(INPUT_FIELDS):
+        return None
+    if not all(_is_str(v) and v for v in inputs.values()):
+        return None
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def input_changes(recorded, current):
+    """The names of the inputs that differ between two identities (present on one side only counts)."""
+    a = recorded if isinstance(recorded, dict) else {}
+    b = current if isinstance(current, dict) else {}
+    return [f for f in INPUT_FIELDS if a.get(f) != b.get(f)]
+
+
+def _files_digest(root, rels):
+    """sha256 over each file's path and bytes; a missing or unreadable file contributes its name and 'absent'."""
+    h = hashlib.sha256()
+    for rel in rels:
+        h.update(rel.encode("utf-8") + b"\0")
+        try:
+            with open(os.path.join(root, rel), "rb") as fh:
+                h.update(hashlib.sha256(fh.read()).hexdigest().encode("ascii"))
+        except OSError:
+            h.update(b"absent")
+    return h.hexdigest()
+
+
+def environment_identity(env=None):
+    """The host and the variables that redirect where a cut reads or writes. PATH and the like are left out on
+    purpose: a terminal and an app session differ there and judge the same tree the same way."""
+    import platform
+    env = os.environ if env is None else env
+    return json.dumps({"host": "%s %s" % (platform.system(), platform.machine()),
+                       "vars": dict((k, env.get(k, "")) for k in ENV_VARS)}, sort_keys=True)
+
+
+def interpreter_identity():
+    return "%s %s" % (sys.executable, _interpreter())
+
+
+def inputs_identity(root, candidate, version, env=None):
+    """The driver's inputs for one candidate commit, every field filled, so a 40 hex candidate always has a key."""
+    return {"candidate": candidate,
+            "checker": _files_digest(root, CHECKER_FILES),
+            "policy": _files_digest(root, [p % version if "%s" in p else p for p in POLICY_FILES]),
+            "interpreter": interpreter_identity(), "environment": environment_identity(env)}
+
+
+def row_inputs_key(export_tree_id, env=None):
+    """The key a rehearsal row carries: its export tree id is its candidate (a cut's bump commits move the commit,
+    not the export), with the interpreter and the environment beside it."""
+    return evidence_key({"candidate": export_tree_id, "interpreter": interpreter_identity(),
+                         "environment": environment_identity(env)})
+
 
 class RehearsalRefused(RuntimeError):
     """A rehearsal that cannot run or cannot be recorded; main prints it and exits 2."""
@@ -299,12 +367,14 @@ def validate_row(row):
     """'' when `row` is a whole row (exactly ROW_FIELDS, each of its type), else the first broken rule. Never raises."""
     if not isinstance(row, dict):
         return "a row is not an object"
-    extra = set(row) - set(ROW_FIELDS) - set(CARRIED_FIELDS)
+    extra = set(row) - set(ROW_FIELDS) - set(CARRIED_FIELDS) - {ROW_INPUTS_FIELD}
     if extra or not set(ROW_FIELDS) <= set(row):
         return "a row has the fields %s, not %s" % (", ".join(sorted(str(k) for k in row)), ", ".join(ROW_FIELDS))
     for field in CARRIED_FIELDS:
         if field in row and (not _is_str(row[field]) or not row[field]):
             return "the %s of row %s is not a non empty string" % (field, row.get("row"))
+    if ROW_INPUTS_FIELD in row and (not _is_str(row[ROW_INPUTS_FIELD]) or not HEX64_RE.fullmatch(row[ROW_INPUTS_FIELD])):
+        return "the %s of row %s is not 64 hex" % (ROW_INPUTS_FIELD, row.get("row"))
     if not _is_str(row["row"]) or row["row"] not in ROW_NAMES:
         return "row %r is not one of %s" % (row["row"], ", ".join(ROW_NAMES))
     if not isinstance(row["argv"], list) or not row["argv"] or not all(_is_str(a) for a in row["argv"]):
@@ -1101,6 +1171,16 @@ def _carried_age_problem(row_name, last, origin, now_s):
     return ""
 
 
+def row_inputs_problem(last, key):
+    """'' unless `last` carries an inputs key (CUT1.b) that is not the one this interpreter and environment give its
+    tree key now: a row measured under another interpreter or another redirected home is not this run's evidence."""
+    if ROW_INPUTS_FIELD not in last:
+        return ""
+    if last[ROW_INPUTS_FIELD] != row_inputs_key(key):
+        return "the %s row was measured under another interpreter or environment" % last.get("row")
+    return ""
+
+
 def reusable_row(record, row, key, home, now=None):
     """(row, '') only when `record` is a READY record whose LAST row named `row` with home `home` carries exactly
     `key`, verdict PASS and a log still hashing to its log_sha256, and is not from the future or older than
@@ -1145,6 +1225,9 @@ def reusable_row(record, row, key, home, now=None):
         return None, "the %s row measured key %s, not %s" % (row, last["key"][:12], key[:12])
     if last["verdict"] != "PASS":
         return None, "the %s row said %s, not PASS" % (row, last["verdict"])
+    why = row_inputs_problem(last, key)
+    if why:
+        return None, why
     origin, why = row_origin_stamp(last)
     if why:
         return None, why
@@ -1247,6 +1330,9 @@ def reusable_check_row(version, row, key, home, directory="", now=None):
             rec["_name"], rec["finished_at"], MAX_AGE_HOURS)
     if last["verdict"] != "PASS":
         return None, "the newest %s row said %s, not PASS" % (row, last["verdict"])
+    why = row_inputs_problem(last, key)
+    if why:
+        return None, why
     try:
         log_sha = _sha256_file(last["log_path"])
     except OSError as exc:

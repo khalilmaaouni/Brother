@@ -46,6 +46,48 @@ Brother connects scoped execution, verification, delivery evidence, and local me
 
 **Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
 
+## What changed in 1.1.9
+
+1.1.9 is a recovery release for the cut process, with a faster hook dispatcher and a measured account of what a fresh install can do.
+
+The cut records each attempt outside the candidate and can resume from the failed phase. Reuse requires matching inputs; an unknown input never counts as a match. Approval is checked early and spent once when the candidate is ready. One coordinator holds the lock while refreshing a login. If renewal cannot complete, the attempt parks. Tests: `python3 -B scripts/test_cut_resume.py`, 14 cases OK on both interpreters. Both rehearsals ran on the real host and are recorded in `docs/plan/CUT-REHEARSAL-1.1.9.json`: the cold rehearsal of the cut took 7781 seconds (preflight 1015, check 6766); the failure and resume rehearsal failed late after the same expensive phases (6996 seconds), and its resume reused the preflight and the check and repeated no expensive execution. The host had 12.87 GiB free, under the 15 GiB default floor, and the rehearsal ran with the floor named at 12 GiB in the command; the record says so.
+
+If a tag push fails after the tag reaches the remote, recovery checks the exact commit reported by this export. It does not adopt a foreign tag or create the tag twice. A publish record that cannot be written returns FAIL. Tests: `python3 -B scripts/test_cut.py`, 205 tests OK; the cut mutation sweep left no survivors among 11 mutations.
+
+One shell tool event now starts one hook dispatcher process, down from six. On a fresh install, the independent seat's probe read one process per event with a median of 64 ms, against the 312 ms measured for v1.1.4. The first goal journey's hook cost row reads PASS. Reproduce the journey with `BROTHER_JOURNEY_WALKED_BY=<seat> python3 -B scripts/journey/run_journey.py --fresh-install --journey J2`.
+
+Fresh install checks cover the install, first goal, and review and accept journeys. The first goal has five PASS rows; review and accept has three. Install has one PASS row and four NO-DATA rows. The independent scores are install 2 of 10, first goal 10 of 10, and review and accept 6 of 6. These are scores for the named checks, not a rating of the whole product. `python3 scripts/go_no_go_119.py` reads eight release rows and reports the measured scores. Its required work row reads the plan; an empty required list needs a recorded decision.
+
+Repository sessions have short notes at the root, loop, and bundle. The root imports the repository instructions once. Export checks identify the public tree from its own project record. Tests: `python3 -B scripts/test_notes.py`, 9 tests OK. Work moved to a later release keeps its frozen check owned through the plan's move record; verify with `python3 -B scripts/test_bl_owns_complete.py`.
+
+The release target is `v1.1.9`, with manifests reading `1.1.9`. The tag ships an export manifest at `docs/releases/1.1.9.export-manifest.txt`, naming every exported file with its sha256. After publication, a fresh clone can verify the exported files without private access or a network connection: check out `v1.1.9`, then run `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.9`. PASS means the named files match their recorded hashes; missing evidence reads NO-DATA.
+
+Not verified in this release: four install checks remain NO-DATA, covering the first screen's paths, internal names, repair through the doctor, and execution of the README's claims. They are recorded as deferred work. The loop token lane reports RENEWED when the login holder answers, not when the provider accepts the login; a seat whose login fails parks. This does not establish automatic renewal. The named checks do not prove that an arbitrary task can finish unattended, that every feature is accessible, or that every branch of the code is covered.
+
+## What changed in 1.1.8
+
+1.1.8 is the release where every delivery report names what was checked and what that proves, and where the Vault refuses to let an author approve their own candidate.
+
+Every delivery report ends with one receipt sentence per unit, the acceptance screen line and, where a risk class was named, the release screen line. It also carries the scoping sentence: `exit 0 means no check failed. It does not mean everything is proven: only the checks named above ran, and a check nobody wrote cannot fail.` Tests: `python3 scripts/test_receipt_door.py`, at 252 OK.
+
+Each wait during a run prints one governor line when it starts and one when it ends. It does not print another line on every poll, so the wait's start and finish are reported without repeating the same notice while it continues. Tests: `python3 scripts/test_brother_run.py`, at 286 OK.
+
+Before an edit of a file the Vault knows, the recall hook prints `Recalled N lesson(s) from the Vault for <file>`. A genuine no-match prints nothing, and the hook writes nothing before consent. Tests: `python3 products/brothermode/tools/test_vault_recall_hook.py`, at 83 OK.
+
+Vault promotion requires a separate approver. An author cannot approve the same candidate, and the rule is on by default: `SEPARATION_OF_DUTIES_ENFORCED` is `True`. Turning that flag off makes the tests for refusing the same author and approver fail, including the case where no enforcement argument is supplied. Tests: `python3 products/brothermode/tools/test_bm_vault_lifecycle.py`, at 42 OK.
+
+The promote command and the approval pane apply the same rule. The refusal of an author's own approval is checked through both paths. Tests: `python3 products/brothermode/tools/test_bm_vault_promotions.py`, at 27 OK, and `python3 products/brothermode/tools/test_bm_vault_pane.py`, at 12 OK.
+
+The 15 legacy command shims remain in this cut, per decision D2.
+
+The public cut is tagged `v1.1.8`, and its manifests read `1.1.8`. The tag ships an export manifest at `docs/releases/1.1.8.export-manifest.txt`, naming 4663 exported files with a sha256 for each. Every file it names ships in the tag. Files under `docs/releases/` are outside the digest, because the release note carrying the digest cannot also be hashed by it.
+
+A fresh clone can check the exported tree with no private access and no network. After `git checkout v1.1.8`, run `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.8`. It prints PASS when every named file matches its recorded hash, FAIL with each file that does not, and NO-DATA when the manifest or digest is missing. The source revision in the release note belongs to the private hub and cannot be resolved from the public clone; the public tag and manifest digest are the checkable claims.
+
+The release note's file checks were measured by breaking each listed file's functions, running the named suite and requiring it to fail, then restoring the file and checking its hash byte for byte. Where a claim's own suite did not catch a broken file, the table names the suite that did. Re-run the table with `python3 scripts/release_note_perturb.py --version 1.1.8`.
+
+Not verified in this release: the file checks do not prove that every branch is covered. They show that replacing a file's functions with ones that raise is noticed by the named suite. A file no suite catches is reported as NO-DATA. A passing delivery report proves only the checks it names ran without a failure; it does not prove behavior for which no check was written.
+
 ## What changed in 1.1.7
 
 1.1.7 is the release where a skipped test can no longer pass as done, and where the loop's own tools and judge cannot change without a whole gate, a canary and, for the judge, the owner's code.

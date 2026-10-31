@@ -200,6 +200,29 @@ class TheOneTable(unittest.TestCase):
                 self.assertEqual(0, S.count(value))
                 self.assertEqual([], S.families(value))
 
+    def test_fixture_entries_never_hide_a_real_shaped_value(self):
+        """The GUARD1 fixture entries (1.1.9) strip only their own complete source
+        text. A real shaped private key block, api key or password of a different
+        value still counts after the strip: an allowlist entry that was a bare
+        header would hide every real key's header, which is the over breadth a
+        security review named on 2026-10-30."""
+        fixtures = [v for v in S.KNOWN_PUBLIC_EXAMPLE_VALUES if "AKIA" not in v]
+        self.assertEqual(6, len(fixtures))
+        for value in fixtures:
+            with self.subTest(entry=value[:8]):
+                self.assertGreaterEqual(S.count(value), 1)
+                self.assertEqual(0, S.count(S.strip_public_examples(value)))
+        real_key = ("-----BEGIN OPENSSH PRIV" + "ATE KEY-----\n"
+                    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMw\n"
+                    "-----END OPENSSH PRIV" + "ATE KEY-----")
+        others = [real_key, "API_" + "KEY=zzzz9999zzzz", "DB_PASS" + "WORD=zzzz9999"]
+        for value in others:
+            with self.subTest(value=value[:12]):
+                stripped = S.strip_public_examples(value)
+                self.assertEqual(value, stripped)
+                self.assertGreaterEqual(S.count(stripped), 1)
+        self.assertTrue(any(p.search(S.strip_public_examples(real_key)) for p in S.STRICT))
+
     def test_public_example_rule_is_pinned(self):
         example = _public_example()
         self.assertEqual(1, S.count(example))

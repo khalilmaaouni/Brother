@@ -73,16 +73,28 @@ import argparse
 import datetime
 import glob
 import json
+import math
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import safe_unwatched_time as sut  # noqa: E402
-import journal_projection  # noqa: E402
+# journal_projection is imported inside build_card, not here (PC1H.b): it pulls in
+# brother_run (about 90 ms measured), and the run index below is read by the status
+# line on nearly every turn, which must not pay for an engine it never calls.
 
 NODATA = "NO-DATA"
+
+#: The two reasons that cap a label at NO-DATA and name themselves inside it
+#: (PROOF1.c). Each is a positive record that a green check proved nothing, so
+#: the phrase belongs in the LABEL and not only in the reason: a reader
+#: scanning labels alone must never see PROVES CHANGE over a check that
+#: collected no tests.
+PASSED_ANYWAY = "would have passed anyway"
+ZERO_TESTS_RAN = "zero tests ran"
 
 RECEIPT_RELPATH = os.path.join("receipt", "receipt.json")
 RUN_LOG_FILENAME = "run.log"
@@ -160,6 +172,14 @@ def file_proof_label(entry):
     own reason. Never PASS: that word belongs to a check's own exit code,
     not to this receipt's projection of it.
 
+    TWO REASONS CAP THE LABEL AT NO-DATA AND NAME THEMSELVES IN IT
+    (PROOF1.c): a reason carrying PASSED_ANYWAY or ZERO_TESTS_RAN is a
+    positive record that the check proved nothing, so it is read before the
+    exit code and before the state. The measured defect it closes is an entry
+    with exit_code 0, check_passed_before None and state "verified", which
+    reached the PROVES CHANGE branch: a command that collected no tests exits
+    0, and a label read off the exit code alone calls that proof.
+
     ORDER MATTERS, and this reads check_passed_before FIRST, ahead of the
     receipt's own "verified" state. That is the one place this file reads
     the addendum's label list as a set of rules rather than as a
@@ -180,6 +200,10 @@ def file_proof_label(entry):
     already judged on its own, None is simply unmeasured."""
     if not isinstance(entry, dict):
         return NODATA, "not a receipt scope.changed entry"
+    reason = entry.get("reason") or ""
+    for phrase in (PASSED_ANYWAY, ZERO_TESTS_RAN):
+        if phrase in reason:
+            return "%s: %s" % (NODATA, phrase), reason
     exit_code = entry.get("exit_code")
     exit_ok = (isinstance(exit_code, int) and not isinstance(exit_code, bool)
               and exit_code == 0)
@@ -683,6 +707,7 @@ def build_card(run_dir):
     claims_path = os.path.join(run_dir, CLAIMS_FILENAME)
     has_claims = os.path.isfile(claims_path)
     claims = sut.read_claims(run_dir) if has_claims else {}
+    import journal_projection  # noqa: E402, call time, see the note at the top
     claims_effective = claims if has_claims else (
         journal_projection.claims_from_journal(events) if has_journal else {})
 
@@ -820,6 +845,334 @@ def render_for_run(run_dir):
     projection like its two callees."""
     fields = build_card(run_dir)
     return render_text(fields), fields
+
+
+def _one_line(value):
+    return " ".join(str(value).split())
+
+
+def verdict_rows(view):
+    """PC1H.a, THE ONE RENDERER of the reader's per unit lines: one line per
+    unit and changed file, `UNIT <id> | FILE <file or none> | CHECK <command>
+    | EXIT <code> | <PASS|FAIL|NO-DATA>`, every non PASS line ending
+    ` | UNPROVEN: <reason>` with the receipt's reason folded to one line.
+    receipt_door.verdict_lines puts the engine's result line above these and
+    owns nothing else. Pure: the same view renders the same bytes. A view
+    with no unit list, or a unit missing a key, reads NO-DATA for the missing
+    piece (the old inline loop raised KeyError there), never a PASS."""
+    units = view.get("units") if isinstance(view, dict) else None
+    rows = []
+    for unit in units if isinstance(units, list) else []:
+        unit = unit if isinstance(unit, dict) else {}
+        verdict = unit.get("verdict", NODATA)
+        for f in unit.get("files") or ["none"]:
+            line = "UNIT %s | FILE %s | CHECK %s | EXIT %s | %s" % tuple(
+                _one_line(v) for v in (unit.get("unit", NODATA), f,
+                                       unit.get("command", NODATA),
+                                       unit.get("exit_code", NODATA),
+                                       verdict))
+            if verdict != "PASS":
+                line += " | UNPROVEN: %s" % _one_line(
+                    unit.get("unproven_reason", NODATA))
+            rows.append(line)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# The short end card (CARD1). Six lines by default, one line per piece that
+# needs a person, never one per file; render_text above is the full card that
+# --full still prints.
+
+#: Ledgers the short card counts, under ~/.brother. PROVISIONAL: the egress
+#: ledger (EG0) and the guard ledger (HD1.d) are not built, so these names
+#: are this module's own until they are; an absent file reads NO-DATA, which
+#: is the honest answer meanwhile.
+EGRESS_LEDGER_FILENAME = "egress-ledger.jsonl"
+GUARD_LEDGER_FILENAME = "guard-ledger.jsonl"
+EGRESS_LABEL = "model calls through the gate; other sockets NO-DATA"
+PARKED_LINE_BYTES = 120   # one parked piece per line, clipped to this
+# Ceilings of the lines built from record text; the sum with the counted
+# lines and the receipt path stays inside the card's 720 bytes.
+RESULT_LINE_BYTES = 90
+COUNTS_LINE_BYTES = 80
+WAITING_LINE_BYTES = 140
+
+
+def _clip(text, limit):
+    """`text` as one line of at most `limit` UTF-8 bytes, cut on a character
+    boundary and ending in three dots when it was cut."""
+    line = _one_line(text)
+    if len(line.encode("utf-8")) <= limit:
+        return line
+    return line.encode("utf-8")[:limit - 3].decode("utf-8", "ignore") + "..."
+
+
+def _text_field(fields, key):
+    """A card field's value when it is text, else NO-DATA (a None, a number
+    or a list in a field never prints as itself)."""
+    entry = fields.get(key) if isinstance(fields, dict) else None
+    value = entry.get("value") if isinstance(entry, dict) else None
+    return value if isinstance(value, str) and value.strip() else NODATA
+
+
+def _count_ledger(path, since, classify):
+    """{bucket: count, "unreadable": n} over the JSONL rows of `path` newer
+    than `since`, or None when the file cannot be read (absent, a directory,
+    permission). `classify(row)` names the bucket of a row. A line that is
+    not UTF-8 JSON, is not an object, or carries no finite numeric ts (so it
+    cannot be placed against `since`) is counted unreadable, never dropped;
+    a torn last line falls out the same way. Rows at or before `since` are
+    not counted. ponytail: the whole file is read once, fine to millions of
+    rows; stream it if a ledger ever outgrows memory."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    counts = {"unreadable": 0}
+    for line in raw.split(b"\n"):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line.decode("utf-8"))
+        except ValueError:   # UnicodeDecodeError is a ValueError
+            row = None
+        ts = row.get("ts") if isinstance(row, dict) else None
+        if type(ts) not in (int, float) or not math.isfinite(ts):
+            counts["unreadable"] += 1
+        elif ts > since:
+            bucket = classify(row)
+            counts[bucket] = counts.get(bucket, 0) + 1
+    return counts
+
+
+def _ledger_sentence(name, counts, order):
+    """`name: a 1, b 2` then ` , unknown N` and `, unreadable N` only when
+    they are not zero (a real zero of the named buckets still prints)."""
+    parts = ["%s %d" % (b, counts.get(b, 0)) for b in order]
+    parts += ["%s %d" % (b, counts[b]) for b in ("unknown", "unreadable")
+              if counts.get(b)]
+    return "%s: %s" % (name, ", ".join(parts))
+
+
+def egress_row(ledger_path, since):
+    """ONE line: the egress ledger's rows newer than `since`, counted
+    allowed and refused (unknown verdict and unreadable lines printed when
+    present), ending in the label that says what the count covers. An absent
+    or unreadable ledger is NO-DATA, never a zero; an empty one is a real
+    zero. Counts only, never content."""
+    counts = _count_ledger(
+        ledger_path, since,
+        lambda r: r["verdict"] if r.get("verdict") in ("allowed", "refused")
+        else "unknown")
+    if counts is None:
+        return "egress: NO-DATA (no ledger)"
+    return "%s; %s" % (_ledger_sentence("egress", counts,
+                                        ("allowed", "refused")), EGRESS_LABEL)
+
+
+def guard_row(ledger_path, since):
+    """ONE line: the guard ledger's deny and park rows newer than `since`,
+    `guards: denied N, parked M`. A row with no rule (or an action that is
+    neither) is unknown, a bad line unreadable, both printed. An absent or
+    unreadable ledger is NO-DATA, never a zero."""
+    names = {"deny": "denied", "park": "parked"}
+    counts = _count_ledger(
+        ledger_path, since,
+        lambda r: names.get(r.get("action"), "unknown")
+        if isinstance(r.get("rule"), str) and r["rule"].strip() else "unknown")
+    if counts is None:
+        return "guards: NO-DATA (no ledger)"
+    return _ledger_sentence("guards", counts, ("denied", "parked"))
+
+
+def waiting_row(stamps, reviews):
+    """`waiting on you: K stamps, <the approval command>` for the stamps
+    ({"id", "approve"}) that wait, naming each one whose review
+    ({"stamp", "verdict"}) is missing or is not PASS. "" when nothing waits.
+    A stamp list that is not a list reads NO-DATA, never "nothing waits"."""
+    if not isinstance(stamps, (list, tuple)):
+        return "waiting on you: NO-DATA (the stamp list is unreadable)"
+    if not stamps:
+        return ""
+    verdicts = {}
+    for review in reviews if isinstance(reviews, (list, tuple)) else ():
+        if isinstance(review, dict):
+            verdicts.setdefault(review.get("stamp"), []).append(review.get("verdict"))
+    commands, notes = [], []
+    for stamp in stamps:
+        stamp = stamp if isinstance(stamp, dict) else {}
+        sid = stamp.get("id") if isinstance(stamp.get("id"), str) else "unnamed"
+        cmd = stamp.get("approve")
+        if isinstance(cmd, str) and cmd.strip() and _one_line(cmd) not in commands:
+            commands.append(_one_line(cmd))
+        seen = verdicts.get(stamp.get("id"))
+        if not seen:
+            notes.append("%s has no verdict" % sid)
+        elif any(v != "PASS" for v in seen):
+            notes.append("%s review is not PASS" % sid)
+    line = "waiting on you: %d stamps, %s" % (
+        len(stamps), " | ".join(commands) or "NO-DATA (no approval command)")
+    return line + (" (%s)" % "; ".join(notes) if notes else "")
+
+
+def render_short(fields, parked=None, stamps=None, reviews=None, since=None,
+                 home=""):
+    """The default end card: the result line (opening `PROOF CARD:`, the
+    marker callers find the card by), the proven and NO-DATA counts,
+    one line per PARKED piece (at most PARKED_LINE_BYTES each), the guard row,
+    the waiting row when a stamp waits, the receipt line, and the egress row
+    last. At most 6 lines and 720 bytes plus 120 per parked piece, however
+    many files or pieces the run had (the receipt PATH is the one line never
+    clipped, so a very long path is the one way past the byte figure). Pure
+    over its arguments and the two ledger files; the ledgers are read from
+    `home` (the real home when empty), rows newer than `since`. A field that
+    is not text prints NO-DATA. Every argument but `fields` is optional
+    and empty by default (no parked piece, no stamp, every ledger row)."""
+    parked = list(parked or ())
+    stamps = [] if stamps is None else stamps
+    since = 0.0 if since is None else since
+    receipt = _text_field(fields, "receipt")
+    if receipt == NODATA:
+        receipt_line = "RECEIPT NO-DATA: no receipt was written"
+    elif _text_field(fields, "files_changed") == NODATA:
+        receipt_line = "RECEIPT %s (NO-DATA: the receipt could not be read)" % receipt
+    else:
+        receipt_line = "RECEIPT %s" % receipt
+    base = os.path.join(home or os.path.expanduser("~"), ".brother")
+    lines = [_clip("PROOF CARD: %s; units %s" % (_text_field(fields, "outcome"),
+                                            _text_field(fields, "units")),
+                   RESULT_LINE_BYTES),
+             _clip("proven %s, NO-DATA %s" % (_text_field(fields, "proven"),
+                                              _text_field(fields, "no_data_files")),
+                   COUNTS_LINE_BYTES)]
+    lines += [_clip("parked: %s" % p, PARKED_LINE_BYTES) for p in parked]
+    lines.append(guard_row(os.path.join(base, GUARD_LEDGER_FILENAME), since))
+    waiting = waiting_row(stamps, reviews)
+    if waiting:
+        lines.append(_clip(waiting, WAITING_LINE_BYTES))
+    lines.append(_one_line(receipt_line))
+    lines.append(egress_row(os.path.join(base, EGRESS_LEDGER_FILENAME), since))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# The run index (PC1H.b). One JSON row per finished run in
+# ~/.brother/runs-index.jsonl, so status, the controller and session start
+# answer "what did the last run say" from ONE small file instead of loading
+# the claim store or walking run folders.
+
+#: brother_run.RESULT_PREFIX, copied rather than imported: brother_run imports
+#: this module at load, and a call time `import brother_run` from inside the
+#: running engine would load it a second time under another name. If the two
+#: ever drift, update_index records a NO-DATA result, never a wrong one.
+RESULT_PREFIX = "BROTHER RESULT: "
+INDEX_FILENAME = "runs-index.jsonl"
+
+
+def index_path(home=""):
+    """~/.brother/runs-index.jsonl under `home` (the real home when empty)."""
+    return os.path.join(home or os.path.expanduser("~"), ".brother",
+                        INDEX_FILENAME)
+
+
+def update_index(run_dir, home=""):
+    """Append ONE row (run dir, result line, time) for a finished run. True
+    when the whole row reached the file, False on any failure; never raises,
+    because a run's index is bookkeeping and must not move its exit code.
+
+    The result line is the LAST RESULT_PREFIX line in run.log (the engine logs
+    it just before calling this), NO-DATA when there is none. ONE os.write on
+    an O_APPEND descriptor per row, so two runs finishing together interleave
+    whole rows, never halves. The row opens with a newline: if a writer died
+    mid row, the torn tail ends at that newline instead of swallowing this
+    row; read_index skips blank lines. A second update of the same run appends
+    one more row (the later row is the newer, so it reads first)."""
+    try:
+        result = NODATA + ": run.log holds no result line"
+        for line in read_run_log(run_dir).splitlines():
+            if line.startswith(RESULT_PREFIX):
+                result = line
+        row = {"run_dir": os.path.abspath(run_dir), "result": result,
+               "time": round(time.time(), 3)}
+        data = ("\n" + json.dumps(row, sort_keys=True) + "\n").encode("utf-8")
+        path = index_path(home)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            return os.write(fd, data) == len(data)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def read_index_counted(home=""):
+    """(rows newest first, torn lines skipped, problem). One file read, no
+    scan of any run folder. A row is {"run_dir", "result", "time"}; a line
+    that is not a JSON object with a text run_dir and result (a torn last
+    line, garbage) is skipped and COUNTED. `time` is None when the row has no
+    numeric time, and such a row sorts after every timed row. `problem` is ""
+    unless the file exists and could not be read; an absent file is the empty
+    index with no problem (NO-DATA is the caller's word for it)."""
+    try:
+        with open(index_path(home), "rb") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        return [], 0, ""
+    except OSError as exc:
+        return [], 0, "the run index could not be read: %s" % exc
+    rows, skipped = [], 0
+    for line in raw.split(b"\n"):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line.decode("utf-8"))
+            ok = isinstance(row, dict) and isinstance(row.get("run_dir"), str)
+        except (ValueError, UnicodeDecodeError):
+            ok = False
+        if not ok:
+            skipped += 1
+            continue
+        t = row.get("time")
+        # A result that is not text reads NO-DATA, never a neighbour's line.
+        result = row.get("result")
+        rows.append({"run_dir": row["run_dir"],
+                     "result": result if isinstance(result, str) else
+                     NODATA + ": the index row carries no text result",
+                     "time": t if type(t) in (int, float)
+                     and math.isfinite(t) else None})
+    # Newest first: timed rows by time, ties by file position (later is
+    # newer), untimed rows last. ponytail: reads the whole file, fine into
+    # the tens of thousands of rows; cap to the tail if it ever measures slow.
+    order = sorted(range(len(rows)), reverse=True, key=lambda i: (
+        rows[i]["time"] is not None, rows[i]["time"] or 0, i))
+    return [rows[i] for i in order], skipped, ""
+
+
+def index_line(row):
+    """One index row as the one line every surface prints (status line,
+    session start, controller): `<UTC date> <result line without its
+    prefix>`, so an old row says how old it is, and ` (run folder missing)`
+    when the run directory is gone (one stat, no scan). A row with no time
+    prints `undated`."""
+    t = row.get("time")
+    try:
+        # gmtime(None) is NOW, which would date an untimed row today.
+        day = time.strftime("%Y-%m-%d", time.gmtime(t)) if t is not None else "undated"
+    except (TypeError, ValueError, OverflowError, OSError):
+        day = "undated"
+    result = " ".join(str(row.get("result") or NODATA).split())
+    if result.startswith(RESULT_PREFIX.strip()):
+        result = result[len(RESULT_PREFIX.strip()):].lstrip()
+    gone = "" if os.path.isdir(row.get("run_dir") or "") else " (run folder missing)"
+    return "%s %s%s" % (day, result, gone)
+
+
+def read_index(home=""):
+    """The index rows, newest first (see read_index_counted). [] when the
+    index is absent or unreadable."""
+    return read_index_counted(home)[0]
 
 
 def main(argv=None):

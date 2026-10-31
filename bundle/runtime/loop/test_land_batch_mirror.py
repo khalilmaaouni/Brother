@@ -116,10 +116,21 @@ class Landing(unittest.TestCase):
         self.assertEqual(fx.git("status", "--porcelain", "-uall"), "", "the tree is left clean")
 
     def test_a_generator_that_exits_nonzero_is_judged_by_the_check(self):
-        fx = self.fixture([{"path": X, "new_file_content": "X = 1\n"}], gen=FAILING_GEN)
+        # S2 (2026-10-25): the tree keeps the WORKING generator and this build installs the failing
+        # one, so the bundle row is red because of the build rather than red on the base as well.
+        fx = self.fixture([{"path": X, "new_file_content": "X = 1\n"},
+                           {"path": "scripts/bundle_runtime.py", "new_file_content": FAILING_GEN}])
         rc, out = fx.land()
         self.assertNotEqual(rc, 0, out)
-        self.assertEqual(self.bundle_runs(fx), [("generate", 1), ("check", 1)], "the check ran after the failed generator and read red")
+        # S2 (2026-10-25): THE THIRD RUN IS THE BASE JUDGEMENT, and it is the point. A gate row red with
+        # the build is now re-run in a tree of the base commit before the landing decides, so a row that
+        # was already rotten does not hold an unrelated build. Here the base tree carries the WORKING
+        # generator, so that third run exits 0, which is exactly the evidence that this build broke the
+        # row and the landing must still refuse. Expecting only two runs would assert the absence of the
+        # base judgement.
+        self.assertEqual(self.bundle_runs(fx), [("generate", 1), ("check", 1), ("check", 0)],
+                         "the check ran after the failed generator and read red, then once more in the "
+                         "base tree where it reads green, which is what makes this the build's fault")
         self.assertEqual(fx.rev("main", cwd=fx.hub), fx.base, "a red gate lands nothing")
 
     def test_mirror_touched_skips_hostile_paths(self):

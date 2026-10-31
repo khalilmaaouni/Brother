@@ -159,6 +159,7 @@ scripts/parity_gate.py
 scripts/park_sidecar.py
 scripts/pattern_note.py
 scripts/perturb_pool.py
+scripts/plan_gates_can_pass.py
 scripts/plan_seed.py
 scripts/plugin_bump_gate.py
 scripts/plugin_runtime_fast_discover.py
@@ -175,6 +176,7 @@ scripts/receipt_door.py
 scripts/refresh_cut.py
 scripts/release_note_from_tree.py
 scripts/release_note_perturb.py
+scripts/release_window_clock_rows.py
 scripts/reproduce_export.py
 scripts/required_fast.sh
 scripts/resource_gate.py
@@ -228,6 +230,7 @@ scripts/test_no_promise_to_cut_version.py
 scripts/test_packs.py
 scripts/test_plugin_bump_gate.py
 scripts/test_proof_card.py
+scripts/test_readme_changed_sections.py
 scripts/test_readme_honesty.py
 scripts/test_receipt_contract.py
 scripts/test_receipt_door.py

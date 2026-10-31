@@ -2521,6 +2521,12 @@ def push_appended(allowlist, remote, branch, root=ROOT, tag=None,
                     "%s, only the tag itself was never created or pushed"
                     % (tag, (peeled.stderr or "").strip(), landed))
                 return EXIT_REFUSED, lines
+            # CUT1.e: the commit this push is about to make public, named
+            # BEFORE the push, so a caller whose connection drops after the
+            # tag lands can reconcile against this run's own commit (cut.py
+            # parses it with _tagging_commit), never against whatever the
+            # remote happens to hold
+            lines.append("TAGGING %s %s" % (tagged_commit, tag))
             announce_remote_write(write_state)
             tag_push = run(["git", "push", "--porcelain", remote,
                             "refs/tags/%s" % tag], d, env=env)
@@ -2694,6 +2700,22 @@ def _readiness_failing_items(text):
     return items
 
 
+def _keep_gate_text(text):
+    """The whole required_fast.sh output of a refused export run, written under the scratch root (never the export
+    tree, which is removed) so the failing row's assertion output survives the refusal; returns the path, or the reason
+    it could not be written. Never raises: a kept copy that fails must not turn a refusal into a crash."""
+    try:
+        root = scratch_root()
+        os.makedirs(root, exist_ok=True)
+        # mkstemp, never a pid named file (review 2026-10-30): two refusals in one process would overwrite each other
+        fd, path = tempfile.mkstemp(prefix="required-fast-export-refused-", suffix=".txt", dir=root)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+    except (OSError, ValueError) as exc:
+        return "(could not keep the gate output: %s)" % exc
+
+
 def check_required_fast(export_dir):
     """The public repository's own required-fast contract must read fail 0
     on the export tree, not only in the hub. required-fast is becoming a
@@ -2735,9 +2757,11 @@ def check_required_fast(export_dir):
                         text, re.M)
     if not summary:
         last = text.splitlines()[-1] if text else "(no output)"
+        # a crash or a timeout drops its details here too (review 2026-10-30): keep the text, the verdict stays NO-DATA
         return False, ["NO-DATA: scripts/required_fast.sh printed no "
                        "summary line on the export tree (exit %s, %s)"
-                       % (proc.returncode, last)]
+                       % (proc.returncode, last),
+                       "[full: %s]" % _keep_gate_text(text)]
     fails = int(summary.group(2))
     if fails > 0 or proc.returncode != 0:
         lines = ["REFUSED: scripts/required_fast.sh does not read fail 0 "
@@ -2747,6 +2771,11 @@ def check_required_fast(export_dir):
                       if l.startswith("FAILED:")), None)
         if failed:
             lines.append(failed)
+        # KEEP THE ROW'S OWN OUTPUT (2026-10-30): required_fast.sh prints every finished row's log into this very
+        # text (reap_one cats $pool/<row>.log) and then removes its pool; the export tree is temporary too. Two cut
+        # rehearsals that night refused here and left only the row's name behind, so the failure had to be chased on
+        # a fresh tree where it did not reproduce. The whole text is kept under the scratch root and named here.
+        lines.append("[full: %s]" % _keep_gate_text(text))
         return False, lines
     return True, ["required-fast: %s" % summary.group(0)]
 

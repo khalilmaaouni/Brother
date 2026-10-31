@@ -634,5 +634,118 @@ class LaneVerdictRules(unittest.TestCase):
                 G.lane_verdict(rows)
 
 
+#: Fake terms, never real ones (PRIV1, 2026-10-18: a term written into code is
+#: a term the code publishes). Nothing in the class below prints a term.
+FAKE_TERM = "zqxfake"
+FAKE_CAPS = "ZQXCODE"
+CLEAN_SENTENCE = "an entirely ordinary sentence"
+
+
+class Delegates(unittest.TestCase):
+    """GB0a: the older grade engine screens through the ONE private list.
+
+    Measured on this tree before the unit: private_hits read a second list of
+    its own, under ~/.claude, which does not exist on this machine, so the
+    loader returned None and EVERY text counted as a hit, the empty string
+    included. The screen was safe and blind at once, since a caller written as
+    `if private_hits(text) > 0` then withholds unconditionally, and both
+    probe_brief and probe_wave import this copy.
+
+    Because an absent list fails closed, every assertion that a term COUNTS was
+    trivially true before the unit. The deciding guards are therefore the ones
+    asserting that a clean text is clean; the counting guards are regression
+    guards, load bearing only once the list is really read, which is what this
+    unit's mutation sweep measures. Each is labelled below.
+    """
+
+    def setUp(self):
+        self.base, _ = _owned_tree("grade-delegates-")
+        self.home = os.path.join(self.base, "home")
+        os.makedirs(self.home)
+        self.old_home = os.environ.get("HOME")
+        self.old_env = os.environ.get(G.PRIVATE_NAMES_ENV)
+        os.environ["HOME"] = self.home
+        os.environ.pop(G.PRIVATE_NAMES_ENV, None)
+
+    def tearDown(self):
+        for key, value in (("HOME", self.old_home),
+                           (G.PRIVATE_NAMES_ENV, self.old_env)):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        _rmtree(self.base)
+
+    def _write_list(self, *terms):
+        """The one list, in this test's own HOME, holding only fake terms."""
+        path = os.path.join(self.home, ".brothersbe-private-names")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("# fake list\n%s\n" % "\n".join(terms))
+        return path
+
+    # --- the deciding guards: red before the unit -------------------------
+
+    def test_a_clean_text_is_clean_through_the_one_list(self):
+        """The condition the unit turns on: the list the engine reads is the
+        one list, so a text carrying no term counts zero."""
+        self._write_list(FAKE_TERM)
+        self.assertEqual(G.private_hits(CLEAN_SENTENCE), 0)
+
+    def test_a_term_is_bounded_by_letters(self):
+        """A term glued inside a longer lowercase word is not that term. The
+        older engine matched a bare substring, so it counted this one."""
+        self._write_list(FAKE_TERM)
+        self.assertEqual(G.private_hits("the %sry habit" % FAKE_TERM), 0)
+
+    def test_the_screen_names_no_second_list_and_reaches_the_scanner(self):
+        """One list means one path named in this module, and the matching is
+        the scanner's rather than a second engine's."""
+        with open(G.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertEqual(source.count("private_names" + ".txt"), 0,
+                         "a second private list is still named here")
+        self.assertGreater(source.count("private_terms_scan"), 0,
+                           "the screen does not reach the one scanner")
+
+    # --- regression guards: green before the unit, must stay green ---------
+
+    def test_a_plain_term_counts(self):
+        self._write_list(FAKE_TERM)
+        self.assertGreater(G.private_hits("the %s project" % FAKE_TERM), 0)
+
+    def test_an_escaped_spelling_counts(self):
+        """PRIV1: a term whose first letter is written as a string escape is
+        still that term, which only the scanner's readings can see."""
+        self._write_list(FAKE_TERM)
+        escaped = '"\\u%04x%s"' % (ord(FAKE_TERM[0]), FAKE_TERM[1:])
+        self.assertGreater(G.private_hits(escaped), 0, escaped)
+
+    def test_a_capitals_term_counts_inside_a_longer_word(self):
+        """A term the list stores in capitals counts anywhere it appears in
+        capitals, longer words included: the anywhere reach the older engine's
+        substring match already had, kept so the one list weakens nothing."""
+        self._write_list(FAKE_CAPS)
+        self.assertGreater(G.private_hits("path%sfile" % FAKE_CAPS), 0)
+
+    def test_the_screen_leaves_sys_path_as_it_found_it(self):
+        """The scanner's folder is on sys.path for one import only. A screen
+        that leaves it behind lets this directory's copies of shared module
+        names win over a caller's own, and about thirty loop tools call this
+        one function. The cached module is dropped first, or the import this
+        guards never runs and the guard passes on nothing.
+        """
+        self._write_list(FAKE_TERM)
+        sys.modules.pop("private_terms_scan", None)
+        before = list(sys.path)
+        G.private_hits(CLEAN_SENTENCE)
+        self.assertEqual([p for p in sys.path if p not in before], [],
+                         "the scanner's folder stayed on sys.path")
+        self.assertEqual(len(sys.path), len(before), "sys.path was rewritten")
+
+    def test_an_absent_list_still_fails_closed(self):
+        """The direction that must never flip: an unknown list blocks."""
+        self.assertGreater(G.private_hits(CLEAN_SENTENCE), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

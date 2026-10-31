@@ -1824,6 +1824,111 @@ class GhReleaseCommandConstruction(unittest.TestCase):
         self.assertIn(" ".join(C.gh_release_command(VERSION)), out.getvalue())
 
 
+class TheTagPushReconcilesOnThisRunsCommit(unittest.TestCase):
+    """CUT1.e on the real chain: export_public.py names the commit it is about
+    to tag (its TAGGING line) before the tag push, and run_chain hands that
+    commit to publish_tag. A push whose connection drops after the tag landed
+    at THAT commit reconciles and goes on to reproduce it, never pushed again;
+    a tag of the name at another commit is foreign and the cut refuses."""
+
+    COMMIT = "a" * 40
+    FAILED_PUSH = ("PUSHED: one commit appended to origin release/%s\n"
+                   "MERGED: https://github.com/khalilmaaouni/Brother/pull/1 into main\n"
+                   "TAGGING %s v%s\n"
+                   "fatal: the remote end hung up unexpectedly\n" % (VERSION, "a" * 40, VERSION))
+
+    def drive(self, landed_at, export_out=None):
+        """The chain with an export that fails after its TAGGING line; the
+        remote shows no tag until the export ran, then one at `landed_at`."""
+        label = "git ls-remote %s" % C.EP.DEFAULT_REMOTE
+        r = Runner(dict(GREEN, **{"export_public.py": (1, export_out or self.FAILED_PUSH)}))
+        answer = Runner.__call__
+
+        def call(cmd, **kw):
+            if _key(cmd) == label and "export_public.py" in r.calls:
+                r.answers[label] = (0, "%s\trefs/tags/v%s^{}\n" % (landed_at, VERSION))
+            return answer(r, cmd, **kw)
+        seen = []
+        real = C.publish_tag
+
+        def spy(tag, commit, push, ls_remote, state_dir):
+            got = real(tag, commit, push, ls_remote, state_dir)
+            seen.append((tag, commit() if callable(commit) else commit, got))
+            return got
+        with mock.patch.object(C, "publish_tag", side_effect=spy):
+            code, _ = _main(["--yes"], call)
+        return code, seen, r
+
+    def test_a_drop_after_the_tag_landed_reconciles_on_the_tagging_commit(self):
+        code, seen, r = self.drive(self.COMMIT)
+        self.assertEqual(len(seen), 1, r.calls)
+        tag, commit, got = seen[0]
+        self.assertEqual((tag, commit), ("v%s" % VERSION, self.COMMIT), "publish_tag never received this run's commit")
+        self.assertEqual(got[0], "PUSHED", got)
+        self.assertEqual(code, C.EXIT_OK, r.calls)
+        self.assertEqual(r.calls.count("export_public.py"), 1, "the push was retried")
+        repro = [c for c in r.cmds if _key(c) == "reproduce_export.py"][0]
+        self.assertEqual(repro[repro.index("--expect-commit") + 1], self.COMMIT)
+
+    def test_no_tagging_line_reconciles_nothing(self):
+        """No TAGGING line: the exporter stopped before its tag push, so a tag
+        the remote shows is not this run's, whatever its commit."""
+        code, seen, r = self.drive(self.COMMIT, export_out="fatal: the remote end hung up unexpectedly\n")
+        tag, commit, got = seen[0]
+        self.assertIsNone(commit, "a commit was invented without a TAGGING line")
+        self.assertEqual(got[0], "FAIL", got)
+        self.assertEqual(code, C.EXIT_REFUSED, r.calls)
+        self.assertNotIn("reproduce_export.py", r.calls)
+
+    def test_a_restarted_cut_reuses_its_own_published_tag(self):
+        """A cut that published its tag and is run again at the same commit
+        over the same evidence reads its own record: REUSED, one export push
+        across both runs, and the second run reproduces the recorded commit."""
+        import shutil
+        import tempfile
+        ev = tempfile.mkdtemp(prefix="cut1e-restart-")
+        self.addCleanup(shutil.rmtree, ev, True)
+        label = "git ls-remote %s" % C.EP.DEFAULT_REMOTE
+        remote = {}
+        runs, verdicts = [], []
+        real = C.publish_tag
+
+        def spy(*a, **k):
+            got = real(*a, **k)
+            verdicts.append(got[0])
+            return got
+
+        def chain():
+            r = Runner(GREEN)
+            answer = Runner.__call__
+
+            def call(cmd, **kw):
+                if _key(cmd) == "export_public.py":
+                    remote["v%s" % VERSION] = GREEN_TAGGED_COMMIT
+                if _key(cmd) == label:
+                    tag = remote.get("v%s" % VERSION)
+                    r.answers[label] = (0, "%s\trefs/tags/v%s^{}\n" % (tag, VERSION) if tag else "")
+                return answer(r, cmd, **kw)
+            with mock.patch.object(C, "publish_tag", side_effect=spy), \
+                    mock.patch.object(C.CR, "evidence_dir", return_value=ev):
+                code, _ = _main(["--yes"], call)
+            runs.append(r)
+            return code
+        self.assertEqual(chain(), C.EXIT_OK)
+        self.assertEqual(chain(), C.EXIT_OK, runs[-1].calls)
+        self.assertEqual(verdicts, ["PUSHED", "REUSED"])
+        self.assertEqual(sum(r.calls.count("export_public.py") for r in runs), 1, "the restart pushed again")
+        repro = [c for c in runs[1].cmds if _key(c) == "reproduce_export.py"][0]
+        self.assertEqual(repro[repro.index("--expect-commit") + 1], GREEN_TAGGED_COMMIT)
+
+    def test_a_tag_at_another_commit_is_foreign_and_refused(self):
+        code, seen, r = self.drive("d" * 40)
+        self.assertEqual(seen[0][2][0], "FAIL", seen)
+        self.assertEqual(code, C.EXIT_REFUSED, r.calls)
+        self.assertEqual(r.calls.count("export_public.py"), 1)
+        self.assertNotIn("reproduce_export.py", r.calls)
+
+
 class GhReleaseRunsOnlyAfterASuccessfulPush(unittest.TestCase):
     """R4: never before the push answer, never in --check, run only when
     the push succeeded, and a failure is reported, never retried."""

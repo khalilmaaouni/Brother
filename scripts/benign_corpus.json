@@ -1,0 +1,1302 @@
+[
+ {
+  "command": "git status",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-status"
+ },
+ {
+  "command": "git status --short",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-status"
+ },
+ {
+  "command": "git status -sb",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-status"
+ },
+ {
+  "command": "git log --oneline -10",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git log --oneline --graph --decorate",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git log --since=2.weeks --author=alice",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git log -p -1",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git diff --stat",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-diff"
+ },
+ {
+  "command": "git diff HEAD~1",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-diff"
+ },
+ {
+  "command": "git diff main...HEAD --name-only",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-diff"
+ },
+ {
+  "command": "git add .",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-add"
+ },
+ {
+  "command": "git add -p",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-add"
+ },
+ {
+  "command": "git add -u",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-add"
+ },
+ {
+  "command": "git commit -m \"fix login redirect\"",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git commit --amend --no-edit",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git commit -m \"feat: add search box\"",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git branch -a",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-branch"
+ },
+ {
+  "command": "git branch -vv",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-branch"
+ },
+ {
+  "command": "git branch --show-current",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-branch"
+ },
+ {
+  "command": "git checkout main",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-checkout"
+ },
+ {
+  "command": "git checkout feature/login-form",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-checkout"
+ },
+ {
+  "command": "git switch main",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-switch"
+ },
+ {
+  "command": "git switch -c bugfix/typo",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-switch"
+ },
+ {
+  "command": "git pull origin main",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-pull"
+ },
+ {
+  "command": "git fetch",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-fetch"
+ },
+ {
+  "command": "git fetch origin",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-fetch"
+ },
+ {
+  "command": "git stash",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-stash"
+ },
+ {
+  "command": "git stash pop",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-stash"
+ },
+ {
+  "command": "git stash show -p",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-stash"
+ },
+ {
+  "command": "git show --stat HEAD~2",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-show"
+ },
+ {
+  "command": "git show v1.2.0",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-show"
+ },
+ {
+  "command": "git remote -v",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-remote"
+ },
+ {
+  "command": "git tag",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-tag"
+ },
+ {
+  "command": "git tag -l 'v1.*'",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-tag"
+ },
+ {
+  "command": "git push origin feature/login-form",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-push"
+ },
+ {
+  "command": "git push -u origin feature/payments",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-push"
+ },
+ {
+  "command": "git merge --no-ff feature/payments",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-merge"
+ },
+ {
+  "command": "git restore --staged src/app.js",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-restore"
+ },
+ {
+  "command": "git blame -L 10,20 src/app.js",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-blame"
+ },
+ {
+  "command": "git grep -n TODO",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-grep"
+ },
+ {
+  "command": "git clone https://github.com/example/project.git",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-clone"
+ },
+ {
+  "command": "git clone --depth 1 https://github.com/example/project.git",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-clone"
+ },
+ {
+  "command": "npm test",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-test"
+ },
+ {
+  "command": "npm run test:unit",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-test"
+ },
+ {
+  "command": "npm install",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-install"
+ },
+ {
+  "command": "npm install express",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-install"
+ },
+ {
+  "command": "npm i",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-install"
+ },
+ {
+  "command": "npm run lint",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-run-script"
+ },
+ {
+  "command": "npm run dev",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-run-script"
+ },
+ {
+  "command": "npm run format",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-run-script"
+ },
+ {
+  "command": "npm ci",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-ci"
+ },
+ {
+  "command": "npm ls --depth=0",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npm-ls"
+ },
+ {
+  "command": "npx tsc --noEmit",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npx"
+ },
+ {
+  "command": "npx jest src/app.test.js",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npx"
+ },
+ {
+  "command": "npx eslint src",
+  "lang": "shell",
+  "source": "https://docs.npmjs.com/cli/v10/commands/npx"
+ },
+ {
+  "command": "yarn install",
+  "lang": "shell",
+  "source": "https://yarnpkg.com/cli/install"
+ },
+ {
+  "command": "yarn test",
+  "lang": "shell",
+  "source": "https://yarnpkg.com/cli/install"
+ },
+ {
+  "command": "pnpm install",
+  "lang": "shell",
+  "source": "https://pnpm.io/cli/install"
+ },
+ {
+  "command": "pnpm test",
+  "lang": "shell",
+  "source": "https://pnpm.io/cli/install"
+ },
+ {
+  "command": "python3 --version",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 -m http.server 8000",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 -m venv .venv",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 manage.py migrate",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 main.py --verbose",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 -m json.tool data.json",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 -c \"import sys; print(sys.version)\"",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python --version",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 -m pytest -x -q",
+  "lang": "shell",
+  "source": "https://docs.pytest.org/en/stable/how-to/usage.html"
+ },
+ {
+  "command": "python3 -m pytest tests/test_api.py -k login",
+  "lang": "shell",
+  "source": "https://docs.pytest.org/en/stable/how-to/usage.html"
+ },
+ {
+  "command": "pytest --maxfail=2 tests/",
+  "lang": "shell",
+  "source": "https://docs.pytest.org/en/stable/how-to/usage.html"
+ },
+ {
+  "command": "python3 -m unittest discover -s tests",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/library/unittest.html"
+ },
+ {
+  "command": "python3 -m unittest tests.test_models -v",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/library/unittest.html"
+ },
+ {
+  "command": "pip install requests",
+  "lang": "shell",
+  "source": "https://pip.pypa.io/en/stable/cli/pip_install/"
+ },
+ {
+  "command": "pip install -e .",
+  "lang": "shell",
+  "source": "https://pip.pypa.io/en/stable/cli/pip_install/"
+ },
+ {
+  "command": "pip list",
+  "lang": "shell",
+  "source": "https://pip.pypa.io/en/stable/cli/pip_install/"
+ },
+ {
+  "command": "pip freeze",
+  "lang": "shell",
+  "source": "https://pip.pypa.io/en/stable/cli/pip_install/"
+ },
+ {
+  "command": "deactivate",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/library/venv.html"
+ },
+ {
+  "command": "ruff check .",
+  "lang": "shell",
+  "source": "https://docs.astral.sh/ruff/"
+ },
+ {
+  "command": "black src tests",
+  "lang": "shell",
+  "source": "https://black.readthedocs.io/en/stable/usage_and_configuration/the_basics.html"
+ },
+ {
+  "command": "black --check .",
+  "lang": "shell",
+  "source": "https://black.readthedocs.io/en/stable/usage_and_configuration/the_basics.html"
+ },
+ {
+  "command": "eslint src --fix",
+  "lang": "shell",
+  "source": "https://eslint.org/docs/latest/use/command-line-interface"
+ },
+ {
+  "command": "prettier --write src",
+  "lang": "shell",
+  "source": "https://prettier.io/docs/cli"
+ },
+ {
+  "command": "tsc --noEmit",
+  "lang": "shell",
+  "source": "https://www.typescriptlang.org/docs/handbook/compiler-options.html"
+ },
+ {
+  "command": "node --version",
+  "lang": "shell",
+  "source": "https://nodejs.org/api/cli.html"
+ },
+ {
+  "command": "node server.js",
+  "lang": "shell",
+  "source": "https://nodejs.org/api/cli.html"
+ },
+ {
+  "command": "node -e \"console.log(1 + 1)\"",
+  "lang": "shell",
+  "source": "https://nodejs.org/api/cli.html"
+ },
+ {
+  "command": "node index.js --port 3000",
+  "lang": "shell",
+  "source": "https://nodejs.org/api/cli.html"
+ },
+ {
+  "command": "make test",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "make build",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "make lint",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "make clean-build",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "make install",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "ls",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "ls -la",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "ls docs",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "ls -1 tests",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "ls -R src | head -20",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "cat README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "cat Makefile",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "cat src/main.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "cat notes.txt",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "head -n 20 README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/head.1.html"
+ },
+ {
+  "command": "head -5 notes.txt",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/head.1.html"
+ },
+ {
+  "command": "tail -f logs/server.log",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tail.1.html"
+ },
+ {
+  "command": "tail -20 notes.txt",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tail.1.html"
+ },
+ {
+  "command": "wc -w README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/wc.1.html"
+ },
+ {
+  "command": "cat notes.txt | wc -l",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/wc.1.html"
+ },
+ {
+  "command": "sort -u names.txt",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/sort.1.html"
+ },
+ {
+  "command": "sort -n numbers.txt | head",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/sort.1.html"
+ },
+ {
+  "command": "cp README.md README.bak",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cp.1.html"
+ },
+ {
+  "command": "cp config/settings.example.yml config/settings.yml",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cp.1.html"
+ },
+ {
+  "command": "cp -n template.html index.html",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cp.1.html"
+ },
+ {
+  "command": "mv old_name.py new_name.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/mv.1.html"
+ },
+ {
+  "command": "mkdir tests",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/mkdir.1.html"
+ },
+ {
+  "command": "mkdir -p build/cache",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/mkdir.1.html"
+ },
+ {
+  "command": "mkdir -p tmp/logs",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/mkdir.1.html"
+ },
+ {
+  "command": "touch tests/__init__.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/touch.1.html"
+ },
+ {
+  "command": "touch docs/changelog.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/touch.1.html"
+ },
+ {
+  "command": "echo $PATH",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "echo \"build finished\"",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "echo '*.log' >> .gitignore",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "pwd",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/pwd.1.html"
+ },
+ {
+  "command": "date",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/date.1.html"
+ },
+ {
+  "command": "du -sh .",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/du.1.html"
+ },
+ {
+  "command": "du -sh * | sort -h",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/du.1.html"
+ },
+ {
+  "command": "chmod +x scripts/run.sh",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/chmod.1.html"
+ },
+ {
+  "command": "chmod 644 README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/chmod.1.html"
+ },
+ {
+  "command": "diff -u a.py b.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/diff.1.html"
+ },
+ {
+  "command": "grep -rn TODO src",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "grep -i error app.log",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "grep -c import src/main.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "grep -rn --include='*.py' fetch_user .",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "ls | grep test",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "sed -n '1,20p' README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/sed.1.html"
+ },
+ {
+  "command": "sed -n '/def main/,/^$/p' src/main.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/sed.1.html"
+ },
+ {
+  "command": "awk '{print $1}' access.log",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/gawk.1.html"
+ },
+ {
+  "command": "awk 'NR>1 {sum+=$3} END {print sum}' sales.txt",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/gawk.1.html"
+ },
+ {
+  "command": "find . -name '*.py'",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/find.1.html"
+ },
+ {
+  "command": "find . -maxdepth 2 -type d",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/find.1.html"
+ },
+ {
+  "command": "find . -name '*.md' -newer README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/find.1.html"
+ },
+ {
+  "command": "tar -czf backup.tar.gz src",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tar.1.html"
+ },
+ {
+  "command": "tar -tzf backup.tar.gz",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tar.1.html"
+ },
+ {
+  "command": "tar -xzf release.tar.gz",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tar.1.html"
+ },
+ {
+  "command": "wget -q -O - https://example.com/robots.txt",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/wget.1.html"
+ },
+ {
+  "command": "curl https://example.com",
+  "lang": "shell",
+  "source": "https://curl.se/docs/manpage.html"
+ },
+ {
+  "command": "curl -I https://example.com",
+  "lang": "shell",
+  "source": "https://curl.se/docs/manpage.html"
+ },
+ {
+  "command": "curl -s https://api.example.com/users/1 | jq .name",
+  "lang": "shell",
+  "source": "https://curl.se/docs/manpage.html"
+ },
+ {
+  "command": "curl -X GET https://api.example.com/items?limit=5",
+  "lang": "shell",
+  "source": "https://curl.se/docs/manpage.html"
+ },
+ {
+  "command": "curl -s -H 'Accept: application/json' https://api.example.com/v1/items",
+  "lang": "shell",
+  "source": "https://curl.se/docs/manpage.html"
+ },
+ {
+  "command": "curl -X POST -H 'Content-Type: application/json' -d '{\"name\":\"alice\"}' https://api.example.com/users",
+  "lang": "shell",
+  "source": "https://curl.se/docs/manpage.html"
+ },
+ {
+  "command": "jq . data.json",
+  "lang": "shell",
+  "source": "https://jqlang.github.io/jq/manual/"
+ },
+ {
+  "command": "jq '.items[] | .name' data.json",
+  "lang": "shell",
+  "source": "https://jqlang.github.io/jq/manual/"
+ },
+ {
+  "command": "docker ps",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/container/ls/"
+ },
+ {
+  "command": "docker ps -a",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/container/ls/"
+ },
+ {
+  "command": "docker build -t myapp:latest .",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/buildx/build/"
+ },
+ {
+  "command": "docker build --no-cache -t myapp .",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/buildx/build/"
+ },
+ {
+  "command": "docker compose up --build",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/compose/up/"
+ },
+ {
+  "command": "docker compose down",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/compose/up/"
+ },
+ {
+  "command": "docker logs -f web",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/container/logs/"
+ },
+ {
+  "command": "docker logs --tail 100 web",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/container/logs/"
+ },
+ {
+  "command": "cargo build --release",
+  "lang": "shell",
+  "source": "https://doc.rust-lang.org/cargo/commands/cargo-build.html"
+ },
+ {
+  "command": "cargo test",
+  "lang": "shell",
+  "source": "https://doc.rust-lang.org/cargo/commands/cargo-test.html"
+ },
+ {
+  "command": "cargo test -- --nocapture",
+  "lang": "shell",
+  "source": "https://doc.rust-lang.org/cargo/commands/cargo-test.html"
+ },
+ {
+  "command": "go build ./...",
+  "lang": "shell",
+  "source": "https://pkg.go.dev/cmd/go"
+ },
+ {
+  "command": "go test ./...",
+  "lang": "shell",
+  "source": "https://pkg.go.dev/cmd/go"
+ },
+ {
+  "command": "go mod tidy",
+  "lang": "shell",
+  "source": "https://pkg.go.dev/cmd/go"
+ },
+ {
+  "command": "go run main.go",
+  "lang": "shell",
+  "source": "https://pkg.go.dev/cmd/go"
+ },
+ {
+  "command": "bundle exec rake test",
+  "lang": "shell",
+  "source": "https://bundler.io/man/bundle-install.1.html"
+ },
+ {
+  "command": "bundle exec rspec",
+  "lang": "shell",
+  "source": "https://bundler.io/man/bundle-install.1.html"
+ },
+ {
+  "command": "kubectl get svc -n staging",
+  "lang": "shell",
+  "source": "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/"
+ },
+ {
+  "command": "kubectl get deployments",
+  "lang": "shell",
+  "source": "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/"
+ },
+ {
+  "command": "gh pr list",
+  "lang": "shell",
+  "source": "https://cli.github.com/manual/gh_pr_list"
+ },
+ {
+  "command": "gh issue list --limit 10",
+  "lang": "shell",
+  "source": "https://cli.github.com/manual/gh_issue_list"
+ },
+ {
+  "command": "rg TODO",
+  "lang": "shell",
+  "source": "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md"
+ },
+ {
+  "command": "rg --files | head",
+  "lang": "shell",
+  "source": "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md"
+ },
+ {
+  "command": "ps aux | head -5",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ps.1.html"
+ },
+ {
+  "command": "basename src/main.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/basename.1.html"
+ },
+ {
+  "command": "dirname src/main.py",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/dirname.1.html"
+ },
+ {
+  "command": "sleep 2",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/sleep.1.html"
+ },
+ {
+  "command": "echo Hello | tr a-z A-Z",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tr.1.html"
+ },
+ {
+  "command": "ln -s ../shared/config.yml config.yml",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ln.1.html"
+ },
+ {
+  "command": "stat README.md",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/stat.1.html"
+ },
+ {
+  "command": "uname -a",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/uname.1.html"
+ },
+ {
+  "command": "md5sum release.tar.gz",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/md5sum.1.html"
+ },
+ {
+  "command": "sha256sum release.tar.gz",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/sha256sum.1.html"
+ },
+ {
+  "command": "make test 2>&1 | tee test.log",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/tee.1.html"
+ },
+ {
+  "command": "printf '%s\\n' one two three",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/printf.1.html"
+ },
+ {
+  "command": "ping -c 3 example.com",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man8/ping.8.html"
+ },
+ {
+  "command": "cd build && make",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "cd frontend && npm install && npm run build",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "make test && make lint",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "make build || echo build failed",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/make.1.html"
+ },
+ {
+  "command": "cd tests && ls",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "cd deploy && docker compose up -d",
+  "lang": "shell",
+  "source": "https://docs.docker.com/reference/cli/docker/compose/up/"
+ },
+ {
+  "command": "cat package.json | grep version",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "cd backend && python3 -m pytest -q",
+  "lang": "shell",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "git add . && git commit -m \"wip\"",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git log --oneline | head -5",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git diff --name-only | xargs wc -l",
+  "lang": "shell",
+  "source": "https://git-scm.com/docs/git-diff"
+ },
+ {
+  "command": "grep -rn 'console.log' src | wc -l",
+  "lang": "shell",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "git commit -m \"ログイン画面の不具合を修正\"",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git commit -m \"READMEを更新\"",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git commit -am \"テストを追加\"",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git log --oneline --grep=\"修正\"",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git log --author=\"山田\" --oneline",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git branch feature/検索機能",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-branch"
+ },
+ {
+  "command": "git checkout -b fix/表示崩れ",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-checkout"
+ },
+ {
+  "command": "git tag -a v1.0.0 -m \"初回リリース\"",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-tag"
+ },
+ {
+  "command": "git stash push -m \"作業中の変更\"",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-stash"
+ },
+ {
+  "command": "git grep -n \"テスト\" -- src",
+  "lang": "ja",
+  "source": "https://git-scm.com/docs/git-grep"
+ },
+ {
+  "command": "echo \"ビルド完了\"",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "echo こんにちは世界",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "grep -rn \"エラー\" logs",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "grep -n \"データベース\" docs/設計.md",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "rg \"ユーザー\" src",
+  "lang": "ja",
+  "source": "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md"
+ },
+ {
+  "command": "cat 日本語メモ.txt",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "cat docs/仕様書.md | head -20",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "ls ドキュメント",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "ls -la 画像",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "mkdir -p ドキュメント/下書き",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/mkdir.1.html"
+ },
+ {
+  "command": "touch 議事録.md",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/touch.1.html"
+ },
+ {
+  "command": "cp 設定例.yml 設定.yml",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/cp.1.html"
+ },
+ {
+  "command": "mv メモ.txt docs/メモ.txt",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/mv.1.html"
+ },
+ {
+  "command": "wc -l 日本語メモ.txt",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/wc.1.html"
+ },
+ {
+  "command": "head -n 10 議事録.md",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/head.1.html"
+ },
+ {
+  "command": "python3 -m pytest tests -k \"ログイン\"",
+  "lang": "ja",
+  "source": "https://docs.pytest.org/en/stable/how-to/usage.html"
+ },
+ {
+  "command": "python3 -c \"print('こんにちは')\"",
+  "lang": "ja",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 scripts/変換.py --input data.csv",
+  "lang": "ja",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "find . -name \"*テスト*\"",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/find.1.html"
+ },
+ {
+  "command": "sed -n \"1,10p\" 議事録.md",
+  "lang": "ja",
+  "source": "https://man7.org/linux/man-pages/man1/sed.1.html"
+ },
+ {
+  "command": "git commit -m \"修复登录页面的错误\"",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git commit -m \"更新文档\"",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git commit -am \"添加单元测试\"",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-commit"
+ },
+ {
+  "command": "git log --oneline --grep=\"修复\"",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git log --author=\"张伟\" --oneline",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-log"
+ },
+ {
+  "command": "git branch feature/搜索功能",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-branch"
+ },
+ {
+  "command": "git checkout -b fix/样式问题",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-checkout"
+ },
+ {
+  "command": "git tag -a v2.0.0 -m \"正式发布\"",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-tag"
+ },
+ {
+  "command": "git stash push -m \"临时修改\"",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-stash"
+ },
+ {
+  "command": "git grep -n \"测试\" -- src",
+  "lang": "zh",
+  "source": "https://git-scm.com/docs/git-grep"
+ },
+ {
+  "command": "echo \"构建完成\"",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "echo 你好世界",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/echo.1.html"
+ },
+ {
+  "command": "grep -rn \"错误\" logs",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "grep -n \"数据库\" docs/设计.md",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/grep.1.html"
+ },
+ {
+  "command": "rg \"用户\" src",
+  "lang": "zh",
+  "source": "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md"
+ },
+ {
+  "command": "cat 会议记录.txt",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "cat docs/需求说明.md | head -20",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/cat.1.html"
+ },
+ {
+  "command": "ls 文档",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "ls -la 图片",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/ls.1.html"
+ },
+ {
+  "command": "mkdir -p 文档/草稿",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/mkdir.1.html"
+ },
+ {
+  "command": "touch 测试报告.md",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/touch.1.html"
+ },
+ {
+  "command": "cp 配置示例.yml 配置.yml",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/cp.1.html"
+ },
+ {
+  "command": "mv 笔记.txt docs/笔记.txt",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/mv.1.html"
+ },
+ {
+  "command": "wc -l 会议记录.txt",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/wc.1.html"
+ },
+ {
+  "command": "head -n 10 会议记录.md",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/head.1.html"
+ },
+ {
+  "command": "python3 -m pytest tests -k \"登录\"",
+  "lang": "zh",
+  "source": "https://docs.pytest.org/en/stable/how-to/usage.html"
+ },
+ {
+  "command": "python3 -c \"print('你好')\"",
+  "lang": "zh",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "python3 scripts/转换.py --input data.csv",
+  "lang": "zh",
+  "source": "https://docs.python.org/3/using/cmdline.html"
+ },
+ {
+  "command": "find . -name \"*测试*\"",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/find.1.html"
+ },
+ {
+  "command": "sed -n \"1,10p\" 会议记录.md",
+  "lang": "zh",
+  "source": "https://man7.org/linux/man-pages/man1/sed.1.html"
+ }
+]

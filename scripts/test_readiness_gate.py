@@ -638,6 +638,46 @@ class TheFifteenQuestionReferenceIsHonestNotInvented(unittest.TestCase):
     questions again without a real source landing first."""
 
     PAGE = os.path.join(REPO_ROOT, "docs", "plan", "FIFTEEN-QUESTION-PR-BAR.md")
+    #: The guard's OWN row of record, which test_it_names_the_row_of_record
+    #: requires the page to cite. It is hub only: docs/plan/EXPORT-ALLOWLIST.txt
+    #: names ten docs/plan files and this is not one of them, so its absence is
+    #: exactly "this tree is not a hub checkout". Measured, not assumed: the
+    #: first attempt at this discriminator tested for docs/plan itself, and the
+    #: export DOES carry that directory with its ten allowlisted files, so the
+    #: skip never fired and the push was refused a second time.
+    ROW_OF_RECORD = os.path.join(REPO_ROOT, "docs", "plan", "VAULT-WBS-V2-2026-08-29.json")
+
+    @classmethod
+    def setUpClass(cls):
+        """NO-DATA on a tree that is not a hub checkout, never FAIL.
+
+        The subject of this guard is a HUB plan document. docs/plan is not
+        exported (docs/plan/EXPORT-ALLOWLIST.txt names a handful of files and
+        not this one), and scripts/readiness_gate.py is not exported either, so
+        on the export tree there is no page for this guard to judge and three
+        of its cases read FileNotFoundError.
+
+        Measured 2026-10-29: the pre-push hermetic row refused a push of 73
+        commits on exactly that, naming test_it_names_the_row_of_record,
+        test_it_reports_no_data_rather_than_inventing_fifteen_questions and
+        test_the_reference_page_exists. The page and this class both landed in
+        8731a3827 on 2026-08-31, so the premise had been wrong for two months
+        and surfaced only when a change to readiness_gate.py pulled this suite
+        into the row's scope.
+
+        THE DISCRIMINATOR MATTERS. Skipping whenever the page is missing would
+        hide a real deletion, which is the whole value of this guard. So the
+        skip is conditioned on the absence of the guard's OWN row of record,
+        docs/plan/VAULT-WBS-V2-2026-08-29.json, which is hub only. Where that
+        row of record is present and the page is not, that is a deletion on a
+        hub tree and still fails below.
+        """
+        if not os.path.isfile(cls.ROW_OF_RECORD):
+            raise unittest.SkipTest(
+                "NO-DATA: %s does not carry docs/plan/VAULT-WBS-V2-2026-08-29.json, the row of "
+                "record this guard requires the page to cite, so it is not a hub checkout and "
+                "holds no fifteen-question reference to judge. Never a pass: on a hub tree "
+                "every case below runs." % REPO_ROOT)
 
     def test_the_reference_page_exists(self):
         self.assertTrue(os.path.isfile(self.PAGE), self.PAGE)

@@ -22,39 +22,35 @@ WHAT THIS IS
   his own Claude Code settings himself.
 
 WHAT IT SHOWS
-  One line, plain language, built from two of the same eight fields the
-  founder's own status view already uses: tools/bm_lead.py's
-  collect_status returns Goal, Direction, Progress, Time remaining,
-  Decision needed, Risk, Evidence and Next step, and this prints Progress
-  next to whether a Decision needed stands. For example: "2 of 5 tasks
-  accepted, decision waiting". No jargon, no store ids, no colour codes.
+  One line: the newest finished run, read from the run index
+  (~/.brother/runs-index.jsonl, scripts/proof_card.py's read_index), as
+  "<date> <the engine's result line>", for example "2026-10-29 DONE |
+  units=3 PASS=3 FAIL=0 NO-DATA=0 | release=NOT_REQUESTED | next=review-
+  receipt". PC1H.b: this used to open the project's claim store on every
+  refresh and build its line from the store's status fields; it now reads
+  ONE small file, so a refresh costs a file read, not a store open. The
+  index is per user, not per project, so the payload's folder no longer
+  matters. No index yet prints "NO-DATA: no run recorded yet", never an
+  error.
 
 WHY THIS DOES NOT CALL `bm-view render`
-  The design names `bm-view render --json` as the intended source. Read
-  against the code rather than the design's expectation: cmd_render's
-  --json branch (tools/bm_view.py, _render_once) prints
+  cmd_render's --json branch (tools/bm_view.py, _render_once) prints
   {path, rel_path, fingerprint, changed, artifact_url}, never a status
   payload, and on every call it WRITES PROJECT-VIEW.html to disk and
   records a view row in the store. A status line that ran that on every
   keystroke would break this file's own first law below on every single
-  invocation, and it would still have no status fields to show. So this
-  file calls the cheapest read only accessor that actually carries the
-  eight fields instead: tools/bm_lead.py's collect_status, against a
-  bs.ReadOnlyStore. That is the exact same collector tools/bm_view.py's
-  own header section and tools/bm_lead.py's own `status` subcommand
-  already read from; no second collector is defined here.
+  invocation.
 
 FAIL SILENT IS LAW
   A status line runs on nearly every turn of a session (event driven,
   debounced at 300ms per the Claude Code contract). On ANY error at all:
-  no BrotherMode project here, no store yet, setup not consented, a
-  corrupt config, a malformed stdin payload, a missing field, more than
-  one project in this folder, an exception of any kind, this prints
+  setup not consented, a corrupt config, a malformed stdin payload, a
+  proof_card.py that cannot be loaded, an exception of any kind, this prints
   NOTHING, to stdout or stderr, and exits 0. A status line that prints a
   traceback into the founder's terminal bar is a worse failure than a
-  status line that stays blank. This file writes no file, ever: it never
-  constructs a writable Store, only bs.ReadOnlyStore, and it calls no
-  function that records anything.
+  status line that stays blank. The one line it prints on purpose when
+  there is nothing to show is the NO-DATA line above. This file writes no
+  file, ever, and opens no store.
 
 Python 3.9, standard library only. No network. No subprocess.
 No em or en dashes anywhere in this file, its comments, or its output.
@@ -71,17 +67,6 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-
-
-def _load(name):
-    """Load a sibling tool by PATH, the same technique every other CLI in
-    this project uses (tools/bm_view.py, tools/bm_lead.py): a hostile
-    sys.path cannot shadow bm_store this way."""
-    spec = importlib.util.spec_from_file_location(
-        name, os.path.join(HERE, name + ".py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _load_setup():
@@ -110,73 +95,46 @@ def _consented():
         return False
 
 
-def _project_id(store):
-    """The one project this cwd's store belongs to, or None when there is
-    not exactly one. A status line that guessed among several projects
-    would show the wrong one silently, which is worse than showing none;
-    tools/bm_view.py's own _only_project makes the identical call."""
-    projects = store.list_projects(raw=True)
-    if len(projects) != 1:
+def _load_proof_card():
+    """scripts/proof_card.py, loaded by path from EITHER layout this tool
+    ships in, exactly as vault_recall_hook._load_journal documents: the
+    source checkout keeps it at <repo>/scripts/proof_card.py, an installed
+    bundle at <root>/runtime/proof_card.py, both three directories above
+    HERE. The first candidate that exists wins; none degrades to None (no
+    line), never a crash. proof_card puts its own directory on sys.path to
+    import safe_unwatched_time, which sits beside it in both layouts."""
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        for path in (os.path.join(root, "scripts", "proof_card.py"),
+                     os.path.join(root, "proof_card.py")):
+            if os.path.isfile(path):
+                break
+        else:
+            return None
+        spec = importlib.util.spec_from_file_location(
+            "proof_card_for_statusline", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent a status line without its index prints nothing, never a traceback
         return None
-    return projects[0].get("project_id")
-
-
-def one_line(fields):
-    """The founder facing line, built from two of collect_status's eight
-    fields: Progress (bl.collect_status, tools/bm_lead.py) says where the
-    work stands in the founder's own words, and Decision needed says
-    whether he is being asked something. Returns None when Progress
-    carries nothing to show rather than printing a half sentence.
-
-    `fields` is the (label, value, extra_lines) list collect_status
-    returns; only label and value are read here, on purpose, since the
-    extra lines are the multi line detail the founder's status view
-    prints and a status line is one line by contract."""
-    by_label = dict((label, value) for label, value, _extra in fields)
-    progress = (by_label.get("Progress") or "").strip()
-    if not progress:
-        return None
-    decision = (by_label.get("Decision needed") or "").strip()
-    waiting = "no decision waiting" if (not decision or decision == "none") \
-        else "decision waiting"
-    return "%s, %s" % (progress, waiting)
 
 
 def _status_line(payload):
     """The line to print for one stdin payload, or None to print nothing.
-    Every store, consent and project ambiguity failure returns None here;
-    genuinely unexpected shapes (a payload that never made it to a dict)
-    are refused by the caller before this is reached.
-
-    Opens a bs.ReadOnlyStore and nothing else: this function, and every
-    function it calls, never constructs a writable Store and never calls
-    a Store method that records anything, so there is no path from here
-    to a write."""
+    Reads the run index and nothing else: no store is opened, no folder is
+    scanned, no file is written, so there is no path from here to a write.
+    An absent index is the NO-DATA line; the payload's contents are not used
+    beyond being a JSON object."""
     if not isinstance(payload, dict):
         return None
     if not _consented():
         return None
-    cwd = payload.get("cwd")
-    if not isinstance(cwd, str) or not cwd:
-        cwd = os.getcwd()
-
-    bl = _load("bm_lead")
-    bs = bl.bs
-    root, _source = bs.resolve_root(cwd)
-    if not root:
+    pc = _load_proof_card()
+    if pc is None:
         return None
-    store = bs.ReadOnlyStore(root)
-    try:
-        project_id = _project_id(store)
-        if project_id is None:
-            return None
-        view = bl.collect_status(store, project_id)
-        return one_line(view["fields"])
-    finally:
-        try:
-            store.close()
-        except Exception:  # sbe: allow-silent best-effort close of a read-only diagnostic handle
-            pass
+    rows = pc.read_index()
+    return pc.index_line(rows[0]) if rows else "NO-DATA: no run recorded yet"
 
 
 def main():

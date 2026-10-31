@@ -591,7 +591,7 @@ class SubmissionTest(unittest.TestCase):
     are also run on fixture trees that isolate one condition each, since the real tree holds one state at a time."""
     SCRIPT = os.path.join(HERE, "one_plugin_readiness.py")
     CORPUS = os.path.join(ROOT, "docs", "plan", "one-plugin-trigger-corpus.json")
-    GUARD = 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py" '
+    DISPATCH = 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brother_hook.py" '
 
     def _run(self, *args, path=None):
         env = dict(os.environ, PATH=path if path is not None else os.environ.get("PATH", ""),
@@ -815,28 +815,45 @@ class SubmissionTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_the_hooks_bar_counts_guarded_commands_against_the_products(self):
-        """hooks-guarded, on a fixture tree: every bundle command wrapped and equal in number to the products' is
-        PASS; one unwrapped command, a dropped command, a corrupt or absent bundle hooks file is FAIL; products that
-        register nothing, or a products file that cannot be read, is NO-DATA, never PASS."""
+    def test_the_hooks_bar_counts_dispatched_handlers_against_the_products(self):
+        """hooks-guarded, on a fixture tree (HD1.e): one dispatcher command per event and a dispatch table holding as
+        many handlers as the products register is PASS; a handler wired past the dispatcher, a second command, a
+        dropped handler, an event the table does not hold, a corrupt or absent bundle hooks file and a corrupt
+        manifest are FAIL; products that register nothing, or a products file that cannot be read, is NO-DATA."""
         import one_plugin_readiness as R
         tmp = tempfile.mkdtemp(prefix="op1f-hooks-")
         try:
-            def hooks(path, commands):
+            def hooks(path, commands, event="Stop"):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                Path(path).write_text(json.dumps({"hooks": {"Stop": [{"matcher": "", "hooks": [
+                Path(path).write_text(json.dumps({"hooks": {event: [{"matcher": "", "hooks": [
                     {"type": "command", "command": c} for c in commands]}]}}), encoding="utf-8")
+
+            def table(rows, event="Stop"):
+                os.makedirs(os.path.dirname(manifest), exist_ok=True)
+                Path(manifest).write_text(json.dumps({"dispatch": {event: [{"tool": "x"}] * rows}}), encoding="utf-8")
             bm = os.path.join(tmp, "products", "brothermode", "hooks", "hooks.json")
             sbe = os.path.join(tmp, "products", "brothersbe", "hooks", "hooks.json")
             bundle = os.path.join(tmp, "bundle", "hooks", "hooks.json")
+            manifest = os.path.join(tmp, "bundle", "runtime", "hooks", "HOOKS-MANIFEST.json")
             hooks(bm, ["python3 a.py"])
             hooks(sbe, ["python3 b.py"])
-            hooks(bundle, [self.GUARD + "brothermode Stop python3 a.py", self.GUARD + "brothersbe Stop python3 b.py"])
+            hooks(bundle, [self.DISPATCH + "Stop"])
+            table(2)
             self.assertEqual(R.hooks_row(tmp)["verdict"], "PASS", R.hooks_row(tmp))
-            hooks(bundle, [self.GUARD + "brothermode Stop python3 a.py", "python3 b.py"])
-            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "one unwrapped command")
-            hooks(bundle, [self.GUARD + "brothermode Stop python3 a.py"])
-            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a dropped command")
+            hooks(bundle, [self.DISPATCH + "Stop", "python3 b.py"])
+            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a handler wired past the dispatcher")
+            hooks(bundle, [self.DISPATCH + "Stop", self.DISPATCH + "Stop"])
+            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a second command for one event")
+            hooks(bundle, [self.DISPATCH + "SessionEnd"])
+            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "the dispatcher given another event's name")
+            hooks(bundle, [self.DISPATCH + "Stop"])
+            table(1)
+            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a dropped handler")
+            table(2, "SessionEnd")
+            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a table that does not hold the wired event")
+            Path(manifest).write_text("{not json", encoding="utf-8")
+            self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a corrupt manifest")
+            table(2)
             Path(bundle).write_text("{not json", encoding="utf-8")
             self.assertEqual(R.hooks_row(tmp)["verdict"], "FAIL", "a corrupt bundle hooks file")
             os.remove(bundle)
@@ -846,7 +863,7 @@ class SubmissionTest(unittest.TestCase):
             hooks(bundle, [])
             self.assertEqual(R.hooks_row(tmp)["verdict"], "NO-DATA", "nothing registered is nothing proven")
             hooks(bm, ["python3 a.py"])
-            hooks(bundle, [self.GUARD + "brothermode Stop python3 a.py"])
+            hooks(bundle, [self.DISPATCH + "Stop"])
             os.remove(sbe)
             self.assertEqual(R.hooks_row(tmp)["verdict"], "NO-DATA", "a missing products file leaves the count unknown")
         finally:

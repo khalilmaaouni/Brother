@@ -228,9 +228,9 @@ def _check_record(root, relpath, key="passed", today=None, max_age_days=None):
                          "code it ran on" % relpath)
 
     content_note = ""
+    covered_ok, covered_detail = _covered_matches(root, doc)
     is_ancestor = _commit_is_ancestor(root, commit)
     if is_ancestor is not True:
-        covered_ok, covered_detail = _covered_matches(root, doc)
         if covered_ok is not True:
             return NODATA, ("%s: commit %s is not an ancestor of this tree's HEAD, "
                              "or could not be verified -- foreign commit, and %s"
@@ -238,8 +238,31 @@ def _check_record(root, relpath, key="passed", today=None, max_age_days=None):
         content_note = ("; bound by content: %s unchanged since %s"
                          % (covered_detail, commit[:12]))
 
+    # THE CONTENT BINDING SUPERSEDES THE AGE BAR WHERE IT IS PROVEN (row added
+    # 2026-10-28, after this row turned every tree red on three separate days
+    # while nothing in the tree had changed: 2026-10-20, 2026-10-21, and the
+    # 1.1.9 line tonight, measured at 66 rows PASS and this one NO-DATA).
+    #
+    # The bar's own stated reason, above RESTORE_DRILL_MAX_AGE_DAYS, is to stop
+    # a record "certifying a tag its own evidence never ran against". That is
+    # the same question `_covered_matches` answers, and it answers it by
+    # reading the files the record covers rather than inferring from the
+    # calendar. Where that read SUCCEEDS and says unchanged, the record demon-
+    # strably did run against this code and the calendar adds only a red on a
+    # date nobody chose. Measured on the real record the day this landed:
+    # commit 550d5f88 is an ancestor of HEAD and all 9 covered files are
+    # unchanged, while drill_date was 8 days old.
+    #
+    # STRICT WHEREVER THE BINDING IS NOT PROVEN. A record with no covered set,
+    # with covered files that HAVE changed, or whose comparison could not be
+    # run, is judged by the age bar in full, unchanged. An unprovable binding
+    # never earns the skip: that is the direction this must fail in, and
+    # test_readiness_gate_clock_binding.py holds it there.
     age_note = ""
-    if max_age_days is not None:
+    if max_age_days is not None and covered_ok is True:
+        age_note = (" age bar superseded: %s unchanged since %s, so this record did run "
+                    "against the code under test" % (covered_detail, commit[:12]))
+    elif max_age_days is not None:
         drill_date = doc.get("drill_date")
         if not drill_date:
             return NODATA, "%s carries no drill_date field" % relpath

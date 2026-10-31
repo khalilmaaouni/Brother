@@ -59,6 +59,11 @@ import door
 import journal
 import scope_audit
 import work_record
+# PC1H.a: the one renderer of the per unit rows. Bound as a public module level name
+# (not a function local import, not behind an underscore), so a reader of this module,
+# and the J4 substitution probe, can see that verdict_lines draws its rows from
+# proof_card and from nowhere else.
+from proof_card import verdict_rows
 
 NODATA = "NO-DATA"
 
@@ -312,6 +317,33 @@ CHECK_WITHOUT_FIELD = "check_without_dependencies"
 NO_FILE_DEPENDENCY = ("its dependency %s changed no file, so nothing shows "
                       "the check exercises it")
 
+#: PROOF1, D9 (2026-10-29): the stamp note for a unit whose own change is
+#: ENTIRELY test files, so a self revert had nothing to put back and no
+#: command was run. Spelled once here and written by brother_run's
+#: _stamp_self_revert, the same way NO_FILE_DEPENDENCY above is.
+#:
+#: WHY THE VERDICT TREATS IT AS NO GAP, which is a decision and not an
+#: oversight. self_revert_gap answers "the re-run could not be made" for it,
+#: and REQ-PROOF1A-03 in scripts/test_proof_can_fail.py reads that as NO-DATA
+#: in its docstring. That consequence is deliberately NOT adopted at the
+#: verdict: PROOF1 exists to refuse a check that would have passed ANYWAY, and
+#: a test only unit's check could not pass before the work at all, which the
+#: row already carries as check_passed_before False. Measured on the engine
+#: before this constant existed: a two unit plan whose units each add one test
+#: file read "0 PASS, 2 NO-DATA" and exited 2, so every "write me a test" task
+#: became an unproven run for a reason that is not PROOF1's.
+#:
+#: COST OF BEING WRONG: a hollow green on a unit that changed only test files
+#: is not caught by THIS reader. It is still reached by check_passed_before,
+#: dependency_gap, red_check_gap and zero_tests_gap, and zero_tests_gap is the
+#: one that catches a test file holding no tests.
+#:
+#: FLIP CONDITION: a hollow green found on a test only unit that no other gate
+#: catches. Then drop this note from the wiring's skip and carry the three
+#: engine fixtures with it.
+NOTHING_TO_REVERT = ("no non test file changed by this unit, so there was "
+                     "nothing to revert and no re-run was made")
+
 #: What a revert re-run's stderr says when the check BROKE rather than failed
 #: (E42, run 5 critic 3, hole H3, 2026-09-03: dependency_gap read any
 #: non-zero exit as coverage, so a check that exited 2 because the reverted
@@ -428,6 +460,12 @@ def dependency_gap(row):
     for entry in entries:
         if not isinstance(entry, dict):
             continue
+        if str(entry.get("kind") or "") == SELF_REVERT_KIND:
+            # PROOF1: self entries share this field with dependency entries.
+            # Unfiltered, a self entry at exit 0 would be reported here as a
+            # DEPENDENCY the check does not cover, naming the unit as its own
+            # dependency. self_revert_gap below owns that reading.
+            continue
         dep = str(entry.get("unit") or "?")
         files = ", ".join(str(f) for f in (entry.get("files") or [])) or "(no file)"
         code = entry.get("exit_code")
@@ -470,6 +508,214 @@ def dependency_note(row):
     return "; ".join(parts) or (
         "declared dependency on %s, never re-run with it reverted"
         % ", ".join(deps))
+
+
+#: PROOF1: the entry kind brother_run.py stamps for a unit's re-run with its
+#: OWN change reverted, as opposed to a dependency's. One spelling, read by
+#: both dependency_gap (which skips it) and self_revert_gap (which owns it).
+SELF_REVERT_KIND = "self"
+
+#: PROOF1.d: who wrote the done_check, in ONE place. It sat as a bare literal
+#: four times across this file and scripts/brother_run.py, with no constant
+#: anywhere, so the run line and the receipt could drift apart silently. Every
+#: other site reads it by name, this file's and the engine's alike.
+PLAN_AUTHOR = "the planning model"
+
+#: PROOF1.d: the journal events that are a RECORDED FAILURE for one unit. A
+#: repair is only a repair after something failed. The gate below used to read
+#: the attempt count alone, which names no failure at all, so a unit handed to
+#: the session and graded a second time was reported as "1 unit(s) were
+#: repaired" with nothing having gone wrong. A repair the run invented is a
+#: claim about work that did not happen.
+JOURNAL_FAILURE_EVENTS = ("unit.refused", "integrate.refused")
+
+#: PROOF1: the two reasons a green check proved nothing. The proof card reads
+#: these exact phrases back out of the reason and prints them in its label, so
+#: they are constants here rather than sentences written twice.
+PASSED_ANYWAY = "would have passed anyway"
+ZERO_TESTS = "zero tests ran"
+
+#: What a test runner prints when it collected nothing. Matched case
+#: insensitively as substrings; "collected 0 items" is not a substring of
+#: "collected 10 items", which is the distinction that matters.
+ZERO_TEST_MARKERS = ("ran 0 tests", "no tests ran", "collected 0 items")
+
+#: How much of a check's own log is read looking for that count. The count a
+#: runner prints sits at the end, and a log can be large.
+OUTPUT_TAIL_CHARS = 20000
+
+
+def zero_tests_ran(output_text):
+    """True when `output_text` is a POSITIVE record that the check collected
+    no tests at all.
+
+    A command that ran nothing exits 0, and exit 0 is what a receipt reads as
+    proof, so the only safe reading is the runner's own count.
+
+    Absent, empty and non string output are False. Unmeasured is not a record
+    that nothing ran, and treating it as one would turn every receipt without
+    a captured log into NO-DATA."""
+    if not isinstance(output_text, str) or not output_text:
+        return False
+    low = output_text.lower()
+    return any(marker in low for marker in ZERO_TEST_MARKERS)
+
+
+# WIRED INTO receipts_for FOR A STAMPED ROW ONLY, 2026-10-29, after the owner
+# delegated the decision this comment used to wait for. The three STAMPED
+# readings (exit 0, no exit code, broke rather than failed) now reach a verdict
+# through self_revert_entries(row) in receipts_for's chain. The fourth, "no
+# self entry at all", is deliberately NOT reached: it would turn every
+# hand-built row in scripts/test_receipt_door.py NO-DATA, and that is a
+# registered test file PROOF1 does not own (its harness is
+# scripts/test_proof_can_fail.py alone). MEASURED, both halves: with the gating
+# in place that suite reads 252 tests OK, unchanged; and the engine stamps a
+# self entry unconditionally for every DONE row it reaches
+# (brother_run.py _stamp_self_revert, outside the dependency loop, returning an
+# entry in every branch), so on this engine absence means a record written
+# before 2026-10-26. The red this wiring closed:
+# scripts/journey/check_vacuous_not_pass.py read FAIL "a check that still
+# passes with its own change reverted read PASS" against this door and PASS
+# after, one edit apart.
+def unrun_check_reason(recorded):
+    """Why this unit's own check cannot be read as having run, or "" when it can.
+
+    `recorded` is the RAW value the claim carried, before the int normalisation,
+    because the two honest answers differ and the normalisation destroys the
+    difference. MEASURED on 2026-10-29, which is the whole of this function:
+    the states were already right (an absent exit code, a string, a float and a
+    bool all read no-data; a recorded 0 reads verified), but every one of those
+    four reported "no captured exit code was recorded for this unit". For three
+    of them that is false. Something WAS recorded, it just was not an exit
+    code, and telling a reader nothing arrived hides a producer writing
+    rubbish, which is the defect that outlives the run.
+
+    A bool is called out by name: True is an int in Python, so `exit_code: true`
+    would otherwise sail through the int test and be read as exit code 1.
+    """
+    if recorded is None:
+        return ("no captured exit code was recorded for this unit, so "
+                "nothing here proves it ran")
+    if isinstance(recorded, bool):
+        return ("this unit's recorded exit code is the boolean %r, which is "
+                "not an exit code, so nothing here proves it ran" % recorded)
+    if not isinstance(recorded, int):
+        return ("this unit's recorded exit code %r is a %s and not an "
+                "integer, so it is not an exit code and nothing here proves "
+                "it ran" % (recorded, type(recorded).__name__))
+    return ""
+
+
+def self_revert_entries(row):
+    """This row's own self revert entries, the list self_revert_gap judges.
+
+    One definition, read in two places: the gap itself, and receipts_for's
+    wiring, which uses it to tell "stamped and hollow" (a verdict it acts on)
+    from "never stamped at all" (the pre-PROOF1 corpus, which it leaves
+    alone). Two spellings of the same filter would let those two readings
+    drift apart, which is the whole reason this is a function."""
+    entries = row.get(CHECK_WITHOUT_FIELD)
+    return [e for e in (entries if isinstance(entries, list) else [])
+            if isinstance(e, dict)
+            and str(e.get("kind") or "") == SELF_REVERT_KIND]
+
+
+def self_revert_applies(row):
+    """True when self_revert_gap's answer for `row` is a verdict receipts_for
+    should act on, False when it is one of the two readings this door
+    deliberately leaves alone.
+
+    LEFT ALONE, both with their reason beside the fact rather than implied:
+
+      no self entry at all. The pre-PROOF1 corpus and every hand-built row in
+        scripts/test_receipt_door.py. brother_run stamps one unconditionally
+        for every DONE row it reaches (_stamp_self_revert, outside the
+        dependency loop, returning an entry in every branch), so on this
+        engine absence means a record written before 2026-10-26, where a PASS
+        is the status quo rather than a regression. MEASURED: dropping this
+        half turns that suite from 252 OK to 49 failures and 2 errors.
+
+      nothing to revert. Every self entry carries NOTHING_TO_REVERT, so the
+        unit's whole change is test files and no command was run. The reason
+        this is not a gap is written beside that constant.
+
+    Everything else is acted on: exit 0, a broken re-run, and a re-run that
+    could not be made for a reason of its own."""
+    mine = self_revert_entries(row)
+    if not mine:
+        return False
+    return not all(str(e.get("note") or "") == NOTHING_TO_REVERT for e in mine)
+
+
+def self_revert_gap(row):
+    """The reason this unit's own check cannot vouch for this unit's OWN
+    change, or "" when it can.
+
+    dependency_gap above asks whether a check covers what it DEPENDS on. This
+    asks the prior question, which nothing asked before PROOF1: does the check
+    exercise the change the unit itself made? The engine re-runs the row's own
+    done_check with the row's own non test files reverted and stamps the exit
+    code; this reads that stamp:
+
+      exit 0 with the unit's own change reverted: the check cannot tell the
+        work from no work, so the reason carries PASSED_ANYWAY.
+      no exit code (None): the re-run could not be made and the stamp's note
+        says why; NO-DATA, never a pass.
+      no self entry at all: the record predates the rule, or the engine never
+        stamped one; NO-DATA, never a pass. That absence is the hole the
+        vacuous probe walked through, so it cannot read as clean.
+      non-zero and stderr saying the check BROKE rather than failed: the
+        re-run reached no verdict about the behaviour, so it shows no
+        coverage either; NO-DATA, never a pass.
+      non-zero with the change reverted: the check fails without it, which is
+        exactly what a covering check must do; no gap.
+
+    A row that is not DONE is not claiming anything yet, so it has no gap."""
+    if str(row.get("status") or "") != "DONE":
+        return ""
+    mine = self_revert_entries(row)
+    if not mine:
+        return ("this unit's check was never re-run with its own change "
+                "reverted, so nothing shows the check exercises the work")
+    for entry in mine:
+        files = ", ".join(str(f) for f in (entry.get("files") or [])) or "(no file)"
+        code = entry.get("exit_code")
+        if isinstance(code, bool) or not isinstance(code, int):
+            return ("the check could not be re-run with this unit's own "
+                    "change to %s reverted (%s), so nothing shows the check "
+                    "exercises the work"
+                    % (files, entry.get("note") or "no reason recorded"))
+        if code == 0:
+            return ("%s: the check still passes with this unit's own change "
+                    "to %s reverted, so it does not exercise the work"
+                    % (PASSED_ANYWAY, files))
+        if revert_broke_check(entry.get("stderr")):
+            return ("the check broke with this unit's own change to %s "
+                    "reverted rather than failing, so nothing shows it "
+                    "exercises the work" % files)
+    return ""
+
+
+def zero_tests_gap(row):
+    """The reason a green check proved nothing because it collected no tests,
+    or "" when it did collect some or when nothing recorded the count.
+
+    The count is read from the row's own captured log, the tail only. An
+    unreadable or absent log reads as no gap, deliberately: see
+    zero_tests_ran, unmeasured is not a record that nothing ran."""
+    if zero_tests_ran(row.get("check_output")):
+        return "%s: the check collected no tests at all" % ZERO_TESTS
+    where = row.get("output_location")
+    if not isinstance(where, str) or not where or where == NODATA:
+        return ""
+    try:
+        with open(where, encoding="utf-8", errors="replace") as handle:
+            tail = handle.read()[-OUTPUT_TAIL_CHARS:]
+    except OSError:
+        return ""
+    if zero_tests_ran(tail):
+        return "%s: the check collected no tests at all" % ZERO_TESTS
+    return ""
 
 
 #: P6 (doc E18/12.6): the five fields brother_run.py's _verify_evidence
@@ -1083,7 +1329,8 @@ def receipts_for(record, claims, refused, log_path=None,
             claim.get("evidence"), dict) else {}
         command = str(evidence.get("check_command")
                       or row.get("done_check") or "").strip()
-        exit_code = evidence.get("exit_code")
+        recorded_exit = evidence.get("exit_code")
+        exit_code = recorded_exit
         if isinstance(exit_code, bool) or not isinstance(exit_code, int):
             exit_code = None
         # P7: computed once per row, ahead of the state machine below, since
@@ -1109,7 +1356,7 @@ def receipts_for(record, claims, refused, log_path=None,
             # that edit path yet, so the field defaults honestly to the one
             # author that has ever actually written a done_check here.
             "author": ("the person" if row.get("check_author") == "the person"
-                      else "the planning model"),
+                      else PLAN_AUTHOR),
             # harness-revision-v1 (zero-context critic finding, defect 2,
             # 2026-09-03): the exact commit of scripts/brother_run.py that
             # RAN this unit, so a pre-fix receipt can be told from a
@@ -1199,6 +1446,32 @@ def receipts_for(record, claims, refused, log_path=None,
             # names the file whose reversion did not change the verdict.
             receipt["state"] = "no-data"
             receipt["reason"] = dependency_gap(row)
+        elif (exit_code == 0 and command and self_revert_applies(row)
+              and self_revert_gap(row)):
+            # PROOF1 (the vacuous probe, receipt 20261018T215741): the check
+            # exits 0 with THIS unit's own change reverted, so it cannot tell
+            # the work from no work. self_revert_gap has existed and been
+            # tested since PROOF1.a and was reachable from no verdict, so an
+            # assert True test over a comment only diff still printed PASS.
+            #
+            # STAMPED ONLY, and that is a decision with a cost. The gap also
+            # answers for a row carrying NO self entry, and that branch is
+            # deliberately not reached here: brother_run.py stamps one
+            # unconditionally for every DONE row it reaches (_stamp_self_revert,
+            # outside the dependency loop), so on this engine absence means a
+            # record written before 2026-10-26, where a PASS is the status quo
+            # rather than a regression. FLIP CONDITION: if any path through the
+            # current engine can mark a row DONE with no self entry, drop
+            # self_revert_entries from this condition and carry the fixtures.
+            receipt["state"] = "no-data"
+            receipt["reason"] = self_revert_gap(row)
+        elif exit_code == 0 and command and zero_tests_gap(row):
+            # PROOF1.b: the command exited 0 having collected no tests at all,
+            # and exit 0 is what a receipt reads as proof. Read from the row's
+            # own captured log, so an unmeasured log is no gap rather than a
+            # refusal; unmeasured is not a record that nothing ran.
+            receipt["state"] = "no-data"
+            receipt["reason"] = zero_tests_gap(row)
         elif exit_code == 0 and command and e18_gap(row):
             # P6 (doc E18/12.6): a green, dependency-proven check on an E18
             # unit is still not proof of ITS OWN claim (a metric against a
@@ -1256,9 +1529,10 @@ def receipts_for(record, claims, refused, log_path=None,
                     "the check fails the same way before and after the "
                     "work, so it does not run and proves nothing")
             else:
+                # FIRST1H.b: the reason by name, so a recorded value that is
+                # not an exit code stops reporting as nothing recorded.
                 receipt["reason"] = (
-                    "no captured exit code was recorded for this unit, so "
-                    "nothing here proves it ran" if exit_code is None else
+                    unrun_check_reason(recorded_exit) if exit_code is None else
                     "the recorded check exited %d, so this unit is not "
                     "proven" % exit_code)
         out.append(receipt)
@@ -2171,7 +2445,7 @@ def receipt_sentence(receipt):
     # (or names it private) instead of printing a bare fragment that reads
     # as though any reader could look it up.
     return "%s Check written by %s, %s." % (
-        body, receipt.get("author") or "the planning model",
+        body, receipt.get("author") or PLAN_AUTHOR,
         harness_label(receipt.get("harness_revision")))
 
 
@@ -2619,8 +2893,9 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
             entry["reason"] = r.get("reason") or NODATA
             unproven.append(entry)
 
-    # Q5: repair history, folded from the journal's own attempt and
-    # check-rewrite events; only units that actually needed repair appear.
+    # Q5: repair history, folded from the journal's own attempt, check-rewrite
+    # AND FAILURE events; only units that actually needed repair appear, which
+    # before PROOF1.d was not true: the gate read the attempt count alone.
     events = journal.read(run_dir) if run_dir else None
     journal_claims = journal_projection.claims_from_journal(events or ())
     rewritten = {}
@@ -2628,11 +2903,29 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
         if event.get("type") == "check.rewritten" and event.get("unit_id"):
             rewritten[event["unit_id"]] = bool(
                 (event.get("payload") or {}).get("still_looks_broken"))
+    failed = set()
+    for event in events or ():
+        uid = event.get("unit_id")
+        if uid is None:
+            continue
+        etype = str(event.get("type") or "")
+        if etype in JOURNAL_FAILURE_EVENTS:
+            failed.add(uid)
+        elif etype == "claim.released":
+            # EVERY release, not the last-wins projection: the failure that
+            # earned the repair is on the EARLIER release, and
+            # claims_from_journal keeps only the latest.
+            code = (event.get("payload") or {}).get("check_exit")
+            if (isinstance(code, int) and not isinstance(code, bool)
+                    and code != 0):
+                failed.add(uid)
     repair_history = []
     for uid in sorted(set(journal_claims) | set(rewritten)):
         attempt = (journal_claims.get(uid) or {}).get("attempt")
         was_rewritten = uid in rewritten
-        if (isinstance(attempt, int) and attempt > 1) or was_rewritten:
+        prior_attempt_failed = uid in failed
+        if prior_attempt_failed and (
+                (isinstance(attempt, int) and attempt > 1) or was_rewritten):
             repair_history.append({
                 "unit": uid,
                 "attempts": attempt if attempt is not None else NODATA,
@@ -3092,16 +3385,8 @@ def verdict_lines(view):
     lines = [brother_run.format_result_line(dict(view, units=len(units)))]
     if not view.get("readable"):
         lines.append("RECEIPT: %s" % _one_line(view.get("why") or NODATA))
-    for unit in units:
-        for f in unit["files"] or ["none"]:
-            line = "UNIT %s | FILE %s | CHECK %s | EXIT %s | %s" % tuple(
-                _one_line(v) for v in (unit["unit"], f, unit["command"],
-                                       unit["exit_code"], unit["verdict"]))
-            if unit["verdict"] != "PASS":
-                line += " | UNPROVEN: %s" % _one_line(unit["unproven_reason"])
-            lines.append(line)
-    return lines
-
+    # PC1H.a: the per unit and file rows come from proof_card, the one renderer.
+    return lines + verdict_rows(view)
 
 def main(argv=None):
     """TV1.b: the one command the status and deliver skills call.

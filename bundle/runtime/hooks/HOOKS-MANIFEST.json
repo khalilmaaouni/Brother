@@ -1,8 +1,457 @@
 {
+ "codex": [
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "SessionStart",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 30,
+   "tool": "brothermode/tools/bm_sessionstart.py"
+  },
+  {
+   "args": [
+    "refresh"
+   ],
+   "class": "advisory",
+   "event": "SessionStart",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 30,
+   "tool": "brothermode/tools/bm_vault.py"
+  },
+  {
+   "args": [
+    "sessionstart"
+   ],
+   "class": "advisory",
+   "event": "SessionStart",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_brother_canary.py"
+  },
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "SessionStart",
+   "matcher": "",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_sessionstart.py"
+  },
+  {
+   "args": [
+    "outcomes-append"
+   ],
+   "class": "advisory",
+   "event": "SessionEnd",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 30,
+   "tool": "brothermode/tools/bm_telemetry.py"
+  },
+  {
+   "args": [
+    "outcomes-append"
+   ],
+   "class": "advisory",
+   "event": "SessionEnd",
+   "matcher": "",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_telemetry.py"
+  },
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "Stop",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_clock_guard.py"
+  },
+  {
+   "args": [
+    "stop"
+   ],
+   "class": "advisory",
+   "event": "Stop",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 30,
+   "tool": "brothermode/tools/bm_hookchain.py"
+  },
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "Stop",
+   "matcher": "",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_session_reconcile.py"
+  },
+  {
+   "args": [
+    "precompact"
+   ],
+   "class": "advisory",
+   "event": "PreCompact",
+   "matcher": "",
+   "product": "brothermode",
+   "timeout": 60,
+   "tool": "brothermode/tools/bm_hookchain.py"
+  },
+  {
+   "args": [
+    "precompact"
+   ],
+   "class": "advisory",
+   "event": "PreCompact",
+   "matcher": "",
+   "product": "brothersbe",
+   "timeout": 120,
+   "tool": "brothersbe/tools/sbe_autosave.py"
+  },
+  {
+   "args": [
+    "precompact-brief"
+   ],
+   "class": "advisory",
+   "event": "PreCompact",
+   "matcher": "",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_telemetry.py"
+  },
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "PreToolUse",
+   "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_clock_guard.py"
+  },
+  {
+   "args": [],
+   "class": "deny",
+   "event": "PreToolUse",
+   "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_fence_hook.py"
+  },
+  {
+   "args": [
+    "check"
+   ],
+   "class": "advisory",
+   "event": "PreToolUse",
+   "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/vault_recall_hook.py"
+  },
+  {
+   "args": [
+    "pre"
+   ],
+   "class": "advisory",
+   "event": "PreToolUse",
+   "matcher": "Bash",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_bash_audit.py"
+  },
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "PreToolUse",
+   "matcher": "Bash",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_session_cap.py"
+  },
+  {
+   "args": [],
+   "class": "deny",
+   "event": "PreToolUse",
+   "matcher": "Edit|Write|MultiEdit|NotebookEdit|CreateDirectory|Delete|apply_patch",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_authority_hook.py"
+  },
+  {
+   "args": [],
+   "class": "deny",
+   "event": "PreToolUse",
+   "matcher": "Edit|Write|MultiEdit|NotebookEdit|CreateDirectory|Delete|apply_patch",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_fence_hook.py"
+  },
+  {
+   "args": [],
+   "class": "deny",
+   "event": "PreToolUse",
+   "matcher": "Bash",
+   "product": "brothersbe",
+   "tool": "brothersbe/tools/sbe_bash_write_guard.py"
+  },
+  {
+   "args": [
+    "post"
+   ],
+   "class": "advisory",
+   "event": "PostToolUse",
+   "matcher": "Bash",
+   "product": "brothermode",
+   "timeout": 15,
+   "tool": "brothermode/tools/bm_bash_audit.py"
+  },
+  {
+   "args": [],
+   "class": "advisory",
+   "event": "PostToolUse",
+   "matcher": "Bash",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/attempt_hook.py"
+  },
+  {
+   "args": [
+    "postskill"
+   ],
+   "class": "advisory",
+   "event": "PostToolUse",
+   "matcher": "Skill",
+   "product": "brothermode",
+   "timeout": 10,
+   "tool": "brothermode/tools/bm_brother_canary.py"
+  }
+ ],
+ "dispatch": {
+  "PostToolUse": [
+   {
+    "args": [
+     "post"
+    ],
+    "class": "advisory",
+    "matcher": "Bash",
+    "product": "brothermode",
+    "timeout": 15,
+    "tool": "brothermode/tools/bm_bash_audit.py"
+   },
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "Bash",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/attempt_hook.py"
+   },
+   {
+    "args": [
+     "postskill"
+    ],
+    "class": "advisory",
+    "matcher": "Skill",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_brother_canary.py"
+   }
+  ],
+  "PreCompact": [
+   {
+    "args": [
+     "precompact"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 60,
+    "tool": "brothermode/tools/bm_hookchain.py"
+   },
+   {
+    "args": [
+     "precompact"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothersbe",
+    "timeout": 120,
+    "tool": "brothersbe/tools/sbe_autosave.py"
+   },
+   {
+    "args": [
+     "precompact-brief"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_telemetry.py"
+   }
+  ],
+  "PreToolUse": [
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_clock_guard.py"
+   },
+   {
+    "args": [],
+    "class": "deny",
+    "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_fence_hook.py"
+   },
+   {
+    "args": [
+     "check"
+    ],
+    "class": "advisory",
+    "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/vault_recall_hook.py"
+   },
+   {
+    "args": [
+     "pre"
+    ],
+    "class": "advisory",
+    "matcher": "Bash",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_bash_audit.py"
+   },
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "Bash",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_session_cap.py"
+   },
+   {
+    "args": [],
+    "class": "deny",
+    "matcher": "Edit|Write|MultiEdit|NotebookEdit|CreateDirectory|Delete|apply_patch",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_authority_hook.py"
+   },
+   {
+    "args": [],
+    "class": "deny",
+    "matcher": "Edit|Write|MultiEdit|NotebookEdit|CreateDirectory|Delete|apply_patch",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_fence_hook.py"
+   },
+   {
+    "args": [],
+    "class": "deny",
+    "matcher": "Bash",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_bash_write_guard.py"
+   }
+  ],
+  "SessionEnd": [
+   {
+    "args": [
+     "outcomes-append"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 30,
+    "tool": "brothermode/tools/bm_telemetry.py"
+   },
+   {
+    "args": [
+     "outcomes-append"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_telemetry.py"
+   }
+  ],
+  "SessionStart": [
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 30,
+    "tool": "brothermode/tools/bm_sessionstart.py"
+   },
+   {
+    "args": [
+     "refresh"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 30,
+    "tool": "brothermode/tools/bm_vault.py"
+   },
+   {
+    "args": [
+     "sessionstart"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_brother_canary.py"
+   },
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_sessionstart.py"
+   }
+  ],
+  "Stop": [
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 10,
+    "tool": "brothermode/tools/bm_clock_guard.py"
+   },
+   {
+    "args": [
+     "stop"
+    ],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothermode",
+    "timeout": 30,
+    "tool": "brothermode/tools/bm_hookchain.py"
+   },
+   {
+    "args": [],
+    "class": "advisory",
+    "matcher": "",
+    "product": "brothersbe",
+    "tool": "brothersbe/tools/sbe_session_reconcile.py"
+   }
+  ]
+ },
  "files": [
+  {
+   "path": "brother_hook.py",
+   "sha256": "3937ea7efeb2d2354b8a5f2fd9ca01aa9e43ead10125ad18afdc355c6af44271"
+  },
   {
    "path": "brothermode/brotherme/core/schema.py",
    "sha256": "16eacad8afb3b5aa1fe54a87032d58b560f2ac762bc24b6ea7966ad61164932b"
+  },
+  {
+   "path": "brothermode/hooks/hooks.json",
+   "sha256": "a4f3919fb4f963b7659260d5e9a6766a3e41a2eb939127af070498fd02eba541"
   },
   {
    "path": "brothermode/scripts/doctor.py",
@@ -14,7 +463,7 @@
   },
   {
    "path": "brothermode/scripts/setup.py",
-   "sha256": "a22cdc5af3f158e33f637657f5fe0c64e3084c1d8b387c2b0ed08f0c0848badf"
+   "sha256": "47df69de05e8a006d153fbfa42c1dd7e9f2159e683e0e1ac0623c0fd7cb7a5e9"
   },
   {
    "path": "brothermode/tools/_jevpath.py",
@@ -70,7 +519,7 @@
   },
   {
    "path": "brothermode/tools/bm_controller.py",
-   "sha256": "331299e03236a12cdb26bdf014162060e2c9d5f556e68d3c16f4971c0e235cfa"
+   "sha256": "6bf197892f13f50fd039362f1b3b52e35332b418afd048faca0ca0f60b551422"
   },
   {
    "path": "brothermode/tools/bm_cursor.py",
@@ -206,11 +655,11 @@
   },
   {
    "path": "brothermode/tools/bm_project.py",
-   "sha256": "4c91e75efc6f2f6527864c2aaee26e39c84f73e6054a7a8654fdbd28704ad904"
+   "sha256": "69f02bb50cabe4b864934f7335d88a4f8c9b4fff60376f6c0195ed1087c8bc1f"
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "baa50ac43da8b00f9c74857a9797bd22223c1570d83bc9e3659c822c80108f91"
+   "sha256": "fbc8ef248b16670a076e5b23eaeea1283d655ac9c4bbe204e2c602883e1230c2"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -266,7 +715,7 @@
   },
   {
    "path": "brothermode/tools/bm_sessionstart.py",
-   "sha256": "34f37c105d3a3d31de0d8fd4ca3941dd85511bd7a0a7f80ad599facb9156319a"
+   "sha256": "c02d541c637bc36a2448b739656e9f9935d403a83785ecbf06222648a758a9b8"
   },
   {
    "path": "brothermode/tools/bm_stall.py",
@@ -274,7 +723,7 @@
   },
   {
    "path": "brothermode/tools/bm_statusline.py",
-   "sha256": "39daa6f436c959d2c4fd71d596188785c921cea3481b4f2ffa0a530f710d7f44"
+   "sha256": "216ef51e4f7d7abbc7ee807f17d39dcf3c6966c3f23b08bc73b3177835b91574"
   },
   {
    "path": "brothermode/tools/bm_store.py",
@@ -605,6 +1054,10 @@
    "sha256": "11e03baba732e77eb886a2ad5f5e0c3f8effd3a12599748a28fd6449cb107bad"
   },
   {
+   "path": "brothersbe/hooks/hooks.json",
+   "sha256": "f4f92100cdc99a4c360155db2297a43cdd69d512048cb231c3ebee58f7a29776"
+  },
+  {
    "path": "brothersbe/src/brothersbe/tasks.py",
    "sha256": "10a03472479b5b2e378830f47b8a7bc71107d639bf8b3bbb8784171fa29f580c"
   },
@@ -614,7 +1067,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_authority_hook.py",
-   "sha256": "8f39b5a6befabf49a84e9ab46daf24b3db0d0ef0ed03f2c1ff86bb66d94a298e"
+   "sha256": "56b79253bfef4d77a66525f1fb506db1a107641c7f5ca75cd3168c0434fd3a50"
   },
   {
    "path": "brothersbe/tools/sbe_autosave.py",
@@ -622,7 +1075,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_bash_write_guard.py",
-   "sha256": "2499e983a80c8b752e22cd4ee33c087d875f97cf2eafc6ace57a6e05eda98cf7"
+   "sha256": "41cca4aa607b98ddd8420025cde480654ff4317d17067ad6384a936fe6ca7aa1"
   },
   {
    "path": "brothersbe/tools/sbe_checks.py",
@@ -642,7 +1095,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_guard_common.py",
-   "sha256": "fc84f4fe6aa016c2b8b4302c980cd430fd63af397f6a11d779828c3604a4185d"
+   "sha256": "aad05b387c9e329adc317abc5ed2469a3c1de31709fa8382dde904277b845a25"
   },
   {
    "path": "brothersbe/tools/sbe_instruction_surface.py",

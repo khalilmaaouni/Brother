@@ -101,6 +101,91 @@ REFUSED = "REFUSED"
 #: different facts, and collapsing them is what hid a real defect for a week.
 ALREADY_INTEGRATED = "ALREADY-INTEGRATED"
 
+#: The commit gate (scripts/loop/commit_scan.py), run by scan_before_commit.
+#: Beside this file in a checkout (scripts/loop/) and in the installed runtime
+#: (runtime/loop/).
+COMMIT_SCAN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop",
+                           "commit_scan.py")
+SCAN_OK = "OK"
+
+
+def _run_scan(args, base):
+    """(verdict, detail) of one commit_scan run in `base`. Its exit status is the
+    verdict: 0 clean, 1 a hit, 3 the only hit is the private terms count and this
+    machine cannot judge them at all (no list, no term scanner), which is said in
+    the detail and is not a refusal, anything else could not tell. The scanner runs
+    isolated (-I: no working directory, script directory or PYTHON* variable on its
+    path), so nothing a lane put in the tree can be imported by the gate that is
+    judging it; it prints counts only, never the matched text."""
+    if not os.path.isfile(COMMIT_SCAN):
+        return NODATA, "commit_scan.py is not beside this file"
+    try:
+        scan = subprocess.run([sys.executable, "-I", COMMIT_SCAN] + list(args), cwd=base,
+                              capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return NODATA, "commit_scan.py could not run (%s)" % type(exc).__name__
+    detail = " ".join((scan.stdout or "").split())[:300]
+    if scan.returncode in (0, 3):
+        return SCAN_OK, detail
+    return (REFUSED if scan.returncode == 1 else NODATA), detail or "exit status %d" % scan.returncode
+
+
+def scan_before_commit(paths, root):
+    """(verdict, detail) for the change staged in `root`: OK, REFUSED (the scan
+    found a secret, a long dash, an attribution line or a private term) or NO-DATA
+    (the scan could not run, or the question was malformed). Only OK lets a commit
+    through; NO-DATA is never a pass (HD1.f, D-3).
+
+    The scan reads the WHOLE staged diff of `root`, a superset of `paths`; `paths`
+    must name at least one file inside the tree, so an empty list, a number or a
+    path outside the tree reads NO-DATA instead of a clean scan. See _run_scan for
+    how the scanner's exit status becomes the verdict."""
+    if not isinstance(root, str) or not root or not os.path.isdir(root):
+        return NODATA, "root is not a directory"
+    if not isinstance(paths, (list, tuple)) or not paths \
+            or not all(isinstance(p, str) and p for p in paths):
+        return NODATA, "no staged path was named"
+    base = os.path.realpath(root)
+    for p in paths:
+        # Lexical on purpose: a staged symlink names a path inside the tree
+        # even when its target does not, and the diff is what gets scanned.
+        full = os.path.normpath(os.path.join(base, p))
+        if full == base or not full.startswith(base + os.sep):
+            return NODATA, "a path is outside the tree"
+    return _run_scan([], base)
+
+
+def _scan_lane_commits(repo, base, lane_sha, runner=None):
+    """None when every commit of base..lane_sha may land, else (verdict, detail),
+    the detail naming the refused commit. Both ends are commit ids resolved once by
+    the caller, so what is scanned is exactly what is merged. The staged diff of the merge is the NET
+    change, so a secret one lane commit adds and a later one removes never reaches
+    it, yet it is in the history canonical would take; each commit's own diff and
+    message are scanned instead. A lane with nothing ahead of canonical has nothing
+    to scan; a count git cannot give is NO-DATA, never a pass."""
+    counted = _git(["rev-list", "--count", "%s..%s" % (base, lane_sha), "--"], repo, runner)
+    if counted.returncode != 0 or not (counted.stdout or "").strip().isdigit():
+        return NODATA, "the lane's commits could not be counted"
+    if int(counted.stdout) == 0:
+        return None
+    verdict, detail = _run_scan(["--log", "%s..%s" % (base, lane_sha)], repo)
+    return None if verdict == SCAN_OK else (verdict, detail)
+
+
+def _scan_staged_merge(repo, runner=None):
+    """None when the merge staged in `repo` may be committed, else the reason it
+    may not. Nothing staged is nothing to scan; a staged list git cannot give is
+    NO-DATA, never a pass."""
+    names = _git(["diff", "--cached", "--name-only", "-z"], repo, runner)
+    if names.returncode != 0:
+        return NODATA, "the staged file list could not be read"
+    paths = [n for n in (names.stdout or "").split("\0") if n]
+    if not paths:
+        return None
+    verdict, detail = scan_before_commit(paths, repo)
+    return None if verdict == SCAN_OK else (verdict, detail)
+
+
 #: A merge git refused only because ANOTHER process held canonical's index
 #: lock for a moment (a concurrent `git status` refreshing the index takes
 #: it) touched nothing and is not a conflict. Measured 2026-09-26: two
@@ -576,6 +661,17 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
             return {"verdict": REFUSED, "unit": unit_id, "canonical": _tip(repo, runner),
                     "reason": stopped}
 
+        # THE LANE IS RESOLVED ONCE, HERE, to a commit id, and that id is what every
+        # later step judges, scans and merges: a branch name can move between two
+        # steps, and a commit that was judged is not the commit that gets merged if
+        # each step reads the name again. A name that does not resolve is a lane
+        # nobody can have scanned, so nothing is merged by name; it reads CONFLICT.
+        resolved = _git(["rev-parse", "-q", "--verify", lane_branch + "^{commit}"], repo, runner)
+        lane_sha = (resolved.stdout or "").strip() if resolved.returncode == 0 else ""
+        if not lane_sha:
+            return {"verdict": CONFLICT, "unit": unit_id, "canonical": _tip(repo, runner),
+                    "reason": "lane %s does not resolve to a commit, so nothing was merged" % lane_branch}
+
         # THE RECOVERY RESOLVER, added 2026-09-01. It answers the one question a
         # crashed run cannot answer from its own state: did this lane's merge
         # already happen? The 2026-08-31 crash measurement recorded the cost of
@@ -591,7 +687,7 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
         # its own verdict rather than letting `merge` return already-up-to-date
         # is the whole point, because a silent no-op is indistinguishable from
         # work that was just done.
-        if _already_integrated(repo, lane_branch, runner):
+        if _already_integrated(repo, lane_sha, runner):
             return {"verdict": ALREADY_INTEGRATED, "unit": unit_id,
                     "canonical": _tip(repo, runner),
                     "reason": "lane %s is already an ancestor of canonical, so this "
@@ -623,7 +719,7 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
         # like the dirty-tree and stop-file checks above rather than landing
         # a merge that then has to be unwound.
         fence_conflict, fence_note = _interactive_fence_conflict(
-            repo, before, lane_branch, runner)
+            repo, before, lane_sha, runner)
         if fence_conflict is not None and fence_conflict["lifecycle_uuid"] == "(unknown)":
             return {"verdict": REFUSED, "unit": unit_id, "canonical": before,
                     "reason": "%s could not be compared against the active "
@@ -643,13 +739,24 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
         if fence_note:
             sys.stderr.write("integrate: %s\n" % fence_note)
 
+        # THE LANE'S HISTORY (HD1.f, the security review of cf681db4b): every commit the
+        # lane would bring is scanned on its own before anything is merged.
+        history = _scan_lane_commits(repo, before, lane_sha, runner)
+        if history is not None:
+            return {"verdict": REFUSED if history[0] == REFUSED else NODATA, "unit": unit_id,
+                    "canonical": before,
+                    "reason": "the commit gate %s the commits of lane %s (%s), so nothing was "
+                              "merged and canonical stays at %s"
+                              % ("refused" if history[0] == REFUSED else "could not clear",
+                                 lane_branch, history[1], before[:9])}
+
         # THE APPLY. --no-ff so the integration is its own commit and the
         # unwind is one reset to a recorded tip. The message is written here
         # rather than left to git's default (E45), so the commit itself says
         # a machine made it and which run to read.
-        merge_args = ["merge", "--no-ff", "-m",
+        merge_args = ["merge", "--no-ff", "--no-commit", "-m",
                       _merge_message(unit_id, lane_branch, run_id,
-                                     harness_revision), lane_branch]
+                                     harness_revision), lane_sha]
         merged = _git(merge_args, repo, runner)
         for attempt in range(INDEX_LOCK_RETRIES):
             # Retried only while nothing moved: the same tip, a clean tree.
@@ -672,6 +779,38 @@ def integrate_one(repo, lane_branch, unit, runner=None, check_runner=None,
                     "reason": "the lane does not apply to the current canonical "
                               "revision: %s"
                               % (merged.stderr or merged.stdout or "").strip()[:200]}
+
+        # THE COMMIT GATE (HD1.f, D-3). The merge above is staged and not yet
+        # committed, so this is the one place the lane's content can be scanned
+        # as a staged diff before it becomes canonical history. A secret, or a
+        # scan that cannot tell, aborts the merge: canonical stays at `before`.
+        # What is staged must be the scanned lane merged onto the canonical tip read at
+        # entry: refuse, and undo, if the tip moved or git merged some other commit.
+        # No MERGE_HEAD means git found nothing to merge ("Already up to date"):
+        # no commit is owed, exactly as before the gate existed.
+        merge_head = _git(["rev-parse", "-q", "--verify", "MERGE_HEAD"], repo, runner)
+        pending = merge_head.returncode == 0
+        if _tip(repo, runner) != before or (
+                pending and (merge_head.stdout or "").strip() != lane_sha):
+            _git(["merge", "--abort"], repo, runner)
+            return {"verdict": REFUSED, "unit": unit_id, "canonical": _tip(repo, runner),
+                    "reason": "canonical or lane %s moved while it was being merged (the scan read "
+                              "%s onto %s), so this merge was undone and committed nothing"
+                              % (lane_branch, lane_sha[:9], before[:9])}
+        gate = _scan_staged_merge(repo, runner)
+        if gate is None and pending:
+            committed = _git(["commit", "--no-edit"], repo, runner)
+            if committed.returncode != 0:
+                gate = (NODATA, "the merge could not be committed: %s"
+                        % ((committed.stderr or committed.stdout or "").strip()[:160]))
+        if gate is not None:
+            _git(["merge", "--abort"], repo, runner)
+            return {"verdict": REFUSED if gate[0] == REFUSED else NODATA, "unit": unit_id,
+                    "canonical": before,
+                    "reason": "the commit gate %s lane %s (%s), so nothing was "
+                              "committed and canonical stays at %s"
+                              % ("refused" if gate[0] == REFUSED else "could not clear",
+                                 lane_branch, gate[1], before[:9])}
 
         # THE REVALIDATION, on canonical, at the revision everybody else will
         # live with. Branch-local green bought admission to this step, nothing

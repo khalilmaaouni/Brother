@@ -64,9 +64,10 @@ sys.exit(code)
 '''
 
 # A stand in Claude Code: one `--print` session per prompt, which fires the shipped hook of the probe's event through
-# `python3` on PATH (the shim) the way the host's hook launcher does, then prints the host's own stream-json account of
-# it. The real host runs the hook_guard.py wrapper; the stand in runs the inner script the wrapper execs, which is the
-# one call the witness records either way. FAKE_CLAUDE_EXTRA=1 reports one hook fire more than it made.
+# `python3` on PATH (the shim) the way the host's hook launcher does (`/bin/sh -c <command>`), then prints the host's own
+# stream-json account of it. Since HD1.e each event's one command is the dispatcher (runtime/hooks/brother_hook.py
+# <Event>), which runs every handler of the event inside its own process, so the dispatcher is the one call the witness
+# records. FAKE_CLAUDE_EXTRA=1 reports one hook fire more than it made.
 # FAKE_CLAUDE_SHAPE=2.1.286 writes the hook line the way the real 2.1.286 stream does (no command field) and
 # FAKE_CLAUDE_LOGGED_OUT=1 fires only a prompt-less SessionStart and ends on the real not signed in error result.
 FAKE_CLAUDE = '''import json, os, subprocess, sys
@@ -93,8 +94,7 @@ commands = [h["command"] for b in blocks for h in b["hooks"]] if event == "Sessi
 lines = [{"type": "system", "subtype": "fake_path", "path": os.environ.get("PATH", "")}]
 for n, command in enumerate(commands):
     command = command.replace("${CLAUDE_PLUGIN_ROOT}", plugin_dir)
-    inner = "python3 " + command.split(" python3 ", 1)[1]
-    done = subprocess.run(["/bin/sh", "-c", inner], input=json.dumps(payload).encode(), cwd=os.path.join(plugin_dir, "hooks"),
+    done = subprocess.run(["/bin/sh", "-c", command], input=json.dumps(payload).encode(), cwd=os.path.join(plugin_dir, "hooks"),
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     lines.append({"type": "system", "subtype": "hook_response", "hook_event": event, "command": command,
                   "hook_id": "h-%d-%d" % (os.getpid(), n), "session_id": sid,
@@ -732,10 +732,12 @@ class TestHostLiveProof(unittest.TestCase):
         self.assertIn("agree", out)
         trace = os.path.join(home, "trace", "trace.jsonl")
         rows = self.rows(trace)
-        # one row per probe the host can label: the guarded write; the door and the verb sessions each fire the four
-        # shipped SessionStart hooks with no prompt (owner ruling 2026-10-05 hp1-claude-door), labelled other
+        # one row per probe the host can label: the guarded write; the door and the verb sessions each fire the one
+        # shipped SessionStart command (HD1.e: the dispatcher, which runs the four SessionStart handlers inside its own
+        # process) with no prompt (owner ruling 2026-10-05 hp1-claude-door), labelled other
         self.assertEqual(collections.Counter((r["event"], r["probe"]) for r in rows),
-                         {("SessionStart", "other"): 8, ("PreToolUse", "guarded_write"): 1})
+                         {("SessionStart", "other"): 2, ("PreToolUse", "guarded_write"): 1})
+        self.assertEqual({os.path.basename(r["script"]) for r in rows}, {"brother_hook.py"})
         self.assertIn("door and verb NO-DATA by owner ruling 2026-10-05 hp1-claude-door", out)
         self.assertEqual({r["host"] for r in rows}, {"claude"})
         with open(claude.claude_stream_path(trace), "rb") as fh:
@@ -770,7 +772,7 @@ class TestHostLiveProof(unittest.TestCase):
         self.assertEqual(code, 3, out)
         self.assertTrue(out.startswith("NO-DATA: claude run "), out)
         self.assertIn("do not agree", out)
-        self.assertEqual(len(self.rows(os.path.join(home, "trace", "trace.jsonl"))), 9)   # 4 SessionStart hooks for the door and the verb, 1 PreToolUse
+        self.assertEqual(len(self.rows(os.path.join(home, "trace", "trace.jsonl"))), 3)   # 1 SessionStart dispatcher fire for the door and the verb, 1 PreToolUse
 
     # the parts --------------------------------------------------------------------------------------------------------
 
@@ -815,8 +817,8 @@ class TestHostLiveProof(unittest.TestCase):
         self.assertTrue(scripts)
         self.assertTrue(all(os.path.isabs(s) for s in scripts))
         self.assertFalse([s for s in scripts if os.path.basename(s) == "hook_guard.py"])   # the wrapper is never a hook
-        self.assertIn(os.path.realpath(os.path.join(bundle, "runtime", "hooks", "brothermode", "tools", "bm_clock_guard.py")),
-                      scripts)
+        # HD1.e: every event's one command is the dispatcher, which runs the handlers inside its own process
+        self.assertEqual(scripts, [os.path.realpath(os.path.join(bundle, "runtime", "hooks", "brother_hook.py"))])
         ag = os.path.join(ROOT, AG_REL)
         self.assertEqual(proof.hook_scripts([os.path.join(ag, "hooks.json")], ag), [os.path.realpath(os.path.join(ag, AG_SCRIPT))])
         broken = write(os.path.join(self.work, "broken.json"), "{not json")

@@ -686,5 +686,22 @@ class TestFR1D(unittest.TestCase):
         for key in spawned[1]:
             self.assertEqual(by[key][0], True)
 
+class TheFloorKnob(unittest.TestCase):
+    """2026-10-30: the floor is 15 unless the owner names another in the command; 0 and junk are the default."""
+
+    def test_default_is_fifteen_and_the_module_reads_it(self):
+        self.assertEqual(15, PP.disk_floor_gib({}))
+        self.assertEqual(15, PP.DEFAULT_DISK_FLOOR_GIB)
+
+    def test_the_owner_may_name_a_floor(self):
+        self.assertEqual(13, PP.disk_floor_gib({"BROTHER_DISK_FLOOR_GIB": "13"}))
+        self.assertEqual(40, PP.disk_floor_gib({"BROTHER_DISK_FLOOR_GIB": " 40 "}))
+
+    def test_zero_negative_junk_and_huge_fall_back_to_the_default(self):
+        for raw in ("0", "-3", "", "off", "13.5", "1000", "1e2"):
+            with self.subTest(raw=raw):
+                self.assertEqual(15, PP.disk_floor_gib({"BROTHER_DISK_FLOOR_GIB": raw}))
+
+
 if __name__ == "__main__":
     unittest.main()

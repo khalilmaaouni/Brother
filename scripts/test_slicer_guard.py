@@ -52,6 +52,75 @@ def segments(src):
             for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
 
 
+class CommentRuns(unittest.TestCase):
+    """SLICE1.a: comment runs between unnamed blocks become one marker line, so the largest modules fit.
+
+    MEASURED ON THE BASE: slicing products/brothermode/tools/bm_store.py (1,095,781 bytes) for
+    mask_absolute_paths raises
+      ValueError: even with every function sliced out the remainder is 128756 bytes against a 110000
+      budget, so the file's imports and module level code alone do not fit
+    which is the spec's own red case. The remainder is imports, small constants and the comment and blank
+    runs between everything the slicer already dropped.
+
+    THE CONSTRAINT THAT MAKES THIS SAFE, and the reason the second test exists: a worker patches the real
+    file with a unique find, so every block the brief keeps must be BYTE IDENTICAL. A slicer that reflows
+    anything produces a patch that cannot apply, which is worse than a brief that is too big."""
+
+    #: this file defines no repository root of its own, so the class carries one rather than
+    #: depending on a global it does not own
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def slicer(self):
+        import importlib.util
+        import sys
+        path = os.path.join(self.REPO, "scripts/loop/slicer.py")
+        if not os.path.isfile(path):
+            self.fail("NO-DATA: scripts/loop/slicer.py is not in this tree")
+        for extra in (os.path.join(self.REPO, "scripts"), os.path.join(self.REPO, "scripts", "loop")):
+            if extra not in sys.path:
+                sys.path.insert(0, extra)
+        spec = importlib.util.spec_from_file_location("slicer_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_bm_store_slices(self):
+        """REQ-SLICE1A-01: the largest shipped module slices under the budget for a named function."""
+        module = self.slicer()
+        self.assertTrue(hasattr(module, "_fold_comment_runs"),
+                        "the slicer has no _fold_comment_runs, so a file whose comment runs alone exceed "
+                        "the budget still refuses the whole lane")
+        target = os.path.join(self.REPO, "products/brothermode/tools/bm_store.py")
+        if not os.path.isfile(target):
+            self.fail("NO-DATA: bm_store.py is not in this tree, so the budget cannot be judged")
+        out, dropped = module.slice_source(target, "mask_absolute_paths", 110000)
+        self.assertLessEqual(len(out), 110000,
+                             "bm_store.py sliced to %d bytes against a 110000 budget" % len(out))
+        #: the NAME alone is hollow: it also appears inside "# [SLICED OUT, not shown:
+        #: mask_absolute_paths, ...]". Measured 2026-10-25, that is exactly what this assertion passed on
+        #: while the slice contained no function body at all. Assert the DEFINITION.
+        self.assertIn("def mask_absolute_paths", out,
+                      "the slice fits the budget but does not contain the function it was written "
+                      "about, so a worker is handed a brief it cannot patch against")
+
+    def test_kept_blocks_are_verbatim(self):
+        """REQ-SLICE1A-02: every kept block is byte identical to the file, so a unique find still applies."""
+        module = self.slicer()
+        self.assertTrue(hasattr(module, "_fold_comment_runs"),
+                        "the slicer has no _fold_comment_runs yet, so this cannot be judged")
+        target = os.path.join(self.REPO, "products/brothermode/tools/bm_store.py")
+        if not os.path.isfile(target):
+            self.fail("NO-DATA: bm_store.py is not in this tree")
+        out, _dropped = module.slice_source(target, "mask_absolute_paths", 110000)
+        src = open(target, encoding="utf-8").read()
+        blocks = [b for b in re.split(r"# \[[A-Z][^\n]*\]\n", out) if b.strip()]
+        self.assertTrue(blocks, "the slice kept nothing at all")
+        not_verbatim = [b.splitlines()[0][:60] for b in blocks if b not in src]
+        self.assertEqual(not_verbatim, [],
+                         "these kept blocks are not byte identical to the file, so a worker's unique "
+                         "find patch would not apply: %s" % not_verbatim)
+
+
 class KeptBlocksAreWhole(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="slicer-guard-")

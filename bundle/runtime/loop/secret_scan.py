@@ -136,7 +136,25 @@ def gate_refuses(text: str, stage: str) -> bool:
 #: fixtures and a teaching page reproduce on purpose. A VALUE allowlist, never a
 #: path one. Written by CONCATENATION on purpose: a contiguous literal here
 #: would be the exact shape this module exists to refuse.
-KNOWN_PUBLIC_EXAMPLE_VALUES = ("AKIA" + "IOSFODNN7" + "EXAMPLE",)
+#: GUARD1 (1.1.9), owner ruling 2026-10-30: the three heredoc bodies the bash
+#: write guard's own fixtures feed a fake network sink, so the guard can be
+#: shown to deny a secret leaving by stdin. Invented values, public by
+#: construction, split as the first entry is so no line here reads as a shape.
+#: Each entry is one COMPLETE fixture value as it sits in the test's source
+#: (the key block carries its body and footer as the literal two character
+#: escapes the source holds), never a bare header: a bare header entry would
+#: strip the header of a real key too (security review, 2026-10-30).
+KNOWN_PUBLIC_EXAMPLE_VALUES = (
+    "AKIA" + "IOSFODNN7" + "EXAMPLE",
+    "API_" + "KEY=abcd1234efgh",
+    "-----BEGIN OPENSSH PRIV" + "ATE KEY-----\\nxx\\nEOF",
+    "DB_PASS" + "WORD=hunter2hunter2",
+    # The three fixture shapes the 1.1.9 line carries in committed test fixtures and commit text (2026-10-30), each the
+    # exact substring and nothing shorter, so a real key or assignment is never stripped (the c88645e00 review's rule):
+    "API_" + "KEY=not-a-real-key",
+    "pass" + "word=zzzz9999 still counts",
+    "-----BEGIN OPENSSH PRIV" + "ATE KEY-----\" alone would be",
+)
 
 
 def strip_public_examples(text: str) -> str:

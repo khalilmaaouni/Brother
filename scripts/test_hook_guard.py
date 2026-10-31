@@ -24,7 +24,7 @@ condition per fixture:
   c.  corrupt settings, corrupt registry, missing config dir, a settings
       file nested past the recursion limit: runs
   d.  two enabled brother roots registering the hook: only the first fires
-  e.  the committed bundle/hooks/hooks.json wraps every command
+  e.  the committed bundle/hooks/hooks.json runs every event through the dispatcher (HD1.e)
   x.  unrunnable command: exit 2 on PreToolUse and Stop, 1 elsewhere, reason
       on stderr
   m1. the old plugin's matcher is NARROWER than the bundle's (Edit|Write vs
@@ -782,24 +782,23 @@ class GuardFiresOnce(unittest.TestCase):
             self.assertEqual(run_guard(reg)[:2], RAN)
 
 
-class TheCommittedBundleWrapsEveryCommand(unittest.TestCase):
+class TheCommittedBundleDispatchesEveryCommand(unittest.TestCase):
 
-    def test_e_every_hooks_json_command_runs_through_the_guard_with_its_event(self):
+    def test_e_every_hooks_json_command_is_the_dispatcher_with_its_event(self):
+        """HD1.e: one command per event, runtime/hooks/brother_hook.py given the event's name; the
+        dispatcher asks this guard per handler (brother_hook._should_yield), and the guard stays
+        shipped as the spawn path (test_e_shipped_guard_is_the_source)."""
         path = os.path.join(REPO, "bundle", "hooks", "hooks.json")
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
-        prefix = 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py" '
+        prefix = 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/brother_hook.py" '
         seen = 0
         for event, groups in doc["hooks"].items():
+            self.assertEqual(sum(len(g["hooks"]) for g in groups), 1, event)
             for g in groups:
                 for h in g["hooks"]:
                     seen += 1
-                    self.assertTrue(h["command"].startswith(prefix), h["command"])
-                    product, ev, flag = h["command"][len(prefix):].split(" ", 3)[:3]
-                    self.assertIn(product, ("brothermode", "brothersbe"))
-                    self.assertEqual(ev, event, h["command"])
-                    self.assertEqual(flag, '"--matcher=%s"' % g.get("matcher", ""),
-                                     h["command"])
+                    self.assertEqual(h["command"], prefix + event)
         self.assertGreater(seen, 0)
         self.assertFalse(os.path.exists(os.path.join(REPO, "bundle", "hooks", "union.json")))
 

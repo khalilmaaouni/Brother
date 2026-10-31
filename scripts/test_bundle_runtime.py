@@ -474,6 +474,11 @@ class LauncherRunsOutsideAnyCheckout(unittest.TestCase):
         self.scripts_dir = os.path.join(self.tmp, "scripts")
         self.runtime_dir = os.path.join(self.tmp, "install", "bundle", "runtime")
         copy_scripts_subset(self.scripts_dir)
+        # integrate.py runs loop/commit_scan.py before it commits a lane (HD1.f), and an
+        # installed runtime always carries scripts/loop beside it (generate_loop), so
+        # the faithful install has it too; without it the gate reads NO-DATA and refuses.
+        shutil.copytree(os.path.join(HERE, "loop"), os.path.join(self.scripts_dir, "loop"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
         BR.generate(scripts_dir=self.scripts_dir, runtime_dir=self.runtime_dir)
         self.launcher = os.path.join(self.runtime_dir, BR.LAUNCHER_NAME)
 
@@ -1201,8 +1206,9 @@ def setUpModule():
 
 class OnePluginHooksRefuseDrift(unittest.TestCase):
     """docs/architecture/ADR-ONE-PLUGIN-HOOKS.md (2026-09-30): the merged
-    hooks live at bundle/hooks/hooks.json, every command runs through the
-    double-fire guard, the retired union.json stays gone, and the manifest
+    hooks live at bundle/hooks/hooks.json, every command is the one
+    dispatcher of its event (HD1.e), which asks the double-fire guard per
+    handler, the retired union.json stays gone, and the manifest
     carries no "dependencies". Generated into a temp bundle from the real
     products/, then broken one way per test; check_hooks() must name each
     break. Never touches the committed bundle."""
@@ -1224,18 +1230,18 @@ class OnePluginHooksRefuseDrift(unittest.TestCase):
     def _check(self):
         return BR.check_hooks(runtime_dir=self.runtime)
 
-    def test_fresh_generation_is_green_and_wrapped(self):
+    def test_fresh_generation_is_green_and_dispatched(self):
         ok, problems = self._check()
         self.assertTrue(ok, problems)
         with open(os.path.join(self.bundle, "hooks", "hooks.json"),
                   encoding="utf-8") as fh:
             doc = json.load(fh)
-        commands = [h["command"] for groups in doc["hooks"].values()
+        commands = [(event, h["command"]) for event, groups in doc["hooks"].items()
                     for g in groups for h in g["hooks"]]
         self.assertTrue(commands)
-        for c in commands:
-            self.assertTrue(c.startswith(
-                'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py" '), c)
+        for event, c in commands:
+            self.assertEqual(c, 'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/hooks/'
+                                'brother_hook.py" ' + event)
 
     def test_matcher_reaches_the_guard_and_a_shell_active_matcher_is_refused(self):
         c = BR._rewrite_plugin_root_command(
@@ -1265,13 +1271,15 @@ class OnePluginHooksRefuseDrift(unittest.TestCase):
         self.assertTrue(any("hooks/hooks.json: missing" in p
                             for p in problems), problems)
 
-    def test_unwrapped_command_is_stale(self):
+    def test_undispatched_command_is_stale(self):
+        """A handler wired straight into hooks.json, past the dispatcher."""
         path = os.path.join(self.bundle, "hooks", "hooks.json")
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
+        old = 'runtime/hooks/brother_hook.py\\" PreToolUse'
+        self.assertIn(old, text)
         text = text.replace(
-            'python3 \\"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/hook_guard.py\\" '
-            'brothermode ', '', 1)
+            old, 'runtime/hooks/brothermode/tools/bm_fence_hook.py\\"', 1)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         ok, problems = self._check()

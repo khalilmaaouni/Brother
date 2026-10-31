@@ -133,10 +133,14 @@ def state_path(version, candidate, directory=""):
     return os.path.join(directory or CR.evidence_dir(), "driver-%s-%s.json" % (version, candidate[:12]))
 
 
-def new_state(version, candidate, tree, release_branch, now):
+def new_state(version, candidate, tree, release_branch, now, inputs=None):
+    """A fresh driver state. `inputs` (CUT1.b) is the identity it is started under, by default this checkout's for
+    `candidate` (cut_rehearsal.inputs_identity); a phase entry that records none of its own is judged by it."""
+    if inputs is None:
+        inputs = CR.inputs_identity(ROOT, candidate, version)
     return {"schema": SCHEMA, "version": version, "candidate_sha": candidate, "candidate_tree": tree,
             "release_branch": release_branch, "started_at": float(now), "phases": {}, "tip": "", "pin": "",
-            "worktree": ""}
+            "worktree": "", "inputs": inputs, "attempts": []}
 
 
 def _read_json(path):
@@ -518,6 +522,88 @@ def adopt_phase(root, version, candidate, record_path, runner=None):
     return verdict, "pin %s at %s, worktree %s" % (pin, tip[:12], worktree), tip, worktree
 
 
+# ---------------------------------------------------------------- X01, the Linux half (RDM1.b)
+
+#: RDM1.b (2026-10-29), the owner's cut gate AC2 of 2026-10-23. The dispatch only virgin-install workflow walks
+#: J1 and J2 on the exported candidate and its RUN LOG is the record (the workflow's own note says so). The
+#: spec fixes no other source, so this reads that log: the newest finished run whose log names the candidate's
+#: identity, bound by the `identity candidate=<sha> installed=<sha>` line scripts/journey/run_journey.py prints.
+#: This reads a run; it dispatches none (the cost law: the owner or the session dispatches it in the public repo).
+UBUNTU_JOURNEYS = ("J1", "J2")
+LOG_PREFIX_RE = re.compile(r"^.*?\d{4}-\d{2}-\d{2}T[0-9:.]+Z ")
+LOG_SECTION_RE = re.compile(r"^=== (J\d+) ===\s*$")
+LOG_ROW_RE = re.compile(r"^(PASS|FAIL|NO-DATA)\s+\S")
+LOG_IDENTITY_RE = re.compile(r"^identity candidate=(\S+) installed=(\S+)\s*$")
+LOG_EXIT_RE = re.compile(r"^(J\d+) exit (\d+)\s*$")
+
+
+def candidate_manifest_identity(worktree):
+    """sha256 of the worktree's bundle runtime manifest, the identity the walker binds a walk by; '' unreadable."""
+    import hashlib
+    try:
+        with open(os.path.join(worktree, "bundle", "runtime", "RUNTIME-MANIFEST.json"), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def parse_ubuntu_log(text, identity):
+    """(None, '') when the log is not about `identity`; else (ok, detail): ok True only when J1 and J2 both ran on
+    that identity, exited 0 and printed rows that are all PASS. Anything missing or malformed is not ok."""
+    sections, current = {}, None
+    for raw in (text or "").splitlines():
+        line = LOG_PREFIX_RE.sub("", raw).strip()
+        m = LOG_SECTION_RE.match(line)
+        if m:
+            current = sections.setdefault(m.group(1), {"rows": [], "ident": None, "exit": None})
+        elif current is not None:
+            if LOG_ROW_RE.match(line):
+                current["rows"].append(line.split()[0])
+            elif LOG_IDENTITY_RE.match(line):
+                current["ident"] = LOG_IDENTITY_RE.match(line).groups()
+            elif LOG_EXIT_RE.match(line):
+                current["exit"] = int(LOG_EXIT_RE.match(line).group(2))
+                current = None      # later lines of the log belong to no journey
+    if not any(sec["ident"] and sec["ident"][0] == identity for sec in sections.values()):
+        return None, ""
+    for journey in UBUNTU_JOURNEYS:
+        sec = sections.get(journey)
+        if sec is None:
+            return False, "the log has no %s section" % journey
+        if sec["ident"] != (identity, identity):
+            return False, "%s walked another tree (%s)" % (journey, sec["ident"])
+        if sec["exit"] != 0:
+            return False, "%s exit %s" % (journey, sec["exit"])
+        if not sec["rows"] or any(v != "PASS" for v in sec["rows"]):
+            return False, "%s rows are not all PASS (%s)" % (journey, ",".join(sec["rows"]) or "none")
+    return True, "J1 and J2 PASS on ubuntu"
+
+
+def ubuntu_x01_gate(worktree, runner=None):
+    """(verdict, detail): PASS only when the newest finished virgin-install run that walked THIS candidate read
+    J1 and J2 PASS on ubuntu. No run for the candidate, an unreadable log or a gh that cannot run is NO-DATA,
+    never PASS; a run that walked it and did not pass is FAIL."""
+    runner = runner or real_runner
+    identity = candidate_manifest_identity(worktree)
+    if not identity:
+        return "NO-DATA", "the candidate's runtime manifest cannot be read, so it has no identity"
+    rc, text = runner(["gh", "run", "list", "--workflow", "virgin-install.yml", "-R", REPO, "--json",
+                       "databaseId,status,createdAt", "--limit", "10"], None)
+    runs = _json(text) if rc == 0 else None
+    if not isinstance(runs, list):
+        return "NO-DATA", "the virgin-install runs cannot be listed (exit %d): %s" % (rc, _last_line(text))
+    done = [r for r in runs if isinstance(r, dict) and r.get("status") == "completed" and r.get("databaseId")]
+    for item in sorted(done, key=lambda r: str(r.get("createdAt")), reverse=True):
+        rc, log = runner(["gh", "run", "view", str(item["databaseId"]), "-R", REPO, "--log"], None)
+        if rc != 0:
+            return "NO-DATA", "run %s log cannot be read (exit %d)" % (item["databaseId"], rc)
+        ok, detail = parse_ubuntu_log(log, identity)
+        if ok is None:
+            continue
+        return ("PASS" if ok else "FAIL"), "virgin-install run %s: %s" % (item["databaseId"], detail)
+    return "NO-DATA", "no finished virgin-install run walked candidate %s on ubuntu" % identity[:12]
+
+
 def cut_command(worktree, version, tip, body, approval=""):
     """The cut's argv; `approval` (CY1.b), the owner's app line, is passed on as --approval when given."""
     cmd = [sys.executable, "-u", os.path.join(worktree, "scripts", "cut.py"), "--version", version,
@@ -876,6 +962,10 @@ def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeou
     if name == "cut":
         if not SHA_RE.fullmatch(state.get("tip", "")) or not os.path.isdir(state.get("worktree", "")):
             return "NO-DATA", "no adopted tip and worktree in the state; rerun the adopt", {}
+        # RDM1.b: nothing is published unless the Linux half of X01 read J1 and J2 PASS on the exported candidate.
+        v, d = ubuntu_x01_gate(state["worktree"], runner)
+        if v != "PASS":
+            return v, "X01 Linux half: " + d, {}
         v, d = cut_phase(state["worktree"], version, state["tip"], body, runner, tty, approval)
         return v, d, {}
     prev = state["phases"].get("after")
@@ -884,10 +974,149 @@ def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeou
     return v, d, {"steps": steps}
 
 
-def run(root, version, candidate, body, release_branch, runner=None, clock=None, tty=None, out=None,
-        hub_remote="hub", timeout_s=CR.DEFAULT_TIMEOUT_S, directory="", require_state=False,
-        power=None, sleeps=None, approval=""):
-    """`approval` (CY1.b) reaches only the cut phase and is never written to the state file."""
+#: CUT1.b: the one key function, shared with the rehearsal rows (cut_rehearsal.evidence_key).
+evidence_key = CR.evidence_key
+
+
+def reuse_miss(entry, inputs, fallback=None):
+    """'' when a kept phase entry may be REUSED for `inputs`, else why not (CUT1.a, CUT1.b). Only a PASS or REUSED
+    entry whose recorded inputs give exactly this evidence key is reused; an entry from before CUT1 carries none and
+    is judged by `fallback`, the identity its state was started under. Unknown inputs on either side never hit."""
+    if not isinstance(entry, dict):
+        return "no earlier attempt"
+    if entry.get("verdict") not in PASSING:
+        return "the earlier attempt read %s" % (entry.get("verdict") or "nothing")
+    key = evidence_key(inputs)
+    if key is None:
+        return "the inputs are unknown, so nothing is reused"
+    recorded = entry["inputs"] if "inputs" in entry else fallback
+    if evidence_key(recorded) is None:
+        return "the earlier attempt recorded no input identity"
+    if evidence_key(recorded) != key:
+        return "changed: %s" % ", ".join(CR.input_changes(recorded, inputs))
+    return ""
+
+
+def _shape(got):
+    """(verdict, detail, extra fields) from a phase runner's answer; a fixture's third item is the tree it saw."""
+    if not isinstance(got, (tuple, list)) or len(got) not in (2, 3) or got[0] not in EXIT_FOR \
+            or not isinstance(got[1], str):
+        return "NO-DATA", "the phase answered %r, not (verdict, detail[, extra])" % (got,), {}
+    extra = got[2] if len(got) == 3 else {}
+    if isinstance(extra, str):
+        extra = {"tree": extra}
+    return got[0], got[1], extra if isinstance(extra, dict) else {}
+
+
+def _walk(state, path, table, inputs, resume, clock, say=None, before=None, after=None, then=None):
+    """THE ONE PHASE LOOP (CUT1.a), for the real phases and a fixture's alike: [(phase, (verdict, detail))] in table
+    order. A phase whose kept entry passes reuse_miss is REUSED and not run; any other phase runs, and every run
+    appends one attempt row (phase, seconds, inputs, result, reuse_miss) to the state, saved before the next phase.
+    The walk stops after the first phase that is not PASS or REUSED. Hooks, all optional: before(name) answers a
+    (verdict, detail) refusal recorded in place of the run; after(name, verdict, detail, started, ended) answers
+    (verdict, detail, extra fields); then(name) True stops the walk after the phase. The second value says whether a
+    hook stopped it."""
+    key = evidence_key(inputs)
+    attempts = state.setdefault("attempts", [])
+    results = []
+    for name, runner in table.items():
+        entry = state["phases"].get(name)
+        miss = reuse_miss(entry, inputs, state.get("inputs")) if resume else "a fresh run reuses nothing"
+        if not miss:
+            results.append((name, ("REUSED", "kept: %s" % entry.get("detail", ""))))
+            continue
+        refused = before(name) if before else None
+        started = clock()
+        if refused:
+            verdict, detail, extra, ended = refused[0], refused[1], {}, started
+        else:
+            try:
+                got = runner(state)
+            except Exception as exc:   # a runner that raises is NO-DATA for its phase, never a pass
+                got = ("NO-DATA", "the %s phase raised %s" % (name, type(exc).__name__))
+            verdict, detail, extra = _shape(got)
+            ended = clock()
+            if after:
+                verdict, detail, more = after(name, verdict, detail, started, ended)
+                extra = dict(extra, **more)
+        new = {"verdict": verdict, "started": started, "seconds": ended - started, "detail": detail, "record": "",
+               "head_after": "", "inputs": inputs, "key": key}
+        new.update(extra)
+        state["phases"][name] = new
+        attempts.append({"phase": name, "started": started, "seconds": new["seconds"], "inputs": inputs,
+                         "key": key, "result": verdict, "reuse_miss": miss})
+        save_state(path, state)
+        if say:
+            say(phase_line(name, verdict, new["seconds"], detail))
+        results.append((name, (verdict, "%s (ran: %s)" % (detail, miss))))
+        if refused or (then and then(name)):
+            return results, True
+        if verdict not in PASSING:
+            break
+    return results, False
+
+
+def _fixture_state(path, version, now):
+    """(state, note): the kept state at `path` for a phase table run, or a fresh one with the reason. A corrupt file
+    is moved aside and reuses nothing; an older one than MAX_STATE_AGE_HOURS starts over (its attempt rows kept)."""
+    fresh = {"schema": SCHEMA, "version": version, "started_at": float(now), "phases": {}, "attempts": []}
+    if not os.path.exists(path):
+        return fresh, "no state at %s" % path
+    data, why = _read_json(path)
+    if data is None:
+        try:
+            os.replace(path, "%s.corrupt-%d" % (path, int(now)))
+        except OSError:
+            pass
+        return fresh, "start over, nothing reused: " + why
+    started = data.get("started_at")
+    if data.get("schema") != SCHEMA or isinstance(started, bool) or not isinstance(started, (int, float)) \
+            or not -CR.FUTURE_SLACK_S <= now - started <= MAX_STATE_AGE_HOURS * 3600:
+        kept = data.get("attempts") if isinstance(data.get("attempts"), list) else []
+        return dict(fresh, attempts=kept), "start over: the state is not %s or not within %g hours" % (
+            SCHEMA, MAX_STATE_AGE_HOURS)
+    return data, ""
+
+
+def run(version, phases=None, state_dir="", inputs=None, resume=False, *cd1, **kw):
+    """CUT1.a: drive `phases`, a table {name: runner(state) -> (verdict, detail[, extra])} in order, under the state
+    file in `state_dir`, reusing on `resume` every kept entry whose `inputs` give the same evidence key. Returns
+    [(phase, (verdict, detail))]. The lock is the real driver's: a second run meets it and reads NO-DATA naming it.
+
+    The CD1 command line shape, run(root, version, candidate, body, release_branch, ...), is the same entry with the
+    real phase table: it is told apart by `phases` not being a table and answers its exit code (drive below)."""
+    if not isinstance(phases, dict):
+        return drive(version, phases, state_dir, inputs, resume, *cd1, **kw)
+    first = next(iter(phases), "ready")
+    if not VERSION_RE.fullmatch(version if isinstance(version, str) else "") or not isinstance(state_dir, str) \
+            or not state_dir:
+        return [(first, ("NO-DATA", "a version X.Y.Z and a state folder are needed, not %r %r" % (version, state_dir)))]
+    path = os.path.join(state_dir, "driver-%s.json" % version)
+    lock = path[:-len(".json")] + ".lock"
+    why = _take_lock(lock)
+    if why:
+        return [(first, ("NO-DATA", why))]
+    try:
+        clock = kw.get("clock") or time.time
+        state, _note = _fixture_state(path, version, clock())
+        return _walk(state, path, phases, inputs, bool(resume), clock)[0]
+    finally:
+        CR._release_lock(lock)
+
+
+def real_phases(state, root, version, body, runner, tty, hub_remote, timeout_s, directory, approval):
+    """The real phase table over _run_phase, in PHASES order, for _walk."""
+    def one(name):
+        return lambda st: _run_phase(name, st, root, version, body, runner, tty, hub_remote, timeout_s, directory,
+                                     approval=approval)
+    return dict((name, one(name)) for name in PHASES)
+
+
+def drive(root, version, candidate, body, release_branch, runner=None, clock=None, tty=None, out=None,
+          hub_remote="hub", timeout_s=CR.DEFAULT_TIMEOUT_S, directory="", require_state=False,
+          power=None, sleeps=None, approval=""):
+    """The real cut, through the same _walk as run(): its exit code. `approval` (CY1.b) reaches only the cut phase
+    and is never written to the state file."""
     runner = runner or real_runner
     clock = clock or time.time
     out = out or sys.stdout
@@ -910,6 +1139,7 @@ def run(root, version, candidate, body, release_branch, runner=None, clock=None,
         say("NO-DATA: " + why)
         return 2
     try:
+        inputs = CR.inputs_identity(ROOT, sha, version)
         existed = os.path.exists(path)
         state, why = load_state(path, sha, tree, clock())
         if state is None:
@@ -923,62 +1153,57 @@ def run(root, version, candidate, body, release_branch, runner=None, clock=None,
                 if why or not release_branch:
                     say("NO-DATA: no release branch named and HEAD is on none")
                     return 2
-            state = new_state(version, sha, tree, release_branch, clock())
-        if next_phase(state) is None:
+            state = new_state(version, sha, tree, release_branch, clock(), inputs)
+        if not [n for n in PHASES if reuse_miss(state["phases"].get(n), inputs, state.get("inputs"))]:
             say("already complete: all %d phases PASS or REUSED for %s %s" % (len(PHASES), version, sha[:12]))
             return 0
+
         def moved(name):
-            """CR1.b: the branch invariant before `name`; True (state saved, line said) when it is violated."""
+            """CR1.b: the branch invariant before `name`; the refusal when it is violated."""
             why = branch_invariant(root, state["release_branch"], state["candidate_sha"],
                                    _verdict(state, "after") in PASSING, runner)
-            if not why:
-                return False
-            detail = "the release branch moved: " + why
-            state["phases"][name] = {"verdict": "NO-DATA", "started": clock(), "seconds": 0, "detail": detail,
-                                     "record": "", "head_after": ""}
-            save_state(path, state)
-            say(phase_line(name, "NO-DATA", 0, detail))
-            return True
+            return ("NO-DATA", "the release branch moved: " + why) if why else None
 
-        began = power_refusal(power)
-        if began:
-            say(began)
-            return 2
-
-        for name in PHASES[PHASES.index(next_phase(state)):]:
-            if _verdict(state, name) in PASSING:
-                continue
-            if moved(name):
-                return 2
+        def before(name):
+            refused = moved(name)
+            if refused:
+                return refused
             lost = power_refusal(power)
-            if lost:
-                state["phases"][name] = {"verdict": "NO-DATA", "started": clock(), "seconds": 0, "detail": lost,
-                                         "record": "", "head_after": ""}
-                save_state(path, state)
-                say(phase_line(name, "NO-DATA", 0, lost))
-                return 2
-            started = clock()
-            verdict, detail, extra = _run_phase(name, state, root, version, body, runner, tty, hub_remote,
-                                                timeout_s, directory, approval=approval)
+            return ("NO-DATA", lost) if lost else None
+
+        def after(name, verdict, detail, started, ended):
             head, _ = _git(root, ["rev-parse", "HEAD"], runner)
-            ended = clock()
             note = _any_note(started, ended, sleeps)
             if note and name in SLEEP_SENSITIVE:
                 detail = "%s; the phase said %s (%s); rerun it" % (note, verdict, detail)
                 verdict = "NO-DATA"
             elif note:
                 detail = "%s; %s" % (detail, note)
-            entry = {"verdict": verdict, "started": started, "seconds": ended - started, "detail": detail,
-                     "record": "", "head_after": head}
-            entry.update(extra)
-            state["phases"][name] = entry
+            return verdict, detail, {"head_after": head}
+
+        def then(name):
+            """After the cut, whatever it exited with: a moved branch records NO-DATA on the after phase."""
+            if name != "cut":
+                return False
+            refused = moved("after")
+            if not refused:
+                return False
+            state["phases"]["after"] = {"verdict": "NO-DATA", "started": clock(), "seconds": 0, "detail": refused[1],
+                                        "record": "", "head_after": ""}
             save_state(path, state)
-            say(phase_line(name, verdict, entry["seconds"], detail))
-            if name == "cut" and moved("after"):     # whatever the cut exited with
-                return 2
-            if verdict not in PASSING:
-                return EXIT_FOR.get(verdict, 2)
-        return 0
+            say(phase_line("after", "NO-DATA", 0, refused[1]))
+            return True
+
+        began = power_refusal(power)
+        if began:
+            say(began)
+            return 2
+        table = real_phases(state, root, version, body, runner, tty, hub_remote, timeout_s, directory, approval)
+        results, stopped = _walk(state, path, table, inputs, True, clock, say, before, after, then)
+        if stopped:
+            return 2
+        last = results[-1][1][0] if results else "PASS"
+        return EXIT_FOR.get(last, 2) if last not in PASSING else 0
     finally:
         CR._release_lock(lock)
 

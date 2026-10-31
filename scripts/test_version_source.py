@@ -148,6 +148,53 @@ def run(args):
     )
 
 
+def said(result):
+    """A completed process's own words, safely. run() leaves stderr None, so concatenating it raised a
+    TypeError and turned this class red for the wrong reason on its first run: an error, not an
+    assertion, which scripts/test_red_on_base.py refuses."""
+    return (result.stdout or "") + (result.stderr or "")
+
+
+class DevVersion(unittest.TestCase):
+    """S12.a: a development version writes and checks, and the cut writes the release over it.
+
+    WHY THE UNIT EXISTS, from its own spec: every loop tool change on a release line reads as runtime
+    drift while the line carries the released number, and the 1.1.8 line hit exactly that. A line that
+    can say 1.1.9-dev stops a tool change looking like a drifted release.
+
+    Only -dev is a suffix. Anything else is refused, because a version source that accepts an arbitrary
+    tail is a version source that cannot tell a development line from a typo."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="version_source_dev_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        build_fixture(self.tmp)
+
+    def test_a_dev_version_round_trips(self):
+        """REQ-S12A-01: a -dev version writes, every carrier reads it, --check passes, and writing the
+        release replaces it in every carrier."""
+        wrote = run(["--write", "--version", "1.1.9-dev", "--root", str(self.tmp)])
+        self.assertEqual(wrote.returncode, 0, "writing a -dev version was refused: " + said(wrote))
+        checked = run(["--check", "--root", str(self.tmp)])
+        self.assertEqual(checked.returncode, 0, "a -dev line does not check clean: " + checked.stdout)
+        self.assertNotIn("DRIFT", checked.stdout)
+
+        released = run(["--write", "--version", "1.1.9", "--root", str(self.tmp)])
+        self.assertEqual(released.returncode, 0, "writing the release over -dev was refused: " + said(released))
+        after = run(["--check", "--root", str(self.tmp)])
+        self.assertEqual(after.returncode, 0, "the released line does not check clean: " + after.stdout)
+        left = [str(f.relative_to(self.tmp)) for f in self.tmp.rglob("*")
+                if f.is_file() and "-dev" in f.read_text(errors="ignore")]
+        self.assertEqual(left, [], "these carriers still hold the -dev version after the release write")
+
+    def test_other_suffixes_refuse(self):
+        """REQ-S12A-02: only -dev is accepted as a suffix."""
+        for bad in ("1.1.9-rc1", "1.1.9-beta", "1.1.9dev", "1.1.9-", "1.1.9-DEV", "1.1.9-dev-dev"):
+            result = run(["--write", "--version", bad, "--root", str(self.tmp)])
+            self.assertNotEqual(result.returncode, 0,
+                                "%s was accepted as a version; only X.Y.Z and X.Y.Z-dev may be" % bad)
+
+
 class VersionSourceTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="version_source_test_"))

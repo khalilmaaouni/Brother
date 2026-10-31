@@ -211,6 +211,25 @@ class EvidenceObligationTests(unittest.TestCase):
                 self.assertEqual(hub.returncode, 1, hub.stdout)
                 self.assertIn("plugin-runtime-tests-fast\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED\tNO-DATA_BLOCKING", hub.stdout)
 
+    def test_current_map_allows_the_plan_gates_row_only_where_the_plan_file_is_absent(self):
+        # 2026-10-30: the cut rehearsal's export row read transition BLOCKED on plan-gates-can-pass with every check green,
+        # because the row was unlisted; the real map now explains its NO-DATA where the release plan is absent, and a tree
+        # that carries the plan still blocks on it (an unexplained NO-DATA there is a real gap)
+        with open(os.path.join(HERE, "gate_obligations.json"), "r", encoding="utf-8") as handle:
+            obligations = json.load(handle)
+        row = [("plan-gates-can-pass", 2)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = make_repo(temp_dir, obligations)
+            public = run_transition(repo, "merge", row)
+            self.assertEqual(public.returncode, 0, public.stdout)
+            self.assertIn("plan-gates-can-pass\tNO-DATA\tREQUIRED_FOR_MERGE\tALLOWED\tNO-DATA_ALLOWED", public.stdout)
+            os.makedirs(os.path.join(repo, "docs", "plan"), exist_ok=True)
+            with open(os.path.join(repo, "docs", "plan", "BROTHER-1.1.9-WBS.json"), "w", encoding="utf-8") as handle:
+                handle.write("{}\n")
+            hub = run_transition(repo, "merge", row)
+            self.assertEqual(hub.returncode, 1, hub.stdout)
+            self.assertIn("plan-gates-can-pass\tNO-DATA\tREQUIRED_FOR_MERGE\tBLOCKED\tNO-DATA_BLOCKING", hub.stdout)
+
     def test_missing_file_empty_stdin_unknown_level(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = os.path.join(temp_dir, "repo")

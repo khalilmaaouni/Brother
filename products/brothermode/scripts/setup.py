@@ -175,10 +175,17 @@ def _atomic_write_text(path, text):
         raise
 
 
-def write_config(vault_path, mode, path=None):
+def write_config(vault_path, mode, path=None, fence_mode=None, lessons=None):
     """Write the consented config. The only function in this file that
     creates ~/.brotherme or the config file; every caller reaches it only
-    after the explicit-yes gate (interactive) or the full flag-mode trio."""
+    after the explicit-yes gate (interactive) or the full flag-mode trio.
+
+    FIRST1.c: fence_mode and lessons are the CONSENT RECORD, written only by
+    answer_consent below and omitted entirely when they are None, so the five
+    key config every existing caller and fixture knows is byte for byte what
+    it was. They are separate keys rather than a new value for security_mode
+    because security_mode is read for display in nineteen places and means
+    something else; see D11 in docs/handover/2026-10-28/05-DECISIONS-TAKEN.md."""
     p = path or config_path()
     _ensure_dir_0700(os.path.dirname(os.path.abspath(p)))
     cfg = {
@@ -188,12 +195,117 @@ def write_config(vault_path, mode, path=None):
         "installation_mode": mode,
         "security_mode": "standard",
     }
+    if fence_mode is not None:
+        cfg["fence_mode"] = fence_mode
+    if lessons is not None:
+        cfg["lessons_root"] = lessons
     _atomic_write_text(p, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
     try:
         os.chmod(p, 0o600)
     except OSError as exc:
         _err("setup.py: warning: could not set %s to 0600 (%s)" % (p, exc))
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# FIRST1.c: the one consent question (D-2: at most 600 bytes, at most 20 s).
+#
+# THE ORDER THIS KEEPS, which is the whole point of the unit: nothing is armed
+# before the yes. answer_consent is the ONLY function that writes the arming
+# record, a no writes nothing at all, and the answer itself is accepted only
+# from outside the session (an interactive terminal, or the answer file the
+# write guard denies to the session), so an agent cannot consent on the
+# person's behalf. bm_project.py's `consent` route is the surface; the rule
+# lives here, with write_config, because this file is the one code path in the
+# project allowed to create the config.
+# ---------------------------------------------------------------------------
+
+#: The fence mode a yes arms. The fence hook's own word for fail closed.
+FENCE_ENFORCED = "enforced"
+
+#: The bytes D-2 allows the question. Counted as UTF-8, not characters: a
+#: translated question pays for its own encoding rather than overrunning it.
+CONSENT_QUESTION_MAX_BYTES = 600
+
+
+def lessons_root():
+    """Where a yes binds lessons. A function, not a module constant, for the
+    same reason config_path() is one: a test pointing HOME at a throwaway
+    directory must not read a path frozen at import time."""
+    return os.path.join(os.path.expanduser("~"), ".brother", "lessons")
+
+
+def consent_answer_path():
+    """The file a person answers in when there is no terminal to answer from.
+
+    THE DENIAL IS NOT IN PLACE YET, and this docstring said otherwise until a
+    security review caught it on 2026-10-29. The design is that HD1.d adds this
+    folder to the set sbe_bash_write_guard and the Write hook deny to the
+    session, which is what would make an answer here evidence of a PERSON: the
+    session that benefits from a yes could not write one. HD1 is OPEN.
+    sbe_bash_write_guard protects families under the repository root and carries
+    its own off switch, so it does not reach a path under the home directory at
+    all today. Until HD1.d lands, an answer in this file is evidence that
+    SOMETHING wrote it, and the arming path says so out loud rather than
+    implying a guarantee it does not have."""
+    return os.path.join(os.path.expanduser("~"), ".brother", "consent", "answer")
+
+
+def consent_question():
+    """REQ-FIRST1C-01: the ONE question, at most 600 bytes of UTF-8.
+
+    It names the three things that get written, where each one lands, and the
+    off switch, because a consent question that does not say what it is
+    consenting to is a formality rather than a question."""
+    return (
+        "Before anything is written, one question.\n"
+        "\n"
+        "Brother writes three things on this machine and nothing else:\n"
+        "  1. a config at ~/.brotherme/config.json, naming where your notes live\n"
+        "  2. lessons at ~/.brother/lessons, what it learned about how you work\n"
+        "  3. receipts beside the work, the commands it ran and what they returned\n"
+        "\n"
+        "Yes arms the write gate: a tool that cannot name its own check refuses\n"
+        "instead of guessing. No writes nothing at all.\n"
+        "\n"
+        "Off later: setup.py --reconfigure, or BM_FENCE_MODE=advisory for one run."
+    )
+
+
+def answer_consent(yes, path=None):
+    """REQ-FIRST1C-03. A yes writes the config through write_config with the
+    fence mode enforced and the lessons root bound, and returns the written
+    dict. A no writes NOTHING and returns {}.
+
+    `yes is not True` rather than `not yes`, deliberately, and for the same
+    reason is_consented above reads `is True`: this is an arming gate, and a
+    truthy string or a stray 1 reaching it must fail CLOSED rather than arm
+    the fence on a value nobody meant as consent.
+
+    An existing vault path and installation mode are carried forward so that
+    answering the question does not silently relocate a vault the person
+    already chose; absent either, the same defaults setup itself uses."""
+    if yes is not True:
+        return {}
+    p = path or config_path()
+    cfg, _err = read_config(p)
+    vault = cfg.get("vault_path")
+    mode = cfg.get("installation_mode")
+    return write_config(vault if isinstance(vault, str) and vault else DEFAULT_VAULT,
+                        mode if isinstance(mode, str) and mode else detect_mode(),
+                        path=p, fence_mode=FENCE_ENFORCED, lessons=lessons_root())
+
+
+def consented_fence_mode(path=None):
+    """The armed fence mode on disk, or None when nothing is armed.
+
+    Fails CLOSED on a corrupt config (read_config's error arm), so an
+    unreadable file reads as not armed rather than as whatever was there."""
+    cfg, err = read_config(path)
+    if err:
+        return None
+    mode = cfg.get("fence_mode")
+    return mode if isinstance(mode, str) and mode else None
 
 
 def detect_mode():

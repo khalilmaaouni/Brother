@@ -66,23 +66,28 @@ class CodexSurface(unittest.TestCase):
             self.assertFalse((BUNDLE / "skills" / name / "SKILL.md").exists(),
                              "%s still ships as a skill" % name)
 
-    def test_every_retired_name_has_exactly_one_moved_command_and_nothing_else_is_moved(self):
-        """Option B (2026-10-11): `/brother:<old name>` keeps working through one moved command per
-        1.1.0 name. Every RETIRED name has exactly one stub; every command other than the door is
-        such a stub and names a retired name; the stub carries the pointer and the verb route."""
+    def test_no_moved_command_ships(self):
+        """DOOR1.a: the door shows six verbs and nothing else.
+
+        Measured on the 1.1.7 install and again on this tree before the change: 49 files in
+        bundle/commands, 48 of them Moved stubs, one per retired 1.1.0 name, and the retired names
+        were typed 0 times in 60 days. The owner approved removing them (AC4, 2026-10-23); the
+        charter's C4 surface freeze is his call and he made it.
+
+        RETIRED itself stays, because the routing table and the verb skill footers read it, and an
+        old name typed AS AN ARGUMENT must still route. That is
+        test_every_retired_name_routes_to_a_verb_skill_in_the_table's job, not this one's.
+        """
         commands = sorted(p.name[:-3] for p in (BUNDLE / "commands").glob("*.md"))
+        self.assertEqual(["brother"], commands,
+                         "bundle/commands ships %d file(s) and only the door may ship: %s"
+                         % (len(commands), " ".join(n for n in commands if n != "brother")))
         retired = sorted(name for name, _verb in codex_surface.RETIRED)
-        self.assertEqual(commands, sorted(["brother"] + retired))
         self.assertEqual(len(retired), len(set(retired)), "a name is listed twice")
-        for name, verb in codex_surface.RETIRED:
-            text = (BUNDLE / "commands" / ("%s.md" % name)).read_text(encoding="utf-8")
-            self.assertTrue(text.startswith('---\ndescription: "%s%s"\n---\n'
-                                            % (codex_surface.MOVED, codex_surface.retired_route(name))), name)
-            self.assertIn("`%s is now /brother %s`" % (name, codex_surface.retired_route(name)), text)
-            self.assertIn("skills/brother-%s/SKILL.md" % verb, text)
-            self.assertIn("$ARGUMENTS", text)
-            self.assertIn(codex_surface.MARKER, text)
-        self.assertNotIn(codex_surface.MARKER, (BUNDLE / "commands" / "brother.md").read_text(encoding="utf-8"))
+        self.assertTrue(retired, "RETIRED is empty, so the routing table has nothing to route")
+        self.assertNotIn(codex_surface.MARKER,
+                         (BUNDLE / "commands" / "brother.md").read_text(encoding="utf-8"),
+                         "the door carries the generated-stub marker, so it looks like a stub")
 
     def _copy_tree(self):
         tmp = Path(tempfile.mkdtemp(prefix="codex-surface-"))
@@ -107,9 +112,15 @@ class CodexSurface(unittest.TestCase):
     def test_a_deleted_or_foreign_moved_command_is_drift(self):
         tmp = self._copy_tree()
         try:
-            (tmp / "bundle" / "commands" / "brothersbe-verify.md").unlink()
+            # A GENERATED subject, which bundle/commands no longer has: DOOR1.a removed every
+            # generated command, and commands/brother.md is HAND WRITTEN (codex_surface.py says so
+            # where it explains that the door carries no marker), so deleting the door was never
+            # reported as drift and never could be. The verb skills are generated, so one of those
+            # is what a deletion drifts now.
+            verb_skill = tmp / "bundle" / "skills" / "brother-start" / "SKILL.md"
+            verb_skill.unlink()
             problems = codex_surface.check(tmp)
-            self.assertEqual(problems, ["bundle/commands/brothersbe-verify.md: missing"])
+            self.assertEqual(problems, ["bundle/skills/brother-start/SKILL.md: missing"])
             codex_surface.generate(tmp)
             self.assertEqual(codex_surface.check(tmp), [])
             (tmp / "bundle" / "commands" / "brothermode-nothing.md").write_text(
@@ -135,8 +146,9 @@ class CodexSurface(unittest.TestCase):
             name = "%s-%s" % (product, skill_dir)
             verb = codex_surface.retired_verb(name)
             self.assertIn("references/%s.md" % stem, self._verb_body(verb), "%s does not teach %s" % (verb, stem))
-            stub = (BUNDLE / "commands" / ("%s.md" % name)).read_text(encoding="utf-8")
-            self.assertIn("references/%s.md" % stem, stub, "the moved command %s does not name %s" % (name, stem))
+            # The moved-command half of this case went with DOOR1.a: no stub ships, so the verb body
+            # is now the ONLY place that can teach the reference, which makes this assertion carry
+            # more weight than it did, not less.
 
     def test_the_stop_names_teach_stopping(self):
         """Review B2 (2026-10-11): brotherme-stop and brothermode-stop pointed at `/brother start`, which
@@ -146,8 +158,9 @@ class CodexSurface(unittest.TestCase):
         for name in ("brotherme-stop", "brothermode-stop"):
             self.assertEqual(codex_surface.retired_route(name), "start stop")
             self.assertIn("| %s | `/brother start stop` (`brother-start`) |" % name, table)
-            stub = (BUNDLE / "commands" / ("%s.md" % name)).read_text(encoding="utf-8")
-            self.assertIn("`%s is now /brother start stop`" % name, stub)
+            # The stub assertion that stood here went with DOOR1.a: no moved command ships, so the
+            # table row above and the start body below are where this property now lives, and both
+            # are still checked.
         body = self._verb_body("start")
         self.assertIn("`/brother start stop`", body)
         self.assertRegex(body, r"releas\w+ every (held )?claim")
@@ -227,8 +240,10 @@ class CodexSurface(unittest.TestCase):
         self.assertIn("`/brother start dispatch`", body)
         self.assertRegex(body, r"`/brother start dispatch` writes a packet for Cursor[^`]*`[^`]*cursor-dispatch\.md`;"
                                r" it REPLACES the engine run for that work and does not run brother_run\.py\.")
-        stub = (BUNDLE / "commands" / "brothermode-cursor-dispatch.md").read_text(encoding="utf-8")
-        self.assertIn("`brothermode-cursor-dispatch is now /brother start dispatch`", stub)
+        # The stub assertion that stood here went with DOOR1.a. The route survives in the table row
+        # and the start body, both asserted above, and the dispatch instructions still ship as
+        # references/cursor-dispatch.md, which test_real_content_references_mirror_the_product_skill
+        # covers.
 
     def test_the_verb_skills_name_only_the_hosts_without_slash_commands(self):
         """Review note 6: Cursor loads ./commands, so only Codex and Antigravity lack slash commands."""
@@ -246,13 +261,34 @@ class CodexSurface(unittest.TestCase):
         self.assertIn("design", self._verb_body("review"))
         self.assertIn("specification", self._verb_body("start"))
 
-    def test_moved_commands_cite_the_plugin_root(self):
-        """Review note 9: a moved command names the verb skill from the plugin root, with the vendor
-        neutral variable beside it, never a bare relative path."""
-        for name, verb in codex_surface.RETIRED:
-            stub = (BUNDLE / "commands" / ("%s.md" % name)).read_text(encoding="utf-8")
-            self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/brother-%s/SKILL.md" % verb, stub, name)
-            self.assertIn("${BROTHER_PLUGIN_ROOT}", stub, name)
+    def test_the_routing_table_does_not_promise_a_moved_command(self):
+        """The table must not offer a route that no longer ships.
+
+        REVIEW NOTE 9 IS RETIRED HERE, WITH ITS REASON. Its requirement was that a MOVED COMMAND
+        name the verb skill from the plugin root with the vendor neutral variable beside it. DOOR1.a
+        removes every moved command, so that requirement's subject no longer exists. The first
+        attempt at this case re-pointed it at the retired-names table, and the table does not name
+        the plugin root and never did: keeping a test alive by inventing a requirement for a file
+        that never carried it is its own dishonesty, so it was dropped instead. The surviving
+        routing guarantee is test_every_retired_name_routes_to_a_verb_skill_in_the_table's, and it
+        is untouched.
+
+        WHAT THIS CASE IS INSTEAD, found by that failure. The table's own prose told the reader a
+        retired name works when "typed as it was under Claude Code (`/brother:<old name>`, a moved
+        command that prints the pointer and routes)". With no moved command shipping, that sentence
+        is a claim the product does not honour, which is exactly what this release exists to stop.
+        """
+        table = (BUNDLE / "skills" / "using-brother" / "references" / "retired-names.md").read_text(
+            encoding="utf-8")
+        self.assertNotIn("a moved command that prints the pointer and routes", table,
+                         "the routing table still promises a moved command, and none ships")
+        self.assertNotIn("/brother:", table,
+                         "the routing table still offers the `/brother:<old name>` form, which no "
+                         "longer resolves to anything")
+        #: The route that DOES survive must still be offered, or the table removed a promise and
+        #: replaced it with nothing.
+        self.assertIn("as an argument to the door", table,
+                      "the table no longer tells the reader the one route that still works")
 
     def test_an_unexpected_skill_is_drift(self):
         """Review note 3: --check must catch any skill directory outside the seven, marked or not."""

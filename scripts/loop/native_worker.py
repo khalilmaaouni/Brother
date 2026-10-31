@@ -722,31 +722,57 @@ def refresh(reg=None, runner=None, env=None, timeout_s=REFRESH_TIMEOUT_S):
     (model_call.build_invocation, the production command line), on the cheapest Claude model, so the CLI refreshes an
     expired login where it may write the Keychain. NEVER inside a seat and never handed to one: it runs in model_call's
     scratch, passes nothing to any seat, and the seat sandbox is untouched. A failure names its class only (call_class).
-    SKIPPED when no seat runs (native off), or on the loop token lane, where seats run on the saved login, not this
-    machine's, and model_call refuses any unsandboxed call. runner(argv, stdin, timeout) replaces the child for tests.
-    Cost: one minimal call per pass."""
+    SKIPPED when no seat runs (native off). On the loop token lane the seats run on the saved login: the run's holder is
+    asked for it (brother_login.ask_holder, the supported read), and with no holder named here it is SKIPPED.
+    CUT1.d: either way the call goes through brother_login.refresh_once, one coordinator per login beside the call
+    ledger, so concurrent workers cause one refresh, and a login that cannot be renewed here (class login, or the
+    holder refusing) is parked once with its class. runner(argv, stdin, timeout) replaces the child for tests.
+    Cost: one minimal call per pass, none while another worker's renewal is under a minute old."""
     env = os.environ if env is None else env
     if not SW.native_on(env):
         return "SKIPPED", "native seats are off, so no seat needs the login"
-    if SW.on("BROTHER_LOOP_TOKEN"):
-        return "SKIPPED", "the loop token lane is on: seats run on the saved login, not this machine's"
-    reg = reg or R.registry()
-    name = cheapest_claude(reg)
-    if not name:
-        return "FAILED", "no-model (the registry names no Claude model)"
-    try:
-        inv = MC.build_invocation(name, PING_PROMPT, timeout_s, reg)
-    except R.Refused:
-        return "FAILED", "refused (the command line for %s could not be built)" % name
-    r, cls = _ledgered(inv.model_id, "", "refresh", inv.argv, inv.stdin, timeout_s, runner or MC._run)
-    if cls == "draining":
-        return "SKIPPED", "the run is draining: no seat starts, so no call is spent"
-    if cls:
-        return "FAILED", cls
-    _answer, why = MC._claude_result(r.get("stdout"))
-    if why:
-        return "FAILED", call_class(r, why)
-    return "OK", "%s answered through %s" % (name, inv.program)
+    skipped = []
+
+    def held():
+        try:
+            value = BL.ask_holder()
+        except BL.Failure as exc:
+            return "EXPIRED", str(exc)
+        if not value:
+            skipped.append("the loop token lane is on and no login holder is named here: seats read the saved login")
+            return "SKIPPED", skipped[-1]
+        return "RENEWED", "the loop token lane: the run's login holder answered"
+
+    def ping():
+        reg_ = reg or R.registry()
+        name = cheapest_claude(reg_)
+        if not name:
+            return "FAILED", "no-model (the registry names no Claude model)"
+        try:
+            inv = MC.build_invocation(name, PING_PROMPT, timeout_s, reg_)
+        except R.Refused:
+            return "FAILED", "refused (the command line for %s could not be built)" % name
+        r, cls = _ledgered(inv.model_id, "", "refresh", inv.argv, inv.stdin, timeout_s, runner or MC._run)
+        if cls == "draining":
+            skipped.append("the run is draining: no seat starts, so no call is spent")
+            return "SKIPPED", skipped[-1]
+        if cls:
+            return "FAILED", cls
+        _answer, why = MC._claude_result(r.get("stdout"))
+        if why:
+            cls = call_class(r, why)
+            return ("EXPIRED" if cls == "login" else "FAILED"), cls
+        return "RENEWED", "%s answered through %s" % (name, inv.program)
+
+    token_lane = SW.on("BROTHER_LOOP_TOKEN")
+    # attempts=1: the driver bounds the whole refresh at 150 s (loop_until.sh), one 90 s call fits, two do not
+    verdict, detail = BL.refresh_once("claude-token" if token_lane else "claude", held if token_lane else ping,
+                                      os.path.dirname(CL.ledger_path()) or ".", attempts=1)
+    if skipped:
+        return "SKIPPED", skipped[-1]
+    if verdict == "RENEWED":
+        return "OK", detail
+    return "FAILED", detail   # PARKED keeps the class the driver reads (login); the park record holds the rest
 
 
 def seat_probe(reg=None, program=None, runner=None, timeout_s=SEAT_PROBE_TIMEOUT_S, root=None):

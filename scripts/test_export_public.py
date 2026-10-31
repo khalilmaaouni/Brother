@@ -3245,6 +3245,15 @@ class TheExportTreeMustClearItsOwnRequiredFastCheck(unittest.TestCase):
     fast and deterministic: what is under test is the parsing of the
     summary line, not required_fast.sh itself."""
 
+    def setUp(self):
+        # every case pins the scratch root (2026-10-30): a refused fake gate keeps its output there, and two cases
+        # without the pin wrote fake refusals into the real ~/.claude/brother-scratch
+        self._scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self._scratch.cleanup)
+        patcher = mock.patch.dict(os.environ, {"BROTHER_SCRATCH": self._scratch.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _write_fake(self, export_dir, summary, exit_code=0):
         scripts = os.path.join(export_dir, "scripts")
         os.makedirs(scripts, exist_ok=True)
@@ -3275,6 +3284,85 @@ class TheExportTreeMustClearItsOwnRequiredFastCheck(unittest.TestCase):
             self.assertTrue(any(l.startswith("REFUSED:") for l in lines),
                             lines)
             self.assertIn("FAILED: readiness-gate", lines)
+
+    def test_a_refusal_keeps_the_whole_gate_output_outside_the_export_tree(self):
+        """2026-10-30: two cut rehearsals refused here and the failing row's assertion output died with the gate's pool
+        and the export tree. A refusal names a kept file, outside the export tree, holding the whole output."""
+        with tempfile.TemporaryDirectory() as export_dir, tempfile.TemporaryDirectory() as scratch:
+            scripts = os.path.join(export_dir, "scripts")
+            os.makedirs(scripts, exist_ok=True)
+            with open(os.path.join(scripts, "required_fast.sh"), "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n"
+                         "echo 'FAIL: test_the_row_that_broke (Suite.test_the_row_that_broke)'\n"
+                         "echo 'AssertionError: 3 != 4'\n"
+                         "echo 'pass 14   fail 1   no-data 0'\n"
+                         "echo 'FAILED: brother-run-2'\n"
+                         "exit 1\n")
+            with mock.patch.dict(os.environ, {"BROTHER_SCRATCH": scratch}):
+                ok, lines = EP.check_required_fast(export_dir)
+            self.assertFalse(ok, lines)
+            kept = [l for l in lines if l.startswith("[full: ")]
+            self.assertEqual(1, len(kept), lines)
+            path = kept[0][len("[full: "):-1]
+            self.assertTrue(path.startswith(scratch), "the kept copy is not under the scratch root: %s" % path)
+            self.assertFalse(path.startswith(export_dir), "the kept copy lives in the export tree, which is removed")
+            with open(path, encoding="utf-8") as fh:
+                body = fh.read()
+            self.assertIn("AssertionError: 3 != 4", body)
+            self.assertIn("FAILED: brother-run-2", body)
+
+    def _fake_refusing(self, export_dir, marker):
+        scripts = os.path.join(export_dir, "scripts")
+        os.makedirs(scripts, exist_ok=True)
+        with open(os.path.join(scripts, "required_fast.sh"), "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho '%s'\necho 'pass 14   fail 1   no-data 0'\necho 'FAILED: brother-run-2'\nexit 1\n"
+                     % marker)
+
+    def test_two_refusals_in_one_process_keep_two_files(self):
+        """Review 2026-10-30: a pid named file would overwrite the first refusal's evidence with the second's."""
+        with tempfile.TemporaryDirectory() as export_dir, tempfile.TemporaryDirectory() as scratch, \
+                mock.patch.dict(os.environ, {"BROTHER_SCRATCH": scratch}):
+            paths = []
+            for marker in ("first refusal marker", "second refusal marker"):
+                self._fake_refusing(export_dir, marker)
+                ok, lines = EP.check_required_fast(export_dir)
+                self.assertFalse(ok, lines)
+                paths.append([l for l in lines if l.startswith("[full: ")][0][len("[full: "):-1])
+            self.assertNotEqual(paths[0], paths[1], "the second refusal overwrote the first")
+            for path, marker in zip(paths, ("first refusal marker", "second refusal marker")):
+                with open(path, encoding="utf-8") as fh:
+                    self.assertIn(marker, fh.read(), path)
+
+    def test_a_crash_with_no_summary_keeps_its_output_and_stays_no_data(self):
+        """Review 2026-10-30: a crash or timeout prints no summary line; its details were dropped and its verdict is
+        NO-DATA, never a pass and never a refusal dressed as one."""
+        with tempfile.TemporaryDirectory() as export_dir, tempfile.TemporaryDirectory() as scratch, \
+                mock.patch.dict(os.environ, {"BROTHER_SCRATCH": scratch}):
+            scripts = os.path.join(export_dir, "scripts")
+            os.makedirs(scripts, exist_ok=True)
+            with open(os.path.join(scripts, "required_fast.sh"), "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\necho 'Traceback (most recent call last):'\necho 'KeyError: pool'\nexit 3\n")
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(lines[0].startswith("NO-DATA:"), lines)
+            kept = [l for l in lines if l.startswith("[full: ")]
+            self.assertEqual(1, len(kept), lines)
+            with open(kept[0][len("[full: "):-1], encoding="utf-8") as fh:
+                self.assertIn("KeyError: pool", fh.read())
+
+    def test_a_kept_copy_that_cannot_be_written_never_hides_the_refusal(self):
+        """Review 2026-10-30: retention is evidence, the refusal is the verdict; a scratch root that is a file, not a
+        folder, fails the write and the refusal still comes back with the reason beside it."""
+        with tempfile.TemporaryDirectory() as export_dir, tempfile.NamedTemporaryFile() as not_a_dir, \
+                mock.patch.dict(os.environ, {"BROTHER_SCRATCH": not_a_dir.name}):
+            self._fake_refusing(export_dir, "refusal under an unwritable root")
+            ok, lines = EP.check_required_fast(export_dir)
+            self.assertFalse(ok, lines)
+            self.assertTrue(any(l.startswith("REFUSED:") for l in lines), lines)
+            self.assertIn("FAILED: brother-run-2", lines)
+            kept = [l for l in lines if l.startswith("[full: ")]
+            self.assertEqual(1, len(kept), lines)
+            self.assertIn("could not keep the gate output", kept[0], kept)
 
     def test_no_data_is_never_read_as_a_failure(self):
         with tempfile.TemporaryDirectory() as export_dir:

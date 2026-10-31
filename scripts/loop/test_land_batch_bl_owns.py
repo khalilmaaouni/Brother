@@ -113,15 +113,19 @@ class Landing(unittest.TestCase):
         self.assertEqual(self.committed_owns(fx), [OLD, NEW, NEW2], out[-800:])
 
     def test_a_refused_landing_of_two_new_loop_files_takes_both_back(self):
-        fx = self.fixture(tree_files={"scripts/test_battery_registration.py": "import sys\nsys.exit(1)\n"},
+        fx = self.fixture(tree_files={"scripts/test_battery_registration.py": "import sys\nsys.exit(0)\n"},
                           edits=[{"path": NEW, "new_file_content": "print('tool')\n"},
-                                 {"path": NEW2, "new_file_content": "print('test')\n"}])
+                                 {"path": NEW2, "new_file_content": "print('test')\n"},
+                                 {"path": "scripts/test_battery_registration.py",
+                                  "new_file_content": "import sys\nsys.exit(1)\n"}])
         rc, out = fx.land()
         self.assert_refused_and_restored(fx, rc, out)
 
     def test_a_landing_refused_at_a_gate_takes_its_owns_entry_back(self):
-        fx = self.fixture(tree_files={"scripts/test_battery_registration.py": "import sys\nsys.exit(1)\n"},
-                          edits=[{"path": NEW, "new_file_content": "print('tool')\n"}])
+        fx = self.fixture(tree_files={"scripts/test_battery_registration.py": "import sys\nsys.exit(0)\n"},
+                          edits=[{"path": NEW, "new_file_content": "print('tool')\n"},
+                                 {"path": "scripts/test_battery_registration.py",
+                                  "new_file_content": "import sys\nsys.exit(1)\n"}])
         rc, out = fx.land()
         self.assert_refused_and_restored(fx, rc, out)
 

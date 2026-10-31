@@ -162,6 +162,96 @@ def _tool(*parts):
     return os.path.join(DIR, *parts)
 
 
+#: PC1.c: the most the last run line may take, in UTF-8 bytes.
+LAST_RUN_LINE_MAX = 160
+LAST_NIGHT_NAME = "last-night.txt"
+
+
+def _load_proof_card():
+    """scripts/proof_card.py by path from EITHER layout (source checkout:
+    <repo>/scripts/proof_card.py; installed bundle: <root>/runtime/
+    proof_card.py, both three directories above HERE), the technique
+    vault_recall_hook._load_journal documents. None when neither exists or the
+    load fails: no run line, never a crash. Same loader as bm_statusline.py,
+    which is a separate script on purpose."""
+    try:
+        import importlib.util
+        root = os.path.dirname(os.path.dirname(DIR))
+        for path in (os.path.join(root, "scripts", "proof_card.py"),
+                     os.path.join(root, "proof_card.py")):
+            if os.path.isfile(path):
+                break
+        else:
+            return None
+        spec = importlib.util.spec_from_file_location(
+            "proof_card_for_sessionstart", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # sbe: allow-silent optional line; no proof_card means no run line this start
+        return None
+
+
+def _first_line_of_night(path):
+    """(first non blank line, mtime) of the night's report, or ("", 0) when
+    there is none. Only the first 64 KB is read. A first line that is not
+    UTF-8 text reads NO-DATA, never garbage; an unreadable file reads as
+    absent."""
+    try:
+        mtime = os.stat(path).st_mtime
+        with io.open(path, "rb") as fh:
+            raw = fh.read(65536)
+    except OSError:
+        return "", 0
+    for piece in raw.split(b"\n"):
+        if piece.strip():
+            try:
+                return " ".join(piece.decode("utf-8").split()), mtime
+            except UnicodeDecodeError:
+                return "NO-DATA: %s is not readable text" % LAST_NIGHT_NAME, mtime
+    return "", 0
+
+
+def _fit(line, limit=LAST_RUN_LINE_MAX):
+    """`line` as at most `limit` UTF-8 bytes, cut on a character boundary and
+    ended with three dots when anything was cut."""
+    raw = line.encode("utf-8")
+    if len(raw) <= limit:
+        return line
+    return raw[:limit - 3].decode("utf-8", "ignore") + "..."
+
+
+def last_run_line(home=""):
+    """PC1.c: the ONE last run line session start and the controller print.
+    The first line of ~/.brother/last-night.txt (the night's report) when that
+    file is newer than the newest run index row, else the newest index row
+    (scripts/proof_card.py's index_line: date, result), as one line of at most
+    LAST_RUN_LINE_MAX bytes of UTF-8; "" when neither exists. Read only. An
+    index that exists but cannot be read logs ONE line to stderr and
+    contributes nothing; the night's line still shows. Never raises."""
+    try:
+        home = home or os.path.expanduser("~")
+        pc = _load_proof_card()
+        newest, newest_time = "", 0
+        if pc is not None:
+            rows, _torn, problem = pc.read_index_counted(home)
+            if problem:
+                # A bare constant on purpose: the reason (an OS message with a
+                # path in it) stays out of the line, so the print choke point
+                # (tools/test_bm_print_choke_point.py) has nothing to flatten.
+                # A print, not a stream write, so tools/write_sites.json (the
+                # reviewed inventory of write calls) is not made to grow.
+                print("bm_sessionstart: the run index could not be read",
+                      file=sys.stderr)
+            if rows:
+                newest, newest_time = pc.index_line(rows[0]), rows[0]["time"] or 0
+        night, night_time = _first_line_of_night(
+            os.path.join(home, ".brother", LAST_NIGHT_NAME))
+        return _fit(night if night and night_time > newest_time else newest)
+    except Exception:  # sbe: allow-silent optional line; any failure is no line, never a broken session start
+        return ""
+
+
 #: A project that has never been planned and never been queued has no
 #: outstanding obligations, so the lines that report an ABSENCE of a handover,
 #: a close pack, a queue, a calibration history or an upstream branch are
@@ -312,6 +402,13 @@ def main():
         if _no_vault_bound():
             _say("No memory vault is bound yet; once you begin, Brother will "
                  "ask where it should live and bind it.\n")
+
+    # PC1.c: one line, at most 160 bytes, saying how the last run (or the last
+    # night) ended. Nothing when there is none. The controller's status prints
+    # the same line from the same function.
+    line = last_run_line()
+    if line:
+        _say(line + "\n")
 
     # R-4 (persona dogfood 2026-09-07): DIGEST.md printed to every session,
     # including a beginner's very first one, who has no use for an

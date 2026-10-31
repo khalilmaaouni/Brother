@@ -65,6 +65,7 @@ THE THREE RULES THIS FILE OBEYS, INHERITED VERBATIM FROM ITS SIBLINGS
 Python 3.9, standard library only, cross-platform, no network, no subprocess.
 No em or en dashes anywhere in this file, its comments, or its output.
 """
+import itertools
 import json
 import os
 import re
@@ -117,8 +118,14 @@ class OpenFail(Exception):
 
 class Unclassifiable(Exception):
     """The command text could not be split into commands and words at all, so
-    nothing about it was examined. Distinct from OpenFail only so the stderr
-    line can say which of the two happened; both allow."""
+    nothing about it was examined. `soft` marks a text that is merely too big
+    or ends in a backslash (it may be fine); a hard one holds an unbalanced
+    quote (no shell would run it). GUARD1: a hard one is refused, a soft one is
+    refused only when its text names a network tool or an interpreter."""
+
+    def __init__(self, message, soft=False):
+        Exception.__init__(self, message)
+        self.soft = soft
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +264,11 @@ def require_tasks_module():
 #: would wave it through.
 ROOT_FAMILY = "the repository root, which contains every protected family"
 
+#: Repository metadata. A write to anything under `.git/` (the index, HEAD, a
+#: hook) changes what the guards read about the repository, and is never a
+#: stranger's task either.
+GIT_FAMILY = "repository metadata under .git/"
+
 #: Set, and the guard says so on stderr on every Bash call it would otherwise
 #: have checked, so the bypass is never silent. Same shape and same name style
 #: as BROTHERSBE_FENCE_HOOK_OFF and BROTHERSBE_AUTHORITY_HOOK_OFF.
@@ -291,7 +303,7 @@ def authority_patterns(surface_mod):
     return tuple(pats)
 
 
-def protected_family(fence_mod, surface_mod, common_mod, root, rel):
+def protected_family(fence_mod, surface_mod, common_mod, root, rel, writing=True):
     """The protected family `rel` belongs to, or "" for none.
 
     Authority families first, through the sibling that already knows how to
@@ -301,11 +313,18 @@ def protected_family(fence_mod, surface_mod, common_mod, root, rel):
     directory prefixes and case."""
     if rel in (".", ""):
         return ROOT_FAMILY
+    if writing and any(part.lower() == ".git" for part in rel.split("/")):
+        return GIT_FAMILY
     surface = common_mod.confirmed_surface(fence_mod, surface_mod, root, rel)
     if surface:
         return surface
     for pattern in authority_patterns(surface_mod) + common_mod.CONTROL_PLANE_PATTERNS:
         if fence_mod.paths_overlap(rel, pattern, root):
+            # The owner's own files are protected only in the Brother source
+            # repository (GUARD1.c); in a stranger's repository `src` is a folder.
+            if pattern in common_mod.OWNER_PATTERNS and not (
+                    writing and common_mod.is_brother_source(root)):
+                continue
             return pattern
     return ""
 
@@ -330,6 +349,16 @@ class Token(object):
         self.text = text
         self.quoted = quoted
         self.is_op = is_op
+        #: Only on a `<<` operator: the here-document body that follows the
+        #: line it sits on. DATA, never split into commands and words.
+        self.body = ""
+        #: The word with what bash would not expand blanked out: the text of a
+        #: single quoted part, and an escaped character, read as nothing. This
+        #: is what a command substitution is searched for in.
+        self.plain = text
+        #: True when the here-document's delimiter was quoted (`<<'EOF'`,
+        #: `<<"EOF"`, `<<\EOF`): bash then leaves the body literal.
+        self.body_quoted = False
 
 
 #: Operators that end one simple command and start another. Redirections are
@@ -391,36 +420,164 @@ def _msys_path_to_windows(raw):
     return "%s:\\%s" % (m.group(1).upper(), m.group(2).replace("/", "\\"))
 
 
+_ANSI_C_ESCAPES = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n",
+                   "r": "\r", "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
+
+
+class Delimiter(object):
+    """A here-document delimiter word after quote removal, and whether it was
+    quoted. An object rather than a pair, for the reason Decision states: this
+    project's honesty meta-test reads a 2-tuple return as a possible verdict
+    source, and neither field here is a check verdict."""
+
+    def __init__(self, word, quoted):
+        self.word = word
+        self.quoted = quoted
+
+
+class ShellMode(object):
+    """How a shell reads its commands ("c", "script" or "stdin") and, for "c",
+    the payload. An object for the same reason as Delimiter."""
+
+    def __init__(self, kind, payload):
+        self.kind = kind
+        self.payload = payload
+
+
+def _unmodelled(why):
+    return Unclassifiable("a here-document delimiter %s, so where its body ends is unknown" % why)
+
+
+def _heredoc_tag(command, j):
+    """The Delimiter (terminator word, whether it was quoted) of a here-document whose
+    delimiter word starts at or after `command[j]`. Bash's quote removal is
+    applied to the WHOLE word: every single quote, double quote and backslash
+    anywhere in it is dropped, and the word is quoted if any was present, so
+    `E'O'F`, `"E"OF`, `E\\OF` and `$'EOF'` are all the terminator EOF, quoted.
+    `$'...'` is read as ANSI C text. Quoting this guard cannot model (an
+    unterminated quote, an unknown `$'...'` escape) raises Unclassifiable: the
+    body would otherwise be read as data from the wrong place."""
+    n = len(command)
+    while j < n and command[j] in " \t":
+        j += 1
+    word, quoted = [], False
+    while j < n and command[j] not in " \t\n;&|<>()":
+        ch = command[j]
+        if ch == "\\" and j + 1 < n:
+            word.append(command[j + 1])
+            quoted = True
+            j += 2
+        elif ch == "'":
+            k = command.find("'", j + 1)
+            if k < 0:
+                raise _unmodelled("carries an unterminated single quote")
+            word.append(command[j + 1:k])
+            quoted = True
+            j = k + 1
+        elif ch == "$" and command[j + 1:j + 2] == "'":
+            quoted = True
+            j += 2
+            while j < n and command[j] != "'":
+                if command[j] != "\\":
+                    word.append(command[j])
+                    j += 1
+                    continue
+                esc = command[j + 1:j + 2]
+                if esc in _ANSI_C_ESCAPES:
+                    word.append(_ANSI_C_ESCAPES[esc])
+                    j += 2
+                    continue
+                m = re.compile(r"x([0-9A-Fa-f]{1,2})|([0-7]{1,3})").match(command, j + 1)
+                if not m:
+                    raise _unmodelled("uses an escape this guard does not model")
+                word.append(chr(int(m.group(1) or m.group(2), 16 if m.group(1) else 8) & 255))
+                j = m.end()
+            if j >= n:
+                raise _unmodelled("carries an unterminated $'...' quote")
+            j += 1
+        elif ch == '"' or (ch == "$" and command[j + 1:j + 2] == '"'):
+            j += 1 if ch == '"' else 2
+            while j < n and command[j] != '"':
+                if command[j] == "\\" and command[j + 1:j + 2] in ('"', "\\", "$", "`"):
+                    j += 1
+                word.append(command[j])
+                j += 1
+            if j >= n:
+                raise _unmodelled("carries an unterminated double quote")
+            quoted = True
+            j += 1
+        else:
+            word.append(ch)
+            j += 1
+    return Delimiter("".join(word), quoted)
+
+
+def _take_bodies(command, i, heredocs):
+    """Read the body of each pending here-document, starting at `command[i]`
+    (the first character after the newline), and return where reading stopped.
+    A body runs to the line that is exactly its tag (leading tabs ignored for
+    `<<-`), or to the end of the text when that line never comes: a missing
+    terminator makes the rest of the text the body, never a stray quote."""
+    n = len(command)
+    for tok, tag, strip, quoted in heredocs:
+        lines = []
+        while i < n:
+            j = command.find("\n", i)
+            line = command[i:j if j >= 0 else n]
+            i = j + 1 if j >= 0 else n
+            if (line.lstrip("\t") if strip else line) == tag:
+                break
+            lines.append(line)
+        tok.body = "\n".join(lines)
+        tok.body_quoted = quoted
+    return i
+
+
 def tokenize(command):
-    """The command line as Tokens, or Unclassifiable naming what stopped it."""
+    """The command line as Tokens, or Unclassifiable naming what stopped it.
+    A here-document body (the lines after `<<TAG`, `<<-TAG`, `<<'TAG'` or
+    `<<"TAG"` up to the terminator) is not tokenized: it is DATA, kept on the
+    `<<` token as `body` for the rules that read it."""
     if not isinstance(command, str):
         raise Unclassifiable("the command was not a string")
     command = _windows_paths_to_slashes(command)
-    if len(command) > MAX_COMMAND_CHARS:
+    if len(command) > MAX_COMMAND_CHARS and ("<<" not in command
+                                             or len(command) > 20 * MAX_COMMAND_CHARS):
         raise Unclassifiable(
             "the command is %d characters, past this guard's %d character ceiling"
-            % (len(command), MAX_COMMAND_CHARS))
+            % (len(command), MAX_COMMAND_CHARS), soft=True)
     tokens = []
     buf = []
+    pbuf = []
     quoted = [False]
+    heredocs = []
     i, n = 0, len(command)
 
     def flush():
         if buf:
             tokens.append(Token("".join(buf), quoted[0], False))
+            tokens[-1].plain = "".join(pbuf)
             del buf[:]
+            del pbuf[:]
             quoted[0] = False
 
     while i < n:
         if len(tokens) > MAX_TOKENS:
             raise Unclassifiable(
                 "the command holds more than %d tokens, past this guard's ceiling"
-                % MAX_TOKENS)
+                % MAX_TOKENS, soft=True)
         ch = command[i]
+        if ch == "#" and not buf and not quoted[0]:
+            # A comment runs to the end of the line and nothing in it is a
+            # quote; the newline itself is kept (it ends the command).
+            j = command.find("\n", i)
+            i = n if j < 0 else j
+            continue
         if ch == "\\":
             if i + 1 >= n:
-                raise Unclassifiable("the command ends in a trailing backslash")
+                raise Unclassifiable("the command ends in a trailing backslash", soft=True)
             buf.append(command[i + 1])
+            pbuf.append("\x01")
             quoted[0] = True
             i += 2
             continue
@@ -429,21 +586,34 @@ def tokenize(command):
             if j < 0:
                 raise Unclassifiable("the command carries an unterminated single quote")
             buf.append(command[i + 1:j])
+            pbuf.append("\x01")
             quoted[0] = True
             i = j + 1
             continue
         if ch == '"':
-            j, parts = i + 1, []
+            j, parts, pparts = i + 1, [], []
             while j < n and command[j] != '"':
                 if command[j] == "\\" and j + 1 < n:
                     parts.append(command[j + 1])
+                    pparts.append("\x01" if command[j + 1] in "$`" else command[j + 1])
                     j += 2
                     continue
+                if command[j] == "$" and command[j + 1:j + 2] == "(":
+                    end = _scan_substitution(command, j + 2)
+                    if end < n:
+                        # The whole `$( ... )`, quotes and all: bash reads it as
+                        # its own command, so a quote inside it does not end this one.
+                        parts.append(command[j:end + 1])
+                        pparts.append(command[j:end + 1])
+                        j = end + 1
+                        continue
                 parts.append(command[j])
+                pparts.append(command[j])
                 j += 1
             if j >= n:
                 raise Unclassifiable("the command carries an unterminated double quote")
             buf.append("".join(parts))
+            pbuf.append("".join(pparts))
             quoted[0] = True
             i = j + 1
             continue
@@ -455,6 +625,7 @@ def tokenize(command):
             if ch == ">" and buf and "".join(buf).isdigit():
                 # `2>file`: the digits are the file descriptor, not a word.
                 del buf[:]
+                del pbuf[:]
                 quoted[0] = False
             else:
                 flush()
@@ -467,11 +638,75 @@ def tokenize(command):
                 i += 1
             tokens.append(Token(op, False, True))
             i += 1
+            if op == "<<" and ch == "<" and command[i:i + 1] != "<":
+                strip = command[i:i + 1] == "-"
+                delim = _heredoc_tag(command, i + 1 if strip else i)
+                if delim.word or delim.quoted:
+                    i += 1 if strip else 0
+                    heredocs.append((tokens[-1], delim.word, strip, delim.quoted))
+            elif op == "\n" and heredocs:
+                i = _take_bodies(command, i, heredocs)
+                heredocs = []
             continue
         buf.append(ch)
+        pbuf.append(ch)
         i += 1
     flush()
+    if len(command) - sum(len(t.body) for t in tokens if t.is_op) > MAX_COMMAND_CHARS:
+        raise Unclassifiable(
+            "the command is %d characters outside its here-documents, past this "
+            "guard's %d character ceiling" % (len(command), MAX_COMMAND_CHARS), soft=True)
     return tokens
+
+
+#: bash words that stand before the command a segment really runs. `coproc`
+#: runs what follows; the rest open or close a compound command. (`time` is a
+#: wrapper with options of its own, so `_argv` skips it, not this.)
+_RESERVED = frozenset(("if then else elif fi do done while until for in select case esac "
+                       "{ } ! coproc function").split())
+
+
+def _strip_openers(seg):
+    """`seg` without what bash reads before the command it runs: a case arm's
+    `pattern)` or `(pattern)`, a function definition's `name()` (with or without
+    `function`), `time` when a compound command follows it, and leading reserved
+    words (`if`, `then`, `do`, `{`, `!`, `coproc` ...), so `then curl ...` is
+    judged as `curl ...`. The body of a function or loop is already in the stream
+    as ordinary segments, so it is judged as commands."""
+    opens = 0
+    leading = bool(seg) and seg[0].is_op and seg[0].text == "("
+    for j, t in enumerate(seg):
+        if t.is_op and t.text == "(":
+            opens += 1
+        elif t.is_op and t.text == ")":
+            head = [u for u in seg[:j] if not u.is_op]
+            rest = any(not u.is_op for u in seg[j + 1:])
+            if opens == 1 and j >= 1 and seg[j - 1].is_op and seg[j - 1].text == "(":
+                if (head and len(head) <= 2 and rest and not leading
+                        and not (j >= 2 and seg[j - 2].text == "$")):
+                    seg = seg[j + 1:]          # `name()` or `function name()`
+                break
+            if rest and ((opens == 0 and (len(head) <= 1 or (head and head[0].text == "case")))
+                         or (opens == 1 and ((leading and len(head) <= 1)
+                                             or (head and head[0].text == "case")))):
+                seg = seg[j + 1:]              # a case arm, `x)` or `(x)`
+            break
+    i = 0
+    while i < len(seg) and not seg[i].is_op and not seg[i].quoted:
+        word = seg[i].text
+        if word in _RESERVED:
+            i += 2 if word == "function" else 1
+        elif word == "time":
+            k = i + 1
+            while k < len(seg) and not seg[k].is_op and seg[k].text.startswith("-"):
+                k += 1
+            if k < len(seg) and not seg[k].is_op and seg[k].text in _RESERVED:
+                i = k
+            else:
+                break
+        else:
+            break
+    return seg[i:]
 
 
 def split_commands(tokens):
@@ -481,11 +716,13 @@ def split_commands(tokens):
     segments, current = [], []
     for t in tokens:
         if t.is_op and t.text in SEPARATORS:
+            current = _strip_openers(current)
             if current:
                 segments.append(current)
             current = []
             continue
         current.append(t)
+    current = _strip_openers(current)
     if current:
         segments.append(current)
     return segments
@@ -504,6 +741,9 @@ class Candidate(object):
         self.raw = raw
         self.why = why
         self.write = write
+        #: True for a path a git command names as a pathspec: it may carry git's
+        #: own spelling (`:(top)`, a glob) that is resolved before matching.
+        self.pathspec = False
 
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -573,29 +813,159 @@ def _dd_targets(segment):
     return out
 
 
+#: Prefix of a pathspec written relative to the repository top (`:(top)x`,
+#: `:/x`); resolved against the real top where the working folder is known.
+TOP_MARK = "\x00top:"
+#: Prefix of a pathspec that is a FILE of pathspecs (`--pathspec-from-file`, a
+#: `--stdin` redirect); read where the working folder is known.
+FILE_MARK = "\x00file:"
+NUL_MARK = "\x00nul::"
+
+#: Where the Brother source keeps the file whose tracking makes it the source, in
+#: its two layouts. Named here only so an index command that rewrites the whole
+#: index (read-tree, update-index --index-info) counts as touching them.
+_MARKER_TOP_PATHS = ("products/brothersbe/src/brothersbe/policy.py",
+                     "src/brothersbe/policy.py")
+
+
+def _git_pathspec(word, prefix):
+    """The path a git pathspec word names, spelled the way this guard resolves
+    paths: joined to the `-C` folder when it is relative to the working folder,
+    or marked TOP_MARK when it is relative to the repository top. An exclusion
+    (`:!x`, `:(exclude)x`) names nothing to write and gives ""."""
+    if word.startswith((":!", ":^")):
+        return ""
+    top = False
+    if word.startswith(":/"):
+        top, word = True, word[2:]
+    elif word.startswith(":("):
+        j = word.find(")")
+        if j > 0:
+            magic = word[2:j].split(",")
+            if "exclude" in magic:
+                return ""
+            top, word = "top" in magic, word[j + 1:]
+    if top:
+        return TOP_MARK + word
+    return os.path.join(prefix, word) if prefix else word
+
+
+_C_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, "\\": 92, '"': 34}
+
+
+def _unquote_c(line):
+    """A pathspec-file line as git reads it: a line in double quotes is C quoted
+    (`\\NNN` octal bytes, `\\n`, `\\"`), anything else is literal. None when the
+    quoting is malformed, which the caller treats as naming the marker."""
+    line = line.rstrip("\r")
+    if not line.startswith('"'):
+        return line
+    if len(line) < 2 or not line.endswith('"'):
+        return None
+    out, i, body = bytearray(), 0, line[1:-1]
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out.extend(ch.encode("utf-8"))
+            i += 1
+            continue
+        nxt = body[i + 1:i + 2]
+        if nxt in _C_ESCAPES:
+            out.append(_C_ESCAPES[nxt])
+            i += 2
+            continue
+        m = re.compile(r"[0-7]{1,3}").match(body, i + 1)
+        if not m:
+            return None
+        out.append(int(m.group(), 8) & 255)
+        i = m.end()
+    return out.decode("utf-8", errors="replace")
+
+
+def _list_raws(items, prefix, c_quoted):
+    """The pathspec raws for the lines (or NUL separated items) of a list, each
+    joined with the `-C` prefix and read for `:(top)` the way a command line word
+    is. A line whose quoting cannot be read names the marker."""
+    out = []
+    for item in items:
+        if not item.strip():
+            continue
+        text = _unquote_c(item) if c_quoted else item
+        if text is None:
+            out += [TOP_MARK + m for m in _MARKER_TOP_PATHS]
+            continue
+        spec = _git_pathspec(text, prefix)
+        if spec:
+            out.append(spec)
+    return out
+
+
+def _abbreviates(word, option, shortest):
+    """True when `word` is `option` or an abbreviation of it git would accept,
+    no shorter than `shortest` (the shortest unambiguous one)."""
+    return len(word) >= len(shortest) and option.startswith(word)
+
+
+def _pathspec_lists(segment, rest, prefix):
+    """Paths named by a pathspec FILE or a `--stdin` list: read from a file or
+    here-document where the text names one, otherwise (`-`, a pipe, a file this
+    guard cannot see) the marker file itself, so the command is judged as touching
+    it. A file is returned as a FILE_MARK or NUL_MARK entry carrying the `-C` prefix
+    its lines are joined with, and is read where the folder is known; a `<`
+    redirect names a file relative to the shell's folder, not to the prefix."""
+    source = None
+    for k, w in enumerate(rest):
+        # git takes any unambiguous abbreviation of a long option
+        key, eq, value = w.partition("=")
+        if _abbreviates(key, "--pathspec-from-file", "--pathspec-fr"):
+            source = value if eq else (rest[k + 1] if k + 1 < len(rest) else None)
+    if source is None and any(_abbreviates(w, "--stdin", "--st") for w in rest):
+        source = "-"
+    if source is None:
+        return []
+    # A list is read on NUL and on newline alike (see _pathspec_raws), so a -z or
+    # --pathspec-file-nul in any spelling (a bundle, an abbreviation) changes
+    # nothing this guard reads; NUL_MARK is no longer written.
+    mark = FILE_MARK + prefix + "\x01"
+    bodies = [t.body for t in segment if t.is_op and t.body]
+    _, _, inputs = _argv(segment)
+    if source != "-":
+        return [mark + os.path.join(prefix, source)]
+    if bodies:
+        return _list_raws([x for body in bodies for x in body.splitlines()], prefix, True)
+    if inputs:
+        return [mark + inputs[0]]
+    return [TOP_MARK + m for m in _MARKER_TOP_PATHS]
+
+
 def _git_targets(segment):
-    """The paths a git subcommand writes into the working tree. Only the
-    subcommands that touch tracked files directly; `git commit` and friends
-    write history, which the Stop reconciler judges from the changes
+    """The paths a git subcommand writes into the working tree or the index.
+    Only the subcommands that touch tracked files directly; `git commit` and
+    friends write history, which the Stop reconciler judges from the changes
     themselves. Returns (subcommand, paths). Git's own value-taking options
     (-c core.foo=bar, -C /dir) sit before the subcommand, so their value
-    word is skipped by name rather than read as the subcommand."""
-    words = [t.text for t in segment if not t.is_op]
-    k = 0
-    while k < len(words) and _ASSIGNMENT.match(words[k]):
-        k += 1
-    if k >= len(words) or os.path.basename(words[k].strip()) != "git":
+    word is skipped by name rather than read as the subcommand; each `-C` folder
+    is joined to the paths, and pathspec magic (`:(top)`, `:/`) is kept so it can
+    be resolved. `read-tree` and `update-index --index-info` rewrite the index
+    wholesale and so name the marker file."""
+    call = _git_call(segment)
+    if call is None:
         return "", []
-    k += 1
-    while k < len(words) and _is_flag(words[k]):
-        if words[k] in GIT_VALUE_FLAGS:
-            k += 1  # this option's separate value word, not the subcommand
-        k += 1
-    if k >= len(words):
-        return "", []
-    sub = words[k]
-    if sub in ("rm", "mv", "restore", "checkout", "clean", "apply", "stash"):
-        return sub, [w for w in words[k + 1:] if not _is_flag(w)]
+    sub, rest, cdirs = call.sub, call.rest, [call.folder] if call.folder else []
+    prefix = os.path.join(*cdirs) if cdirs else ""
+    if sub in ("rm", "mv", "restore", "checkout", "reset", "clean", "apply", "stash",
+               "update-index"):
+        names = [w for w in rest if not _is_flag(w)]
+        extra = _pathspec_lists(segment, rest, prefix)
+        if sub == "update-index":
+            # --cacheinfo mode,sha,path names its path last, after commas
+            names += [w.split(",")[-1] for w in names if "," in w]
+        paths = [x for x in (_git_pathspec(w, prefix) for w in names) if x] + extra
+        if sub == "update-index" and "--index-info" in rest:
+            paths += [TOP_MARK + m for m in _MARKER_TOP_PATHS]
+        return sub, paths
+    if sub == "read-tree":
+        return sub, [TOP_MARK + m for m in _MARKER_TOP_PATHS]
     return sub, []
 
 
@@ -882,7 +1252,784 @@ def push_effect(segment, root, cwd, cmd_text):
 #: The effect rules, in order. Each one reads ONE simple command and returns
 #: an EffectFinding or None. Small on purpose: this is not a policy engine, it
 #: is the short list of effects a path pattern cannot see.
-COMMAND_EFFECTS = (push_effect,)
+class GitCall(object):
+    """A git command line taken apart: the subcommand, the words after it, and
+    the folder its `-C` options point at (joined, relative to the working
+    folder)."""
+
+    def __init__(self, sub, rest, folder, configs=(), git_dir="", globals_=()):
+        self.sub, self.rest, self.folder = sub, rest, folder
+        #: The words between `git` and the subcommand (its global options).
+        self.globals = list(globals_)
+        #: The value of `--git-dir`, when given.
+        self.git_dir = git_dir
+        #: The `-c key=value` overrides given before the subcommand.
+        self.configs = list(configs)
+
+
+def _git_call(segment):
+    """The GitCall of a segment that runs git (also behind `env`, `sudo` and the
+    like), or None."""
+    name, words, _ = _argv(segment)
+    if name != "git":
+        return None
+    k = 0
+    folder, configs, git_dir = "", [], ""
+    first_global = k
+    while k < len(words) and _is_flag(words[k]):
+        if words[k].startswith("--git-dir="):
+            git_dir = words[k].split("=", 1)[1]
+        elif words[k] in GIT_VALUE_FLAGS:
+            if words[k] == "-C" and k + 1 < len(words):
+                folder = os.path.join(folder, words[k + 1])
+            elif words[k] == "-c" and k + 1 < len(words):
+                configs.append(words[k + 1])
+            elif words[k] == "--git-dir" and k + 1 < len(words):
+                git_dir = words[k + 1]
+            k += 1
+        k += 1
+    if k >= len(words):
+        return None
+    return GitCall(words[k], words[k + 1:], folder, configs, git_dir, words[first_global:k])
+
+
+#: Subcommands that move or rewrite HEAD. Named by what they do to the owner
+#: files: a move to a tree without the marker unprotects them.
+HEAD_MOVERS = frozenset(("reset checkout switch rebase filter-branch filter-repo replace "
+                         "update-ref symbolic-ref").split())
+_NEW_BRANCH_FLAGS = frozenset(("-b", "-B", "-c", "-C", "--orphan"))
+
+
+class HeadMove(object):
+    """Where a git command sends HEAD: kind "none" (not at all), "rev" (to
+    `target`, whose tree can be read) or "never" (to a result that cannot be
+    inspected before it runs); `must_resolve` is True when a target that git
+    cannot resolve is itself a refusal."""
+
+    def __init__(self, kind, target="", must_resolve=False):
+        self.kind, self.target, self.must_resolve = kind, target, must_resolve
+
+
+def _head_move(call, base, common):
+    """The HeadMove of one git command (see HEAD_MOVERS)."""
+    sub, rest = call.sub, call.rest
+    flags = [w for w in rest if _is_flag(w)]
+    if sub in ("filter-branch", "filter-repo"):
+        return HeadMove("never")
+    if sub == "rebase":
+        return HeadMove("none" if set(flags) & {"--abort", "--quit"} else "never")
+    if sub == "replace":
+        return HeadMove("none" if set(flags) & {"-l", "--list", "--format"} else "never")
+    if sub == "symbolic-ref":
+        names = [w for w in rest if not _is_flag(w)]
+        if len(names) >= 2 and names[0] == "HEAD":
+            return HeadMove("rev", names[1], True)
+        return HeadMove("none")
+    if sub == "update-ref":
+        names, skip = [], False
+        for w in rest:
+            if skip:
+                skip = False
+            elif w == "-m":
+                skip = True
+            elif not _is_flag(w):
+                names.append(w)
+        if "-d" in flags:
+            return HeadMove("never" if names[:1] == ["HEAD"] else "none")
+        if len(names) >= 2 and (names[0] == "HEAD" or names[0].startswith("refs/heads/")):
+            return HeadMove("rev", names[1], True)
+        return HeadMove("none")
+    if "--orphan" in rest:
+        return HeadMove("never")
+    before = rest[:rest.index("--")] if "--" in rest else rest
+    named = []
+    skip = False
+    for w in before:
+        if skip:
+            skip = False
+        elif w in _NEW_BRANCH_FLAGS:
+            skip = True
+        elif not _is_flag(w):
+            named.append(w)
+    if not named:
+        return HeadMove("none")
+    if sub in ("checkout", "reset") and "--" in rest and not set(flags) & _NEW_BRANCH_FLAGS:
+        # `git checkout <rev> -- paths`, `git reset <rev> -- paths`: files and
+        # index entries from a commit, HEAD stays; judged as writes of the paths
+        return HeadMove("none")
+    if common.tree_holds_marker(base, named[0]) is None:
+        return HeadMove("none")      # not a revision: a path, judged as a write
+    return HeadMove("rev", named[0])
+
+
+def head_move_effect(segment, root, cwd, cmd_text):
+    """Refuse a command that moves HEAD, in a tree that holds the marker, to a
+    tree that does not (or whose result cannot be inspected first). The marker
+    is what makes a tree the Brother source; a reset, a checkout or a rewrite
+    to a commit before it was added would remove the owner files' protection
+    without touching any path. In a stranger's repository none of this applies."""
+    call = _git_call(segment)
+    if call is None or call.sub not in HEAD_MOVERS:
+        return None
+    common = require_common_module()
+    base = os.path.join(cwd or root, call.folder) if call.folder else (cwd or root)
+    if not common.is_brother_source(base):
+        return None
+    move = _head_move(call, base, common)
+    if move.kind == "none":
+        return None
+    if move.kind == "rev":
+        holds = common.tree_holds_marker(base, move.target)
+        if holds or (holds is None and not move.must_resolve):
+            return None
+        why = ("the tree %s names does not hold the owner marker" % move.target
+               if holds is False else
+               "%s cannot be resolved to a tree, so what it holds is unknown" % move.target)
+    else:
+        why = "its result cannot be inspected before it runs"
+    return EffectFinding(reason=(
+        "BrotherSBE Bash guard: `git %s` would move or rewrite HEAD, and %s. In the "
+        "Brother source that would remove the owner files' protection without writing "
+        "a path (the marker policy.py would no longer be in HEAD).\n"
+        "A move to a branch or commit that holds the marker is allowed. Otherwise do "
+        "it yourself in a terminal, or set BROTHERSBE_BASH_GUARD_OFF=1 for this session "
+        "(the guard then says on stderr that it was off).\n"
+        "This guard reads command text only; it did NOT prove anything about the rest "
+        "of the command." % (call.sub, why)))
+
+
+COMMAND_EFFECTS = (push_effect, head_move_effect)
+
+
+# ---------------------------------------------------------------------------
+# Content that git applies. In the Brother source, a command that applies a
+# patch, a commit, a merge or a stash is judged by the owner paths the content
+# touches, exactly as `git rm` of those paths would be: removing the owner files
+# by applying a diff that deletes them is the same act.
+# ---------------------------------------------------------------------------
+
+_PATCH_HEADER = re.compile(
+    r"^(?:diff --git a/(\S+) b/(\S+)|--- (?:a/)?(\S+)|\+\+\+ (?:b/)?(\S+)"
+    r"|(?:rename|copy) (?:from|to) (\S+))", re.M)
+_APPLY_VALUE_FLAGS = frozenset(("--directory", "--include", "--exclude", "--whitespace",
+                                "-p", "-C"))
+_APPLY_READ_ONLY = frozenset(("--check", "--stat", "--numstat", "--summary"))
+_APPLY_ABORTS = frozenset(("--abort", "--continue", "--skip", "--quit", "--show-current-patch",
+                           "--edit-todo"))
+
+
+def _owner_touch(paths, owner_patterns):
+    """The first of `paths` that matches an owner pattern, or "". A path is also
+    tried with its leading folders stripped, since a patch may carry a prefix
+    (`a/`, `-p2`, `--directory`) this guard does not apply."""
+    import fnmatch
+    for path in paths:
+        parts = path.split("/")
+        for i in range(len(parts)):
+            tail = "/".join(parts[i:])
+            if any(fnmatch.fnmatchcase(tail, pat) for pat in owner_patterns):
+                return path
+    return ""
+
+
+def _patch_paths(text):
+    return [g for m in _PATCH_HEADER.finditer(text) for g in m.groups()
+            if g and g != "/dev/null"]
+
+
+#: The one way this guard asks git which paths a diff touches. Fixed words only:
+#: the agent's own options and pathspecs are never passed on.
+_DIFF_NAMES = ["diff", "--name-only", "--no-ext-diff", "--no-textconv"]
+
+
+def _upstream_patch_text(common, base, up):
+    """Patch-shaped text naming the paths a piped `git diff`, `show`, `log` or
+    `format-patch` would send, built from a FIXED command. Only revision words
+    that do not start with a dash and resolve are used; an option, a pathspec or
+    anything else makes the patch unreadable (None). Never runs the agent's words."""
+    words = up.rest
+    if any(w == "--" or _is_flag(w) for w in words):
+        return None
+    revs = []
+    for w in words:
+        for part in ([w] if ".." not in w else [x for x in w.replace("...", "..").split("..") if x]):
+            if common.git_output(base, ["rev-parse", "--verify", "--quiet", part]) is None:
+                return None
+            revs.append(part)
+    if up.sub == "diff":
+        if len(revs) != 2:
+            return None          # one revision (or none) compares the working tree
+        names = common.git_output(base, _DIFF_NAMES + revs)
+    else:
+        if len(revs) == 1:
+            names = common.git_output(base, _DIFF_NAMES + [revs[0] + "^", revs[0]])
+            if names is None:
+                names = common.git_output(base, ["show", "--name-only", "--format=",
+                                                 "--no-ext-diff", "--no-textconv", revs[0]])
+        elif len(revs) == 2 and ".." in "".join(words):
+            names = common.git_output(base, _DIFF_NAMES + revs)
+        else:
+            return None
+    if names is None:
+        return None
+    return "\n".join("diff --git a/%s b/%s" % (n, n) for n in names.split())
+
+
+def _commit_paths(common, base, sub, target):
+    """The paths the commit (or range) `target` changes, as `sub` would apply
+    them, or None when it cannot be resolved."""
+    if sub == "merge":
+        out = common.git_output(base, _DIFF_NAMES + ["HEAD..." + target])
+    elif ".." in target:
+        left, _, right = target.replace("...", "..").partition("..")
+        out = common.git_output(base, _DIFF_NAMES + [left or "HEAD", right or "HEAD"])
+    else:
+        out = common.git_output(base, _DIFF_NAMES + [target + "^", target])
+        if out is None:
+            out = common.git_output(base, ["show", "--name-only", "--format=", "--no-ext-diff",
+                                           "--no-textconv", target])
+    return None if out is None else out.split()
+
+
+def _words_without(rest, value_flags):
+    """The non-flag words of `rest`, skipping the value of each option in
+    `value_flags`."""
+    out, skip = [], False
+    for w in rest:
+        if skip:
+            skip = False
+        elif w in value_flags:
+            skip = True
+        elif not _is_flag(w):
+            out.append(w)
+    return out
+
+
+#: Configuration keys the agent must not author in the Brother source: they decide
+#: what a "configured remote" is, where the work tree is, and what is included.
+_PROTECTED_CONFIG = re.compile(
+    r"^(remote\.|branch\..*\.(remote|merge)$|core\.(worktree|hookspath|fsmonitor|sshcommand)$"
+    r"|include|url\.)", re.I)
+_CONFIG_READS = frozenset(("--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l",
+                           "--list", "--show-origin", "--show-scope", "--name-only"))
+_CONFIG_EDITS = frozenset(("--unset", "--unset-all", "--add", "--replace-all",
+                           "--rename-section", "--remove-section", "-e", "--edit"))
+_REMOTE_EDITS = frozenset(("add", "set-url", "rename", "remove", "rm", "set-head",
+                           "set-branches"))
+
+
+_NETWORK_URL = re.compile(r"^(?:https?|ssh|git)://|^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:")
+_RO_SUBS = frozenset(("log show diff status rev-parse rev-list ls-tree ls-files cat-file "
+                      "for-each-ref describe blame grep shortlog reflog whatchanged "
+                      "count-objects show-ref ls-remote fsck verify-pack name-rev "
+                      "merge-base cherry diff-tree diff-index diff-files var help version "
+                      "archive bundle").split())
+_BRANCH_READ = frozenset(("-l", "--list", "-a", "--all", "-r", "--remotes", "-v", "-vv",
+                          "--verbose", "--contains", "--no-contains", "--merged",
+                          "--no-merged", "--show-current", "--sort", "--format", "--color",
+                          "--no-color", "--column", "--points-at", "-i", "--ignore-case"))
+
+
+def _remote_urls(common, base):
+    """{remote name: url} of the configured remotes of the repository at `base`."""
+    out = common.git_output(base, ["config", "--get-regexp", r"^remote\..*\.url$"]) or ""
+    urls = {}
+    for line in out.splitlines():
+        if line.strip():
+            key, _, url = line.partition(" ")
+            urls[key[len("remote."):-len(".url")]] = url.strip()
+    return urls
+
+
+def _remote_path(url):
+    """The folder a path or file:// remote URL names, or "" for a network URL."""
+    if _NETWORK_URL.match(url):
+        return ""
+    return os.path.realpath(url[len("file://"):] if url.startswith("file://") else url)
+
+
+def _writes_a_remote_repository(call, e, root, common):
+    """True when this git command runs inside the repository of a configured path
+    remote (by -C, --git-dir, or the folder a cd followed into) and would change
+    it: that is a push to the remote the session may not make, and the way to
+    forge a default branch the exemption trusts."""
+    if call.sub in _RO_SUBS:
+        return False
+    flags = set(w for w in call.rest if _is_flag(w))
+    words = [w for w in call.rest if not _is_flag(w)]
+    if call.sub == "branch" and not flags - _BRANCH_READ and (not words or flags & {"-l", "--list"}):
+        return False
+    if call.sub == "config" and flags & _CONFIG_READS:
+        return False
+    if call.sub == "remote" and (not words or words[0] in ("show", "get-url")):
+        return False
+    here = [e.cwd or root] + ([e.alt] if e.alt else [])
+    targets = [os.path.realpath(os.path.join(b, call.folder)) if call.folder
+               else os.path.realpath(b) for b in here]
+    if call.git_dir:
+        targets += [os.path.realpath(os.path.join(b, call.git_dir)) for b in here]
+    root_real = os.path.realpath(root)
+    outside = [t for t in targets if t != root_real and not t.startswith(root_real + os.sep)]
+    if not outside:
+        return False
+    urls = _remote_urls(common, root)
+    paths = set(filter(None, (_remote_path(u) for u in urls.values())))
+    return any(t == r or t.startswith(r + os.sep) for t in outside for r in paths)
+
+
+#: Environment a fetch must not run under in the Brother source: each can send a
+#: fetch of a configured remote somewhere else, or change which config it reads.
+_TRANSPORT_ENV = re.compile(
+    r"^(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_PARAMETERS"
+    r"|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_NOSYSTEM|GIT_SSH|GIT_SSH_COMMAND"
+    r"|GIT_PROXY_COMMAND|GIT_EXEC_PATH|GIT_DIR|GIT_WORK_TREE|GIT_ALTERNATE_OBJECT_DIRECTORIES"
+    r"|GIT_OBJECT_DIRECTORY|GIT_NAMESPACE|GIT_ALLOW_PROTOCOL|GIT_CONFIG|HOME|XDG_CONFIG_HOME|PATH)$")
+_TRANSPORT_OPTIONS = ("--upload-pack", "--receive-pack", "--exec=", "--config-env", "--config",
+                      "--exec-path", "--git-dir", "--work-tree")
+
+
+def _inline_env_names(seg):
+    """The names of the environment variables set inline in front of the command
+    (`A=1 B=2 git ...`, `env A=1 git ...`)."""
+    names = []
+    for t in seg:
+        if t.is_op:
+            continue
+        if _ASSIGNMENT.match(t.text):
+            names.append(t.text.split("=", 1)[0])
+        elif os.path.basename(t.text) not in _WRAPPERS:
+            break
+    return names
+
+
+def _is_fetching(call):
+    """True for a git command that fetches: fetch, pull, clone, `remote update`,
+    `submodule update`."""
+    return call.sub in ("fetch", "pull", "clone") or (
+        call.sub in ("remote", "submodule") and call.rest[:1] == ["update"])
+
+
+#: Variables whose value changes how a fetch reaches its remote.
+_STATE_VARS = re.compile(r"^(GIT_|SSH_|XDG_)|^(HOME|PATH)$")
+_STATE_COMMANDS = frozenset(("export", "declare", "typeset", "readonly"))
+_STATE_ALWAYS = frozenset((".", "source", "eval", "exec"))
+
+
+def _earlier_state(entries, i):
+    """The construct before entries[i], in the same command text, that changes the
+    shell state a fetch will run under in a way the hook cannot read: an export or
+    declaration of a git, ssh, XDG, HOME or PATH variable, `set -a`, a bare
+    assignment of one, or a sourced or evaluated file. "" for none."""
+    for prior in entries[:i]:
+        name, args, _ = _argv(prior.seg)
+        names = [w.split("=", 1)[0] for w in args if not _is_flag(w)]
+        words = [t.text for t in prior.seg if not t.is_op and not _ASSIGNMENT.match(t.text)]
+        first = os.path.basename(words[0]) if words else ""
+        if name in _STATE_ALWAYS or first in _STATE_ALWAYS:
+            return first or name
+        if name in _STATE_COMMANDS and any(_STATE_VARS.match(n) for n in names):
+            return "%s %s" % (name, next(n for n in names if _STATE_VARS.match(n)))
+        if name == "set" and any(w in ("-a", "allexport") for w in args):
+            return "set -a"
+        if not name:
+            for t in prior.seg:
+                if not t.is_op and _ASSIGNMENT.match(t.text) and _STATE_VARS.match(
+                        t.text.split("=", 1)[0]):
+                    return "an assignment of " + t.text.split("=", 1)[0]
+    return ""
+
+
+def _carries_transport_redirection(call, seg):
+    """The variable or option, if any, that this fetch-like command carries to
+    redirect or reconfigure its transport; "" for none."""
+    if not _is_fetching(call):
+        return ""
+    for name in _inline_env_names(seg):
+        if _TRANSPORT_ENV.match(name):
+            return name
+    if call.configs:
+        return "-c " + call.configs[0].split("=", 1)[0]
+    for g in call.globals + call.rest:
+        for option in _TRANSPORT_OPTIONS:
+            if g == option.rstrip("=") or g.startswith(option if option.endswith("=")
+                                                         else option + "="):
+                return option.rstrip("=")
+    if call.sub == "clone" and "-u" in call.rest:
+        return "-u"
+    return ""
+
+
+def _transport_is_untouched(common, base, remote):
+    """True when nothing rewrites how `remote` is reached: no `url.*.insteadOf` or
+    `pushInsteadOf` in any config scope, and the effective URL (insteadOf applied)
+    is the configured one."""
+    rewrites = common.git_output(base, ["config", "--show-origin", "--get-regexp",
+                                        r"url\..*insteadof"], ok=(0, 1))
+    if rewrites is None or rewrites.strip():
+        return False
+    configured = _remote_urls(common, base).get(remote, "")
+    effective = (common.git_output(base, ["ls-remote", "--get-url", remote]) or "").strip()
+    return bool(configured) and effective == configured
+
+
+#: A redirecting variable named anywhere in a command's text; HOME and PATH only
+#: when assigned (reading them is ordinary).
+_REDIRECT_NAMES = re.compile(
+    r"\b(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\w*|GIT_CONFIG_VALUE_\w*|GIT_CONFIG_PARAMETERS"
+    r"|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_NOSYSTEM|GIT_SSH_COMMAND|GIT_SSH"
+    r"|GIT_PROXY_COMMAND|GIT_EXEC_PATH|GIT_DIR|GIT_WORK_TREE|GIT_ALTERNATE_OBJECT_DIRECTORIES"
+    r"|GIT_OBJECT_DIRECTORY|GIT_NAMESPACE|GIT_ALLOW_PROTOCOL|GIT_TEMPLATE_DIR"
+    r"|XDG_CONFIG_HOME)\b|(?:^|[\s;&|(\"'])((?:HOME|PATH))=")
+_LAUNCHERS = frozenset(("env make xargs git").split())
+
+
+def _launches_a_program(entries):
+    """True when some command in the text launches a shell, an interpreter, env,
+    make, xargs, `find -exec` or git: something that could run git with the
+    variables the text names."""
+    for e in entries:
+        words = [t.text for t in e.seg if not t.is_op and not _ASSIGNMENT.match(t.text)]
+        first = os.path.basename(words[0]) if words else ""
+        name, args, _ = _argv(e.seg)
+        for cmd in (first, name):
+            if (cmd in _LAUNCHERS or cmd in SHELL_INTERPRETERS or _interpreter_family(cmd)
+                    or (cmd == "find" and any(a in ("-exec", "-execdir", "-ok", "-okdir")
+                                              for a in words))):
+                return True
+    return False
+
+
+def redirecting_env_effect(entries, root, common):
+    """Refuse a command whose TEXT names a variable that redirects git's transport
+    or configuration, when the text also launches a program that could run git,
+    in the Brother source. The variable may sit in front of a shell, an
+    interpreter, `env -S` or `make` that runs git itself, where the per command
+    rule cannot see it; reading a variable (`echo $GIT_DIR`) launches nothing and
+    stays allowed."""
+    text = " ".join(t.text for e in entries for t in e.seg if not t.is_op)
+    # operators are not in the join; assignments inside them are in the words
+    m = _REDIRECT_NAMES.search(text)
+    if not m or not _launches_a_program(entries) or not common.is_brother_source(root):
+        return None
+    name = m.group(1) or ("%s=" % m.group(2))
+    return EffectFinding(reason=(
+        "BrotherSBE Bash guard: this command names %s and launches a program that could run "
+        "git with it. In the Brother source such a variable can send a fetch of a configured "
+        "remote somewhere else, or change which config git reads, so the remote tracking "
+        "exemption could not be trusted.\n"
+        "Do it yourself in a terminal, or set BROTHERSBE_BASH_GUARD_OFF=1 for this session "
+        "(the guard then says on stderr that it was off).\n"
+        "This guard reads command text only; it did NOT prove anything about the rest of "
+        "the command." % name))
+
+
+def metadata_effect(entries, i, root, common):
+    """Refuse a git command that authors repository metadata the other rules
+    trust, in the Brother source: what a configured remote is (`remote add`,
+    `config remote.*`, `-c remote.*`), what refs/remotes/ holds (`update-ref`,
+    `symbolic-ref`, a push into it), and where fetches come from (a URL or path on
+    the command line, `--update-head-ok`). The remote tracking exemption holds only
+    for refs a configured remote fetched, and these are the ways to fake one."""
+    e = entries[i]
+    call = _git_call(e.seg)
+    if call is None:
+        return None
+    base = os.path.join(e.cwd or root, call.folder) if call.folder else (e.cwd or root)
+    sub, rest = call.sub, call.rest
+    flags = set(w for w in rest if _is_flag(w))
+    words = [w for w in rest if not _is_flag(w)]
+    why = ""
+    redirect = _carries_transport_redirection(call, e.seg)
+    earlier = _earlier_state(entries, i) if _is_fetching(call) else ""
+    if redirect:
+        why = ("it carries %s, which can send the fetch somewhere other than the "
+               "configured remote" % redirect)
+    elif earlier:
+        why = ("%s comes earlier in the same command, and the shell state a fetch then "
+               "runs under cannot be read by this guard" % earlier)
+    elif _writes_a_remote_repository(call, e, root, common) and common.is_brother_source(root):
+        return EffectFinding(reason=(
+            "BrotherSBE Bash guard: `git %s` would change the repository of a configured "
+            "remote (by -C, --git-dir or a cd into it). In the Brother source the remote's "
+            "branches are trusted because the owner's pull request process moves them; "
+            "moving one from here is a push the session may not make.\n"
+            "Do it yourself in a terminal, or set BROTHERSBE_BASH_GUARD_OFF=1 for this "
+            "session (the guard then says on stderr that it was off).\n"
+            "This guard reads command text only; it did NOT prove anything about the rest "
+            "of the command." % sub))
+    if any(_PROTECTED_CONFIG.match(c.split("=", 1)[0]) for c in call.configs):
+        why = "it overrides a remote or include setting with -c"
+    elif sub == "remote" and words[:1] and words[0] in _REMOTE_EDITS:
+        why = "it edits the list of configured remotes"
+    elif sub == "config":
+        # `--file X` / `-f X` names the config file written; its value is not the key.
+        target, kept, skip = None, [], False
+        for w in rest:
+            if skip:
+                target, skip = w, False
+            elif w in ("-f", "--file"):
+                skip = True
+            elif w.startswith("--file="):
+                target = w.split("=", 1)[1]
+            elif not _is_flag(w):
+                kept.append(w)
+        words = kept
+        in_repo = target is None or any(
+            part.lower() == ".git" for part in target.replace("\\", "/").split("/"))
+        if target is not None and not in_repo:
+            # a relative --file is the working folder's (or --git-dir's) own file:
+            # anything that lands inside the gitdir is the repository config
+            gitdirs = [os.path.realpath(os.path.join(_toplevel(base), ".git"))]
+            if call.git_dir:
+                gitdirs.append(os.path.realpath(os.path.join(base, call.git_dir)))
+            spots = [os.path.realpath(os.path.join(base, target))]
+            if call.git_dir:
+                spots.append(os.path.realpath(os.path.join(base, call.git_dir, target)))
+            in_repo = any(sp == gd or sp.startswith(gd + os.sep)
+                          for sp in spots for gd in gitdirs)
+        edits = bool(flags & _CONFIG_EDITS) or len(words) >= 2
+        key = words[0] if words else ""
+        if in_repo and not flags & _CONFIG_READS and edits and (
+                "-e" in flags or "--edit" in flags or _PROTECTED_CONFIG.match(key)
+                or "--rename-section" in flags or "--remove-section" in flags):
+            why = "it writes a remote, include or work tree setting"
+    elif sub in ("update-ref", "symbolic-ref") and any("refs/remotes/" in w for w in words):
+        why = "it writes a remote tracking ref"
+    elif sub in ("push", "fetch") and any(
+            ":" in w and w.split(":")[-1].startswith(("refs/remotes/", "+refs/remotes/"))
+            for w in words):
+        why = "it writes a remote tracking ref"
+    elif sub == "push" and words[:1] in (["."], [".."]):
+        why = "it pushes into this repository"
+    elif sub in ("fetch", "pull") and ("--update-head-ok" in flags or "-u" in flags
+                                       and sub == "fetch"):
+        why = "it fetches over the checked out branch"
+    elif sub in ("fetch", "pull") and words and "--all" not in flags:
+        remotes = (common.git_output(base, ["remote"]) or "").split()
+        if words[0] not in remotes and words[0] not in ("--",):
+            why = "it fetches from %s, which is not a configured remote" % words[0]
+    if not why or not common.is_brother_source(base):
+        return None
+    return EffectFinding(reason=(
+        "BrotherSBE Bash guard: `git %s` is refused because %s. In the Brother source the "
+        "remotes and refs/remotes/ are repository metadata the session does not author: "
+        "content on a remote tracking ref is trusted because a configured remote fetched "
+        "it.\n"
+        "Do it yourself in a terminal, or set BROTHERSBE_BASH_GUARD_OFF=1 for this session "
+        "(the guard then says on stderr that it was off).\n"
+        "This guard reads command text only; it did NOT prove anything about the rest of "
+        "the command." % (sub, why)))
+
+
+def _remote_default_branch(common, base, remote):
+    """The branch `refs/remotes/<remote>/HEAD` points at, or `main` when that
+    symbolic ref is absent. Only this branch reaches the repository through the
+    owner's pull request process; any other branch on the remote may have been
+    pushed by the session."""
+    out = (common.git_output(base, ["symbolic-ref", "--short", "refs/remotes/%s/HEAD" % remote])
+           or "").strip()
+    return out[len(remote) + 1:] if out.startswith(remote + "/") else "main"
+
+
+def _fetch_head_source_is_configured(common, base):
+    """True when the last fetch (the first line of FETCH_HEAD) came from the URL of
+    a configured remote."""
+    path = common.git_output(base, ["rev-parse", "--git-path", "FETCH_HEAD"])
+    if not path:
+        return False
+    try:
+        with open(os.path.join(base, path.strip()), "r", encoding="utf-8", errors="replace") as f:
+            first = f.readline()
+    except (OSError, ValueError):
+        return False
+    source = first.rstrip("\n").rsplit(" of ", 1)[-1].strip()
+    named = re.search(r"'([^']+)' of ", first)
+    urls = (common.git_output(base, ["config", "--get-regexp", r"^remote\..*\.url$"]) or "")
+    def plain(url):
+        # git records the source without a trailing slash or `.git`
+        url = url.strip().rstrip("/")
+        return url[:-4] if url.endswith(".git") else url
+    for line in urls.splitlines():
+        if not line.strip() or plain(line.split(None, 1)[-1]) != plain(source):
+            continue
+        remote = line.split(None, 1)[0][len("remote."):-len(".url")]
+        if not _NETWORK_URL.match(line.split(None, 1)[-1].strip()) \
+                or not _transport_is_untouched(common, base, remote):
+            continue
+        branch = named.group(1).replace("refs/heads/", "", 1) if named else ""
+        if branch == _remote_default_branch(common, base, remote):
+            return True
+    return False
+
+
+def _is_remote_tracking(common, base, target):
+    """True when `target` names a remote tracking ref of a CONFIGURED remote
+    (`origin/main` with `origin` in `git remote`, or `@{u}` resolving to one), and
+    no local branch or tag of that name could be what git picks instead. Content
+    on such a ref reached the repository through the owner's own pull request
+    process; the owner family guards the AGENT's authorship, not that process."""
+    if target == "FETCH_HEAD":
+        return _fetch_head_source_is_configured(common, base)
+    if target == "@{u}":
+        name = (common.git_output(base, ["rev-parse", "--symbolic-full-name", "@{u}"]) or "").strip()
+        if not name.startswith("refs/remotes/"):
+            return False
+        return _is_remote_tracking(common, base, name[len("refs/remotes/"):])
+    remotes = (common.git_output(base, ["remote"]) or "").split()
+    owner_remote = next((r for r in remotes if target.startswith(r + "/")), "")
+    if not owner_remote or not _NETWORK_URL.match(
+            _remote_urls(common, base).get(owner_remote, "")) \
+            or not _transport_is_untouched(common, base, owner_remote) or target != "%s/%s" % (
+            owner_remote, _remote_default_branch(common, base, owner_remote)):
+        return False
+    def exists(ref):
+        return common.git_output(base, ["rev-parse", "--verify", "--quiet", ref]) is not None
+    return (exists("refs/remotes/" + target) and not exists("refs/heads/" + target)
+            and not exists("refs/tags/" + target))
+
+
+def _patch_text(entries, i, call, base):
+    """The patch text a `git apply` or `git am` at entries[i] reads, from files it
+    names, a `<` redirect, a here-document, or the git command piped into it; or
+    None when its source cannot be read (a URL, a process substitution, a here
+    string, a missing file, any other upstream command)."""
+    seg = entries[i].seg
+    files = [w for w in _words_without(call.rest, _APPLY_VALUE_FLAGS) if w != "-"]
+    _, _, inputs = _argv(seg)
+    files += inputs
+    chunks = []
+    for path in files:
+        try:
+            with open(os.path.join(base, path), "r", encoding="utf-8", errors="replace") as f:
+                chunks.append(f.read(8000000))
+        except (OSError, ValueError):
+            return None
+    bodies = [t.body for t in seg if t.is_op and t.body]
+    chunks += bodies
+    if files or bodies:
+        return "\n".join(chunks)
+    if _herestrings(seg):
+        return None
+    if i > 0 and entries[i - 1].pipe == entries[i].pipe and entries[i - 1].post == "|":
+        up = _git_call(entries[i - 1].seg)
+        if up is None or up.sub not in ("diff", "show", "format-patch", "log"):
+            name, args, _ = _argv(entries[i - 1].seg)
+            if name == "cat":
+                return _patch_text_of_files(args, base)
+            return None
+        common = require_common_module()
+        upbase = os.path.join(base, up.folder) if up.folder else base
+        return _upstream_patch_text(common, upbase, up)
+    return None
+
+
+def _patch_text_of_files(args, base):
+    chunks = []
+    for path in [a for a in args if not _is_flag(a)]:
+        try:
+            with open(os.path.join(base, path), "r", encoding="utf-8", errors="replace") as f:
+                chunks.append(f.read(8000000))
+        except (OSError, ValueError):
+            return None
+    return "\n".join(chunks)
+
+
+def content_apply_effect(entries, i, root, common):
+    """Refuse a git command that applies content touching an owner file, in the
+    Brother source (see the section note above). `apply` and `am` are judged by
+    the headers of the patch they read, `cherry-pick`, `revert`, `merge` and `pull`
+    by the diff of the commits they bring in, `stash pop` and `stash apply` by the
+    stash. Content this guard cannot read is refused as unclassifiable."""
+    e = entries[i]
+    call = _git_call(e.seg)
+    if call is None:
+        name, args, _ = _argv(e.seg)
+        if name not in ("patch", "gpatch"):
+            return None
+        # `patch` is judged exactly as `git apply`: the patch comes from -i or
+        # --input, a `<` redirect, a here-document or the pipe, and any file
+        # operand it patches is an owner path if it matches one.
+        sources, operands, skip = [], [], False
+        for k, w in enumerate(args):
+            if skip:
+                skip = False
+            elif w in ("-i", "--input"):
+                sources.append(args[k + 1] if k + 1 < len(args) else "")
+                skip = True
+            elif w.startswith("--input="):
+                sources.append(w.split("=", 1)[1])
+            elif w.startswith("-i") and len(w) > 2:
+                sources.append(w[2:])
+            elif w in ("-p", "-d", "-o", "-r", "-B", "-V", "-F", "-D", "--directory"):
+                skip = True
+            elif not _is_flag(w):
+                operands.append(w)
+        if {"--dry-run", "-C", "--check"} & set(args):
+            return None
+        call = GitCall("apply", sources, "")
+        patch_operands = operands
+    else:
+        patch_operands = []
+    if call.sub not in ("apply", "am", "cherry-pick", "revert", "merge", "pull", "stash"):
+        return None
+    flags = set(w for w in call.rest if _is_flag(w))
+    if flags & _APPLY_ABORTS or (call.sub == "apply" and flags & _APPLY_READ_ONLY
+                                 and "--apply" not in flags):
+        return None
+    base = os.path.join(e.cwd or root, call.folder) if call.folder else (e.cwd or root)
+    if not common.is_brother_source(base):
+        return None
+    sub, owner = call.sub, common.OWNER_PATTERNS
+    unreadable = ""
+    touched = ""
+    if sub in ("apply", "am"):
+        text = _patch_text(entries, i, call, base)
+        if text is None:
+            unreadable = "the patch it reads cannot be read before it runs"
+        else:
+            touched = _owner_touch(_patch_paths(text) + patch_operands, owner)
+    elif sub == "stash":
+        words = [w for w in call.rest if not _is_flag(w)]
+        if not words or words[0] not in ("pop", "apply"):
+            return None
+        out = common.git_output(base, ["stash", "show", "--name-only"] + words[1:2])
+        if out is None:
+            unreadable = "the stash it applies cannot be read"
+        else:
+            touched = _owner_touch(out.split(), owner)
+    else:
+        words = _words_without(call.rest, {"-m", "-s", "-X", "-F", "--strategy", "-S"})
+        if sub == "pull":
+            targets = ["%s/%s" % (words[0], r) for r in words[1:]] if words else []
+            if not words:
+                targets = ["@{u}"]
+        else:
+            targets = words or (["@{u}"] if sub == "merge" else [])
+        for target in targets:
+            if _is_remote_tracking(common, base, target):
+                continue
+            paths = _commit_paths(common, base, "merge" if sub in ("merge", "pull") else sub,
+                                  target)
+            if paths is None:
+                if sub in ("pull", "merge") and not words:
+                    continue
+                unreadable = "%s cannot be resolved, so what it brings in is unknown" % target
+                break
+            touched = _owner_touch(paths, owner)
+            if touched:
+                break
+    if not touched and not unreadable:
+        return None
+    why = ("it changes the owner file %s" % touched) if touched else unreadable
+    return EffectFinding(reason=(
+        "BrotherSBE Bash guard: `git %s` applies content, and %s. In the Brother source "
+        "the owner files are protected from a deletion or a rewrite by a diff, a commit, "
+        "a merge or a stash exactly as from `rm`.\n"
+        "Make the change through Edit or Write after declaring the path, do it yourself in "
+        "a terminal, or set BROTHERSBE_BASH_GUARD_OFF=1 for this session (the guard then "
+        "says on stderr that it was off).\n"
+        "This guard reads command text only; it did NOT prove anything about the rest of "
+        "the command." % (sub, why)))
 
 
 #: name -> a function from (non-flag words, flags) to the paths it writes.
@@ -1001,7 +2148,9 @@ def segment_candidates(segment, depth):
     elif name == "git":
         git_sub, git_paths = _git_targets(segment)
         for p in git_paths:
-            out.append(Candidate(p, "git %s" % git_sub, True))
+            cand = Candidate(p, "git %s" % git_sub, True)
+            cand.pathspec = True
+            out.append(cand)
     elif name in SHELL_INTERPRETERS and depth < MAX_DEPTH:
         payload = _payload_of(segment, ("-c",))
         if payload:
@@ -1011,8 +2160,8 @@ def segment_candidates(segment, depth):
             except Unclassifiable as e:
                 raise Unclassifiable(
                     "the %s -c payload could not be read (%s)" % (name, e))
-    elif name in CODE_INTERPRETERS:
-        payload = _payload_of(segment, ("-c", "-e"))
+    elif _interpreter_family(name):
+        payload = interpreter_code(segment)
         if payload:
             out.extend(_code_payload_candidates(
                 payload, "a %s -c/-e payload carrying a write marker" % name))
@@ -1029,6 +2178,1087 @@ def segment_candidates(segment, depth):
         if t.is_op or t.text in written or _ASSIGNMENT.match(t.text):
             continue
         out.append(Candidate(t.text, "mentioned in the command", False))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# GUARD1: what a stranger's agent sends out of the machine, what an interpreter
+# one liner deletes, and the folder a command runs in.
+#
+# These rules are the one place this guard FAILS CLOSED. The write boundary
+# above fails open on purpose; an upload of a secret or a recursive delete is
+# not a thing a hook in front of every Bash call may guess about. Every refusal
+# here names BROTHERSBE_BASH_GUARD_OFF. A command that cannot be split is
+# refused when it could be carrying a network tool or an interpreter (see
+# DANGER_WORDS); a long line or a trailing backslash that carries neither is
+# allowed with the usual loud note.
+#
+# Like everything in this file it reads command TEXT. A key read by a script, a
+# path built at run time or an upload over a protocol this file does not know
+# is outside it; docs/limits.md says so under "Shapes this guard does not see".
+# ---------------------------------------------------------------------------
+
+#: Commands that carry bytes off the machine, and the two that upload a file by
+#: option. Spelled as split strings: this guard only REFUSES these commands, and
+#: the zero-network scan (test_sbe.py) reads a tuple of those names as a client.
+EXFIL_SINKS = frozenset("curl wget nc ncat netcat".split())
+_UPLOADERS = frozenset("curl wget".split())
+
+#: A command the guard could not split is refused only when its raw text names
+#: one of these; otherwise it is allowed with a note (a long line, a trailing
+#: backslash). Words, not a parse: the text could not be parsed.
+DANGER_WORDS = re.compile(
+    r"\b(?:curl|wget|nc|ncat|netcat|socat|python[0-9.]*|node|perl|ruby|php|bash|sh|zsh|eval)\b"
+    r"|/dev/tcp")
+
+#: Words that run another command, each with the options that take a separate
+#: value. Skipped to find the command that really runs.
+_WRAPPERS = {
+    "sudo": frozenset("-u -g -h -p -C -D -R -T -U -r -t".split()),
+    "doas": frozenset("-u -C".split()),
+    "env": frozenset("-u -C -S".split()),
+    "timeout": frozenset("-s -k".split()),
+    "exec": frozenset("-a".split()),
+    "nice": frozenset("-n".split()),
+    "ionice": frozenset("-c -n -p".split()),
+    "stdbuf": frozenset("-i -o -e".split()),
+    "time": frozenset("-f -o".split()),
+    "xargs": frozenset("-a -d -E -I -L -n -P -s".split()),
+    "nohup": frozenset(), "command": frozenset(), "builtin": frozenset(),
+    "busybox": frozenset(), "setsid": frozenset(),
+}
+
+_SECRET_BASENAMES = frozenset((".netrc", "credentials", "id_rsa", "id_ed25519",
+                               "id_ecdsa", "id_dsa"))
+_SECRET_SUFFIXES = (".pem", ".key")
+_SECRET_DIRS = frozenset((".ssh", ".aws"))
+#: `.env.example` is the committed template, not the secret.
+_ENV_TEMPLATES = (".example", ".sample", ".template", ".dist")
+#: A .pem whose name says it is a certificate or a public part holds no secret.
+_PUBLIC_PEM = r"cert|public|chain|^ca[-_.]"
+
+#: curl's upload options by kind: "data" is `@file`, "enc" is `@file` or
+#: `name@file`, "form" is `name=@file` or `name=<file`, "file" is the file itself.
+_CURL_UPLOADS = {
+    "-d": "data", "--data": "data", "--data-binary": "data", "--data-ascii": "data",
+    "--json": "data", "--data-urlencode": "enc", "-T": "file",
+    "--upload-file": "file", "-F": "form", "--form": "form"}
+_WGET_UPLOADS = {"--post-file": "file", "--body-file": "file"}
+#: curl's other short options that take a value, so `-XPOST` or `-H x` is not
+#: read as a cluster of flags.
+_CURL_VALUE_FLAGS = frozenset("XHoubAecmwxyYzEKrCDQt")
+
+_REDIRECTS = frozenset(("<", "<<", ">", ">>", ">|"))
+#: Pattern strings, not compiled objects: most commands never reach a
+#: substitution or a delete call, and the guard runs on every Bash call.
+_SUBSTITUTION = r"\$\s*\(([^)]*)\)?|`([^`]*)`?"
+
+
+def secret_shaped(path):
+    """True for a path that looks like a credential: .env and .env.* (not the
+    .example template), an ssh or tls private key, .netrc, a file named
+    credentials, and anything under a .ssh or .aws folder (a public .pub key
+    and a certificate .pem excepted)."""
+    if not isinstance(path, str):
+        return False
+    parts = [x for x in path.strip().replace("\\", "/").split("/") if x]
+    if not parts:
+        return False
+    base = parts[-1].lower()
+    if base.endswith(".pub") or (base.endswith(".pem") and re.search(_PUBLIC_PEM, base)):
+        return False
+    if any(x in _SECRET_DIRS for x in parts):
+        return True
+    if base == ".env" or (base.startswith(".env.") and not base.endswith(_ENV_TEMPLATES)):
+        return True
+    return base in _SECRET_BASENAMES or base.endswith(_SECRET_SUFFIXES)
+
+
+def _argv(segment):
+    """(command name, its argument words, its input files) for one simple
+    command. Redirection targets are not arguments, a here string's word is
+    data not a file, and leading assignments and wrappers (sudo -u x, env -u X,
+    timeout -s KILL 5) are skipped with their own option values. The input
+    files are the `<` targets and an `xargs -a FILE`."""
+    words, inputs, pending, prev = [], [], None, ""
+    for t in segment:
+        if t.is_op:
+            pending = t.text if t.text in _REDIRECTS else None
+            if pending == "<" and prev == "<<":
+                pending = "<<<"
+            prev = t.text
+            continue
+        prev = ""
+        if pending is None:
+            words.append(t.text)
+        elif pending == "<":
+            inputs.append(t.text)
+        pending = None
+    k = 0
+    while k < len(words):
+        if _ASSIGNMENT.match(words[k]):
+            k += 1
+            continue
+        wrapper = os.path.basename(words[k])
+        valued = _WRAPPERS.get(wrapper)
+        if valued is None:
+            break
+        k += 1
+        while k < len(words):
+            w = words[k]
+            if w in valued:
+                if wrapper == "xargs" and w == "-a" and k + 1 < len(words):
+                    inputs.append(words[k + 1])
+                k += 2
+            elif w.startswith("-") or _ASSIGNMENT.match(w) or re.match(r"^[0-9.]+[smhd]?$", w):
+                k += 1
+            else:
+                break
+    if k >= len(words):
+        return "", [], inputs
+    return os.path.basename(words[k]), words[k + 1:], inputs
+
+
+def _upload_file(kind, val):
+    """The file one upload option names, or "" when its value is literal text."""
+    if kind == "file":
+        return val
+    if kind == "data":
+        return val[1:] if val.startswith("@") else ""
+    if kind == "enc":
+        head, at, tail = val.partition("@")
+        return tail if at and "=" not in head else ""
+    _, eq, v = val.partition("=")
+    return v[1:].split(";")[0].strip("\"'") if eq and v[:1] in ("@", "<") else ""
+
+
+def upload_targets(segment):
+    """The files one curl or wget segment sends, in the order named. Reads the
+    long, attached and clustered spellings (--data-binary @f, -d@f, -sd @f)."""
+    name, args, _ = _argv(segment)
+    table = _CURL_UPLOADS if name == "curl" else _WGET_UPLOADS if name == "wget" else None
+    if table is None:
+        return []
+    out, i = [], 0
+    while i < len(args):
+        w = args[i]
+        i += 1
+        kind = val = None
+        if w.startswith("--"):
+            key, eq, rest = w.partition("=")
+            if key in table:
+                kind = table[key]
+                val = rest if eq else (args[i] if i < len(args) else "")
+                i += 0 if eq else 1
+        elif w.startswith("-") and len(w) > 1:
+            for j, ch in enumerate(w[1:], 1):
+                if "-" + ch in table:
+                    kind, rest = table["-" + ch], w[j + 1:]
+                    val = rest if rest else (args[i] if i < len(args) else "")
+                    i += 0 if rest else 1
+                    break
+                if name == "curl" and ch in _CURL_VALUE_FLAGS:
+                    i += 0 if w[j + 1:] else 1
+                    break
+        if kind:
+            target = _upload_file(kind, val)
+            if target:
+                out.append(target)
+    return out
+
+
+def _substituted_secret(segment):
+    """A secret shaped file named inside a $( ) or backtick substitution of this
+    segment, or "". Read from the segment's text because the scanner keeps the
+    substitution's words in place, quoted or not."""
+    text = " ".join(t.text for t in segment)
+    for m in re.finditer(_SUBSTITUTION, text):
+        for w in (m.group(1) or m.group(2) or "").split():
+            w = w.lstrip("<").strip("\"'")
+            if secret_shaped(w):
+                return w
+    return ""
+
+
+#: What makes a here-document body secret shaped: a private key block, a cloud
+#: or token prefix, or a NAME=value line whose name says secret. The body is
+#: read for this and for nothing else.
+_SECRET_BODY = (
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}"
+    r"|\bsk-[A-Za-z0-9_-]{20,}"
+    r"|^\s*(?:export\s+)?[A-Za-z0-9_]*(?:SECRET|TOKEN|PASSW(?:OR)?D|API_?KEY|PRIVATE_?KEY"
+    r"|ACCESS_?KEY)[A-Za-z0-9_]*\s*=\s*\S")
+
+
+def _secret_heredoc(segment):
+    """True when a here-document body on this segment looks like a secret."""
+    body = "\n".join(t.body for t in segment if t.is_op and t.body)
+    return bool(body) and re.search(_SECRET_BODY, body, re.M | re.I) is not None
+
+
+def _exfil_reason(secret, how):
+    return (
+        "BrotherSBE Bash guard: this command sends %s, which is secret shaped, off the "
+        "machine (%s). Keys, tokens and .env files are not uploaded or piped to the "
+        "network by an agent.\n"
+        "If this is deliberate, run it yourself in a terminal, send a copy that holds "
+        "no secret, or set BROTHERSBE_BASH_GUARD_OFF=1 for this session (the guard then "
+        "says on stderr that it was off).\n"
+        "This guard reads command text only; it did NOT prove anything about the rest "
+        "of the command." % (secret, how))
+
+
+def exfil_refusal(segments):
+    """The refusal for one pipeline (a list of simple commands) that sends a
+    secret shaped file to the network, or "" for none. Four shapes: curl or wget
+    uploading one (-d @f, -T f, -F x=@f, --post-file f ...); a sink reading one
+    through `<` or `xargs -a`; a sink whose argument is a substitution of one;
+    and a command naming one piped into a sink anywhere later in the pipeline.
+    Commands a shell is handed as text (-c, eval, here strings) are separate
+    pipelines here: `analyze` expands them first."""
+    reader = ""
+    for seg in segments:
+        name, args, inputs = _argv(seg)
+        sent, how = "", ""
+        if name in _UPLOADERS:
+            sent = next((f for f in upload_targets(seg) if secret_shaped(f)), "")
+            how = "%s uploads it" % name
+        if name in EXFIL_SINKS and not sent:
+            sent = next((f for f in inputs if secret_shaped(f)), "")
+            how = "%s reads it from a redirect" % name
+        if name in EXFIL_SINKS and not sent:
+            sent = _substituted_secret(seg)
+            how = "%s is given its contents through a substitution" % name
+        secret_body = _secret_heredoc(seg)
+        if name in EXFIL_SINKS and not sent and secret_body:
+            sent, how = "a here-document body", "%s is fed it on stdin" % name
+        if name in EXFIL_SINKS and not sent and reader:
+            sent, how = reader, "it is piped into %s" % name
+        if sent:
+            return _exfil_reason(sent, how)
+        if not reader:
+            reader = next((a for a in args + inputs if secret_shaped(a)), "")
+            reader = reader or ("a here-document body" if secret_body else "")
+    return ""
+
+
+def unsplittable_reason(why):
+    return (
+        "BrotherSBE Bash guard: this command could not be read completely (%s), so "
+        "part of it was not examined, and it holds an unbalanced quote, a shell nested "
+        "too deep, or a network tool or an interpreter, so it is not allowed "
+        "unexamined.\n"
+        "Rewrite it with balanced quotes, or set BROTHERSBE_BASH_GUARD_OFF=1 for this "
+        "session (the guard then says on stderr that it was off)." % why)
+
+
+#: Python, perl, ruby, node and php one liners: the family each name belongs to
+#: (python3.11 is python) and the flag that carries the code.
+_INTERPRETER_NAME = re.compile(r"(python|perl|ruby|node|php)[0-9.]*$")
+_CODE_FLAG = {"python": r"-[A-Za-z]*c", "perl": r"-[A-Za-z]*e", "ruby": r"-[A-Za-z]*e",
+              "node": r"-[a-z]*[ep]|--eval|--print", "php": r"-r"}
+
+#: A recursive delete call in one of those languages. rmSync, rmdirSync and
+#: any `.rm(` method (fs.rm, fs.promises.rm) delete a tree only with recursive set; the rest always do.
+_TREE_DELETE = (
+    r"\b(rmtree|removedirs|remove_tree|rm_rf|rm_r|remove_entry|rimraf|"
+    r"rmSync|rmdirSync|(?<=\.)rm)\s*\(")
+_RECURSIVE = r"recursive\s*:\s*true|:recursive\s*=>\s*true"
+_NEEDS_RECURSIVE = frozenset(("rmSync", "rmdirSync", "rm"))
+#: A first argument that names the home folder without a path literal.
+_NAMES_HOME = (r"environ\s*\[\s*['\"](?:HOME|USERPROFILE)['\"]\s*\]"
+               r"|(?:environ\.get|getenv)\s*\(\s*['\"](?:HOME|USERPROFILE)['\"]"
+               r"|expandvars\s*\(\s*['\"][^'\"]*(?:\$\{?HOME\}?|%USERPROFILE%)"
+               r"|\bPath\.home\s*\(|process\.env\.(?:HOME|USERPROFILE)|\bhomedir\s*\(")
+
+
+def _interpreter_family(name):
+    m = _INTERPRETER_NAME.match(name or "")
+    return m.group(1) if m else ""
+
+
+def interpreter_code(segment):
+    """The code string of a python, node, perl, ruby or php one liner (-c, -e,
+    -r, --eval), or "" when the segment is not one."""
+    name, args, _ = _argv(segment)
+    family = _interpreter_family(name)
+    if not family:
+        return ""
+    flag = re.compile(_CODE_FLAG[family])
+    for i, a in enumerate(args):
+        if a.startswith("-") and flag.fullmatch(a) and i + 1 < len(args):
+            return args[i + 1]
+    return ""
+
+
+def _first_argument(code, start):
+    """The text of the first argument of the call whose `(` ends just before
+    `start`: up to the first comma or the closing parenthesis at depth zero."""
+    depth, quote = 0, ""
+    for i in range(start, len(code)):
+        ch = code[i]
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                return code[start:i]
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return code[start:i]
+    return code[start:]
+
+
+#: Two string literals side by side, joined by nothing, white space, a line
+#: continuation or a `+`: one path to the language that runs them.
+_ADJACENT_LITERALS = (r"""(?:'([^']*)'|"([^"]*)"|`([^`]*)`)(?:\s*\\?\s*\+?\s*)"""
+                      r"""(?:'([^']*)'|"([^"]*)"|`([^`]*)`)""")
+
+
+def _join_literals(arg):
+    """`arg` with every run of adjacent string literals (`'.cl' 'aude'`,
+    `'.cl' + 'aude'`, across a line continuation) read as the one literal."""
+    def joined(m):
+        text = "".join(g for g in m.groups() if g is not None)
+        return ("'%s'" if '"' in text else '"%s"') % text
+    while True:
+        after = re.sub(_ADJACENT_LITERALS, joined, arg)
+        if after == arg:
+            return arg
+        arg = after
+
+
+def interpreter_refusal(code, judge):
+    """The refusal for an interpreter one liner that deletes a tree, or "".
+    `judge(path)` is the guard's own rm rule for one path: it returns why the
+    path may not be deleted, or "" (so a one liner is never stricter than the
+    shell for a path the shell may delete). Every string literal in the call's
+    first argument is judged, so `os.path.join('build', 'x')` is judged by
+    `build`; an argument with no literal (a variable from mkdtemp) names nothing
+    this guard can read and is left to the Stop reconciler. A literal inside
+    `[...]` or `.get(` is a dictionary key, never a path; an argument that names
+    HOME (`os.environ['HOME']`, `Path.home()`, `process.env.HOME`) deletes HOME."""
+    recursive = bool(re.search(_RECURSIVE, code, re.I))
+    for m in re.finditer(_TREE_DELETE, code):
+        if m.group(1) in _NEEDS_RECURSIVE and not recursive:
+            continue
+        arg = _join_literals(_first_argument(code, m.end()))
+        paths = ["~"] if re.search(_NAMES_HOME, arg) else []
+        for lit in re.finditer(r"(['\"`])(.*?)\1", arg):
+            before = arg[:lit.start()]
+            if (lit.group(2).strip() and "${" not in lit.group(2)
+                    and before.count("[") <= before.count("]")
+                    and not re.search(r"(?:\.get|getenv)\s*\(\s*$", before)):
+                paths.append(lit.group(2))
+        for path in paths:
+            why = judge(path)
+            if why:
+                return (
+                    "BrotherSBE Bash guard: this one liner deletes a directory tree with "
+                    "%s() and %s.\n"
+                    "Delete it with rm inside the worktree, or set BROTHERSBE_BASH_GUARD_OFF=1 "
+                    "for this session (the guard then says on stderr that it was off).\n"
+                    "This guard reads command text only; it did NOT prove anything about "
+                    "the rest of the command." % (m.group(1), why))
+    return ""
+
+
+def _under_temp(path):
+    """True for a path strictly inside the system temporary folders."""
+    for base in (os.environ.get("TMPDIR"), "/tmp", "/var/tmp"):
+        if base:
+            base = os.path.realpath(base).rstrip(os.sep) + os.sep
+            if path.startswith(base) and len(path) > len(base):
+                return True
+    return False
+
+
+def _home_protected(path):
+    """True for HOME itself, any folder above it, and anything under one of its
+    dot folders (.ssh, .claude, .config ...). The temporary folder allowance
+    never covers these, whatever temporary folder HOME happens to sit under."""
+    home = os.path.realpath(os.path.expanduser("~"))
+    if path == home or (home + os.sep).startswith(path.rstrip(os.sep) + os.sep):
+        return True
+    rel = os.path.relpath(path, home)
+    return not rel.startswith("..") and rel.split(os.sep)[0].startswith(".")
+
+
+# -- HD1.d: the park and consent folders -------------------------------------
+#
+# A parked call is answered by a file under ~/.brother/park, and a consent by one
+# under ~/.brother/consent; the dispatcher trusts an answer only because the
+# session cannot write there. So this rule FAILS CLOSED, before any module is
+# loaded: a write that lands in either folder (or replaces ~/.brother itself) is
+# refused in every spelling of the path this guard reads, and so is any command
+# naming them that is not a known reader. Reading them stays ordinary.
+
+_PARK_FOLDERS = ("park", "consent")
+#: Commands that only read what they are given; a redirect they carry is still
+#: judged as a write. find is a reader only without an action that writes or runs.
+_PARK_READERS = frozenset(
+    "ls cat head tail less more stat wc grep egrep fgrep test [ realpath readlink du "
+    "echo printf diff cmp shasum sha1sum sha256sum md5 md5sum basename dirname cd pushd "
+    "popd true find".split())
+_FIND_ACTIONS = frozenset("-delete -exec -execdir -ok -okdir -fprint -fprint0 -fprintf "
+                          "-fls".split())
+#: A path this guard cannot read where it lands: a variable or a substitution.
+_UNREAD_PATH = re.compile(r"[$`]")
+
+
+def _brace_words(word):
+    """`word` with its `{a,b}` groups expanded as bash does, without recursion (a
+    crash here would fail open). None past 64 forms: the word cannot be read."""
+    out, todo = [], [word]
+    while todo:
+        w = todo.pop()
+        m = re.search(r"\{([^{}]*,[^{}]*)\}", w)
+        if not m:
+            out.append(w)
+            continue
+        todo.extend(w[:m.start()] + part + w[m.end():] for part in m.group(1).split(","))
+        if len(out) + len(todo) > 64:
+            return None
+    return out
+
+
+def _park_spot(raw, base):
+    """The park or consent folder `raw` (read from `base`) lands in, or
+    ~/.brother itself when it names that, or "" for anywhere else. ~, $HOME and
+    ${HOME} are HOME; a glob counts for what it matches; case is ignored, since
+    the default macOS volume ignores it. A brace expansion too large to read is
+    answered as if it reached the folders."""
+    import glob
+    import itertools
+    home = os.path.expanduser("~")
+    roots = set(os.path.join(h, ".brother").lower() for h in (home, os.path.realpath(home)))
+    words = _brace_words(raw.split("\0")[0])
+    if words is None:
+        return "a brace expansion too large to read"
+    for word in words:
+        word = os.path.expanduser(re.sub(r"^\$(?:HOME\b|\{HOME\})", lambda _: home, word))
+        spot = os.path.join(base or os.sep, word)
+        spots = [spot] + (list(itertools.islice(glob.iglob(spot), 64))
+                          if any(c in word for c in "*?[") else [])
+        for one in spots:
+            low = os.path.realpath(one).lower()
+            for top in roots:
+                if low == top:
+                    return top
+                for sub in _PARK_FOLDERS:
+                    d = os.path.join(top, sub)
+                    if low == d or low.startswith(d + os.sep):
+                        return d
+    return ""
+
+
+def _names_park_in_code(code):
+    """True when interpreter code spells the two folders in any join of its
+    literals: '.brother' beside 'park' or 'consent'."""
+    low = re.sub(r"""['"`]\s*[+.,]?\s*['"`]""", "", code).lower()
+    return ".brother" in low and any(sub in low for sub in _PARK_FOLDERS)
+
+
+#: A pseudo terminal, which makes the answer command's terminal check pass.
+_PSEUDO_TERMINAL = re.compile(
+    r"\b(?:pty\.(?:fork|spawn|openpty)|os\.(?:openpty|forkpty)|openpty|forkpty)\b"
+    r"|(?<![\w./-])(?:script|expect|unbuffer|socat)(?![\w.-])")
+
+
+#: Commands whose arguments are themselves a command this guard reads as one:
+#: wrappers, shells, launchers. The arguments of anything else (a commit
+#: message, an echo, a grep pattern) are prose and run nothing.
+_LAUNCH_WORDS = frozenset(_WRAPPERS) | SHELL_INTERPRETERS | frozenset(
+    ("script", "expect", "unbuffer", "socat", "watch", "eval", "exec", "source", "."))
+
+
+def _command_text(entries):
+    """The words in command position: each simple command's first word, every
+    word of one run by a wrapper, shell, launcher or interpreter (or of the
+    dispatcher run by path), and the code an interpreter reads on stdin.
+    Commands handed to a shell (`bash -c`, a here-document fed to bash, a
+    substitution) are entries of their own and are read the same way; a
+    here-document body that only feeds a file never is."""
+    parts = []
+    for i, e in enumerate(entries):
+        first = command_name(e.seg)
+        if first in _LAUNCH_WORDS or _interpreter_family(first) or "brother_hook" in first.lower():
+            parts.extend(t.text for t in e.seg if not t.is_op)
+        else:
+            parts.append(first)
+        parts.append(_interpreter_stdin_code(entries, i))
+    return "\n".join(parts)
+
+
+def _answer_refusal(entries):
+    """Why this command runs the park's answer command, or "": the dispatcher
+    with `--answer` in command position, or a pseudo terminal in command
+    position beside `--answer` or the two folders (a word that resolves there,
+    or interpreter code that spells them). Prose naming them is allowed."""
+    text = _command_text(entries)
+    low = re.sub(r"""['"`]\s*[+.,]?\s*['"`]""", "", text).lower()
+    answer = "--answer" in low
+    if answer and "brother_hook" in low:
+        return "this command runs the park's answer command (brother_hook.py --answer)"
+    if not _PSEUDO_TERMINAL.search(low):
+        return ""
+    if answer:
+        return "this command opens a pseudo terminal beside --answer"
+    if _names_park_in_code(text) or any(
+            _park_hint(t.text) and _park_spot(t.text, b)
+            for e in entries for t in e.seg if not t.is_op for b in _bases(e)):
+        return "this command opens a pseudo terminal beside the park or consent folder"
+    return ""
+
+
+def _park_hint(text):
+    low = text.lower()
+    return ("brother" in low or "park" in low or "consent" in low or "{" in text
+            or any(c in text for c in "*?["))
+
+
+def park_refusal(entries):
+    """The refusal for a command that may write the park or consent folders, or
+    "". Judged on the command's own words; no module, no registry."""
+    def refuse(what):
+        return ("BrotherSBE Bash guard: %s. A parked call is answered by a person outside "
+                "the session, and the dispatcher trusts that answer only because the "
+                "session cannot write ~/.brother/park or ~/.brother/consent.\n"
+                "Answer it yourself in a terminal outside the session, or set "
+                "BROTHERSBE_BASH_GUARD_OFF=1 for this session (the guard then says on "
+                "stderr that it was off).\n"
+                "This guard reads command text only; it did NOT prove anything about the "
+                "rest of the command." % what)
+    why = _answer_refusal(entries)
+    if why:
+        return refuse(why)
+    touched = any(_park_spot(".", b) for e in entries for b in _bases(e))
+    found = []
+    for i, e in enumerate(entries):
+        name, args, _ = _argv(e.seg)
+        code = interpreter_code(e.seg) or _interpreter_stdin_code(entries, i)
+        if code and _names_park_in_code(code):
+            return refuse("this %s one liner names the park or consent folder" % name)
+        try:
+            cands = segment_candidates(e.seg, 0)
+        except Unclassifiable:
+            cands = [Candidate(t.text, "mentioned in the command", True)
+                     for t in e.seg if not t.is_op]
+        reader = name in _PARK_READERS and not (
+            name == "find" and any(a in _FIND_ACTIONS for a in args))
+        for t in e.seg:
+            if not t.is_op and _ASSIGNMENT.match(t.text) and _park_hint(t.text):
+                touched = touched or any(
+                    _park_spot(t.text.split("=", 1)[1], b) for b in _bases(e))
+        for c in cands:
+            if not c.write and not _park_hint(c.raw):
+                continue
+            for b in _bases(e):
+                # an option's value (`--out=PATH`) is a path too
+                spot = _park_spot(c.raw, b) or ("=" in c.raw and _park_spot(
+                    c.raw.rsplit("=", 1)[1], b))
+                if spot:
+                    touched = True
+                    if c.write or not reader:
+                        return refuse("%s (%s) reaches %s" % (c.raw, c.why, spot))
+            if c.write and _UNREAD_PATH.search(c.raw):
+                found.append(c)
+    if touched and found:
+        return refuse("this command names the park or consent folder and writes %s, a path "
+                      "this guard cannot read" % found[0].raw)
+    return ""
+
+
+# -- a shell out from inside a one liner --------------------------------------
+
+#: A call that runs another program from inside interpreter code.
+_SHELL_OUT = re.compile(
+    r"\b(?:subprocess|os\.(?:system|popen|exec\w*|spawn\w*|posix_spawn\w*)|pty\.spawn"
+    r"|child_process|exec(?:File)?Sync|spawnSync|execFile|spawn|system|exec|popen|Open3|qx)\b"
+    r"|%x[({\[]")
+#: Code that touches the environment a program it runs inherits.
+_ENV_TOUCH = re.compile(
+    r"\b(?:environ|putenv|unsetenv)\b|process\.env\b|%ENV\b|\$ENV\s*\{|\bENV\s*\[|\benv\s*[=:]")
+_NAMES_GIT = re.compile(r"(?i)(?<![A-Za-z0-9_])git(?![A-Za-z0-9_])")
+#: Where a comment starts in each family: at the start, or after white space or
+#: `;`, outside a string. Never inside a string, and never perl's `//` operator.
+_COMMENT_START = {"python": ("#",), "perl": ("#",), "ruby": ("#",), "php": ("#", "//"),
+                  "node": ("//",)}
+
+
+def _without_comments(code, family):
+    """`code` with its comments removed, strings kept, quote aware."""
+    starts = _COMMENT_START.get(family, ("#",))
+    out, i, n, quote = [], 0, len(code), ""
+    while i < n:
+        ch = code[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(code[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"`":
+            quote = ch
+        elif (i == 0 or code[i - 1] in " \t\n;") and any(code.startswith(s, i) for s in starts):
+            j = code.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        elif family == "node" and code.startswith("/*", i) and (i == 0 or code[i - 1] in " \t\n;"):
+            j = code.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _interpreter_stdin_code(entries, i):
+    """The code an interpreter in entries[i] reads on stdin (`python3 - <<EOF`,
+    `python3 <<< '...'`, `echo '...' | node`), or "" when it runs a script, a
+    module or a -c/-e payload."""
+    name, args, inputs = _argv(entries[i].seg)
+    if not _interpreter_family(name) or interpreter_code(entries[i].seg) or inputs:
+        return ""
+    k = 0
+    while k < len(args) and args[k].startswith("-") and args[k] != "-":
+        k += 2 if args[k] in ("-W", "-X", "-I") else 1
+    if k < len(args) and args[k] != "-":
+        return ""
+    e = entries[i]
+    texts = list(_herestrings(e.seg))
+    for p in entries[:i + 1]:
+        if p.pipe != e.pipe:
+            continue
+        texts.extend(t.body for t in p.seg if t.is_op and t.body)
+        pname, pargs, _ = _argv(p.seg)
+        if pname in ("echo", "printf") and p is not e:
+            texts.append(" ".join(a for a in pargs if not a.startswith("-")))
+    return "\n".join(texts)
+
+
+def shell_out_effect(entries, root, common):
+    """Refuse, in the Brother source, an interpreter one liner (or code it reads
+    on stdin) that runs another program and either names git anywhere outside a
+    comment or touches the environment that program inherits. Such a call is a
+    git command whose text this guard cannot read (its variables may be built at
+    run time, so the transport rules cannot see them), and a fetch like command
+    the guard cannot read is refused there. A shell out to anything else, and
+    git named only in a comment, stay allowed; a stranger's repository is not
+    affected."""
+    for i, e in enumerate(entries):
+        code = interpreter_code(e.seg) or _interpreter_stdin_code(entries, i)
+        if not code:
+            continue
+        name = _argv(e.seg)[0]
+        family = _interpreter_family(name)
+        plain = _without_comments(code, family)
+        out = _SHELL_OUT.search(code) or (family in ("perl", "ruby") and "`" in plain)
+        if not out:
+            continue
+        joined = re.sub(r"""['"`]\s*[+.]?\s*['"`]""", "", plain)
+        why = ("names git" if _NAMES_GIT.search(joined) else
+               "sets the environment it runs under" if _ENV_TOUCH.search(code) else "")
+        if not why or not common.is_brother_source(e.cwd or root):
+            continue
+        return EffectFinding(reason=(
+            "BrotherSBE Bash guard: this %s one liner runs another program and %s. In the "
+            "Brother source that is a git command whose text this guard cannot read (a "
+            "variable built at run time can send a fetch of a configured remote somewhere "
+            "else), and such a command is refused there.\n"
+            "Run git as its own command, or do it yourself in a terminal, or set "
+            "BROTHERSBE_BASH_GUARD_OFF=1 for this session (the guard then says on stderr "
+            "that it was off).\n"
+            "This guard reads command text only; it did NOT prove anything about the rest "
+            "of the command." % (name, why)))
+    return None
+
+
+# -- the commands a shell is handed as text ----------------------------------
+
+def _shell_mode(args):
+    """How a shell reads its commands, a ShellMode: kind "c" when a -c (or a bundled
+    -lc, -euc) sits among its options, the payload being the first word after
+    them; kind "script" when it runs a file; "stdin" otherwise. The
+    shell's own options are skipped: `-o pipefail`, `+o history`, `--norc`,
+    `-x`, and `--`."""
+    has_c, i = False, 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if a in ("--rcfile", "--init-file"):
+            i += 2
+            continue
+        if re.fullmatch(r"[-+][A-Za-z]+", a):
+            # A bundle of short options (-lc, -ceu, -eou): a c anywhere in it is
+            # the -c, and an o anywhere in it takes the next word as its value.
+            has_c = has_c or (a[0] == "-" and "c" in a)
+            i += 2 if ("o" in a or "O" in a) else 1
+            continue
+        if a == "-" or not a.startswith(("-", "+")):
+            break
+        i += 1
+    rest = args[i:]
+    if has_c:
+        return ShellMode("c", rest[0] if rest else "")
+    if rest and rest[0] != "-":
+        return ShellMode("script", "")
+    return ShellMode("stdin", "")
+
+
+def _herestrings(segment):
+    """The words fed to a command as here strings (`<<< word`)."""
+    out, prev2, prev = [], "", ""
+    for t in segment:
+        if t.is_op:
+            prev2, prev = prev, t.text
+            continue
+        if prev == "<" and prev2 == "<<":
+            out.append(t.text)
+        prev2 = prev = ""
+    return out
+
+
+def _scan_substitution(text, j):
+    """The index of the `)` that closes a `$(` whose body starts at `text[j]`,
+    or len(text) when none does. A `)` inside single or double quotes is text,
+    a quoted `$(` is a substitution in its own right, and a backslash escapes
+    the next character."""
+    n, depth = len(text), 0
+    while j < n:
+        ch = text[j]
+        if ch == "\\":
+            j += 2
+            continue
+        if ch == "'":
+            k = text.find("'", j + 1)
+            j = n if k < 0 else k + 1
+            continue
+        if ch == '"':
+            j += 1
+            while j < n and text[j] != '"':
+                if text[j] == "\\":
+                    j += 2
+                elif text[j] == "$" and text[j + 1:j + 2] == "(":
+                    j = _scan_substitution(text, j + 2) + 1
+                else:
+                    j += 1
+            j += 1
+            continue
+        if ch == "$" and text[j + 1:j + 2] == "(":
+            j = _scan_substitution(text, j + 2) + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                return j
+            depth -= 1
+        j += 1
+    return n
+
+
+def _substitutions(text):
+    """The command texts inside the `$( ... )` and backtick substitutions of
+    `text`, parentheses balanced, so `$(echo $(curl x))` gives `echo $(curl x)`
+    (the inner one is found when that text is read in turn). A substitution with
+    no closing parenthesis runs to the end of the text."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        m = re.compile(r"\$\s*\(|`").search(text, i)
+        if not m:
+            break
+        if m.group() == "`":
+            j = text.find("`", m.end())
+            j = n if j < 0 else j
+            out.append(text[m.end():j])
+            i = j + 1
+            continue
+        out.append(text[m.end():_scan_substitution(text, m.end())])
+        i = m.end()
+    return [t for t in out if t.strip()]
+
+
+def _embedded_commands(entries):
+    """(text, folder, lenient) for every command text something in `entries`
+    hands to a shell: `sh -lc 'x'`, `eval x`, `bash <<< 'x'`, the text that
+    reaches a shell's stdin (`echo 'x' | bash`, `cat <<EOF | sh`, `bash <<EOF`),
+    and every `$( )` or backtick substitution in a command or an unquoted
+    here-document body. `lenient` marks a substitution: a text cut out of a
+    longer word may not parse on its own, and is then refused only when it
+    names a tool or an interpreter."""
+    for e in entries:
+        for t in e.seg:
+            if t.is_op and t.body and not t.body_quoted and ("$(" in t.body or "`" in t.body):
+                for text in _substitutions(t.body):
+                    yield text, e.cwd, True
+        joined = " ".join(t.text if t.is_op else t.plain for t in e.seg)
+        if "$" in joined or "`" in joined:
+            for text in _substitutions(joined):
+                yield text, e.cwd, True
+    for i, e in enumerate(entries):
+        name, args, _ = _argv(e.seg)
+        if name == "eval":
+            if args:
+                yield " ".join(args), e.cwd, False
+            continue
+        if name not in SHELL_INTERPRETERS:
+            continue
+        mode = _shell_mode(args)
+        payload = mode.payload
+        mode = mode.kind
+        if mode == "c":
+            if payload:
+                yield payload, e.cwd, False
+            continue
+        if mode != "stdin":
+            continue
+        for text in _herestrings(e.seg):
+            yield text, e.cwd, False
+        for p in entries[:i + 1]:
+            if p.pipe != e.pipe:
+                continue
+            for t in p.seg:
+                if t.is_op and t.body:
+                    yield t.body, e.cwd, False
+            pname, pargs, _ = _argv(p.seg)
+            if pname in ("echo", "printf") and p is not e:
+                words = [a for a in pargs if not a.startswith("-")]
+                yield " ".join(words[1:] if pname == "printf" else words), e.cwd, False
+
+
+# -- the folder a command runs in --------------------------------------------
+
+class Entry(object):
+    """One simple command with where it sits: the separator before and after
+    it, the parenthesis depth at its start, at its command word and at its end,
+    which pipeline it belongs to, and the folder it will run in."""
+
+    def __init__(self, seg, pre, post, d0, dcmd, dend, pipe):
+        self.seg, self.pre, self.post = seg, pre, post
+        self.d0, self.dcmd, self.dend, self.pipe = d0, dcmd, dend, pipe
+        self.cwd = None
+        #: Where the command would run if the last cd it could not resolve
+        #: (a folder that does not exist yet) does succeed; None when there is none.
+        self.alt = None
+
+
+def segment_flow(tokens):
+    """The token stream as Entries, in order. Same segments as split_commands,
+    with what that drops: the separators and the parentheses."""
+    entries, seg, pre = [], [], ""
+    depth = d0 = pipe = 0
+    dcmd = None
+    for t in tokens:
+        if t.is_op and t.text in SEPARATORS:
+            if seg:
+                if _strip_openers(seg):
+                    entries.append(Entry(_strip_openers(seg), pre, t.text, d0,
+                                         d0 if dcmd is None else dcmd, depth, pipe))
+                if t.text != "|":
+                    pipe += 1
+            seg, dcmd, pre = [], None, t.text
+            continue
+        if not seg:
+            d0 = depth
+        seg.append(t)
+        if t.is_op and t.text == "(":
+            depth += 1
+        elif t.is_op and t.text == ")":
+            depth = max(0, depth - 1)
+        elif not t.is_op and dcmd is None:
+            dcmd = depth
+    if seg and _strip_openers(seg):
+        entries.append(Entry(_strip_openers(seg), pre, "", d0,
+                             d0 if dcmd is None else dcmd, depth, pipe))
+    return entries
+
+
+def _cd_step(e, cur, stack):
+    """The folder after this segment, or None when it is not known. A cd is
+    followed only when it really changes the folder of what comes next: it runs
+    in this shell (not in a pipe, not backgrounded), is not conditional (`||`),
+    and its target is a directory that exists. A cd that fails, or that cannot
+    be read (`cd -`, `cd $X`), leaves the folder unknown."""
+    name, args, _ = _argv(e.seg)
+    if name not in ("cd", "pushd", "popd"):
+        return cur
+    if e.pre == "|" or e.post in ("|", "&"):
+        return cur
+    if e.pre == "||" or e.post == "||":
+        return None
+    if name == "popd":
+        return stack.pop() if stack else None
+    dirs = [a for a in args if not a.startswith(("-", "+"))]
+    if not dirs:
+        return os.path.expanduser("~") if not args and name == "cd" else None
+    d = dirs[0]
+    if any(c in d for c in "$`*?[{"):
+        return None
+    d = os.path.expanduser(d)
+    if not os.path.isabs(d):
+        if cur is None:
+            return None
+        d = os.path.join(cur, d)
+    d = os.path.normpath(d)
+    if not os.path.isdir(d):
+        return None
+    if name == "pushd":
+        stack.append(cur)
+    return d
+
+
+def _written_cd_target(e, base):
+    """Where a cd this guard could not follow would land if it succeeds: its
+    target as written, joined to `base` and normalised, whether or not it
+    exists. None when the target is not in the text (`cd -`, `cd $X`)."""
+    name, args, _ = _argv(e.seg)
+    dirs = [a for a in args if not a.startswith(("-", "+"))]
+    if name not in ("cd", "pushd") or not dirs or any(c in dirs[0] for c in "$`*?[{"):
+        return None
+    d = os.path.expanduser(dirs[0])
+    return os.path.normpath(d if os.path.isabs(d) else os.path.join(base, d))
+
+
+def effective_cwd(segments, start, before=None, alts=None):
+    """The folder after `segments` (Entries, or bare segments) have run,
+    following `cd <dir>`, `pushd <dir>` and `popd` only where they hold (see
+    `_cd_step`) and undoing a cd made inside parentheses. A folder that is not
+    known reads as `start`, the folder the session began in. When `before` is a
+    list, the folder each segment starts in is appended; when `alts` is a list,
+    so is the folder it would start in if the last unresolved cd had succeeded
+    (see Entry.alt), so a relative path after `mkdir d && cd d` is judged
+    against both."""
+    cur, alt, saved, level, stack = start, None, [], 0, []
+    for item in segments:
+        e = item if isinstance(item, Entry) else Entry(item, "", ";", 0, 0, 0, 0)
+        while level > e.dcmd:
+            cur, alt = saved.pop()
+            level -= 1
+        while level < e.dcmd:
+            saved.append((cur, alt))
+            level += 1
+        if before is not None:
+            before.append(start if cur is None else cur)
+        if alts is not None:
+            alts.append(alt)
+        base = cur if cur is not None else (alt if alt is not None else start)
+        new = _cd_step(e, cur, stack)
+        if new is None and _argv(e.seg)[0] in ("cd", "pushd"):
+            alt = _written_cd_target(e, base)
+        elif new is not None and _argv(e.seg)[0] in ("cd", "pushd", "popd"):
+            alt = None
+        cur = new
+        while level > e.dend:
+            cur, alt = saved.pop()
+            level -= 1
+        while level < e.dend:
+            saved.append((cur, alt))
+            level += 1
+    return start if cur is None else cur
+
+
+def _toplevel(start):
+    """The folder above `start` (or `start` itself) that holds a `.git` entry,
+    read from disk; `start` when none does."""
+    here = os.path.abspath(start)
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return os.path.abspath(start)
+        here = parent
+
+
+def _pathspec_raws(cand, base, owner_patterns):
+    """The paths a git pathspec candidate stands for, resolved the way git does:
+    a top relative spelling against the real repository top, and a glob against
+    the files it matches plus the owner files its pattern would match (the
+    marker may be gone from disk and still in the index)."""
+    raw = cand.raw
+    top = _toplevel(base)
+    if raw.startswith((FILE_MARK, NUL_MARK)):
+        # a file of pathspecs: judge each path in it; unreadable counts as the marker
+        is_nul = raw.startswith(NUL_MARK)
+        prefix, _, listed = raw[len(NUL_MARK if is_nul else FILE_MARK):].partition("\x01")
+        path = os.path.join(base, listed)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read(1000000)
+        except (OSError, ValueError):
+            return [os.path.join(top, m) for m in _MARKER_TOP_PATHS]
+        # Both readings, whatever the options said: NUL separated items as git reads
+        # them with -z (no unquoting), and lines as git reads them without it (C
+        # unquoted, each cut at its first NUL, where git's C string ends).
+        lines = [line.split("\0")[0] for line in text.splitlines()]
+        found = []
+        for spec in _list_raws(text.split("\0"), prefix, False) + _list_raws(lines, prefix, True):
+            inner = Candidate(spec, cand.why, cand.write)
+            inner.pathspec = True
+            found.extend(_pathspec_raws(inner, base, owner_patterns))
+        return found or [path]
+    if raw.startswith(TOP_MARK):
+        raw = os.path.join(top, raw[len(TOP_MARK):])
+    if not any(ch in raw for ch in "*?["):
+        return [raw]
+    import fnmatch
+    import glob
+    spec = os.path.normpath(raw if os.path.isabs(raw) else os.path.join(base, raw))
+    found = sorted(glob.glob(spec))[:200]
+    for pattern in owner_patterns:
+        if not any(ch in pattern for ch in "*?["):
+            concrete = os.path.normpath(os.path.join(top, pattern))
+            if fnmatch.fnmatchcase(concrete, spec):
+                found.append(concrete)
+    return found or [raw]
+
+
+def _bases(e):
+    """The folders to judge a command's relative paths against: where it runs,
+    and where it would run if its last unresolved cd had succeeded."""
+    return [e.cwd] + ([e.alt] if e.alt is not None and e.alt != e.cwd else [])
+
+
+def analyze(tokens, start, notes, depth=0, unit=None):
+    """Every simple command to judge, as Entries carrying the folder each runs
+    in: the command line's own, then (to MAX_DEPTH) those of every command text
+    a shell in it is handed. A text that cannot be split is refused when it
+    could carry a tool (an Unclassifiable is raised) and noted otherwise."""
+    unit = unit if unit is not None else [0]
+    entries = segment_flow(tokens)
+    for e in entries:
+        e.pipe = (unit[0], e.pipe)
+    unit[0] += 1
+    cwds, alts = [], []
+    effective_cwd(entries, start, before=cwds, alts=alts)
+    for e, c, a in zip(entries, cwds, alts):
+        e.cwd, e.alt = c, a
+    out = list(entries)
+    if depth < MAX_DEPTH:
+        for text, at, lenient in list(_embedded_commands(entries)):
+            try:
+                inner = tokenize(text)
+            except Unclassifiable as exc:
+                if (exc.soft or lenient) and not DANGER_WORDS.search(text):
+                    notes.append("sbe_bash_write_guard: a command text handed to a shell "
+                                 "could not be read (%s), so it was NOT examined." % exc)
+                    continue
+                raise
+            out.extend(analyze(inner, at, notes, depth + 1, unit))
+    elif any(True for _ in _embedded_commands(entries)):
+        raise Unclassifiable(
+            "a command text is nested more than %d shell levels deep, past the depth "
+            "this guard reads, and a command it did not read is not allowed" % MAX_DEPTH)
     return out
 
 
@@ -1423,9 +3653,10 @@ def deny_payload(reason):
 
 def refusal_reason(rel, family, why, command, live_tasks):
     if live_tasks:
-        names = ", ".join(sorted(str(t.get("id") or "(unnamed task)") for t in live_tasks))
-        task_state = ("%d open task(s) exist (%s) and none declares %s in its ownedPaths"
-                      % (len(live_tasks), names, rel))
+        # A count, never the ids: a refusal is read by whoever the agent shows
+        # it to, and a task id names someone else's work (P8's leak).
+        task_state = ("%d open task(s) exist and none declares %s in its ownedPaths"
+                      % (len(live_tasks), rel))
     else:
         task_state = "no task is open, so nothing declares this path"
     return (
@@ -1508,6 +3739,28 @@ def decide(payload):
         root = payload.get("project_dir")
         root = root.strip() if isinstance(root, str) and root.strip() else cwd
 
+        # Fail closed (GUARD1): a command that cannot be split was not examined,
+        # and a secret may be leaving in it. Judged before any module is loaded,
+        # so an unimportable sibling cannot switch the exfiltration rule off.
+        # A hard failure (an unbalanced quote) is refused; a soft one (too long,
+        # a trailing backslash) only when its text names a tool or an interpreter.
+        try:
+            entries = analyze(tokenize(command), cwd, notes)
+        except Unclassifiable as e:
+            if e.soft and not DANGER_WORDS.search(command):
+                raise OpenFail(
+                    "this Bash command could not be split into commands and words (%s) "
+                    "and names no network tool or interpreter, so it is allowed "
+                    "unexamined" % e)
+            return Decision(deny_payload(unsplittable_reason(e)), notes)
+        for _, group in itertools.groupby(entries, key=lambda e: e.pipe):
+            why = exfil_refusal([e.seg for e in group])
+            if why:
+                return Decision(deny_payload(why), notes)
+        why = park_refusal(entries)
+        if why:
+            return Decision(deny_payload(why), notes)
+
         fence_mod = require_fence_module()
         surface_mod = require_surface_module()
         common_mod = require_common_module()
@@ -1521,20 +3774,36 @@ def decide(payload):
                 "scope is unknown" % e)
         live = tasks_mod.open_tasks(data)
 
-        try:
-            segments = split_commands(tokenize(command))
-        except Unclassifiable as e:
-            raise OpenFail(
-                "this Bash command could not be split into commands and words (%s), so "
-                "NOTHING about it was examined and it is allowed unexamined" % e)
+        def tree_delete_judge(at):
+            """The guard's rm rule for one path, for an interpreter one liner."""
+            def judge(target):
+                target = os.path.expanduser(target)
+                rel = fence_mod.canonical_target(root, target, at)
+                if rel is None:
+                    absolute = os.path.realpath(os.path.join(at, target))
+                    # A temporary folder is fair game, but never HOME (or what
+                    # holds it, or its dot folders) and never the ones the
+                    # worktree itself sits in.
+                    if _under_temp(absolute) and not _home_protected(absolute) and not (
+                            os.path.realpath(root) + os.sep).startswith(
+                                absolute.rstrip(os.sep) + os.sep):
+                        return ""
+                    return "%s is outside the worktree" % target
+                family = protected_family(fence_mod, surface_mod, common_mod, root, rel)
+                if not family or any(
+                        fence_mod.paths_overlap(rel, claim, root)
+                        for t in live for claim in (t.get("ownedPaths") or [])):
+                    return ""
+                return "%s is a protected path (%s)" % (rel, family)
+            return judge
 
         # Cross-project execution check, ahead of the write-family check: it is
         # a categorical refusal by name, not a scope question the task
         # registry's ownedPaths could ever answer, since ownedPaths declares
         # paths inside THIS project and another project's tool is never one.
         root_real = os.path.realpath(root)
-        for seg in segments:
-            hit = cross_project_candidate(seg, root_real, cwd)
+        for e in entries:
+            hit = cross_project_candidate(e.seg, root_real, e.cwd)
             if hit is None:
                 continue
             if hit.other_root is None:
@@ -1549,9 +3818,22 @@ def decide(payload):
         # a categorical refusal read off the command itself, not a path
         # question the write-family loop below could ever ask, since an
         # effect like a push carries no path a task could declare.
-        for seg in segments:
+        finding = redirecting_env_effect(entries, root, common_mod)
+        if finding is not None:
+            return Decision(deny_payload(finding.reason), notes)
+        finding = shell_out_effect(entries, root, common_mod)
+        if finding is not None:
+            return Decision(deny_payload(finding.reason), notes)
+
+        for i in range(len(entries)):
+            for rule in (metadata_effect, content_apply_effect):
+                finding = rule(entries, i, root, common_mod)
+                if finding is not None:
+                    return Decision(deny_payload(finding.reason), notes)
+
+        for e in entries:
             for effect_rule in COMMAND_EFFECTS:
-                finding = effect_rule(seg, root, cwd, command)
+                finding = effect_rule(e.seg, root, e.cwd, command)
                 if finding is None:
                     continue
                 if finding.note:
@@ -1559,23 +3841,51 @@ def decide(payload):
                 if finding.reason:
                     return Decision(deny_payload(finding.reason), notes)
 
+        for e in entries:
+            code = interpreter_code(e.seg)
+            for base in _bases(e):
+                why = interpreter_refusal(code, tree_delete_judge(base)) if code else ""
+                if why:
+                    return Decision(deny_payload(why), notes)
+
         candidates = []
-        for seg in segments:
+        for e in entries:
             try:
-                candidates.extend(segment_candidates(seg, 0))
+                found = segment_candidates(e.seg, 0)
+                candidates.extend((c, base) for base in _bases(e) for c in found)
             except Unclassifiable as e:
                 notes.append(
                     "sbe_bash_write_guard: part of this command could not be read (%s), "
                     "so that part was NOT examined and is allowed unexamined." % e)
 
+        expanded = []
+        for c, c_cwd in candidates:
+            if not c.pathspec:
+                expanded.append((c, c_cwd))
+                continue
+            for raw in _pathspec_raws(c, c_cwd, common_mod.OWNER_PATTERNS):
+                one = Candidate(raw, c.why, c.write)
+                expanded.append((one, c_cwd))
+
+        gitdirs = [os.path.realpath(g) for g in _repo_dirs(root) if g]
         mentioned = []
-        for c in candidates:
-            rel = fence_mod.canonical_target(root, c.raw, cwd)
+        for c, c_cwd in expanded:
+            rel = fence_mod.canonical_target(root, c.raw, c_cwd)
+            if c.write and c.raw and gitdirs:
+                # a gitdir reached through a `.git` file's pointer (a linked worktree,
+                # a submodule) or core.worktree lies outside the project folder and is
+                # the same metadata: map a path inside it to a `.git/` path
+                spot = os.path.realpath(os.path.join(c_cwd, os.path.expanduser(c.raw)))
+                for gd in gitdirs:
+                    if spot == gd or spot.startswith(gd + os.sep):
+                        rel = ".git/" + os.path.relpath(spot, gd)
+                        break
             if rel is None:
                 # Outside the project root. This guard governs a project, not
                 # the filesystem, exactly as both sibling hooks do.
                 continue
-            family = protected_family(fence_mod, surface_mod, common_mod, root, rel)
+            family = protected_family(fence_mod, surface_mod, common_mod, root, rel,
+                                      c.write)
             if not family:
                 continue
             declared = any(

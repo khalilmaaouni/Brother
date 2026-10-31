@@ -4,8 +4,8 @@ Status: CURRENT
 
 BrotherMode ships two small pieces of Claude Code's own furniture, and turns
 neither one on. The first is a status line: a single line at the bottom of
-Claude Code that can read "2 of 5 tasks accepted, decision waiting" instead
-of the built in keyboard hints. The second is a footer link setting that
+Claude Code that can read how your last run ended instead of the built in
+keyboard hints. The second is a footer link setting that
 turns a decision id or a trace tag anywhere in the transcript into a
 clickable badge. Both are useful. Neither is on by default, and this page
 says exactly why, and carries the two blocks you paste into your own
@@ -34,31 +34,37 @@ is your call, made once, in your own settings file.
 
 ### What it shows
 
-One line, plain language, built from the same status fields your project's
-own status view already uses (`tools/bm_lead.py`'s `collect_status`):
-Progress, and whether a Decision needed stands. For example:
+One line: how the newest finished run ended, read from the run index at
+`~/.brother/runs-index.jsonl`. Every finished run appends one row to that
+file (the run folder, the engine's one result line, and the time), and the
+status line reads the newest row. It shows the date of the run, then the
+result line in the engine's own words. For example:
 
 ```
-2 of 5 tasks accepted, decision waiting
+2026-10-29 DONE | units=3 PASS=3 FAIL=0 NO-DATA=0 | release=NOT_REQUESTED | next=review-receipt
 ```
 
-or, with nothing waiting on you:
+If the run folder has since been deleted, the line still prints and ends
+with `(run folder missing)`.
+
+Before any run has finished on this machine there is no index yet, and the
+line says so:
 
 ```
-3 of 3 tasks accepted, no decision waiting
+NO-DATA: no run recorded yet
 ```
 
-or, before anything has been planned yet:
+The index belongs to you, not to a project, so the line is the same in
+every folder Claude Code runs in. A torn last line in the index (a run that
+died mid write) is skipped, and the next row still reads. The status line
+opens that one file and nothing else: it does not open the project's store
+and it starts no other process.
 
-```
-nothing planned yet, no decision waiting
-```
-
-No jargon, no store ids, no colour codes. If BrotherMode has not been set
-up in the folder Claude Code is running in, or setup has not been consented
-to yet, or the folder holds more than one BrotherMode project, the line is
-simply blank: BrotherMode's status line never prints a half answer, and it
-never prints an error into your terminal's bottom bar.
+No colour codes, no store ids. If setup has not been consented to yet, or
+the script cannot read what it needs, the line is simply blank: BrotherMode's
+status line never prints a half answer, and it never prints an error into
+your terminal's bottom bar. The one thing it prints on purpose when there
+is nothing to show is the NO-DATA line above.
 
 ### The settings block
 

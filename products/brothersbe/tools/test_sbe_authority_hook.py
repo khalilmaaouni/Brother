@@ -16,7 +16,7 @@ same two properties carrying the file.
   `TestFailOpen` is the fail-open class; `TestTheOneRefusal` is the exception,
   proven both ways.
 
-  IT SAYS WHY, AND THE RECOVERY IS NAMED. Every refusal states the task ID
+  IT SAYS WHY, AND THE RECOVERY IS NAMED. Every refusal states the task COUNT
   (or that none is open), the path, and the recovery action, in the exact
   words the brief specifies: "open a task record naming this path, or edit
   outside a worker context".
@@ -168,7 +168,10 @@ class TestTheOneRefusal(AuthorityCase):
         self.write_registry([self.open_task(task_id="wave5-alpha", owns=["src/unrelated.py"])])
         d = self.decide(self.payload(os.path.join(self.root, "CLAUDE.md")))
         reason = self.assertDenied(d)
-        self.assertIn("wave5-alpha", reason, "the refusal must name the open task")
+        # Reconciled to the review of the bash guard (M7): a refusal states how
+        # many tasks are open, never their ids, which name someone else's work.
+        self.assertNotIn("wave5-alpha", reason, "the refusal must not list a task id")
+        self.assertIn("1 open task(s) exist", reason, "the refusal must count the open tasks")
         self.assertIn("CLAUDE.md", reason, "the refusal must name the path")
         self.assertIn(
             "open a task record naming this path, or edit outside a worker context",
