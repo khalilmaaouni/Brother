@@ -3026,6 +3026,43 @@ def receipt_record(run_dir_or_record, receipts, log_path=None):
     }
 
 
+def outcome_of(run_dir):
+    """OUT1.b: the outcome the run's intake recorded, read from its Work document through the engine's own lookup
+    (continuity._work_doc_path), else its one W-*.json, or "" when there is none. Receipt and acceptance both read
+    the run's outcome here."""
+    import continuity
+    path = continuity._work_doc_path(str(run_dir)) if run_dir else None
+    if not path and run_dir:
+        # the engine reads a folder holding a stray JSON beside the Work document (a review.json, say) as ambiguous;
+        # the run's one W-*.json still names it. This is the only copy of that rule: accept_delivery delegates here
+        try:
+            work = sorted(n for n in os.listdir(run_dir) if n.startswith("W-") and n.endswith(".json"))
+        except OSError:
+            work = []
+        path = os.path.join(run_dir, work[0]) if len(work) == 1 else None
+    doc = continuity._read_json(path)[0] if path else None
+    outcome = doc.get("outcome") if isinstance(doc, dict) else None
+    return outcome.strip() if isinstance(outcome, str) else ""
+
+
+def write_receipt(run_dir, changed_files, checks):
+    """OUT1.b: receipt_record(run_dir) serialized to the run's receipt file with the intake's outcome at the top,
+    plus the changed files and checks the caller names. Returns the path. An intake with no outcome raises
+    ValueError: a receipt that binds no outcome is refused at intake, never written."""
+    import brother_run
+    outcome = outcome_of(run_dir)
+    if not outcome:
+        raise ValueError("the run's intake records no outcome, so no receipt can carry one to acceptance")
+    body = receipt_record(run_dir, [])
+    body.update(outcome=outcome, changed_files=list(changed_files or []), checks=list(checks or []))
+    out_dir = os.path.join(run_dir, brother_run.RECEIPT_DIRNAME)
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, brother_run.RECEIPT_FILENAME)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(body, fh, indent=1, default=str)
+    return path
+
+
 #: E72.2: the eight acceptance questions of the trusted-delegation steering
 #: doc (docs/plan/STEERING-TRUSTED-DELEGATION-2026-09-03.md section 16,
 #: WORKSTREAM A, lines 1536 to 1543) in the order receipt_record()'s own

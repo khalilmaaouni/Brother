@@ -344,8 +344,11 @@ class TheOutFlag(Sandbox):
             code = pc.main(["--out", run])
         self.assertEqual(code, 0)
         after = set(os.listdir(run))
-        self.assertEqual(after - before, {"proof_card.txt", "proof_card.json"})
-        with open(os.path.join(run, "proof_card.json"), encoding="utf-8") as fh:
+        self.assertEqual(after - before, {"proof_card"})
+        self.assertEqual(set(os.listdir(os.path.join(run, "proof_card"))),
+                         {"proof_card.txt", "proof_card.json"})
+        with open(os.path.join(run, "proof_card", "proof_card.json"),
+                  encoding="utf-8") as fh:
             written = json.load(fh)
         self.assertEqual(written, pc.build_card(run))
 
@@ -684,6 +687,559 @@ class TheRenderForRunFunction(Sandbox):
         text, fields = pc.render_for_run(run)
         self.assertTrue(text.startswith(pc.TITLE))
         self.assertEqual(fields["receipt"]["value"], pc.NODATA)
+
+
+def write_door_run(runs_root, name, cwd, rows, outcome="make the thing",
+                   claims=None, receipt=None, receipt_raw=None, marker=None):
+    """One door run folder under <runs_root>/docs/plan/runs, the layout
+    brother_run.find_unfinished_runs reads: target.json (the repository the
+    run is for), a W-*.json Work document, and optionally claims.json and
+    receipt/receipt.json. `receipt_raw` writes those exact bytes (a corrupt
+    or truncated receipt); `marker` overrides target.json's text."""
+    run_dir = os.path.join(runs_root, "docs", "plan", "runs", name)
+    os.makedirs(run_dir)
+    with open(os.path.join(run_dir, "target.json"), "w", encoding="utf-8") as fh:
+        fh.write(marker if marker is not None else json.dumps({"cwd": cwd}))
+    if rows is not None:
+        with open(os.path.join(run_dir, "W-%s.json" % name), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"outcome": outcome, "rows": rows}, fh)
+    if claims is not None:
+        with open(os.path.join(run_dir, "claims.json"), "w", encoding="utf-8") as fh:
+            json.dump(claims, fh)
+    if receipt is not None or receipt_raw is not None:
+        os.makedirs(os.path.join(run_dir, "receipt"))
+        with open(os.path.join(run_dir, "receipt", "receipt.json"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(receipt_raw if receipt_raw is not None else json.dumps(receipt))
+    return run_dir
+
+
+DONE_ROWS = [{"id": "u1", "status": "DONE"}, {"id": "u2", "status": "DONE"}]
+HALF_ROWS = [{"id": "u1", "status": "DONE"}, {"id": "u2", "status": "OPEN"}]
+
+
+class DoorRunStatus(Sandbox):
+    """KEY1.c: a door delivery has a current run the status card can find.
+    current_run_state is the one resolver: a named loop run reads
+    stage_log.current_run, otherwise the engine's own door run record (the
+    newest run folder for this cwd) is read, otherwise NO-DATA naming why.
+    The loop log is a REAL stage_log file, written by its own record_progress."""
+
+    def setUp(self):
+        super().setUp()
+        self.runs = os.path.join(self.root, "runs-root")
+        self.cwd = os.path.join(self.root, "repo")
+        self.loop_log = os.path.join(self.root, "loop-run.jsonl")
+
+    def state(self, run="", cwd=None, loop_log=None):
+        return pc.current_run_state(run=run, loop_log=loop_log or self.loop_log,
+                                    runs_root=self.runs,
+                                    cwd=cwd if cwd is not None else self.cwd,
+                                    now=1000.0)
+
+    def loop_event(self, run="loop-1"):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts", "loop"))
+        import stage_log
+        ok, _seq = stage_log.record_progress(run, "a" * 40, "RUNNING", "build",
+                                             now=900.0, lease_s=600,
+                                             path=self.loop_log)
+        self.assertTrue(ok)
+
+    # a. no run at all
+    def test_no_run_at_all_is_no_data_and_names_why(self):
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("NO-DATA", got["summary"])
+        self.assertIn("no door run", got["summary"])
+        self.assertIn("Unknown (NO-DATA)", pc.workflow_card(got))
+
+    # b. a door run only: the mutation target (read only stage_log again)
+    def test_a_finished_door_run_alone_reads_its_state_not_no_data(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)},
+                       receipt=GREEN_RECEIPT)
+        got = self.state()
+        self.assertEqual(got["source"], "door")
+        self.assertEqual(got["state"], "DONE")
+        self.assertEqual(got["outcome"], "make the thing")
+        self.assertEqual(got["verdict"], "UNIT-COMPLETE")
+        self.assertIn("Finished", pc.workflow_card(got))
+
+    def test_a_door_run_with_a_failed_unit_reads_failed(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                       claims={"u1": claim("u1", 0, 10),
+                               "u2": claim("u2", 10, 20, state="failed")},
+                       receipt=GREEN_RECEIPT)
+        got = self.state()
+        self.assertEqual((got["state"], got["verdict"]), ("FAILED", "FAIL"))
+
+    # f. an unfinished door run
+    def test_an_unfinished_door_run_reads_waiting_with_its_count(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        got = self.state()
+        self.assertEqual((got["source"], got["state"]), ("door", "WAITING"))
+        self.assertIn("1 of 2", got["summary"])
+        self.assertIn("Waiting", pc.workflow_card(got))
+
+    def test_the_newest_run_for_this_cwd_wins_and_other_cwds_are_ignored(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS, outcome="old")
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS, outcome="new")
+        write_door_run(self.runs, "20261103T000000-z", self.cwd + "-other", HALF_ROWS,
+                       outcome="elsewhere")
+        self.assertEqual(self.state()["outcome"], "new")
+
+    # c. a loop run only: unchanged
+    def test_a_loop_run_alone_reads_stage_log(self):
+        self.loop_event()
+        got = self.state(run="loop-1")
+        self.assertEqual((got["source"], got["state"], got["phase"]),
+                         ("loop", "RUNNING", "build"))
+        self.assertEqual(got["next_action"], "wait_lease")
+
+    # d. both: the loop run wins, because it is the live engine state
+    def test_with_both_the_named_loop_run_wins(self):
+        self.loop_event()
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        self.assertEqual(self.state(run="loop-1")["source"], "loop")
+        self.assertEqual(self.state()["source"], "door")
+
+    def test_a_named_loop_run_with_no_row_falls_to_the_door_run(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        self.assertEqual(self.state(run="never-ran")["source"], "door")
+
+    # e. corrupt or truncated input never reads as a run or a guessed state
+    def test_a_corrupt_receipt_is_no_data_not_done(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                       receipt_raw='{"scope": {"chang')
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("receipt could not be read", got["summary"])
+
+    def test_a_receipt_that_is_not_an_object_is_no_data(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                       receipt_raw="[1, 2]")
+        self.assertIsNone(self.state()["state"])
+
+    def test_a_corrupt_work_document_is_no_data(self):
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, None)
+        with open(os.path.join(run, "W-x.json"), "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("work record", got["summary"])
+
+    def test_all_pieces_done_but_no_receipt_is_no_data_not_done(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS)
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("no receipt was written", got["summary"])
+
+    def test_a_corrupt_newest_run_does_not_fall_back_to_an_older_one(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, DONE_ROWS,
+                       outcome="old", receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                       receipt_raw="{")
+        self.assertIsNone(self.state()["state"])
+
+    def test_a_run_folder_with_an_unreadable_marker_is_never_matched(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS, marker="{")
+        self.assertIsNone(self.state()["state"])
+
+    def test_a_corrupt_loop_log_with_a_door_run_reads_the_door_run(self):
+        with open(self.loop_log, "w", encoding="utf-8") as fh:
+            fh.write("garbage\n{\n")
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        self.assertEqual(self.state(run="loop-1")["source"], "door")
+
+    def test_the_status_flag_prints_the_card_and_exits_by_the_state(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = pc.main(["--status", "--runs-root", self.runs,
+                            "--cwd", self.cwd, "--loop-log", self.loop_log])
+        self.assertEqual(code, 0)
+        self.assertIn("Waiting", out.getvalue())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = pc.main(["--status", "--runs-root", self.runs,
+                            "--cwd", self.cwd + "-none", "--loop-log", self.loop_log])
+        self.assertEqual(code, 2)
+        self.assertIn("NO-DATA", out.getvalue())
+
+    def test_the_status_flag_exits_1_on_a_failed_run(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                       claims={"u1": claim("u1", 0, 10),
+                               "u2": claim("u2", 10, 20, state="failed")},
+                       receipt=GREEN_RECEIPT)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = pc.main(["--status", "--runs-root", self.runs,
+                            "--cwd", self.cwd, "--loop-log", self.loop_log])
+        self.assertEqual(code, 1)
+        self.assertIn("Stopped on a problem", out.getvalue())
+
+    def test_a_pointed_at_work_document_wins_over_a_stray_finished_one(self):
+        # target.json points at W-z.json (unfinished); a stray W-a.json has
+        # every row DONE; a receipt exists. The engine lists this run as
+        # unfinished, so the card must too, never "Finished".
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, None,
+                             receipt=GREEN_RECEIPT,
+                             marker=json.dumps({"cwd": self.cwd,
+                                                "work_document": "W-z.json"}))
+        for name, rows in (("W-z.json", HALF_ROWS), ("W-a.json", DONE_ROWS)):
+            with open(os.path.join(run, name), "w", encoding="utf-8") as fh:
+                json.dump({"outcome": "x", "rows": rows}, fh)
+        got = self.state()
+        self.assertEqual((got["source"], got["state"]), ("door", "WAITING"))
+        import brother_run
+        self.assertEqual(len(brother_run.find_unfinished_runs(self.runs, self.cwd)), 1)
+
+    def test_an_ambiguous_folder_with_no_pointer_is_no_data(self):
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        with open(os.path.join(run, "W-other.json"), "w", encoding="utf-8") as fh:
+            json.dump({"rows": DONE_ROWS}, fh)
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("ambiguous", got["summary"])
+
+    def test_a_linked_target_record_is_never_followed(self):
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        real = os.path.join(self.root, "real-target.json")
+        os.replace(os.path.join(run, "target.json"), real)
+        os.symlink(real, os.path.join(run, "target.json"))
+        got = self.state()
+        self.assertIsNone(got["state"])
+        # the reason of the marker guard alone: the link made the folder match
+        # no repository, so nothing was read from it (a followed link would
+        # match and fail later in the Work document lookup instead).
+        self.assertIn("no door run is recorded", got["summary"])
+
+    def test_a_letter_named_folder_does_not_outrank_a_stamped_run(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS,
+                       outcome="stamped")
+        write_door_run(self.runs, "zzz-manual", self.cwd, HALF_ROWS,
+                       outcome="letters")
+        self.assertEqual(self.state()["outcome"], "stamped")
+
+    def test_a_later_stamp_outranks_an_earlier_one_across_days(self):
+        write_door_run(self.runs, "20261102T235959-a", self.cwd, HALF_ROWS,
+                       outcome="earlier")
+        write_door_run(self.runs, "20261103T000001-a", self.cwd, HALF_ROWS,
+                       outcome="later")
+        self.assertEqual(self.state()["outcome"], "later")
+
+    def test_a_newer_corrupt_target_record_of_another_repository_does_not_blank_this_one(self):
+        # the damaged marker may belong to ANY repository sharing the root;
+        # the engine's --unfinished skips it, so the card does too.
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, DONE_ROWS,
+                       outcome="mine", receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        write_door_run(self.runs, "20261102T000000-a", self.cwd + "-other", HALF_ROWS,
+                       marker="{")
+        got = self.state()
+        self.assertEqual((got["source"], got["outcome"]), ("door", "mine"))
+
+    def test_a_corrupt_target_record_older_than_the_match_is_ignored(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS,
+                       marker="{")
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS,
+                       outcome="good")
+        self.assertEqual(self.state()["outcome"], "good")
+
+    def test_a_corrupt_claims_record_is_a_problem_not_finished(self):
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                             receipt=GREEN_RECEIPT)
+        with open(os.path.join(run, "claims.json"), "w", encoding="utf-8") as fh:
+            fh.write("{broken")
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("claim record", got["summary"])
+
+
+    # KEY1.c review round 1 ---------------------------------------------
+
+    def test_status_without_a_runs_root_reads_the_engines_default_root(self):
+        # A checkout ignores HOME and BROTHER_STATE_ROOT, so the engine's
+        # default root is pointed at the fixture through the engine's own
+        # default_runs_root, the one _resolve_runs_root asks.
+        import brother_run
+        from unittest import mock
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        out = io.StringIO()
+        with mock.patch.object(brother_run, "default_runs_root",
+                               return_value=(self.runs, True)):
+            with contextlib.redirect_stdout(out):
+                code = pc.main(["--status", "--cwd", self.cwd,
+                                "--loop-log", self.loop_log])
+        self.assertEqual(code, 0)
+        self.assertIn("Waiting", out.getvalue())
+        self.assertNotIn("Unknown", out.getvalue())
+
+    def test_status_without_a_cwd_means_the_current_folder(self):
+        import brother_run
+        from unittest import mock
+        write_door_run(self.runs, "20261102T000000-a", os.path.abspath("."), HALF_ROWS)
+        with mock.patch.object(brother_run, "default_runs_root",
+                               return_value=(self.runs, True)):
+            got = pc.current_run_state(loop_log=self.loop_log, now=1000.0)
+        self.assertEqual((got["source"], got["state"]), ("door", "WAITING"))
+
+    def test_the_card_and_unfinished_name_the_same_run(self):
+        import brother_run
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS, outcome="old")
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS, outcome="new")
+        listed = brother_run.find_unfinished_runs(self.runs, self.cwd)
+        self.assertEqual(len(listed), 2)
+        self.assertEqual(self.state()["outcome"], "new")
+
+    def test_a_newer_failed_run_is_read_not_hidden_behind_an_older_unfinished_one(self):
+        # THE NEWEST run answers. An older unfinished run adds one plain
+        # count line and never hides today's failure; rc stays 1.
+        write_door_run(self.runs, "20260801T000000-a", self.cwd, HALF_ROWS, outcome="older")
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, DONE_ROWS,
+                       outcome="newer", receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10),
+                               "u2": claim("u2", 10, 20, state="failed")})
+        got = self.state()
+        self.assertEqual((got["state"], got["outcome"]), ("FAILED", "newer"))
+        self.assertIn("1 earlier run is still unfinished", got["summary"])
+        card = pc.workflow_card(got)
+        self.assertIn("Stopped on a problem", card)
+        self.assertIn("1 earlier run is still unfinished", card)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = pc.main(["--status", "--runs-root", self.runs, "--cwd", self.cwd,
+                            "--loop-log", self.loop_log])
+        self.assertEqual(code, 1)
+
+    def test_several_older_unfinished_runs_are_counted_in_the_plural(self):
+        write_door_run(self.runs, "20260801T000000-a", self.cwd, HALF_ROWS)
+        write_door_run(self.runs, "20260802T000000-a", self.cwd, HALF_ROWS)
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, DONE_ROWS,
+                       receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        got = self.state()
+        self.assertEqual(got["state"], "DONE")
+        self.assertIn("2 earlier runs are still unfinished", got["summary"])
+
+    def test_a_newest_unfinished_run_counts_only_the_other_unfinished_ones(self):
+        write_door_run(self.runs, "20260801T000000-a", self.cwd, HALF_ROWS)
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, HALF_ROWS, outcome="newest")
+        got = self.state()
+        self.assertEqual((got["state"], got["outcome"]), ("WAITING", "newest"))
+        self.assertIn("1 earlier run is still unfinished", got["summary"])
+
+    def test_no_earlier_unfinished_run_adds_no_count_line(self):
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, HALF_ROWS)
+        self.assertNotIn("earlier", self.state()["summary"])
+
+    def test_a_newer_unreadable_marker_with_a_failed_claim_says_a_newer_run_could_not_be_read(self):
+        # Round 2 case B: yesterday finished green; today's run for this
+        # folder ended failed but its target.json is truncated.
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, DONE_ROWS,
+                       outcome="yesterday", receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, DONE_ROWS,
+                       outcome="today", receipt=GREEN_RECEIPT,
+                       marker='{"cwd": "%s"' % self.cwd,
+                       claims={"u1": claim("u1", 0, 10),
+                               "u2": claim("u2", 10, 20, state="failed")})
+        got = self.state()
+        self.assertEqual((got["state"], got["outcome"]), ("DONE", "yesterday"))
+        self.assertIn("a newer run could not be read", got["summary"])
+        self.assertIn("a newer run could not be read", pc.workflow_card(got))
+
+    def test_an_empty_marker_newer_than_an_unfinished_run_says_so(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS, outcome="yesterday")
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, HALF_ROWS, marker="")
+        got = self.state()
+        self.assertEqual((got["state"], got["outcome"]), ("WAITING", "yesterday"))
+        self.assertIn("a newer run could not be read", got["summary"])
+
+    def test_an_unreadable_marker_older_than_the_run_shown_adds_no_caveat(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS, marker="{")
+        write_door_run(self.runs, "20261102T090000-a", self.cwd, HALF_ROWS)
+        self.assertNotIn("could not be read", self.state()["summary"])
+
+    def test_a_folder_without_a_marker_does_not_clear_an_earlier_damaged_one(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS)
+        os.makedirs(os.path.join(self.runs, "docs", "plan", "runs", "20261102T090000-a"))
+        write_door_run(self.runs, "20261103T090000-a", self.cwd, HALF_ROWS, marker="{")
+        self.assertIn("a newer run could not be read", self.state()["summary"])
+
+    def test_a_run_folder_with_no_marker_yet_adds_no_caveat(self):
+        # a run still being created has no target.json: not damage
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, HALF_ROWS)
+        os.makedirs(os.path.join(self.runs, "docs", "plan", "runs", "20261102T090000-a"))
+        self.assertNotIn("could not be read", self.state()["summary"])
+
+    def test_the_unfinished_test_is_the_engines_own(self):
+        # Pinned to the CALL: with the engine's listing emptied, an unfinished
+        # run is not described as Waiting by a private copy of the test, and
+        # never as Finished.
+        import brother_run
+        from unittest import mock
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS,
+                       receipt=GREEN_RECEIPT)
+        with mock.patch.object(brother_run, "find_unfinished_runs", return_value=[]):
+            got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("not done", got["summary"])
+
+    def test_a_symlinked_legacy_work_document_is_waiting_as_the_engine_lists_it(self):
+        import brother_run
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, None)
+        real = os.path.join(self.root, "real-w.json")
+        with open(real, "w", encoding="utf-8") as fh:
+            json.dump({"outcome": "x", "rows": HALF_ROWS}, fh)
+        os.symlink(real, os.path.join(run, "W-a.json"))
+        self.assertEqual(len(brother_run.find_unfinished_runs(self.runs, self.cwd)), 1)
+        self.assertEqual(self.state()["state"], "WAITING")
+
+    def test_a_linked_claims_record_is_never_followed(self):
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                             receipt=GREEN_RECEIPT)
+        real = os.path.join(self.root, "real-claims.json")
+        with open(real, "w", encoding="utf-8") as fh:
+            json.dump({"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)}, fh)
+        os.symlink(real, os.path.join(run, "claims.json"))
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("claim record", got["summary"])
+
+    def test_rows_that_are_not_objects_are_no_data_naming_malformed_rows(self):
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, [1, 2])
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("malformed", got["summary"])
+        self.assertNotIn("no rows", got["summary"])
+
+    def test_a_linked_receipt_is_never_followed(self):
+        run = write_door_run(self.runs, "20261102T000000-a", self.cwd, DONE_ROWS,
+                             claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        os.makedirs(os.path.join(run, "receipt"))
+        real = os.path.join(self.root, "real-receipt.json")
+        with open(real, "w", encoding="utf-8") as fh:
+            json.dump(GREEN_RECEIPT, fh)
+        os.symlink(real, os.path.join(run, "receipt", "receipt.json"))
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("receipt could not be read", got["summary"])
+        self.assertIsNone(pc.read_receipt(run))
+
+    def test_a_newer_finished_run_of_another_repository_is_never_read_for_this_one(self):
+        write_door_run(self.runs, "20261101T000000-a", self.cwd, DONE_ROWS,
+                       outcome="mine", receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        write_door_run(self.runs, "20261102T000000-a", self.cwd + "-other", DONE_ROWS,
+                       outcome="theirs", receipt=GREEN_RECEIPT,
+                       claims={"u1": claim("u1", 0, 10), "u2": claim("u2", 10, 20)})
+        self.assertEqual(self.state()["outcome"], "mine")
+
+    # KEY1.c review round 2 ----------------------------------------------
+
+    def _status_stdout(self, *extra):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = pc.main(["--status", "--loop-log", self.loop_log] + list(extra))
+        return code, out.getvalue()
+
+    def _state_default(self):
+        return pc.current_run_state(loop_log=self.loop_log, cwd=self.cwd, now=1000.0)
+
+    def _no_run_start_side_effects(self):
+        """A status read starts no subprocess and never calls the engine's
+        run-start resolver (it creates folders and prints): either raises."""
+        import brother_run
+        from unittest import mock
+
+        def boom(*a, **k):
+            raise AssertionError("a status read must not do this")
+        return (mock.patch.object(brother_run.subprocess, "run", side_effect=boom),
+                mock.patch.object(brother_run, "_resolve_runs_root", side_effect=boom))
+
+    def test_a_status_read_in_a_checkout_prints_only_the_card(self):
+        import brother_run
+        from unittest import mock
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        a, b = self._no_run_start_side_effects()
+        with mock.patch.object(brother_run, "default_runs_root",
+                               return_value=(self.runs, True)), a, b:
+            code, text = self._status_stdout("--cwd", self.cwd)
+            expected = pc.workflow_card(self._state_default())
+        self.assertEqual(code, 0)
+        self.assertEqual(text, expected + "\n")
+        self.assertIn("Waiting", text)
+
+    def test_a_status_read_in_the_installed_layout_finds_the_fallback_root_silently(self):
+        # in_checkout False: the engine's run-start resolver would ask which
+        # earlier places hold runs (a subprocess) and print lines about them.
+        # The default root does not exist; the run is in the user-config
+        # fallback. Nothing is created and stdout is the card alone.
+        import brother_run
+        from unittest import mock
+        cfg = os.path.join(self.root, "cfg")
+        default = os.path.join(self.root, "state-root")
+        write_door_run(os.path.join(cfg, brother_run.FALLBACK_RUNS_DIR),
+                       "20261102T000000-a", self.cwd, HALF_ROWS)
+        a, b = self._no_run_start_side_effects()
+        with mock.patch.dict(os.environ, {"BROTHER_CONFIG_DIR": cfg}), \
+                mock.patch.object(brother_run, "default_runs_root",
+                                  return_value=(default, False)), a, b:
+            code, text = self._status_stdout("--cwd", self.cwd)
+            expected = pc.workflow_card(self._state_default())
+        self.assertEqual(code, 0)
+        self.assertEqual(text, expected + "\n")
+        self.assertIn("Waiting", text)
+        self.assertFalse(os.path.exists(default))
+
+    def test_the_installed_default_root_wins_when_it_holds_runs(self):
+        import brother_run
+        from unittest import mock
+        cfg = os.path.join(self.root, "cfg")
+        default = os.path.join(self.root, "state-root")
+        write_door_run(default, "20261102T000000-a", self.cwd, HALF_ROWS, outcome="default")
+        write_door_run(os.path.join(cfg, brother_run.FALLBACK_RUNS_DIR),
+                       "20261103T000000-a", self.cwd, HALF_ROWS, outcome="fallback")
+        with mock.patch.dict(os.environ, {"BROTHER_CONFIG_DIR": cfg}), \
+                mock.patch.object(brother_run, "default_runs_root",
+                                  return_value=(default, False)):
+            self.assertEqual(self._state_default()["outcome"], "default")
+
+    def test_status_without_a_cwd_flag_defaults_main_to_the_current_folder(self):
+        os.makedirs(self.cwd)
+        old = os.getcwd()
+        os.chdir(self.cwd)
+        self.addCleanup(os.chdir, old)
+        write_door_run(self.runs, "20261102T000000-a", os.getcwd(), HALF_ROWS)
+        code, text = self._status_stdout("--runs-root", self.runs)
+        self.assertEqual(code, 0)
+        self.assertIn("Waiting", text)
+
+    def test_a_refused_default_root_is_no_data_not_an_exit(self):
+        # the engine's state_root exits with a message on a bad
+        # BROTHER_RUNS_ROOT; the card says NO-DATA instead of exiting.
+        import brother_run
+        from unittest import mock
+        with mock.patch.object(brother_run, "default_runs_root",
+                               side_effect=SystemExit("not an absolute path")):
+            code, text = self._status_stdout("--cwd", self.cwd)
+        self.assertEqual(code, 2)
+        self.assertIn("could not be resolved", text)
+
+    def test_an_unreadable_runs_folder_names_why(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads any folder")
+        write_door_run(self.runs, "20261102T000000-a", self.cwd, HALF_ROWS)
+        runs_dir = os.path.join(self.runs, "docs", "plan", "runs")
+        os.chmod(runs_dir, 0)
+        self.addCleanup(os.chmod, runs_dir, 0o755)
+        got = self.state()
+        self.assertIsNone(got["state"])
+        self.assertIn("run folder could not be read", got["summary"])
+
 
 if __name__ == '__main__':
     unittest.main()

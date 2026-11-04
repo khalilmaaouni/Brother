@@ -27,9 +27,9 @@ runner is subprocess.run with stdin closed.
 Usage:
   merge_precompute.py pins <clone> <list> <pr>...   read the pins from GitHub, write the list, start the worker
   merge_precompute.py start <clone> <list>          start (or find) the background worker for a written list
-  merge_precompute.py worker <clone> <list>         the foreground worker gate_merge_seq.sh execs into
+  merge_precompute.py worker <clone> <list> [base]  the foreground worker gate_merge_seq.sh execs into
   merge_precompute.py status <clone> <list>         print the progress file as JSON
-  merge_precompute.py wait <clone> <tree> <seconds> wait for the tree's row: exit 0 PASS, 1 FAIL, 2 NO-DATA
+  merge_precompute.py wait <clone> <tree> <seconds> [base] wait for the tree's row: exit 0 PASS, 1 FAIL, 2 NO-DATA
 """
 from __future__ import annotations
 
@@ -58,8 +58,8 @@ POLL_S = 1.0
 WORKER_NAMES = ("merge_precompute", "gate_merge_seq")
 GATE_ARGV = ["sh", merge_gate.GATE_SCRIPT]
 PIN_FIELDS = "state,baseRefName,headRefName,mergeable,headRefOid"
-USAGE = ("usage: merge_precompute.py pins <clone> <list> <pr>... | start <clone> <list> | worker <clone> <list> | "
-         "status <clone> <list> | wait <clone> <tree> <seconds>")
+USAGE = ("usage: merge_precompute.py pins <clone> <list> <pr>... | start <clone> <list> | worker <clone> <list> [base] | "
+         "status <clone> <list> | wait <clone> <tree> <seconds> [base]")
 
 MergeGateError = merge_gate.MergeGateError
 MergeNoData = merge_gate.MergeNoData
@@ -218,10 +218,10 @@ def chain_trees(clone, base, pins, runner=None):
     return trees
 
 
-def _fetch_main(runner, clone):
-    code, out, err = _call(runner, ["git", "fetch", "--quiet", REMOTE, BRANCH], clone)
+def _fetch_main(runner, clone, branch=BRANCH):
+    code, out, err = _call(runner, ["git", "fetch", "--quiet", REMOTE, branch], clone)
     if code != 0:
-        raise MergeNoData("cannot fetch %s/%s: %s" % (REMOTE, BRANCH, (err or out).strip()[:200]))
+        raise MergeNoData("cannot fetch %s/%s: %s" % (REMOTE, branch, (err or out).strip()[:200]))
     return _git(runner, clone, ["rev-parse", "FETCH_HEAD"])
 
 
@@ -252,11 +252,13 @@ def _gate_one(runner, clone, scratch, env, tree, chained, pin, base):
         _call(runner, ["git", "worktree", "remove", "--force", worktree], clone)
 
 
-def run_precompute(clone, pins, env=None, runner=None, status_path=None):
+def run_precompute(clone, pins, env=None, runner=None, status_path=None, branch=BRANCH):
     """Gate every pin in list order on the chained tree. Returns the final status object (also written to
     `status_path` after every step when given): status DONE, FAILED, STALE-BASE or NO-DATA, and one entry per pin
-    with result PASS, FAIL, SKIPPED-ALREADY-GATED, BLOCKED-BY #n, CONFLICT or NO-DATA."""
+    with result PASS, FAIL, SKIPPED-ALREADY-GATED, BLOCKED-BY #n, CONFLICT or NO-DATA. `branch` is the base the pins
+    merge into (main unless a train for a named dev line asks); it must be on merge_gate.ALLOWED_BASES (FLOW1.a)."""
     clone = _as_str(clone, "clone")
+    merge_gate.base_ref(branch)
     if isinstance(pins, (str, bytes)) or not isinstance(pins, (list, tuple)):
         raise MergeGateError("pins must be a list, not %s" % type(pins).__name__)
     for pin in pins:
@@ -269,7 +271,7 @@ def run_precompute(clone, pins, env=None, runner=None, status_path=None):
     status = {"schema": SCHEMA, "pid": os.getpid(), "started": merge_gate._iso(time.time()), "restarts": 0,
               "status": "RUNNING", "base": "", "entries": []}
     try:
-        base = _fetch_main(runner, clone)
+        base = _fetch_main(runner, clone, branch)
         while True:
             status["base"] = base
             status["entries"] = [{"pr": p["pr"], "head": p["head"], "tree": "", "result": "PENDING"} for p in pins]
@@ -289,7 +291,7 @@ def run_precompute(clone, pins, env=None, runner=None, status_path=None):
                     _write_status(status_path, status)
                     continue
                 entry["tree"] = tree
-                verdict, why = merge_gate.verify_tree(clone, tree, environment, runner)
+                verdict, why = merge_gate.verify_tree(clone, tree, environment, runner, base=branch)
                 if verdict == "PASS":
                     entry["result"] = "SKIPPED-ALREADY-GATED"
                 else:
@@ -300,7 +302,7 @@ def run_precompute(clone, pins, env=None, runner=None, status_path=None):
                         status["status"] = "NO-DATA"
                         _write_status(status_path, status)
                         return status
-                    verdict, why = merge_gate.verify_tree(clone, tree, environment, runner)
+                    verdict, why = merge_gate.verify_tree(clone, tree, environment, runner, base=branch)
                     entry["result"] = verdict if verdict in ("PASS", "FAIL") else "NO-DATA: %s" % why
                     if verdict != "PASS":
                         blocked_by = pin["pr"]   # no tree is recorded on top of a failing one
@@ -308,7 +310,7 @@ def run_precompute(clone, pins, env=None, runner=None, status_path=None):
                 if blocked_by is not None:
                     continue
                 current = chained
-                fresh = _fetch_main(runner, clone)
+                fresh = _fetch_main(runner, clone, branch)
                 if fresh != base:
                     status["restarts"] += 1
                     if status["restarts"] > MAX_RESTARTS:
@@ -439,9 +441,10 @@ def read_status(list_path, env=None, clone=None):
     return status
 
 
-def wait_ready(clone, tree, timeout_s, env=None, runner=None):
+def wait_ready(clone, tree, timeout_s, env=None, runner=None, base="main"):
     """Poll the ledger for the tree until `timeout_s`: the verify_tree verdict as soon as it is PASS or FAIL, and
-    ("NO-DATA", why) at the timeout, never a pass. verify_tree is verify_newest, so every row rule applies here too."""
+    ("NO-DATA", why) at the timeout, never a pass. verify_tree is verify_newest, so every row rule applies here too,
+    judged against `base` (one of merge_gate.ALLOWED_BASES)."""
     clone = _as_str(clone, "clone")
     tree = _as_str(tree, "tree")
     if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s < 0 \
@@ -451,7 +454,7 @@ def wait_ready(clone, tree, timeout_s, env=None, runner=None):
     runner = _runner(runner)
     deadline = time.monotonic() + timeout_s
     while True:
-        verdict, why = merge_gate.verify_tree(clone, tree, environment, runner)
+        verdict, why = merge_gate.verify_tree(clone, tree, environment, runner, base=base)
         if verdict in ("PASS", "FAIL"):
             return verdict, why
         left = deadline - time.monotonic()
@@ -513,11 +516,12 @@ def main(argv=None):
             sys.stdout.write("WORKER pid %d\n" % start_background(rest[0], rest[1]))
             return 0
         if command == "worker":
-            if len(rest) != 2:
+            if len(rest) not in (2, 3):
                 sys.stderr.write(USAGE + "\n")
                 return 2
             pins = parse_list(rest[1])
-            status = run_precompute(rest[0], pins, status_path=status_path(rest[0], rest[1]))
+            status = run_precompute(rest[0], pins, status_path=status_path(rest[0], rest[1]),
+                                    branch=rest[2] if len(rest) == 3 else BRANCH)
             for entry in status["entries"]:
                 sys.stdout.write("#%s %s %s\n" % (entry["pr"], entry["tree"] or "-", entry["result"]))
             sys.stdout.write("%s: %d listed PR(s), %d restart(s)\n"
@@ -530,10 +534,10 @@ def main(argv=None):
             status = read_status(rest[1], clone=rest[0])
             sys.stdout.write(json.dumps(status, sort_keys=True, indent=1) + "\n")
             return 2 if status.get("status") == "NO-DATA" else 0
-        if len(rest) != 3 or not rest[2].isdigit():
+        if len(rest) not in (3, 4) or not rest[2].isdigit():
             sys.stderr.write(USAGE + "\n")
             return 2
-        verdict, why = wait_ready(rest[0], rest[1], int(rest[2]))
+        verdict, why = wait_ready(rest[0], rest[1], int(rest[2]), base=rest[3] if len(rest) == 4 else "main")
     except MergeGateError as exc:
         sys.stderr.write("%s: %s\n" % ("STOP" if isinstance(exc, PinRefused) else "NO-DATA", exc))
         return 1 if isinstance(exc, PinRefused) else 2

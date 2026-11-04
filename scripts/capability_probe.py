@@ -135,11 +135,16 @@ def compare_inventory(results, inventory_path):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--inventory",
-                    default="~/Documents/Kay Vault/50-Reference/installed-tools.md")
+                    default=None, help="default: 50-Reference/installed-tools.md in the configured vault")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     results = survey()
+    if args.inventory is None:  # KEY1.f: the one vault resolver, never a guessed folder
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import pattern_note
+        args.inventory = os.path.join(pattern_note.require_vault_root(None, "capability_probe"),
+                                      "50-Reference", "installed-tools.md")
     undocumented = compare_inventory(results, args.inventory)
 
     if args.json:

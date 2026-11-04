@@ -523,6 +523,7 @@ run_check "graph-loop"            python3 scripts/graph_loop.py
 # that lands it, per this estate's own recorded lesson that an unregistered
 # tool is invisible to every check the project owns.
 run_check "merge-queue-self"      python3 scripts/test_merge_queue.py -v
+run_check "train-build-self"      python3 -B scripts/test_train_build.py
 run_check "merge-verified-self"   python3 scripts/test_merge_verified.py
 run_check "merge-precompute-self" python3 -B scripts/test_merge_precompute.py
 run_check "merge-pins-self"       python3 -B scripts/test_merge_pins.py
@@ -702,6 +703,9 @@ run_check "work-record-self"       python3 scripts/test_work_record.py -v
 # itself validates. Its refused case is the important one, the same way
 # work-record-self's is: a cyclic decomposition must leave the store untouched.
 run_check "door-self"              python3 scripts/test_door.py -v
+# KEY1.d: a publish ask reaches the cut driver only from a maintainer checkout; an install gets the limitation and
+# never a command naming a file it does not contain.
+run_check "door-publish-route-self" python3 scripts/test_door_publish_route.py -v
 
 # Every persona pack in scripts/packs, generically: it enumerates the
 # directory rather than naming packs, so pack fourteen joins this gate by
@@ -963,6 +967,11 @@ run_check "acceptance-time" python3 scripts/test_acceptance_time.py -v
 # the closure is computed from the real files (not a hand-typed list), the
 # packaged copy is byte-identical, and the installed launcher actually runs.
 run_check "bundle-runtime-self" python3 scripts/test_bundle_runtime.py -v
+# ship-every-route (SHIP1.a, 2026-11-01): every target the door routes to (its mobile scripts, bds.py, bin/sbe,
+# each REACH.json command and routed group owner) ships in bundle/runtime, attested by a manifest; NO-DATA exit 2
+# when the door or REACH.json cannot be read.
+run_check "ship-every-route-self" python3 -B scripts/test_ship_every_route.py
+run_check "ship-every-route-py39" /usr/bin/python3 -B scripts/test_ship_every_route.py
 # bundle-doctor-route (DR1, 2026-10-11): the installed brothermode_cli.py doctor
 # route, proven on a mirror this tree's generator regenerates into a scratch copy.
 run_check "bundle-doctor-route" python3 -B scripts/test_bundle_doctor_route.py
@@ -1512,14 +1521,19 @@ run_check "check-all-summary-self" python3 scripts/test_check_all_summary.py
 run_check "check-all-merge" python3 -B scripts/test_check_all_merge.py
 run_check "check-all-merge-py39" /usr/bin/python3 -B scripts/test_check_all_merge.py
 
-# The closing ceremony law (founder order 2026-08-30): a session close on
-# this estate is FINISHED only when the newest handover pack carries the
-# start-here with its four sections, the board HTML, the session log and a
-# complete zip, fresh within 24 hours and clean of private terms. On a
-# machine or moment with no pack this is NO-DATA (exit 2), named, never a
+# The closing ceremony law, re-scoped by HO1 (owner order 2026-10-31): every
+# declared handover record under the root (scripts/handover_record.py emit)
+# parses and scans clean, and the whole root is clean of private terms; a
+# directory that is not a close is ignored by name, never judged. On a
+# machine or moment with no close this is NO-DATA (exit 2), named, never a
 # pass and never red: the battery is not always run at close time.
 run_check "close-ceremony"     python3 scripts/close_ceremony_check.py
 run_check "close-ceremony-tests" python3 scripts/test_close_ceremony_check.py
+# HO1 (owner order 2026-10-31): the handover record a session emits for the
+# next session in the same project, and the receiver's validation against the
+# live tree. Both Pythons, since the emitter runs under whichever one a host has.
+run_check "handover-record" python3 -B scripts/test_handover_record.py
+run_check "handover-record-py39" /usr/bin/python3 -B scripts/test_handover_record.py
 # P1.d: the prediction ledger's suites and its report. One named check per
 # test file of unit P1, so scripts/test_battery_registration.py stops reading
 # this instrument as unregistered. A test file of the unit that is not yet on
@@ -1708,12 +1722,17 @@ run_check "deploy-excludes-tests" python3 -B scripts/test_deploy_excludes_tests.
 run_check "deploy-canary" python3 -B scripts/test_deploy_canary.py -v
 run_check "stop-ownership-edges" python3 -B scripts/test_stop_ownership_edges.py
 run_check "proc-table-nodata" python3 -B scripts/test_proc_table_nodata.py
+run_check "procs-row-unknown-self" python3 -B scripts/test_procs_row_unknown.py
+run_check "procs-row-unknown-self-py39" /usr/bin/python3 -B scripts/test_procs_row_unknown.py
+run_check "procs-row-unknown-edges-self" python3 -B scripts/test_procs_row_unknown_edges.py
+run_check "procs-row-unknown-edges-self-py39" /usr/bin/python3 -B scripts/test_procs_row_unknown_edges.py
 run_check "attacker-role-limit" python3 -B scripts/test_attacker_role_limit.py
 run_check "bridge-spawners" python3 -B scripts/test_bridge_spawners.py
 run_check "freeze-manifest" python3 -B scripts/test_freeze_manifest.py
 run_check "freeze-native-closure" python3 -B scripts/test_freeze_native_closure.py
 run_check "burn-guard-flat-bin" python3 -B scripts/test_burn_guard_flat_bin.py
 run_check "burn-guard-refusals" python3 -B scripts/test_burn_guard_refusals.py
+run_check "burn-guard-main-expiry-stab1g" python3 -B scripts/test_burn_guard_main_expiry.py
 run_check "freeze-loaders" python3 -B scripts/test_freeze_loaders.py
 run_check "freeze-namespace-parent" python3 -B scripts/test_freeze_namespace_parent.py
 run_check "code-root" python3 -B scripts/test_code_root.py
@@ -1908,6 +1927,11 @@ run_check "plan-119-landed-py39" /usr/bin/python3 -B scripts/test_plan_119.py La
 run_check "journey-harness-self" python3 -B scripts/journey/test_run_journey.py
 run_check "journey-harness-py39" /usr/bin/python3 -B scripts/journey/test_run_journey.py
 run_check "journey-walker-selftest" python3 -B scripts/journey/run_journey.py --selftest
+# SIM1 (2026-11-01): the SIMULATED first-time-user trial behind BASE1.e. Its suite proves PASS, FAIL and
+# NO-DATA and runs one mutation per guard; the seeds row refuses a seed file under 60 live public cases.
+run_check "sim-trial" python3 -B scripts/test_sim_trial.py
+run_check "sim-trial-py39" /usr/bin/python3 -B scripts/test_sim_trial.py
+run_check "sim-seeds" python3 -B scripts/sim_trial.py validate-seeds
 # S2.a: the inherited red rule on gate rows. Its five classes are green since S2.a landed, so the
 # harness leaves test_battery_registration.EXEMPT and runs here. land_batch's own selftest joins it
 # because that is where the rule's logic is actually tested: of ten scoped mutations to it, the
@@ -1940,6 +1964,8 @@ run_check "acceptance-4-disk-reading" python3 -B scripts/test_acceptance_4.py
 run_check "model-call-no-plugin" python3 scripts/test_model_call_no_plugin.py
 run_check "model-call-ledger-rows" python3 -B scripts/test_model_call_ledger_rows.py
 run_check "model-call-selftest-world" python3 -B scripts/test_model_call_selftest_world.py
+run_check "hermetic-ledgers-self" python3 -B scripts/test_hermetic_ledgers.py
+run_check "hermetic-ledgers-py39" /usr/bin/python3 -B scripts/test_hermetic_ledgers.py
 run_check "runner-straggler-settles" python3 -B scripts/test_runner_straggler_settles.py
 run_check "runner-one-deadline" python3 -B scripts/test_runner_one_deadline.py
 run_check "unit-ledger-model-clock" python3 -B scripts/test_unit_ledger_model_clock.py
@@ -2107,9 +2133,9 @@ run_check "jbeq-e2e-check-self" python3 scripts/test_jbeq_e2e_check.py -v
 # was written on. The three habits it refuses (a ~/.claude path, a
 # CLAUDE_PLUGIN_ROOT with no vendor neutral alternative, a slash command with
 # no route beside it) are invisible under Claude Code and fatal under Codex,
-# so nothing here would have caught them. It re-execs itself under an
-# interpreter that has PyYAML when the caller's lacks it, and reports NO-DATA
-# rather than a pass when no interpreter on the machine has one.
+# so nothing here would have caught them. It reads frontmatter with its own
+# strict subset reader (no PyYAML), so it answers the same under any HOME and
+# either interpreter, and refuses any frontmatter outside that subset.
 run_check "skills-portable" python3 scripts/test_skills_portable.py
 # C1/C2: the Codex package. This check asks the control that owns the
 # decision: it shells out to the CANONICAL validator installed with the Codex
@@ -2430,6 +2456,8 @@ run_check "filesystem_enforcement-self" python3 scripts/test_filesystem_enforcem
 run_check "run-journal-chain-self" python3 scripts/test_run_journal_chain.py -v
 run_check "machine_reservation-self" python3 scripts/test_machine_reservation.py -v
 run_check "heavy-slot-self"         python3 scripts/test_heavy_slot.py -v
+run_check "cut-resource-admission-self" python3 scripts/test_cut_resource_admission.py -v
+run_check "cut-stop-classes-self"   python3 scripts/test_cut_stop_classes.py -v
 run_check "wip-status" python3 -B scripts/loop/test_wip_status.py
 run_check "bridge_content_gate-self" python3 scripts/test_bridge_content_gate.py -v
 run_check "record_distance-self" python3 scripts/test_record_distance.py -v
@@ -2507,6 +2535,8 @@ run_check "wire-birth-gate-self" python3 scripts/test_wire_birth_gate.py -v
 run_check "acceptance-trial-assign-self" python3 scripts/test_acceptance_trial_assign.py -v
 run_check "assurance-graph-self" python3 scripts/test_assurance_graph.py -v
 run_check "benchmark-harness-self" python3 scripts/test_benchmark_harness.py -v
+run_check "base1b-tasks-self" python3 scripts/test_base1b_tasks.py -v
+run_check "base1b-tasks-py39" /usr/bin/python3 scripts/test_base1b_tasks.py -v
 run_check "brother-worktree-census-self" python3 scripts/test_brother_worktree_census.py -v
 run_check "claim-evidence-self" python3 scripts/test_claim_evidence.py -v
 run_check "claim-lifecycle-self" python3 scripts/test_claim_lifecycle.py -v
@@ -2578,6 +2608,10 @@ run_check "c0-fast-cut-self" python3 scripts/test_c0_fast_cut.py
 run_check "brother-pass-self" python3 scripts/test_brother_pass.py
 run_check "probe-round-self" python3 scripts/test_probe_round.py
 run_check "close-unit-self" python3 scripts/test_close_unit.py
+run_check "landing-facts-self" python3 -B scripts/test_landing_facts.py
+run_check "closure-revision-self" python3 -B scripts/test_closure_revision.py
+run_check "closure-revision-py39" /usr/bin/python3 -B scripts/test_closure_revision.py
+run_check "landing-contract-self" python3 -B scripts/test_landing_contract.py
 run_check "donecheck-recon-self" python3 scripts/test_donecheck_recon.py
 run_check "jev-checks-r41-self" python3 scripts/test_jev_checks_r41.py
 run_check "jev-seam-wiring-self" python3 scripts/test_jev_seam_wiring.py
@@ -2639,6 +2673,8 @@ run_check "redeploy-check-115-self" python3 -B scripts/loop/test_redeploy_check.
 run_check "redeploy-check-115-py39" /usr/bin/python3 -B scripts/loop/test_redeploy_check.py
 run_check "start-run-remedy-115-self" python3 -B scripts/loop/test_start_run_remedy.py
 run_check "start-run-remedy-115-py39" /usr/bin/python3 -B scripts/loop/test_start_run_remedy.py
+run_check "start-run-stale-deploy-self" python3 -B scripts/test_start_run_stale_deploy.py
+run_check "start-run-stale-deploy-py39" /usr/bin/python3 -B scripts/test_start_run_stale_deploy.py
 run_check "land-batch-closure-115-self" python3 -B scripts/loop/test_land_batch_closure.py
 run_check "land-batch-closure-115-py39" /usr/bin/python3 -B scripts/loop/test_land_batch_closure.py
 run_check "diag-frozen-root-115-self" python3 -B scripts/loop/test_diag_frozen_root.py
@@ -2679,6 +2715,101 @@ run_check "pool-why-lines-117-self" python3 -B scripts/loop/test_pool_why_lines.
 run_check "pool-why-lines-117-py39" /usr/bin/python3 -B scripts/loop/test_pool_why_lines.py
 run_check "refill-after-quarantine-117-self" python3 -B scripts/loop/test_refill_after_quarantine.py
 run_check "refill-after-quarantine-117-py39" /usr/bin/python3 -B scripts/loop/test_refill_after_quarantine.py
+run_check "run-state-120-self" python3 -B scripts/test_run_state.py
+run_check "run-state-120-py39" /usr/bin/python3 -B scripts/test_run_state.py
+run_check "idle-with-work-stab1h-self" python3 -B scripts/test_stage_log_idle.py
+run_check "idle-with-work-stab1h-py39" /usr/bin/python3 -B scripts/test_stage_log_idle.py
+# LOOP1.g: stage_log.delivery_trace at its entry point (the frozen Delivered harness stays red until a watched unit lands through the loop and the harness plan path, watched constants and BROTHER_WBS are pointed at the plan holding it).
+run_check "delivery-trace-loop1g-self" python3 -B scripts/test_delivery_trace.py
+run_check "delivery-trace-loop1g-py39" /usr/bin/python3 -B scripts/test_delivery_trace.py
+run_check "monitor-wired-stab1j-self" python3 -B scripts/test_monitor_wired.py
+run_check "monitor-wired-stab1j-py39" /usr/bin/python3 -B scripts/test_monitor_wired.py
+# KEY1.e (merged #996) left its harness run by no battery, so battery-registration-self went red on the line.
+run_check "key-path-inventory-key1e-self" python3 -B scripts/test_key_path_inventory.py
+run_check "key-path-inventory-key1e-py39" /usr/bin/python3 -B scripts/test_key_path_inventory.py
+# KEY1.a (train A, PR 997) left its harness run by no battery, the same miss as KEY1.e above.
+run_check "vault-notice-key1a-self" python3 -B scripts/test_brother_run_vault_notice.py
+run_check "vault-notice-key1a-py39" /usr/bin/python3 -B scripts/test_brother_run_vault_notice.py
+run_check "live-state-contract-120-self" python3 -B scripts/test_live_state.py --require-implementation
+run_check "live-state-contract-120-py39" /usr/bin/python3 -B scripts/test_live_state.py --require-implementation
+run_check "authentication-contract-120-self" python3 -B scripts/test_authentication_contract.py --require-implementation
+run_check "authentication-contract-120-py39" /usr/bin/python3 -B scripts/test_authentication_contract.py --require-implementation
+run_check "recovery-contract-120-self" python3 -B scripts/test_recovery_contract.py --require-implementation
+run_check "recovery-contract-120-py39" /usr/bin/python3 -B scripts/test_recovery_contract.py --require-implementation
+run_check "vault-access-contract-120-self" python3 -B scripts/test_vault_access_contract.py --require-implementation
+run_check "vault-access-contract-120-py39" /usr/bin/python3 -B scripts/test_vault_access_contract.py --require-implementation
+run_check "vault-door-120-self" python3 -B scripts/test_vault_door.py
+run_check "vault-door-120-py39" /usr/bin/python3 -B scripts/test_vault_door.py
+run_check "vault-default-one-reader-120-self" python3 -B scripts/test_vault_default_one_reader.py
+run_check "vault-default-one-reader-120-py39" /usr/bin/python3 -B scripts/test_vault_default_one_reader.py
+run_check "data-access-contract-120-self" python3 -B scripts/test_data_access_contract.py --require-implementation
+run_check "data-access-contract-120-py39" /usr/bin/python3 -B scripts/test_data_access_contract.py --require-implementation
+run_check "mobile-access-contract-120-self" python3 -B scripts/test_mobile_access_contract.py --require-implementation
+run_check "mobile-access-contract-120-py39" /usr/bin/python3 -B scripts/test_mobile_access_contract.py --require-implementation
+run_check "assurance-access-contract-120-self" python3 -B scripts/test_assurance_access_contract.py --require-implementation
+run_check "assurance-access-contract-120-py39" /usr/bin/python3 -B scripts/test_assurance_access_contract.py --require-implementation
+run_check "assurance-door-ops-120-self" python3 -B scripts/test_assurance_door_ops.py
+run_check "assurance-door-ops-120-py39" /usr/bin/python3 -B scripts/test_assurance_door_ops.py
+run_check "mobile-door-ops-120-self" python3 -B scripts/test_mobile_door_ops.py
+run_check "mobile-door-ops-120-py39" /usr/bin/python3 -B scripts/test_mobile_door_ops.py
+run_check "host-access-contract-120-self" python3 -B scripts/test_host_access_contract.py --require-implementation
+run_check "host-access-contract-120-py39" /usr/bin/python3 -B scripts/test_host_access_contract.py --require-implementation
+run_check "host-door-ops-120-self" python3 -B scripts/test_host_door_ops.py
+run_check "host-door-ops-120-py39" /usr/bin/python3 -B scripts/test_host_door_ops.py
+run_check "loop-access-contract-120-self" python3 -B scripts/test_loop_access_contract.py --require-implementation
+run_check "loop-access-contract-120-py39" /usr/bin/python3 -B scripts/test_loop_access_contract.py --require-implementation
+run_check "loop-door-ops-120-self" python3 -B scripts/test_loop_door_ops.py
+run_check "loop-door-ops-120-py39" /usr/bin/python3 -B scripts/test_loop_door_ops.py
+run_check "calibrated-access-contract-120-self" python3 -B scripts/test_calibrated_access_contract.py --require-implementation
+run_check "calibrated-access-contract-120-py39" /usr/bin/python3 -B scripts/test_calibrated_access_contract.py --require-implementation
+run_check "jev-door-ops-120-self" python3 -B scripts/test_jev_door_ops.py
+run_check "jev-door-ops-120-py39" /usr/bin/python3 -B scripts/test_jev_door_ops.py
+run_check "jev-door-real-120-self" python3 -B scripts/test_jev_door_real.py
+run_check "jev-door-real-120-py39" /usr/bin/python3 -B scripts/test_jev_door_real.py
+run_check "learning-access-contract-120-self" python3 -B scripts/test_learning_access_contract.py --require-implementation
+run_check "learning-access-contract-120-py39" /usr/bin/python3 -B scripts/test_learning_access_contract.py --require-implementation
+run_check "learning-door-ops-120-self" python3 -B scripts/test_learning_door_ops.py
+run_check "learning-door-ops-120-py39" /usr/bin/python3 -B scripts/test_learning_door_ops.py
+run_check "content-access-contract-120-self" python3 -B scripts/test_content_access_contract.py --require-implementation
+run_check "content-access-contract-120-py39" /usr/bin/python3 -B scripts/test_content_access_contract.py --require-implementation
+run_check "content-door-ops-120-self" python3 -B scripts/test_content_door_ops.py
+run_check "content-door-ops-120-py39" /usr/bin/python3 -B scripts/test_content_door_ops.py
+run_check "content-pipeline-120-self" python3 -B -m unittest plugin.runtime.brother.rtm.test_voice_pipeline
+run_check "content-pipeline-120-py39" /usr/bin/python3 -B -m unittest plugin.runtime.brother.rtm.test_voice_pipeline
+run_check "consumer-admission-120-self" python3 -B scripts/test_consumer_admission.py
+run_check "consumer-admission-120-py39" /usr/bin/python3 -B scripts/test_consumer_admission.py
+run_check "data-door-120-self" python3 -B scripts/test_data_door.py
+run_check "data-door-120-py39" /usr/bin/python3 -B scripts/test_data_door.py
+run_check "consumer-view-contract-120-self" python3 -B scripts/test_consumer_view_contract.py --require-implementation
+run_check "consumer-view-contract-120-py39" /usr/bin/python3 -B scripts/test_consumer_view_contract.py --require-implementation
+run_check "consumer-view-edges-120-self" python3 -B scripts/test_consumer_view_edges.py
+run_check "consumer-view-edges-120-py39" /usr/bin/python3 -B scripts/test_consumer_view_edges.py
+run_check "cut-door-contract-120-self" python3 -B scripts/test_cut_door_contract.py --require-implementation
+run_check "cut-door-contract-120-py39" /usr/bin/python3 -B scripts/test_cut_door_contract.py --require-implementation
+run_check "cut-door-edges-120-self" python3 -B scripts/test_cut_door_edges.py
+run_check "cut-door-edges-120-py39" /usr/bin/python3 -B scripts/test_cut_door_edges.py
+run_check "cut-evidence-contract-120-self" python3 -B scripts/test_cut_evidence_contract.py --require-implementation
+run_check "cut-evidence-contract-120-py39" /usr/bin/python3 -B scripts/test_cut_evidence_contract.py --require-implementation
+run_check "cut-evidence-edges-120-self" python3 -B scripts/test_cut_evidence_edges.py
+run_check "cut-evidence-edges-120-py39" /usr/bin/python3 -B scripts/test_cut_evidence_edges.py
+run_check "cut-prepare-contract-120-self" python3 -B scripts/test_cut_prepare_contract.py --require-implementation
+run_check "cut-prepare-contract-120-py39" /usr/bin/python3 -B scripts/test_cut_prepare_contract.py --require-implementation
+run_check "cut-prepare-edges-120-self" python3 -B scripts/test_cut_prepare_edges.py
+run_check "cut-prepare-edges-120-py39" /usr/bin/python3 -B scripts/test_cut_prepare_edges.py
+run_check "cut-publish-contract-120-self" python3 -B scripts/test_cut_publish_contract.py --require-implementation
+run_check "cut-publish-contract-120-py39" /usr/bin/python3 -B scripts/test_cut_publish_contract.py --require-implementation
+run_check "cut-publish-edges-120-self" python3 -B scripts/test_cut_publish_edges.py
+run_check "cut-publish-edges-120-py39" /usr/bin/python3 -B scripts/test_cut_publish_edges.py
+run_check "cut-reuse-approval-120-self" python3 -B scripts/test_cut_reuse_approval.py
+run_check "cut-reuse-approval-120-py39" /usr/bin/python3 -B scripts/test_cut_reuse_approval.py
+run_check "session-relay-contract-120-self" python3 -B scripts/test_session_relay_contract.py --require-implementation
+run_check "session-relay-contract-120-py39" /usr/bin/python3 -B scripts/test_session_relay_contract.py --require-implementation
+run_check "session-relay-edges-120-self" python3 -B scripts/test_session_relay.py
+run_check "session-relay-edges-120-py39" /usr/bin/python3 -B scripts/test_session_relay.py
+run_check "stage-ledger-120-self" python3 -B scripts/test_stage_ledger.py
+run_check "stage-ledger-120-py39" /usr/bin/python3 -B scripts/test_stage_ledger.py
+run_check "flow-report-120-self" python3 -B scripts/test_flow_report.py
+run_check "flow-report-120-py39" /usr/bin/python3 -B scripts/test_flow_report.py
 run_check "grade-build-guard-paths-115-self" python3 -B scripts/loop/test_grade_build_guard_paths_115.py
 run_check "grade-build-guard-paths-115-py39" /usr/bin/python3 -B scripts/loop/test_grade_build_guard_paths_115.py
 run_check "run-summary-115-self" python3 -B scripts/loop/test_run_summary.py
@@ -3047,6 +3178,14 @@ run_check "program-resolution" python3 -B scripts/loop/test_program_resolution.p
 run_check "program-resolution-py39" /usr/bin/python3 -B scripts/loop/test_program_resolution.py
 run_check "reach-attack-r1" python3 -B scripts/loop/test_reach_attack_r1.py
 run_check "reach-attack-r1-py39" /usr/bin/python3 -B scripts/loop/test_reach_attack_r1.py
+run_check "reach-check" python3 -B scripts/test_reach_check.py
+run_check "reach-check-py39" /usr/bin/python3 -B scripts/test_reach_check.py
+run_check "reach-inventory" python3 -B scripts/test_reach_inventory.py
+run_check "reach-inventory-py39" /usr/bin/python3 -B scripts/test_reach_inventory.py
+run_check "reach-guards" python3 -B scripts/test_reach_guards.py
+run_check "reach-guards-py39" /usr/bin/python3 -B scripts/test_reach_guards.py
+run_check "reach-out1" python3 -B scripts/test_reach.py
+run_check "reach-out1-py39" /usr/bin/python3 -B scripts/test_reach.py
 run_check "ready-contract" python3 -B scripts/loop/test_ready_contract.py
 run_check "ready-contract-py39" /usr/bin/python3 -B scripts/loop/test_ready_contract.py
 run_check "adapter-contract-self" python3 scripts/loop/test_adapter_contract.py
@@ -3111,6 +3250,10 @@ run_check "wiring-user-routes-self" python3 scripts/test_wiring_user_routes.py
 run_check "runner-pool-seats-self" python3 scripts/loop/test_runner_pool_seats.py
 run_check "cut-ready-margin-self" python3 scripts/test_cut_ready_margin.py
 run_check "runner-pool-load-self" python3 scripts/loop/test_runner_pool_load.py
+run_check "pool-room-limits-self" python3 -B scripts/test_pool_room_limits.py
+run_check "pool-room-limits-py39" /usr/bin/python3 -B scripts/test_pool_room_limits.py
+run_check "loop-admission-edges-self" python3 -B scripts/test_loop_admission_edges.py
+run_check "loop-admission-edges-py39" /usr/bin/python3 -B scripts/test_loop_admission_edges.py
 run_check "runner-pool-after-self" python3 scripts/loop/test_runner_pool_after.py
 run_check "builder-claim-self" python3 scripts/loop/test_builder_claim.py
 run_check "cut-ready-power-self" python3 scripts/test_cut_ready_power.py

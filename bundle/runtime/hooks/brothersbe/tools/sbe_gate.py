@@ -581,7 +581,7 @@ def _receipt_still_binds(d, root, full):
     """
     try:
         from brothersbe import evidence as evidence_mod
-    except ImportError:
+    except ImportError:  # sbe: allow-silent the reader is not installed; the caller reports None as NO-DATA, never PASS
         return None
     try:
         return bool(evidence_mod.commit_binding_holds(d, root, full))

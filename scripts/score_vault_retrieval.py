@@ -195,6 +195,10 @@ def _env(work, vault, sources):
         "HOME": os.path.join(work, "home"),
         "BROTHER_CONFIG_DIR": os.path.join(work, "cfg"),
         "BM_VAULT_ROOT": vault,
+        # the tool refuses two vault names that disagree: an alias inherited from the caller's shell would fail the whole
+        # run as NO-DATA, so every name the tool reads names the staged vault
+        "BROTHERMODE_VAULT_ROOT": vault,
+        "BROTHERMODE_VAULT": vault,
         "BM_FRESHNESS_STATE": os.path.join(work, "cfg", "freshness.sqlite3"),
         "BM_FRESHNESS_ROOTS": sources,
     })

@@ -18,9 +18,13 @@
 # (docs/plan/runs/2026-10-25-night-119/MEASURED-CORRECTIONS-2026-10-26.md). The line that
 # stood here from 2026-09-03 to 2026-10-29 read "well under 5 minutes (measured ~90s)": 0 of
 # those 144 runs met it, so it was a target written as a measurement. The target is still
-# 5 minutes; every landing pays the gap until the serial phase below is audited row by
-# row and the audited rows join the parallel case (the longest parallel row is brother-run
-# at 123 seconds, so the parallel phase alone fits the target).
+# 5 minutes. GATE1 (2026-11-01) audited the six slowest serial rows into the side by side
+# passes, widened the gate to the load ceiling (6 here) and split the two longest suites in
+# quarters. Measured as one pair, back to back on one checkout through the slot, queue wait
+# excluded: 1417 s at width 4 before (70 rows, one minute load 6.64 at the start, 5.86 at
+# the end) and 722 s at width 6 after (74 rows, 5.86 at the start, 9.93 at the end), 0.51
+# of the time. The target is still not met: deploy-canary (366 s) and bundle-runtime
+# (319 s) are now the critical path.
 
 cd "$(dirname "$0")/.." || exit 1
 
@@ -31,7 +35,20 @@ cd "$(dirname "$0")/.." || exit 1
 # one-at-a-time order. A caller that names shared state (a Jev, config or Codex
 # directory, a reservation path or a refusal log) gets 1, because checks side by
 # side would share it.
-jobs=${REQUIRED_FAST_JOBS:-4}
+# GATE1 (2026-11-01): the default width is no longer a fixed 4 but the load
+# ceiling scripts/heavy_slot.py admits under (every core but
+# resource_gate.CORE_RESERVE, 6 on this 8 core machine; BROTHER_LOAD_CEILING
+# may lower it), so one controller decides both when the gate starts and how
+# wide it runs. A tree without heavy_slot.py, or a ceiling that cannot be
+# read, falls back to the old 4 and says so.
+if [ -n "${REQUIRED_FAST_JOBS:-}" ]; then
+  jobs=$REQUIRED_FAST_JOBS
+elif [ -f scripts/heavy_slot.py ] && jobs=$(python3 -B -c 'import os, sys; sys.path.insert(0, "scripts"); import heavy_slot; print(max(1, int(heavy_slot.load_ceiling(os.environ))))' 2>/dev/null) && [ -n "$jobs" ]; then
+  :
+else
+  echo "required-fast: no load ceiling read from scripts/heavy_slot.py; width 4" >&2
+  jobs=4
+fi
 case "$jobs" in
   ''|0*|*[!0-9]*) echo "NO-DATA: REQUIRED_FAST_JOBS must be a positive integer" >&2; exit 2 ;;
 esac
@@ -53,9 +70,54 @@ fi
 # times slower than alone. Re-enter this gate holding one shared machine slot.
 # A fixture copy without heavy_slot.py beside it, a nested run, or
 # BROTHER_HEAVY_SLOT=off runs straight through.
+# GATE1 (orchestrator decision 2026-11-01). That day three whole gates ran at
+# once on one machine, for two reasons, both in the slot log
+# (~/.claude/evidence/local-slots/waits.jsonl): five waits ended "unqueued" after
+# heavy_slot's 3600 s bound, and five admissions read "of 4 slots" (14h29, three
+# within 17 s at 15h44), a caller without LOCAL_SLOTS=1 taking slot 1 to 3 while
+# a gate held slot 0. So a whole gate now:
+#  - runs ALONE: BROTHER_HEAVY_SLOT_EXCLUSIVE=1 holds heavy_slot's machine lock
+#    exclusively, so no run of any slot count starts beside it, whatever
+#    LOCAL_SLOTS its caller set; it takes one slot at weight 1, since the lock,
+#    not the slot count, is what keeps it alone;
+#  - waits for that with NO bound and never runs unqueued: a run handed
+#    BROTHER_HEAVY_SLOT_HELD=unqueued, or a HELD whose BROTHER_HEAVY_SLOT_HOLDER
+#    pid has ended, refuses with NO-DATA;
+#  - goes STALE after GATE_STALE_S, 3 times the longest whole gate in the ledger
+#    (1994 s): its run ends as NO-DATA, never a pass, the slot frees, and the
+#    event names its pid and age. A slot holder that starts a gate without HELD
+#    therefore waits at worst until its own deadline, then both read NO-DATA.
+#    REQUIRED_FAST_STALE_S may lower it (the test seam), never raise it.
+# BROTHER_HEAVY_SLOT=off still runs straight through: test suites drive the real
+# gate with it, and no production caller sets it.
+GATE_STALE_S=5982
+stale_s=$GATE_STALE_S
+case "${REQUIRED_FAST_STALE_S:-}" in
+  ''|0*|*[!0-9]*) ;;
+  *) [ "$REQUIRED_FAST_STALE_S" -ge "$GATE_STALE_S" ] || stale_s=$REQUIRED_FAST_STALE_S ;;
+esac
+# The two refusals bind only where the slot is in use (heavy_slot.py beside this
+# file and BROTHER_HEAVY_SLOT not off), so a stub fixture tree and an off run go
+# straight through. Whoever handed it down, a gate given HELD=unqueued would run
+# unqueued, so it refuses: under a check_all.sh battery that waited out its bound,
+# a nested gate on a real tree reads NO-DATA (fails closed) instead of running.
+if [ "${BROTHER_HEAVY_SLOT:-on}" != "off" ] && [ -f scripts/heavy_slot.py ]; then
+  if [ "${BROTHER_HEAVY_SLOT_HELD:-}" = unqueued ]; then
+    echo "NO-DATA: this whole gate holds no machine slot (BROTHER_HEAVY_SLOT_HELD=unqueued); it never runs unqueued" >&2
+    exit 2
+  fi
+  if [ -n "${BROTHER_HEAVY_SLOT_HELD:-}" ] && [ -n "${BROTHER_HEAVY_SLOT_HOLDER:-}" ] \
+     && ! kill -0 "$BROTHER_HEAVY_SLOT_HOLDER" 2>/dev/null; then
+    echo "NO-DATA: BROTHER_HEAVY_SLOT_HELD names holder pid $BROTHER_HEAVY_SLOT_HOLDER, which has ended; this whole gate holds no slot" >&2
+    exit 2
+  fi
+fi
 if [ -z "${BROTHER_HEAVY_SLOT_HELD:-}" ] && [ "${BROTHER_HEAVY_SLOT:-on}" != "off" ] \
    && [ -f scripts/heavy_slot.py ]; then
-  BROTHER_HEAVY_SLOT_WEIGHT=$jobs; export BROTHER_HEAVY_SLOT_WEIGHT
+  BROTHER_HEAVY_SLOT_WEIGHT=1 BROTHER_HEAVY_SLOT_EXCLUSIVE=1
+  BROTHER_HEAVY_SLOT_WAIT=inf BROTHER_HEAVY_SLOT_DEADLINE=$stale_s
+  export BROTHER_HEAVY_SLOT_WEIGHT BROTHER_HEAVY_SLOT_EXCLUSIVE \
+    BROTHER_HEAVY_SLOT_WAIT BROTHER_HEAVY_SLOT_DEADLINE
   exec python3 scripts/heavy_slot.py sh "scripts/required_fast.sh" "$@"
 fi
 
@@ -65,6 +127,10 @@ fi
 # key is now the WORKTREE plus the pid, so two lanes can neither write nor
 # read each other's file.
 worktree_key="$(basename "$(pwd)")-$$"
+# GATE1: where each check's full output is kept, read once here, because every
+# check running side by side gets its own TMPDIR (removed with the pool) and a
+# kept file named on a summary line must outlive the run.
+keep_dir="${TMPDIR:-/tmp}"
 
 pass=0; fail=0; nodata=0
 failed_names=""
@@ -139,6 +205,15 @@ whole_gate_tree=""
 if [ -f scripts/gate_ledger.py ]; then
   whole_gate_tree="$(python3 scripts/gate_ledger.py --whole-gate-snapshot)" || whole_gate_tree=""
 fi
+# STAB1.c: a refused gate is on record too, beside the PASS records, in the same
+# shared file and schema (status FAIL, exit_code, the start tree, refused_rows).
+# Only a PASS record ever lets anything through; the writer never changes this
+# gate's own exit code. $1 the refusing names, $2 the gate's exit code.
+whole_gate_fail() {
+  [ -f scripts/gate_ledger.py ] || return 0
+  python3 scripts/gate_ledger.py --whole-gate-fail --refused "$1" --exit-code "$2" --tree "$whole_gate_tree" \
+    --started "$whole_gate_started" --worktree-key "$worktree_key"
+}
 
 # D4.d REQ-GL. Milliseconds for shell timing. POSIX sh carries no monotonic
 # clock, so this reads the wall clock at whatever resolution the platform
@@ -275,7 +350,7 @@ PY
        # handle instead of rerunning the check. The verdict above is already
        # captured, so a keep that cannot be written loses only the handle,
        # never the PASS. The handle is named, never printed.
-       pass_keep="${TMPDIR:-/tmp}/required-fast-pass-$name-$worktree_key.txt"
+       pass_keep="$keep_dir/required-fast-pass-$name-$worktree_key.txt"
        if printf '%s' "$out" > "$pass_keep"; then
          last="$last  [full: $pass_keep]"
        else
@@ -285,7 +360,7 @@ PY
     2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name" ;;
     *) fail=$((fail+1));   verdict="FAIL   "; failed_names="$failed_names $name"
        # CAPTURE EVERYTHING, READ A SLICE (same estate lesson as check_all.sh).
-       keep="${TMPDIR:-/tmp}/required-fast-fail-$name-$worktree_key.txt"
+       keep="$keep_dir/required-fast-fail-$name-$worktree_key.txt"
        printf '%s\n' "$out" > "$keep" || exit 1
        last="$last  [full: $keep]"
        ;;
@@ -346,26 +421,40 @@ drain_checks() {
   while [ "$running" -gt 0 ]; do reap_one; done
 }
 
-# Two passes over the list below: the audited checks start side by side in the
-# first, everything else runs one at a time in the second, after the first has
-# drained. A check nobody audited for shared state is serial by default.
-# loop-wiring joined 2026-09-26: it only reads scripts/loop and the installed
-# copies in ~/.claude/bin and makes one private temp folder (24 s alone).
+# Three passes over the list below: the audited checks start side by side in
+# the first two, everything else runs one at a time in the third, after the
+# first two have drained. A check nobody audited for shared state is serial by
+# default. loop-wiring joined 2026-09-26: it only reads scripts/loop and the
+# installed copies in ~/.claude/bin and makes one private temp folder (24 s alone).
+# GATE1 (2026-11-01), six serial rows audited for shared state and joined: each
+# keeps to its own scratch and none writes this checkout, binds a port or uses
+# the real HOME. supply-chain-gate reads `git ls-files` and the files it lists;
+# integrate and plugin-runtime-tests-fast build temp repositories and an empty
+# HOME; deploy-canary deploys into its own HOME and TMPDIR under
+# ~/.claude/brother-scratch/run-f47-*, copying committed blobs, never the
+# working tree; bm-hookperf and bm-hookbench measure inside bm_hookbench.py's
+# Sandbox and assert no new entry in products/brothermode while they run, so a
+# neighbour writing there turns them red (a false FAIL that blocks), never a
+# false PASS. The longest rows (60 s or more in the 2026-11-01 train gate)
+# start in the first pass, so the pool never ends on one long row alone.
 run_check() {
   if [ "$jobs" -eq 1 ]; then
-    [ "$phase" != parallel ] || check_now "$@"
+    [ "$phase" != first ] || check_now "$@"
     return
   fi
   case "$1" in
-    version-truth|bundle-runtime|native-evidence|mobile-workflow|\
-    mobile-design|surface|brother-run|brother-run-2|worktree-lane|\
+    brother-run|brother-run-2|brother-run-3|brother-run-4|export-public|export-public-2|\
+    export-public-3|export-public-4|bundle-runtime|\
+    readme-honesty|deploy-canary|loop-wiring|bm-hookbench) check_phase=first ;;
+    version-truth|native-evidence|mobile-workflow|\
+    mobile-design|surface|worktree-lane|\
     packs|no-data-semantics|no-data-class-lints|receipt-door|receipt-contract-v1|\
-    brothermode-verify-install|brothersbe-verify-install|readme-honesty|charter-paths|\
-    export-public|export-public-2|release-cut|cursor-plugin-self|cursor-hook-run-self|\
+    brothermode-verify-install|brothersbe-verify-install|charter-paths|\
+    release-cut|cursor-plugin-self|cursor-hook-run-self|\
     client-parity|readiness-gate|key-components|\
     intake-screen|board-status|handover-ceremony|closing-ceremony|\
     closing-ceremony-real|doc-assurance|system-inventory|evidence-obligation|\
-    loop-wiring) check_phase=parallel ;;
+    supply-chain-gate|bm-hookperf|plugin-runtime-tests-fast|integrate) check_phase=parallel ;;
     *) check_phase=serial ;;
   esac
   [ "$phase" = "$check_phase" ] || return 0
@@ -377,6 +466,10 @@ run_check() {
   (
     trap - 0
     codes_file="$pool/$1.code"
+    # GATE1: a private TMPDIR per check, removed with the pool.
+    TMPDIR="$pool/$1.tmp"
+    export TMPDIR
+    mkdir "$TMPDIR" || exit 1
     BROTHER_JEV_STATE_DIR="$pool/$1.jev"
     export BROTHER_JEV_STATE_DIR
     # ACC2.4: the engine's machine reservation and load refusal log, private
@@ -392,10 +485,50 @@ run_check() {
   running=$((running+1))
 }
 
+# STAB1.c: the cheap refusals first. Three checks that take seconds and refuse
+# the classes measured to waste a whole battery: a changed test red under an
+# empty HOME (the hermetic check, through pre_push_gate.py so this gate and the
+# push hook judge it the same way), a scripts/loop file unit BL does not own,
+# and a swallowed exception in scripts/loop. A refusal stops the gate here,
+# naming the check, with a FAIL record and before any battery row runs. Exit 2
+# (or a check this tree does not carry) is NO-DATA: said, never a refusal, and
+# the battery still runs. The last two run again as battery rows.
+cheap_refused=""
+cheap_check() {
+  cheap_name="$1"; cheap_file="$2"; shift 2
+  if [ -f "$cheap_file" ]; then
+    cheap_out="$("$@" < /dev/null 2>&1)"
+    cheap_code=$?
+  else
+    cheap_out="$cheap_file is not in this tree, so it judged nothing"
+    cheap_code=2
+  fi
+  case "$cheap_code" in
+    0) echo "cheap: PASS $cheap_name" ;;
+    2) echo "cheap: NO-DATA $cheap_name (exit 2, not a pass): $(printf '%s\n' "$cheap_out" | tail -n 1 | cut -c1-160)" ;;
+    *) echo "cheap: REFUSED by $cheap_name (exit $cheap_code), before the battery"
+       printf '%s\n' "$cheap_out" | tail -n 8
+       cheap_refused="$cheap_refused $cheap_name" ;;
+  esac
+}
+cheap_check "hermetic" scripts/pre_push_gate.py python3 scripts/pre_push_gate.py --hermetic-only
+cheap_check "loop-owns-complete" scripts/test_bl_owns_complete.py python3 scripts/test_bl_owns_complete.py
+cheap_check "loop-silent-failure" scripts/test_loop_report_run.py python3 scripts/test_loop_report_run.py Lint
+if [ -n "$cheap_refused" ]; then
+  summary_printed=1
+  echo
+  echo "REFUSED before the battery by:$cheap_refused  (no battery row ran)"
+  whole_gate_fail "${cheap_refused# }" 1
+  rm -rf "$pool"
+  rm -f "$codes_file"
+  [ -z "$order_dir" ] || rm -rf "$order_dir"
+  exit 1
+fi
+
 echo "Brother: required-fast, the pre-merge contract"
 echo
 
-for phase in parallel serial; do
+for phase in first parallel serial; do
 [ "$phase" != serial ] || drain_checks
 
 run_check "version-truth"       python3 scripts/test_version_truth.py
@@ -403,10 +536,18 @@ run_check "version-truth"       python3 scripts/test_version_truth.py
 # alone, so they start at once instead of 7th and 20th; otherwise the pool
 # ends on one long check running by itself. version-truth stays first: it
 # is the anchor test_required_fast.py cuts the check list on, and takes 0 s.
-run_check "brother-run"         env BROTHER_TEST_SHARD=1/2 python3 scripts/test_brother_run.py -v
-run_check "export-public"       env BROTHER_TEST_SHARD=1/2 python3 scripts/test_export_public.py -v
-run_check "brother-run-2"       env BROTHER_TEST_SHARD=2/2 python3 scripts/test_brother_run.py -v
-run_check "export-public-2"     env BROTHER_TEST_SHARD=2/2 python3 scripts/test_export_public.py -v
+# GATE1 (2026-11-01): quarters, not halves. In the 2026-11-01 train gate the
+# halves of brother-run took 321 s and 144 s (the slow classes fell in one
+# half), the longest row of the gate; suite_shard deals classes round robin,
+# so each quarter takes half of a half's classes.
+run_check "brother-run"          env BROTHER_TEST_SHARD=1/4 python3 scripts/test_brother_run.py -v
+run_check "export-public"        env BROTHER_TEST_SHARD=1/4 python3 scripts/test_export_public.py -v
+run_check "brother-run-2"        env BROTHER_TEST_SHARD=2/4 python3 scripts/test_brother_run.py -v
+run_check "export-public-2"      env BROTHER_TEST_SHARD=2/4 python3 scripts/test_export_public.py -v
+run_check "brother-run-3"        env BROTHER_TEST_SHARD=3/4 python3 scripts/test_brother_run.py -v
+run_check "export-public-3"      env BROTHER_TEST_SHARD=3/4 python3 scripts/test_export_public.py -v
+run_check "brother-run-4"        env BROTHER_TEST_SHARD=4/4 python3 scripts/test_brother_run.py -v
+run_check "export-public-4"      env BROTHER_TEST_SHARD=4/4 python3 scripts/test_export_public.py -v
 run_check "supply-chain-gate"   python3 scripts/supply_chain_gate.py --offline --repo .
 run_check "bundle-runtime"      python3 scripts/test_bundle_runtime.py -v
 run_check "native-evidence"     python3 scripts/test_native_evidence.py -v
@@ -414,8 +555,9 @@ run_check "mobile-workflow" python3 scripts/test_mobile_workflow.py -v
 run_check "mobile-design" python3 scripts/test_mobile_design.py -v
 run_check "surface"             /usr/bin/python3 -m unittest tests/test_surface.py
 run_check "bm-clock-guard"      python3 -B -m unittest products.brothermode.tools.test_bm_clock_guard products.brothermode.tools.test_bm_clock_guard_m12 products.brothermode.tools.test_bm_clock_guard_m13 products.brothermode.tools.test_bm_clock_guard_m14
-# LAT0H (1.1.8, D-13): the hook cost suites sat red 27 days because no gate ran them; serial on purpose (hookperf
-# asserts the run wrote nothing into this repository), pinned in scripts/test_required_fast_rows.py REQUIRED.
+# LAT0H (1.1.8, D-13): the hook cost suites sat red 27 days because no gate ran them; pinned in
+# scripts/test_required_fast_rows.py REQUIRED. Side by side since GATE1 (2026-11-01): both assert the run wrote
+# nothing into products/brothermode, which a neighbour's write would turn red, never green (run_check above).
 run_check "bm-hookperf"         python3 -B products/brothermode/tools/test_bm_hookperf.py
 run_check "bm-hookbench"        python3 -B products/brothermode/tools/test_bm_hookbench.py
 run_check "hook-latency"        python3 -B scripts/test_hook_latency.py
@@ -598,6 +740,9 @@ fi
 run_check "daybook"             python3 scripts/test_daybook.py
 run_check "handover-ceremony"   python3 scripts/test_handover_ceremony.py
 run_check "closing-ceremony"    python3 scripts/test_close_ceremony_check.py
+# HO1 (owner order 2026-10-31): the real row below judges DECLARED handover
+# records (scripts/handover_record.py emit) plus the whole root's private
+# terms; a directory that is not a close is ignored by name, never judged.
 # F2 (root-cause fix, 2026-09-14 adversarial sweep): the FIXTURE suite above
 # only proves close_ceremony_check.py's own logic against hand-built zips; a
 # real handover pack's zip shape (member paths prefixed with the pack's own
@@ -655,9 +800,13 @@ run_check "wiring-user-routes"  python3 scripts/wiring_audit.py --user-routes --
 # G11.a (L30): the deploy's own proof, here and not only in check_all.sh. On
 # 2026-10-14 and 15 a small rule file move left its neighbour suites green and
 # turned 8 of 12 cases of this canary red, found only when the whole gate ran
-# later. Serial: it builds scratch HOMEs and deploys into them, and nobody has
-# audited it for running side by side.
+# later. Side by side since GATE1 (2026-11-01): its scratch HOME and TMPDIR are
+# its own and it deploys committed blobs, never this working tree (run_check above).
 run_check "deploy-canary"        python3 -B scripts/test_deploy_canary.py -v
+# STAB1.c (stability amendment, audit J6): the OpenRouter bridge's own tests in the required set. No whole gate
+# ran them before, so a bridge change could land unchecked. The owner confirmed the row and the kernel gaining
+# scripts/loop/test_or_ask.py on 2026-11-01 ("Yes, add it").
+run_check "or-ask-self"          python3 -B scripts/loop/test_or_ask.py
 # The one plugin submission readiness, static bars only (docs/plan/specs/OP1.md
 # 5.5, OP1.f): no host binary, about 2 s. Exit 0 only when all six bars PASS,
 # 1 on any FAIL, 2 when a bar is NO-DATA or missing. Until the 1.1.0 cut
@@ -782,6 +931,12 @@ obligation=$?
 if [ -f scripts/gate_ledger.py ]; then
   python3 scripts/gate_ledger.py --whole-gate-record --codes "$codes_file" --tree "$whole_gate_tree" \
     --obligation "$obligation" --started "$whole_gate_started" --worktree-key "$worktree_key"
+fi
+# STAB1.c: a refused battery (a FAIL row, or the obligation step) is recorded as FAIL.
+if [ "$fail" -ne 0 ] || [ "$obligation" -ne 0 ]; then
+  refused_by="${failed_names# }"
+  [ "$obligation" -eq 0 ] || refused_by="${refused_by:+$refused_by }obligation-transition"
+  whole_gate_fail "$refused_by" 1
 fi
 rm -f "$codes_file"
 [ "$fail" -eq 0 ] || exit 1

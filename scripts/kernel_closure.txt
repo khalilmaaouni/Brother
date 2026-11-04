@@ -41,6 +41,7 @@ scripts/codex_smoke.py
 scripts/coe_outside_gate.py
 scripts/continuity.py
 scripts/contract_check.py
+scripts/credit_marks.py
 scripts/cursor_plugin_install.py
 scripts/cut.py
 scripts/cut_driver.py
@@ -74,6 +75,7 @@ scripts/git_location_guard.py
 scripts/graph_loop.py
 scripts/handover_ceremony.py
 scripts/handover_pack_scan.py
+scripts/handover_record.py
 scripts/heavy_slot.py
 scripts/hermetic_test_check.py
 scripts/hermetic_worker_env.py
@@ -138,6 +140,7 @@ scripts/loop/self_check.py
 scripts/loop/sibling_new.py
 scripts/loop/spec_check.py
 scripts/loop/stage_log.py
+scripts/loop/test_or_ask.py
 scripts/loop/tool_stamp.py
 scripts/loop/unit_ledger.py
 scripts/loop/worker_mix.py

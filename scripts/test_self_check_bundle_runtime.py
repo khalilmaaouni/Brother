@@ -119,7 +119,7 @@ class CommitHook(unittest.TestCase):
                         GIT_CONFIG_NOSYSTEM="1", PYTHONDONTWRITEBYTECODE="1", C3_COUNTER=self.counter)
         for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
             self.env.pop(k, None)
-        for name in ("self_check_staged.py", "private_terms_scan.py"):
+        for name in ("self_check_staged.py", "private_terms_scan.py", "credit_marks.py"):
             shutil.copy(os.path.join(HERE, name), os.path.join(self.repo, "scripts", name))
         self.write("scripts/bundle_runtime.py", GOOD_GEN)
         self.write("scripts/eng_alpha.py", '"""eng_alpha: the one closure file of this fixture."""\n')

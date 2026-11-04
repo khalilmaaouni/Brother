@@ -47,12 +47,17 @@ class FindConsumers(unittest.TestCase):
 
     def test_the_symlinked_spelling_of_the_path_also_counts(self):
         """On this machine /tmp is a symlink to /private/tmp, so a consumer
-        usually names the spelling it was given, not the canonical one."""
-        canonical = os.path.realpath(self.target)
-        self.assertNotEqual(canonical, self.target,
+        usually names the spelling it was given, not the canonical one. The
+        symlinked spelling is made here (not read off the temp root, which is
+        already canonical under a run with its own temp folder)."""
+        alias = os.path.join(self.root, "lane-alias")
+        os.symlink(self.target, alias)
+        canonical = os.path.realpath(alias)
+        self.assertNotEqual(canonical, alias,
                             "this case needs a target whose path is a symlink")
-        self.write("job.sh", "cd %s && ./run.sh\n" % self.target)
-        self.assertEqual(self.kinds(), ["path"])
+        self.write("job.sh", "cd %s && ./run.sh\n" % alias)
+        found = D.find_consumers(alias, [self.other])
+        self.assertEqual(sorted({k for k, _, _ in found}), ["path"])
 
     def test_a_python_import_of_a_module_the_target_provides(self):
         self.write("consumer.py", "import helper\nhelper.x()\n")

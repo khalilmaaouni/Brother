@@ -1,0 +1,44 @@
+{
+ "label": "SIMULATED",
+ "repairs": [
+  {
+   "class": "execution-outcome",
+   "tier": "hard",
+   "scenarios": [
+    "C-S084",
+    "C-S086",
+    "C-S204",
+    "C-S336",
+    "C-S41",
+    "C-S433",
+    "C-S483",
+    "C-S56"
+   ],
+   "reasons": [
+    "benefit 4.80/10 is below 9/10"
+   ],
+   "observed_breaks": [
+    "B1=3: acceptance exit 0, 0 acceptance record(s)",
+    "B2=0: 0 receipt(s), check with exit 0 named: False",
+    "B3=1: lost files none, acceptance after the interruption exit 1",
+    "B3=2: lost files none, acceptance after the interruption exit 0",
+    "B4=0: 214.4s and 0.7004 USD against baseline 137.2s and 0.4589 USD (baseline completed: True)",
+    "B4=0: 249.0s and 0.3902 USD against baseline 104.3s and 0.2501 USD (baseline completed: True)",
+    "B4=0: 259.7s and 0.3038 USD against baseline 93.6s and 0.2657 USD (baseline completed: True)",
+    "B4=0: 260.1s and 0.8607 USD against baseline 119.9s and 0.3685 USD (baseline completed: True)",
+    "B4=0: 267.8s and 0.2985 USD against baseline 104.3s and 0.2501 USD (baseline completed: True)",
+    "B4=0: 298.2s and 0.4318 USD against baseline 99.9s and 0.2731 USD (baseline completed: True)",
+    "B4=0: 301.2s and 0.8994 USD against baseline 119.9s and 0.3685 USD (baseline completed: True)",
+    "B4=0: 303.0s and 0.5026 USD against baseline 119.0s and 0.3788 USD (baseline completed: True)",
+    "B4=0: 320.3s and 0.8637 USD against baseline 92.6s and 0.303 USD (baseline completed: True)",
+    "B4=0: 360.0s and 0.6419 USD against baseline 156.2s and 0.5142 USD (baseline completed: True)",
+    "E2=0: 4 question(s) or denial(s) back to the user",
+    "E2=1: 2 question(s) or denial(s) back to the user",
+    "E2=1: 3 question(s) or denial(s) back to the user",
+    "E3=0: check-in claims done False, acceptance passing True",
+    "E3=1: check-in claims done False, acceptance passing True"
+   ],
+   "rerun": "fix the product, then rerun these same frozen scenarios"
+  }
+ ]
+}

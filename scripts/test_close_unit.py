@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # children alike.
 os.environ.pop("BROTHER_WBS", None)
 import close_unit as C  # noqa: E402
+import export_public  # noqa: E402
 
 DONE_CHECK = "python3 -B -m unittest plugin.runtime.brother.core.test_or_fanout"
 
@@ -543,6 +544,553 @@ class TheEntryPointSaysWhyAndLeavesRetiredUnitsAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("RETIRED", r.stdout)
         self.assertEqual(state, "RETIRED")
+
+
+SCRATCH = os.path.join(export_public.scratch_root(), "stab1f")   # fixtures live under the one scratch root, never in the system temp folder
+SKIP_MODULE = ("import unittest\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n\n"
+               "    def test_b(self):\n        self.skipTest(%r)\n")
+
+
+class SkippedTestAsksOnce(unittest.TestCase):
+    """STAB1.f. A done check that exits 0 with a skipped test used to print a red NOT CLOSED on every pass, forever, and name
+    nothing. The closer now names the skipped test with its reason, writes ONE NEEDS_INPUT record, and a second pass over the
+    same skip writes nothing and does not go red. Driven at the entry point, the way the loop calls it (a subprocess in a
+    repository holding the plan), with the records in a fixture evidence root."""
+
+    def setUp(self):
+        os.makedirs(SCRATCH, exist_ok=True)
+        self.root = __import__("tempfile").mkdtemp(prefix="asks-once-", dir=SCRATCH)
+        self.addCleanup(__import__("shutil").rmtree, self.root, True)
+        self.ev = os.path.join(self.root, "evidence")
+
+    def tree(self, name, units, files=(), plan="BROTHER-1.1.0-LAUNCH-WBS.json"):
+        """A committed repository holding the plan `units` and `files`; returns its directory."""
+        import json
+        d = os.path.join(self.root, name)
+        p = os.path.join(d, "docs", "plan", plan)
+        os.makedirs(os.path.dirname(p))
+        with open(p, "w") as fh:
+            json.dump({"units": units}, fh)
+        for fname, body in files:
+            with open(os.path.join(d, fname), "w") as fh:
+                fh.write(body)
+        make_repo(d)
+        return d
+
+    def closer(self, d, *args, ev=None, wbs=None):
+        import subprocess
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_WBS"}
+        env.update(HOME=d, TMPDIR=d, BROTHER_EVIDENCE=ev or self.ev)
+        if wbs:
+            env["BROTHER_WBS"] = wbs
+        r = subprocess.run([sys.executable, "-B", C.__file__] + list(args), cwd=d, env=env, capture_output=True, text=True, timeout=120)
+        return r.returncode, r.stdout + r.stderr
+
+    def records(self, ev=None):
+        import json
+        try:
+            with open(os.path.join(ev or self.ev, "brother-needs-input.jsonl"), encoding="utf-8") as fh:
+                return [json.loads(l) for l in fh if l.strip()]
+        except FileNotFoundError:
+            return []
+
+    def skip_tree(self, name, reason):
+        unit = {"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": "A.1 landed initial.",
+                "done_check": "python3 -B -m unittest skipmod"}
+        return self.tree(name, [unit], [("skipmod.py", SKIP_MODULE % reason)])
+
+    def test_the_first_pass_names_the_skipped_test_and_writes_one_record(self):
+        require_sandbox(self)
+        d = self.skip_tree("one", "needs the owner key")
+        code, out = self.closer(d)
+        self.assertIn("NEEDS_INPUT", out)
+        self.assertIn("skipmod.T.test_b", out)
+        self.assertIn("needs the owner key", out)
+        self.assertNotIn("NOT CLOSED", out)
+        self.assertEqual(code, 1, out)
+        recs = self.records()
+        self.assertEqual([(r["kind"], r["unit"]) for r in recs], [("skip", "A")], recs)
+        self.assertEqual(recs[0]["tests"], [{"test": "skipmod.T.test_b", "reason": "needs the owner key"}])
+
+    def test_a_second_pass_over_the_same_skip_writes_nothing_and_is_not_red(self):
+        require_sandbox(self)
+        d = self.skip_tree("two", "needs the owner key")
+        self.closer(d)
+        before = self.records()
+        code, out = self.closer(d)
+        self.assertEqual(self.records(), before, "the second pass wrote a second record")
+        self.assertIn("NEEDS_INPUT", out)
+        self.assertIn("already asked", out)
+        self.assertNotIn("NOT CLOSED", out)
+        self.assertEqual(len(before), 1)
+
+    def test_a_different_skip_is_a_new_ask(self):
+        require_sandbox(self)
+        self.closer(self.skip_tree("first", "needs the owner key"))
+        self.closer(self.skip_tree("second", "needs a different thing"))
+        self.assertEqual(len(self.records()), 2)
+
+    def test_an_evidence_root_that_cannot_be_written_still_asks_and_still_closes_nothing(self):
+        require_sandbox(self)
+        d = self.skip_tree("blocked", "needs the owner key")
+        os.makedirs(self.ev)
+        bad = os.path.join(self.ev, "not-a-directory")
+        open(bad, "w").close()
+        code, out = self.closer(d, ev=bad)
+        self.assertIn("NEEDS_INPUT", out)
+        self.assertIn("unrecorded", out)
+        self.assertNotIn("UNIT DONE", out)
+        self.assertEqual(code, 1, out)
+
+    # NEEDFACT: one fixture per condition, so only one guard can refuse each
+    def needfact(self, name, runs, notes=None, evidence=""):
+        """A plan whose only sub unit A.1 has `evidence` (not landed by default), with run folders `runs`
+        [(name, STATUS text, diagnosed, age seconds)]."""
+        d = self.tree(name, [{"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": evidence, "done_check": "python3 -B check.py"}])
+        base = __import__("time").time()
+        for rname, status, diagnosed, age in runs:
+            rd = os.path.join(self.ev, "unit-runs", rname)
+            os.makedirs(rd)
+            with open(os.path.join(rd, "STATUS"), "w") as fh:
+                fh.write(status + "\n")
+            if diagnosed:
+                open(os.path.join(rd, "DIAGNOSED"), "w").close()
+            os.utime(rd, (base - age, base - age))
+        if notes:
+            os.makedirs(os.path.join(self.ev, "diag-notes"))
+            with open(os.path.join(self.ev, "diag-notes", "A.txt"), "w") as fh:
+                fh.write(notes)
+        return d
+
+    def test_a_diagnosed_exhausted_sub_unit_escalates_once_with_its_note_path(self):
+        d = self.needfact("nf", [("A.1-101010", "EXHAUSTED after 5", True, 60)], notes="A.1: VERIFIED FACT: x\n")
+        code, out = self.closer(d)
+        note = os.path.join(self.ev, "diag-notes", "A.txt")
+        self.assertIn("A     NEEDS_INPUT: A.1 needs a fact", out)
+        self.assertIn(note, out)
+        self.assertEqual([r["kind"] for r in self.records()], ["needfact"])
+        code2, out2 = self.closer(d)
+        self.assertNotIn("NEEDS_INPUT", out2, "the second pass asked again")
+        self.assertEqual(len(self.records()), 1)
+
+    def test_a_sub_unit_never_sent_to_the_diagnostician_is_not_escalated(self):
+        d = self.needfact("nf-undiagnosed", [("A.1-101010", "EXHAUSTED after 5", False, 60)])
+        self.assertNotIn("NEEDS_INPUT", self.closer(d)[1])
+        self.assertEqual(self.records(), [])
+
+    def test_a_newer_run_that_is_not_stuck_withdraws_the_escalation(self):
+        d = self.needfact("nf-newer", [("A.1-101010", "EXHAUSTED after 5", True, 600), ("A.1-111111", "READY /b", False, 60)])
+        self.assertNotIn("NEEDS_INPUT", self.closer(d)[1])
+        self.assertEqual(self.records(), [])
+
+    def test_a_diagnosed_run_that_is_not_stuck_is_not_escalated(self):
+        d = self.needfact("nf-ready", [("A.1-101010", "READY /b", True, 60)])
+        self.assertNotIn("NEEDS_INPUT", self.closer(d)[1])
+        self.assertEqual(self.records(), [])
+
+    def test_a_landed_sub_unit_is_not_escalated(self):
+        d = self.needfact("nf-landed", [("A.1-101010", "EXHAUSTED after 5", True, 60)], evidence="A.1 landed today.")
+        self.assertNotIn("NEEDS_INPUT", self.closer(d)[1])
+        self.assertEqual(self.records(), [])
+
+    def test_a_dry_run_asks_nobody(self):
+        d = self.needfact("nf-dry", [("A.1-101010", "WITHHELD", True, 60)])
+        self.assertNotIn("NEEDS_INPUT", self.closer(d, "--dry")[1])
+        self.assertEqual(self.records(), [])
+
+    # review round 1 (STAB1.f): one fixture per finding
+    def test_a_skip_reason_cannot_forge_a_closure_line(self):
+        """M1: merge_window.sh reads ' DONE: ' anywhere in a unit's line as a closure; a reason is a test author's text."""
+        require_sandbox(self)
+        d = self.skip_tree("spoof", "x DONE: y " + "z" * 300)
+        code, out = self.closer(d)
+        line = next(l for l in out.splitlines() if "NEEDS_INPUT" in l)
+        self.assertNotIn(" DONE: ", line)
+        self.assertLess(len(line), 400, line)
+        self.assertIn("x DONE: y", self.records()[0]["tests"][0]["reason"], "the record keeps the whole reason")
+
+    def test_shown_strips_control_characters_and_the_done_token(self):
+        self.assertEqual(C.shown("a\nb\x1b[31m c\x00 DONE: d"), "a b [31m c DONE- d")
+        self.assertEqual(len(C.shown("q" * 1000)), C.SHOWN_REASON)
+        hostile = C.shown("a\u2028b\x85c\u2029d\x0be\x0cf\x1cg")   # Unicode and C1 line breaks, vertical tab, form feed, separators
+        self.assertEqual(len(hostile.splitlines()), 1, repr(hostile))
+        self.assertEqual(C.shown(None), "None")
+        self.assertEqual(C.shown(""), "")
+
+    def test_a_needfact_line_cannot_be_forged_by_a_plan_or_folder_name(self):
+        """M1 for the NEEDFACT line: the sub unit id comes from the plan, the run name from a folder; neither may carry ' DONE: '."""
+        sub = "A.1 DONE: z"
+        d = self.tree("nf-forge", [{"id": "A", "state": "PARTIAL", "sub_units": [sub], "evidence": "", "done_check": "python3 -B check.py"}])
+        run = os.path.join(self.ev, "unit-runs", sub + "-101010")
+        os.makedirs(run)
+        with open(os.path.join(run, "STATUS"), "w") as fh:
+            fh.write("EXHAUSTED\n")
+        open(os.path.join(run, "DIAGNOSED"), "w").close()
+        code, out = self.closer(d, "--needfact")
+        line = next(l for l in out.splitlines() if "NEEDS_INPUT" in l)
+        self.assertNotIn(" DONE: ", line)
+
+    def test_a_status_file_with_foreign_bytes_still_reads(self):
+        d = self.needfact("nf-status-bytes", [("A.1-101010", "EXHAUSTED", True, 60)])
+        with open(os.path.join(self.ev, "unit-runs", "A.1-101010", "STATUS"), "wb") as fh:
+            fh.write(b"EXHAUSTED \xff\xfe after 5\n")
+        code, out = self.closer(d, "--needfact")
+        self.assertIn("NEEDS_INPUT: A.1 needs a fact", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_a_plan_of_the_wrong_shape_asks_nobody_and_does_not_crash_the_sweep(self):
+        d = self.tree("nf-shape", [{"id": "A", "state": "PARTIAL", "sub_units": 5, "evidence": 7},
+                                   {"id": "B", "state": "PARTIAL", "sub_units": "B.1", "evidence": ""},
+                                   {"id": "C", "state": "PARTIAL", "sub_units": [3, None, ["x"]], "evidence": ""}])
+        for name in ("B.1-101010", "5-101010"):
+            run = os.path.join(self.ev, "unit-runs", name)
+            os.makedirs(run)
+            open(os.path.join(run, "DIAGNOSED"), "w").close()
+            with open(os.path.join(run, "STATUS"), "w") as fh:
+                fh.write("EXHAUSTED\n")
+        code, out = self.closer(d, "--needfact")
+        self.assertEqual((code, out), (0, ""), out)
+
+    def test_a_unit_whose_evidence_is_not_text_asks_nobody_and_does_not_crash(self):
+        """One guard: sub_units is a good list here, so only the evidence type can refuse it."""
+        d = self.tree("nf-evidence", [{"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": 7}])
+        run = os.path.join(self.ev, "unit-runs", "A.1-101010")
+        os.makedirs(run)
+        open(os.path.join(run, "DIAGNOSED"), "w").close()
+        with open(os.path.join(run, "STATUS"), "w") as fh:
+            fh.write("EXHAUSTED\n")
+        code, out = self.closer(d, "--needfact")
+        self.assertEqual((code, out), (0, ""), out)
+
+    def test_a_plan_whose_units_are_null_asks_nobody_and_does_not_crash(self):
+        d = self.tree("nf-null", None)
+        code, out = self.closer(d, "--needfact")
+        self.assertEqual((code, out), (0, ""), out)
+
+    def test_the_sweep_reads_the_plan_the_dev_line_selects(self):
+        """BROTHER_WBS names the plan (1.2.0 lands on the dev line with its own plan file); nothing falls back to the default."""
+        d = self.tree("nf-dev", [{"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": "", "done_check": "python3 -B check.py"}],
+                      plan="DEV-1.2.0-WBS.json")
+        run = os.path.join(self.ev, "unit-runs", "A.1-101010")
+        os.makedirs(run)
+        open(os.path.join(run, "DIAGNOSED"), "w").close()
+        with open(os.path.join(run, "STATUS"), "w") as fh:
+            fh.write("EXHAUSTED\n")
+        self.assertIn("NO-DATA: the plan is unreadable", self.closer(d, "--needfact")[1], "the default plan does not exist here")
+        self.assertIn("NEEDS_INPUT: A.1 needs a fact", self.closer(d, "--needfact", wbs="docs/plan/DEV-1.2.0-WBS.json")[1])
+
+    def test_a_sweep_with_nothing_to_ask_creates_nothing(self):
+        d = self.needfact("nf-quiet", [("A.1-101010", "READY /b", False, 60)])
+        before = sorted(os.listdir(self.ev))
+        code, out = self.closer(d, "--needfact")
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(sorted(os.listdir(self.ev)), before)
+        fresh = os.path.join(self.root, "never-made")
+        self.closer(d, "--needfact", ev=fresh)
+        self.closer(d, "--dry", ev=fresh)
+        self.assertFalse(os.path.exists(fresh), "a read created the evidence folder")
+
+    def records_valid(self):
+        import json
+        out = []
+        with open(os.path.join(self.ev, "brother-needs-input.jsonl"), "rb") as fh:
+            for l in fh.read().splitlines():
+                try:
+                    out.append(json.loads(l.decode("utf-8")))
+                except ValueError:
+                    continue
+        return out
+
+    def test_a_non_utf8_byte_in_the_log_is_a_bad_line_not_a_crash(self):
+        """M3: one foreign byte used to raise UnicodeDecodeError out of the closer, and nothing closed until a person edited the file."""
+        require_sandbox(self)
+        os.makedirs(self.ev)
+        with open(os.path.join(self.ev, "brother-needs-input.jsonl"), "wb") as fh:
+            fh.write(b'{"key": "other"}\n\xff\xfe torn\n')
+        code, out = self.closer(self.skip_tree("bytes", "needs the owner key"))
+        self.assertIn("NEEDS_INPUT", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(len(self.records_valid()), 2)
+        d = self.needfact("nf-bytes", [("A.1-101010", "EXHAUSTED after 5", True, 60)])
+        code, out = self.closer(d)
+        self.assertIn("A     NEEDS_INPUT: A.1 needs a fact", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_a_reason_that_changes_only_in_its_numbers_is_the_same_ask(self):
+        """L1: a pid or a port in the reason must not ask again every pass."""
+        require_sandbox(self)
+        self.closer(self.skip_tree("pid1", "host probe failed: pid 4711 port 8080"))
+        self.closer(self.skip_tree("pid2", "host probe failed: pid 99 port 31337"))
+        self.assertEqual(len(self.records()), 1, self.records())
+
+    def test_two_units_with_the_identical_skip_are_two_asks(self):
+        """R3: the ask is the unit's; a second unit with the same skipped test is its own question."""
+        require_sandbox(self)
+        mk = lambda uid: {"id": uid, "state": "PARTIAL", "sub_units": [uid + ".1"], "evidence": uid + ".1 landed initial.",
+                          "done_check": "python3 -B -m unittest skipmod"}
+        d = self.tree("twins", [mk("A"), mk("B")], [("skipmod.py", SKIP_MODULE % "needs the owner key")])
+        self.closer(d)
+        self.assertEqual(sorted(r["unit"] for r in self.records()), ["A", "B"])
+
+    def test_a_unittest_discover_done_check_still_runs_and_names_its_skip(self):
+        """M4: a global -v before discover exits 2 (unrecognized arguments); -v belongs after it."""
+        require_sandbox(self)
+        import subprocess
+        unit = {"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": "A.1 landed initial.",
+                "done_check": "python3 -B -m unittest discover -s tests"}
+        d = self.tree("disc", [unit], [])
+        os.makedirs(os.path.join(d, "tests"))
+        with open(os.path.join(d, "tests", "test_s.py"), "w") as fh:
+            fh.write(SKIP_MODULE % "needs the owner key")
+        g = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
+        subprocess.run(g + ["add", "-A"], cwd=d, check=True, capture_output=True)
+        subprocess.run(g + ["commit", "-q", "-m", "t"], cwd=d, check=True, capture_output=True)
+        code, out = self.closer(d)
+        self.assertIn("NEEDS_INPUT: PARTIAL: 1 test(s) skipped: test_s.T.test_b (needs the owner key)", out)
+
+    def test_a_script_form_done_check_names_its_skip(self):
+        """M5: 'python3 -B scripts/test_x.py' is the shape of 360 of 386 done checks; unittest.main takes -v from argv."""
+        require_sandbox(self)
+        unit = {"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": "A.1 landed initial.",
+                "done_check": "python3 -B skiprun.py"}
+        body = SKIP_MODULE % "needs the owner key" + "\nif __name__ == '__main__':\n    unittest.main()\n"
+        code, out = self.closer(self.tree("script", [unit], [("skiprun.py", body)]))
+        self.assertIn("NEEDS_INPUT: PARTIAL: 1 test(s) skipped: __main__.T.test_b (needs the owner key)", out)
+        self.assertEqual(self.records()[0]["tests"][0]["reason"], "needs the owner key")
+
+    def test_a_script_that_reads_its_own_arguments_is_left_as_written(self):
+        d = self.root
+        for name, body, want in (("own.py", "import argparse\nimport unittest\nunittest.main()\n", False),
+                                 ("argv.py", "import sys\nimport unittest\nunittest.main(argv=sys.argv[:1])\n", False),
+                                 ("plain.py", "import unittest\nunittest.main()\n", True)):
+            with open(os.path.join(d, name), "w") as fh:
+                fh.write(body)
+            self.assertEqual(C.runs_unittest_main(os.path.join(d, name)), want, name)
+        self.assertFalse(C.runs_unittest_main(os.path.join(d, "missing.py")))
+        own = ["python3", "-B", os.path.join(d, "own.py")]
+        self.assertEqual(C.verbose_step(own), own)
+        self.assertEqual(C.verbose_step(["python3", "-m", "unittest", "discover", "-s", "t"]),
+                         ["python3", "-m", "unittest", "discover", "-v", "-s", "t"])
+
+    def test_a_closer_waits_for_the_lock_another_closer_holds_on_the_log(self):
+        """R1: read-then-append is one step under an exclusive lock. A racing sixteen did not reproduce a duplicate on this host
+        (the first closer finishes inside its time slice), so the lock is pinned directly: while another holder has the log
+        locked, ask_once must NOT complete; once released it completes and asks exactly once."""
+        import fcntl, subprocess, time
+        path = os.path.join(self.root, "lock", "brother-needs-input.jsonl")
+        os.makedirs(os.path.dirname(path))
+        code = ("import sys\nsys.path.insert(0, %r)\nimport close_unit as C\nprint(C.ask_once({'key': 'same', 'unit': 'A'}, %r))\n"
+                % (os.path.dirname(os.path.abspath(C.__file__)), path))
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_WBS"}
+        with open(path, "a+") as holder:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            p = subprocess.Popen([sys.executable, "-B", "-c", code], stdout=subprocess.PIPE, text=True, env=env)
+            time.sleep(3)
+            still_waiting = p.poll() is None
+            fcntl.flock(holder, fcntl.LOCK_UN)
+        out = p.communicate(timeout=60)[0].strip()
+        self.assertTrue(still_waiting, "ask_once finished while another closer held the log: it takes no lock")
+        self.assertEqual(out, "asked")
+        self.assertEqual(len(self.records_valid_at(path)), 1)
+
+    def records_valid_at(self, path):
+        import json
+        with open(path, "rb") as fh:
+            return [json.loads(l.decode("utf-8")) for l in fh.read().splitlines() if l.strip()]
+
+    def test_the_newest_run_is_the_newest_by_the_clock_not_by_its_name(self):
+        """R2: the folder name is HHMMSS and wraps at midnight; 001000 made after midnight is newer than 235000 from the night before."""
+        d = self.needfact("nf-midnight", [("A.1-235000", "READY /b", False, 7200), ("A.1-001000", "EXHAUSTED after 5", True, 60)])
+        self.assertIn("A     NEEDS_INPUT: A.1 needs a fact", self.closer(d)[1])
+
+    def test_needfact_alone_asks_and_closes_nothing(self):
+        d = self.needfact("nf-flag", [("A.1-101010", "WITHHELD", True, 60)])
+        code, out = self.closer(d, "--needfact")
+        self.assertIn("NEEDS_INPUT: A.1 needs a fact", out)
+        self.assertNotIn("nothing to close", out)
+        self.assertEqual(code, 0, out)
+
+
+class ALaneThatNeverRuledPrintsRetiredNotZeroOverZero(unittest.TestCase):
+    """STAB1.f. The PULSE line printed "checker LAND 0/0" for a lane that gave no verdict in a whole run while builds reached
+    its stage. Driven at pass_pulse.py's entry point (a subprocess, the driver's argv) over a fixture evidence root; each
+    fixture isolates one condition of the rename."""
+
+    def pulse(self, probe_ok=True, checker_files=()):
+        import json, shutil, subprocess, tempfile, time
+        os.makedirs(SCRATCH, exist_ok=True)
+        d = tempfile.mkdtemp(prefix="pulse-", dir=SCRATCH)
+        self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, "unit-runs"))
+        with open(os.path.join(d, "brother-stages.jsonl"), "w") as fh:
+            fh.write(json.dumps({"event": "leave", "stage": "probe", "ok": probe_ok, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}) + "\n")
+        for i, verdict in enumerate(checker_files):
+            out = os.path.join(d, "unit-runs", "A.1-0%d0000" % (i + 1), "round0", "out")
+            os.makedirs(out)
+            with open(os.path.join(out, "A.1-r0-build.json.check.json"), "w") as fh:
+                json.dump({"verdict": verdict}, fh)
+        log = os.path.join(d, "driver.log")
+        open(log, "w").close()
+        loop = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop", "pass_pulse.py")
+        r = subprocess.run([sys.executable, "-B", loop, "--start", str(int(time.time() - 3600)), "--passes", "3", "--log", log],
+                           capture_output=True, text=True, env=dict(os.environ, PULSE_EVIDENCE=d), timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return next(l for l in r.stdout.splitlines() if l.startswith("PULSE pass"))
+
+    def test_no_verdict_while_a_build_reached_the_stage_is_retired(self):
+        self.assertIn("checker LAND RETIRED (no answer 0)", self.pulse())
+
+    def test_no_build_reached_the_stage_keeps_zero_over_zero(self):
+        self.assertIn("checker LAND 0/0 (no answer 0)", self.pulse(probe_ok=False))
+
+    def test_a_lost_call_is_not_a_retired_lane(self):
+        self.assertIn("checker LAND 0/0 (no answer 1)", self.pulse(checker_files=["NO-DATA"]))
+
+    def test_a_lane_that_ruled_keeps_its_count(self):
+        self.assertIn("checker LAND 1/1 (no answer 0)", self.pulse(checker_files=["LAND"]))
+
+
+class TheLandersClosingPassHonoursTheAsk(unittest.TestCase):
+    """Review round 1 (STAB1.f), H1 and M2, at the entry point the loop uses: land_batch.closing_pass (loop_pass.sh calls
+    land_batch.py --close). A skip question must print as NEEDS-INPUT, record ONE attempt so the done check is not run again on an
+    unchanged tree, and write no failure ledger row; a diagnosed NEEDFACT sub unit must be asked from this same pass."""
+
+    PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+
+    def setUp(self):
+        import json, subprocess
+        import land_batch as LB
+        os.makedirs(SCRATCH, exist_ok=True)
+        self.root = __import__("tempfile").mkdtemp(prefix="closing-pass-", dir=SCRATCH)
+        self.addCleanup(__import__("shutil").rmtree, self.root, True)
+        self.LB, self.json, self.subprocess = LB, json, subprocess
+        self.ev = os.path.join(self.root, "evidence")
+        self.repo = os.path.join(self.root, "repo")
+        os.makedirs(os.path.join(self.repo, "docs", "plan"))
+        self.attempts, self.ledger = os.path.join(self.root, "attempts.jsonl"), os.path.join(self.root, "ledger.jsonl")
+
+        def fake_boxed(argv, log, timeout, env, cwd=None, root=None, seed=()):   # the ledger classifier, faked to one class row
+            with open(argv[argv.index("--path") + 1], "a") as fh:
+                fh.write('{"class": "close"}\n')
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        from unittest import mock
+        for patch in (mock.patch.object(LB, "code_root", lambda frozen=None: "/code"), mock.patch.object(LB, "boxed", fake_boxed),
+                      mock.patch.object(LB, "FAILURE_LEDGER", self.ledger), mock.patch.object(LB, "CLOSE_ATTEMPTS", self.attempts)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.here = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, self.here)
+
+    def commit(self, units):
+        with open(self.PLAN, "w") as fh:
+            self.json.dump({"units": units}, fh)
+        with open("c.py", "w") as fh:
+            fh.write("a = 1\n")
+        g = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
+        for argv in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "c"]):
+            self.subprocess.run(g + argv, check=True, capture_output=True)
+
+    def rows(self, path):
+        return open(path).read().count("\n") if os.path.exists(path) else 0
+
+    def fake_closer(self, said):
+        """sh_ for closing_pass: --dry lists ACC2, --needfact is silent, a named run answers `said` and exits 1."""
+        runs = []
+
+        def sh_(cmd, log, timeout=None):
+            if any(str(c).endswith("close_unit.py") for c in cmd):
+                if "--dry" in cmd:
+                    return self.subprocess.CompletedProcess(cmd, 1, "ACC2  running its done_check: python3 -m unittest x\nCLOSED  0 unit(s): none\n", "")
+                if "--needfact" in cmd:
+                    return self.subprocess.CompletedProcess(cmd, 0, "", "")
+                runs.append(cmd[-1])
+                return self.subprocess.CompletedProcess(cmd, 1, said, "")
+            return self.subprocess.CompletedProcess(cmd, 0, "", "")
+        sh_.runs = runs
+        return sh_
+
+    ASK = ("ACC2  running its done_check: python3 -m unittest x\n"
+           "ACC2  NEEDS_INPUT: PARTIAL: 1 test(s) skipped: x.T.test_b (no network)%s\nCLOSED  0 unit(s): none\n")
+
+    def test_a_skip_question_is_not_red_and_is_not_rerun_on_an_unchanged_tree(self):
+        self.commit([{"id": "ACC2", "state": "PARTIAL", "done_check": "python3 -m unittest x"}])
+        first, second = self.fake_closer(self.ASK % ""), self.fake_closer(self.ASK % " [already asked, waiting on the owner]")
+        out1 = self.LB.closing_pass(["--all-eligible"], first, None, "hub", "b", plan_path=self.PLAN)
+        out2 = self.LB.closing_pass(["--all-eligible"], second, None, "hub", "b", plan_path=self.PLAN)
+        self.assertEqual(first.runs, ["ACC2"])
+        self.assertTrue(any(l.startswith("NEEDS-INPUT ACC2: PARTIAL: 1 test(s) skipped: x.T.test_b") for l in out1), out1)
+        self.assertFalse(any(l.startswith("CLOSE-RED") for l in out1 + out2), out1 + out2)
+        self.assertEqual(second.runs, [], "pass 2 ran the done check again on an unchanged tree")
+        self.assertTrue(any(l.startswith("CLOSE-SKIP ACC2: ") for l in out2), out2)
+        self.assertEqual((self.rows(self.attempts), self.rows(self.ledger)), (1, 0))
+
+    def test_a_skip_question_from_the_real_closer_through_the_real_closing_pass(self):
+        """No scripted reply: close_unit.py itself runs the unit's done check (confined, in a copy) and the real closing_pass reads it."""
+        from unittest import mock
+        require_sandbox(self)
+        unit = {"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": "A.1 landed initial.", "done_check": "python3 -B -m unittest skipmod"}
+        with open("skipmod.py", "w") as fh:
+            fh.write(SKIP_MODULE % "needs the owner key")
+        self.commit([unit])
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_WBS"}
+        env.update(HOME=self.root, TMPDIR=self.root, BROTHER_EVIDENCE=self.ev)
+        runs = []
+
+        def real_closer(cmd, log, timeout=None):
+            if any(str(c).endswith("close_unit.py") for c in cmd) and "--dry" not in cmd and "--needfact" not in cmd:
+                runs.append(cmd[-1])
+            return self.subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=self.repo, timeout=300)
+        argv = lambda code, args=(), py=None: [sys.executable, "-B", C.__file__] + list(args)
+        with mock.patch.object(self.LB, "closer_argv", argv):
+            out1 = self.LB.closing_pass(["A"], real_closer, None, "hub", "b", plan_path=self.PLAN)
+            out2 = self.LB.closing_pass(["A"], real_closer, None, "hub", "b", plan_path=self.PLAN)
+        self.assertTrue(any(l.startswith("NEEDS-INPUT A: PARTIAL: 1 test(s) skipped: skipmod.T.test_b (needs the owner key)") for l in out1), out1)
+        self.assertFalse(any(l.startswith("CLOSE-RED") for l in out1 + out2), out1 + out2)
+        self.assertEqual(runs, ["A"], "the done check ran again on an unchanged tree")
+        self.assertTrue(any(l.startswith("CLOSE-SKIP A: ") for l in out2), out2)
+        self.assertEqual((self.rows(self.attempts), self.rows(self.ledger)), (1, 0))
+        self.assertEqual(len(open(os.path.join(self.ev, "brother-needs-input.jsonl")).read().splitlines()), 1)
+
+    def test_a_sweep_that_cannot_run_is_said_not_swallowed_and_not_red(self):
+        self.commit([{"id": "ACC2", "state": "PARTIAL", "done_check": "python3 -m unittest x"}])
+        inner = self.fake_closer(self.ASK % "")
+
+        def sh_(cmd, log, timeout=None):
+            if "--needfact" in cmd:
+                return self.subprocess.CompletedProcess(cmd, 2, "NO-DATA: the plan is unreadable (boom)\n", "")
+            return inner(cmd, log, timeout)
+        out = self.LB.closing_pass(["--all-eligible"], sh_, None, "hub", "b", plan_path=self.PLAN)
+        self.assertTrue(any(l.startswith("NEEDS-INPUT NO-DATA: the NEEDFACT sweep did not run (exit 2") for l in out), out)
+
+    def test_a_red_closure_that_merely_mentions_needs_input_stays_red(self):
+        """One guard: only the PARTIAL skip question is exempt; any other NEEDS_INPUT text in a failing closer is still a red."""
+        self.commit([{"id": "ACC2", "state": "PARTIAL", "done_check": "python3 -m unittest x"}])
+        said = "ACC2  running its done_check: python3 -m unittest x\nACC2  NOT CLOSED: the done_check exited 1: FAIL: x\nACC2  NEEDS_INPUT: unrelated\n"
+        out = self.LB.closing_pass(["--all-eligible"], self.fake_closer(said), None, "hub", "b", plan_path=self.PLAN)
+        self.assertTrue(any(l.startswith("CLOSE-RED ACC2: the done_check exited 1") for l in out), out)
+
+    def test_a_diagnosed_needfact_sub_unit_is_asked_from_the_closing_pass_the_loop_runs(self):
+        self.commit([{"id": "A", "state": "PARTIAL", "sub_units": ["A.1"], "evidence": "", "done_check": "python3 -B check.py"}])
+        run = os.path.join(self.ev, "unit-runs", "A.1-101010")
+        os.makedirs(run)
+        with open(os.path.join(run, "STATUS"), "w") as fh:
+            fh.write("EXHAUSTED after 5\n")
+        open(os.path.join(run, "DIAGNOSED"), "w").close()
+        from unittest import mock
+        env = {k: v for k, v in os.environ.items() if k != "BROTHER_WBS"}
+        env.update(HOME=self.root, BROTHER_EVIDENCE=self.ev)
+
+        def real_closer(cmd, log, timeout=None):   # close_unit.py itself, as the frozen closer would run it
+            return self.subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=self.repo, timeout=120)
+        argv = lambda code, args=(), py=None: [sys.executable, "-B", C.__file__] + list(args)
+        with mock.patch.object(self.LB, "closer_argv", argv):
+            out1 = self.LB.closing_pass(["--all-eligible"], real_closer, None, "hub", "b", plan_path=self.PLAN)
+            out2 = self.LB.closing_pass(["--all-eligible"], real_closer, None, "hub", "b", plan_path=self.PLAN)
+        note = os.path.join(self.ev, "diag-notes", "A.txt")
+        self.assertTrue(any(l.startswith("NEEDS-INPUT A: A.1 needs a fact") and note in l for l in out1), out1)
+        self.assertFalse(any("NEEDS-INPUT" in l for l in out2), "the second pass asked again: %s" % out2)
+        self.assertFalse(any(l.startswith("CLOSE-RED") for l in out1 + out2), out1 + out2)
 
 
 if __name__ == "__main__":

@@ -3247,7 +3247,7 @@ class TheExportTreeMustClearItsOwnRequiredFastCheck(unittest.TestCase):
 
     def setUp(self):
         # every case pins the scratch root (2026-10-30): a refused fake gate keeps its output there, and two cases
-        # without the pin wrote fake refusals into the real ~/.claude/brother-scratch
+        # without the pin wrote fake refusals into the real scratch root
         self._scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self._scratch.cleanup)
         patcher = mock.patch.dict(os.environ, {"BROTHER_SCRATCH": self._scratch.name})
@@ -5678,6 +5678,219 @@ def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: 
     """ACC2: BROTHER_TEST_SHARD=k/n runs the k-th of n class shards (scripts/suite_shard.py); unset runs every test."""
     import suite_shard
     return suite_shard.select(tests, os.environ.get("BROTHER_TEST_SHARD"))
+
+
+class TheExportedInventoryDescribesTheExportedTree(unittest.TestCase):
+    """OUT1.a slice 2, 2026-11-01: docs/plan/REACH.json claimed code_exists
+    for six owners under plugin/ the allowlist withholds, so reach_check
+    FAILED in every exported clone. build_export_tree now rewrites those
+    rows to code_exists false, "not in this edition", keeping every row,
+    and leaves the hub's own copy alone. Driven through build_export_tree,
+    the entry point every export route calls."""
+
+    def test_a_withheld_owner_reads_not_in_this_edition(self):
+        reg ={"capabilities": [], "inventory": [
+            {"id": "carried", "code_exists": True, "source_owners": ["scripts/carried.py"]},
+            {"id": "withheld", "code_exists": True,
+             "source_owners": ["scripts/carried.py", "plugin/withheld.py"]},
+            {"id": "escapes", "code_exists": True, "source_owners": ["../outside.py"]},
+            {"id": "absent", "code_exists": False}]}
+        hub_text = json.dumps(reg, indent=1) + "\n"
+        with tempfile.TemporaryDirectory() as root, \
+             tempfile.TemporaryDirectory() as dest:
+            _make_fake_root(root, {
+                "docs/plan/REACH.json": hub_text,
+                "scripts/carried.py": "# ships\n",
+                "plugin/withheld.py": "# the allowlist withholds this\n"})
+            EP.build_export_tree(dest, ["docs/plan/REACH.json", "scripts/carried.py"], root=root)
+            with open(os.path.join(dest, "docs", "plan", "REACH.json"), encoding="utf-8") as fh:
+                rows = {r["id"]: r for r in json.load(fh)["inventory"]}
+            with open(os.path.join(root, "docs", "plan", "REACH.json"), encoding="utf-8") as fh:
+                self.assertEqual(hub_text, fh.read(), "the hub's own REACH.json was rewritten")
+        self.assertEqual(["absent", "carried", "escapes", "withheld"], sorted(rows), "a row was dropped")
+        self.assertIs(rows["withheld"]["code_exists"], False)
+        self.assertEqual(EP.NOT_IN_THIS_EDITION, rows["withheld"].get("code_exists_reason"))
+        self.assertEqual(["scripts/carried.py", "plugin/withheld.py"], rows["withheld"]["source_owners"])
+        self.assertIs(rows["carried"]["code_exists"], True)
+        self.assertNotIn("code_exists_reason", rows["carried"])
+        self.assertIs(rows["escapes"]["code_exists"], True, "an escaping owner was hidden from reach_check")
+        self.assertNotIn("code_exists_reason", rows["absent"])
+
+
+class TheRewrittenInventoryRegeneratesTheInstalledBundleCopy(unittest.TestCase):
+    """OUT1.n, 2026-11-01: bundle_runtime.py ships REACH.json inside bundle/runtime
+    and hashes it, so rewriting the source over the export tree left that copy and
+    its manifest stale (hermetic BLOCK on test_bundle_runtime and
+    test_consumer_admission). Driven through build_export_tree with a stub
+    generator that records its run; one fixture per guard.
+
+    SHIP1.a, 2026-11-03: the export regenerates the bundle ONCE, last, whether or
+    not a row moved, because the route closure copies product files the
+    allowlist withholds (a skipped run shipped a stale bundle). build() returns
+    the number of generator runs, so a second run is caught as well as a
+    missing one."""
+
+    def build(self, owners, generator, with_generator=True):
+        reg = {"capabilities": [], "inventory": [
+            {"id": "row", "code_exists": True, "source_owners": owners}]}
+        files = {"docs/plan/REACH.json": json.dumps(reg, indent=1) + "\n"}
+        if with_generator:
+            files["scripts/bundle_runtime.py"] = generator
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as dest:
+            _make_fake_root(root, files)
+            try:
+                EP.build_export_tree(dest, sorted(files), root=root)
+            except RuntimeError as e:
+                return None, str(e)
+            path = os.path.join(dest, "ran.txt")
+            if not os.path.isfile(path):
+                return 0, ""
+            with open(path, encoding="utf-8") as fh:
+                return len(fh.read()), ""
+
+    RECORD = "open('ran.txt', 'a').write('x')\n"
+
+    def test_runs_once_when_a_row_was_rewritten(self):
+        ran, _ = self.build(["plugin/withheld.py"], self.RECORD)
+        self.assertEqual(ran, 1)
+
+    def test_runs_once_when_nothing_was_rewritten(self):
+        ran, _ = self.build(["docs/plan/REACH.json"], self.RECORD)
+        self.assertEqual(ran, 1)
+
+    def test_a_failing_generator_stops_the_export(self):
+        ran, err = self.build(["plugin/withheld.py"], "import sys; sys.exit(3)\n")
+        self.assertIsNone(ran)
+        self.assertIn("exit 3", err)
+
+    def test_no_generator_in_the_tree_is_a_no_op(self):
+        ran, err = self.build(["plugin/withheld.py"], "", with_generator=False)
+        self.assertEqual(ran, 0)
+        self.assertEqual(err, "")
+
+
+class TheExportedRuntimeStampIsTheHubsRevision(unittest.TestCase):
+    """OUT1.n review, 2026-11-01: an export tree has no .git, so regenerating the bundle there stamped the manifest
+    NO-DATA over the hub's real source revision (every public install then shipped receipts with no engine
+    revision). One fixture per guard; the stub generator behaves like the real one over a tree with no git."""
+
+    REV = "d9d48279b3c1f4e0a7b25e6d8f90ab12c34d56ef"
+    DESC = "v1.0.17-4437-gd9d48279b"
+    NO_GIT = ("import json\n"
+              "p = 'bundle/runtime/RUNTIME-MANIFEST.json'\n"
+              "doc = json.load(open(p))\n"
+              "doc['files'] = [{'path': 'regenerated'}]\n"
+              "doc['source_revision'] = 'NO-DATA: git could not name the source revision'\n"
+              "doc['source_describe'] = 'NO-DATA: git could not describe the source revision'\n"
+              "open(p, 'w').write(json.dumps(doc, indent=1, sort_keys=True) + '\\n')\n")
+
+    FRESH = ("import json, os\n"
+             "os.makedirs('bundle/runtime', exist_ok=True)\n"
+             "json.dump({'files': [], 'source_revision': 'NO-DATA: x', 'source_describe': 'NO-DATA: y'},"
+             " open('bundle/runtime/RUNTIME-MANIFEST.json', 'w'))\n")
+
+    def export(self, manifest, generator=None):
+        reg = {"capabilities": [], "inventory": [
+            {"id": "row", "code_exists": True, "source_owners": ["plugin/withheld.py"]}]}
+        files = {"docs/plan/REACH.json": json.dumps(reg, indent=1) + "\n",
+                 "scripts/bundle_runtime.py": generator or self.NO_GIT}
+        if manifest is not None:
+            files["bundle/runtime/RUNTIME-MANIFEST.json"] = manifest
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as dest:
+            _make_fake_root(root, files)
+            EP.build_export_tree(dest, sorted(files), root=root)
+            with open(os.path.join(dest, "bundle", "runtime", "RUNTIME-MANIFEST.json"), encoding="utf-8") as fh:
+                return json.load(fh)
+
+    def hub_manifest(self, **changes):
+        doc = {"files": [], "source_revision": self.REV, "source_describe": self.DESC}
+        doc.update(changes)
+        return json.dumps(doc, indent=1, sort_keys=True) + "\n"
+
+    def test_the_exported_stamp_equals_the_hubs_source_revision(self):
+        got = self.export(self.hub_manifest())
+        self.assertEqual((self.REV, self.DESC), (got["source_revision"], got["source_describe"]))
+        self.assertEqual([{"path": "regenerated"}], got["files"])  # the regeneration still happened
+
+    def test_an_unreadable_hub_manifest_leaves_the_generators_own_stamp(self):
+        got = self.export("not json", self.FRESH)
+        self.assertTrue(got["source_revision"].startswith("NO-DATA"), got)
+
+    def test_a_hub_stamp_missing_one_field_is_not_restored_half_way(self):
+        doc = {"files": [], "source_revision": self.REV}
+        got = self.export(json.dumps(doc) + "\n")
+        self.assertTrue(got["source_describe"].startswith("NO-DATA"), got)
+        self.assertTrue(got["source_revision"].startswith("NO-DATA"), got)
+
+    def test_a_missing_hub_manifest_is_not_invented(self):
+        got = self.export(None, self.FRESH)
+        self.assertTrue(got["source_revision"].startswith("NO-DATA"), got)
+
+
+class TheExportedWalkRecordsCarryNoMachineInternals(unittest.TestCase):
+    """OUT1.n review L4, 2026-11-01: docs/plan/JOURNEY-J*.json also hold the temp path of the install a journey walked
+    and the seat that walked; both are machine internals and must not reach the public tree. One fixture per guard."""
+
+    RECORD = {"journey": "J2", "clean_home": True, "identity": "a", "candidate_identity": "a", "host": "macos",
+              "rows": {"x": "PASS"}, "installed_root": "/var/folders/zz/T/brother-journey-1/config",
+              "walked_by": "session-119-orchestrator", "stripped_env": ["A"]}
+
+    def export(self, text):
+        files = {"docs/plan/JOURNEY-J2.json": text}
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as dest:
+            _make_fake_root(root, files)
+            EP.build_export_tree(dest, sorted(files), root=root)
+            with open(os.path.join(dest, "docs", "plan", "JOURNEY-J2.json"), "rb") as fh:
+                return fh.read()
+
+    def test_the_exported_record_keeps_what_the_door_reads_and_drops_the_rest(self):
+        got = self.export(json.dumps(self.RECORD))
+        doc = json.loads(got)
+        self.assertEqual(sorted(doc), ["candidate_identity", "clean_home", "host", "identity", "journey", "rows"])
+        self.assertEqual(doc["rows"], {"x": "PASS"})
+        for private in (b"installed_root", b"walked_by", b"/var/folders", b"session-119"):
+            self.assertNotIn(private, got)
+
+    def test_a_record_that_cannot_be_reduced_stops_the_export(self):
+        for bad in ("not json", "[1, 2]"):
+            with self.assertRaises(RuntimeError) as cm:
+                self.export(bad)
+            self.assertIn("JOURNEY-J2.json", str(cm.exception))
+
+
+class AMirroredPageIsCheckedAtItsSource(unittest.TestCase):
+    """SHIP1.a, 2026-11-03: bundle/runtime/products/ mirrors product pages whose relative links point at siblings the
+    mirror does not copy (3 dead links on the 1.2.0 candidate). A byte-identical mirror of an exported page is covered
+    by its source's check; anything else under the mirror is still checked. One fixture per guard."""
+
+    PAGE = "see [rules](PRACTICES.md)\n"
+
+    def run_check(self, mirror_text, with_source=True):
+        with tempfile.TemporaryDirectory() as tree:
+            files = {"bundle/runtime/products/p/SKILL.md": mirror_text}
+            if with_source:
+                files["products/p/SKILL.md"] = self.PAGE
+                files["products/p/PRACTICES.md"] = "rules\n"
+            for rel, text in files.items():
+                path = os.path.join(tree, *rel.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+            return EP.check_markdown_links(tree)
+
+    def test_an_identical_mirror_is_covered_by_its_source(self):
+        ok, lines = self.run_check(self.PAGE)
+        self.assertTrue(ok, lines)
+
+    def test_a_mirror_that_differs_from_its_source_is_still_checked(self):
+        ok, lines = self.run_check(self.PAGE + "and [more](GONE.md)\n")
+        self.assertFalse(ok)
+        self.assertTrue(any("bundle/runtime/products/p/SKILL.md points at GONE.md" in l for l in lines), lines)
+
+    def test_a_mirror_with_no_source_in_the_export_is_still_checked(self):
+        ok, lines = self.run_check(self.PAGE, with_source=False)
+        self.assertFalse(ok)
+        self.assertTrue(any("points at PRACTICES.md" in l for l in lines), lines)
 
 
 class ATrackedSymlinkShipsAsTheSameLink(unittest.TestCase):

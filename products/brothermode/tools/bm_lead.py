@@ -25,7 +25,7 @@ THE ONE DOOR, AND WHY IT IS THE FIRST THING IN THIS FILE
   before the COMMANDS lookup, and refuses the whole dispatch when it is
   false: a human-invoked command prints the setup sentence, and the
   watchdog prints nothing at all, because a hook is never a place to ask a
-  question. Consent itself is not defined here: scripts/setup.py is loaded
+  question. Consent itself is not defined here: setup.py is loaded
   BY PATH and its own read_config and is_consented are called, so there is
   no second definition of what consent means. tools/test_bm_lead.py parses
   this file with ast and fails if a second store constructor is ever
@@ -89,13 +89,13 @@ bs = _load("bm_store")
 # ---------------------------------------------------------------------------
 # THE CONSENT GATE. Shape copied from tools/bm_telemetry.py's
 # _load_bm_setup / _get_bm_setup / _consented, deliberately verbatim in
-# structure: scripts/setup.py is the ONE place the consent config schema
+# structure: setup.py is the ONE place the consent config schema
 # and its reader live, and this is how a second program reaches them
 # without a second, drifting copy.
 # ---------------------------------------------------------------------------
 
 CONSENT_REFUSAL = ("bm_lead: setup is not complete yet; run: "
-                   "python3 scripts/setup.py")
+                   "python3 " + os.path.join(os.path.dirname(HERE), "scripts", "setup.py"))
 
 
 class ConsentMissing(Exception):
@@ -107,7 +107,7 @@ _bm_setup_cache = []
 
 
 def _load_bm_setup():
-    """Load scripts/setup.py by path. Loading a module that itself imports
+    """Load setup.py by path. Loading a module that itself imports
     subprocess (for its own doctor invocation, never called from the pure
     functions this file uses) does not make THIS file import subprocess:
     the no-subprocess audit in tools/test_bm.py scans source LINES of
@@ -129,7 +129,7 @@ def _get_bm_setup():
 
 
 def _consent_state():
-    """True only when scripts/setup.py's own is_consented says so. Fails
+    """True only when setup.py's own is_consented says so. Fails
     CLOSED on any load error: an unloadable setup module, a missing config
     or a corrupt one must never be read as permission to write.
 
@@ -168,7 +168,7 @@ def _root():
 def _store_or_refuse(kv, write):
     """THE ONLY constructor of bs.Store and bs.ReadOnlyStore in this file.
 
-    Raises ConsentMissing when scripts/setup.py's is_consented is False.
+    Raises ConsentMissing when setup.py's is_consented is False.
     Every subcommand obtains its handle here or does not have one, which is
     what makes a pre-consent write structurally impossible rather than
     merely absent. `kv` is the parsed flag dict, carried so a future gate

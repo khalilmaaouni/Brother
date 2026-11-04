@@ -223,7 +223,7 @@ def _consented():
 
 
 _CONSENT_REQUIRED_LINE = (
-    "bm_bash_audit: setup is not complete yet; run: python3 scripts/setup.py")
+    "bm_bash_audit: setup is not complete yet; run: python3 " + os.path.join(os.path.dirname(HERE), "scripts", "setup.py"))
 
 
 # ---------------------------------------------------------------------------

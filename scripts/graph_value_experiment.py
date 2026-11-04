@@ -70,8 +70,10 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pattern_note  # noqa: E402  the one vault resolver (KEY1.f)
+
 HOME = os.path.expanduser("~")
-DEFAULT_VAULT = os.path.join(HOME, "Documents", "Kay Vault")
 DEFAULT_BM_VAULT = os.path.join(HOME, "Documents", "BrotherModeUp", "tools", "bm_vault.py")
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_QUERIES = os.path.join(HERE, "..", "benchmarks", "graph-value", "queries-2026-08-30.json")
@@ -222,11 +224,12 @@ def calibrate(queries, decoy_pool):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="D15 graph value experiment")
-    ap.add_argument("--vault", default=DEFAULT_VAULT)
+    ap.add_argument("--vault", default=None)
     ap.add_argument("--bm-vault", default=None)
     ap.add_argument("--queries", default=None)
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
+    args.vault = pattern_note.require_vault_root(args.vault, "graph_value_experiment")
     bm_vault = args.bm_vault or DEFAULT_BM_VAULT
     queries_path = args.queries or DEFAULT_QUERIES
     out_path = args.out or DEFAULT_OUT

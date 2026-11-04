@@ -138,7 +138,10 @@ class Race(unittest.TestCase):
         view = S.plan_view(S.candidates(str(self.runs), {"X.a"}), lambda b: "", "shadow", str(self.runs))
         older = [c for c in view if c["run"].endswith("010000")]
         self.assertEqual(len(older), 1, [c["run"] for c in view])
-        self.assertEqual(older[0]["action"], "leave: newest run of X.a is UNREADABLE")
+        # Since the 2026-10-04 review an unreadable newest STATUS is held by plan_view's "unknown, never promote under
+        # it" branch, which words the leave as the landing-refusal one; the direction (older build left) is unchanged.
+        self.assertEqual(older[0]["action"],
+                         "leave: the newest run of X.a was refused at landing; older builds wait for a new fact")
 
     def test_promote_refuses_when_a_newer_run_with_an_unreadable_status_appeared(self):
         """Entry point promote (2026-09-30): a run of X.a newer than the selected one appears after selection with

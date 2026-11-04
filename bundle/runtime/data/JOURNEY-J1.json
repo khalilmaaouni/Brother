@@ -1,0 +1,14 @@
+{
+ "candidate_identity": "shipped",
+ "clean_home": true,
+ "host": "macos",
+ "identity": "shipped",
+ "journey": "J1",
+ "rows": {
+  "A.first-screen-paths-exist": "PASS",
+  "D.doctor-fixes-work": "PASS",
+  "D.no-internal-names": "PASS",
+  "D.readme-claims-executed": "PASS",
+  "D.six-verbs-only": "PASS"
+ }
+}

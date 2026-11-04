@@ -54,7 +54,7 @@ _LOCALE_SHAPE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 #: 2026-09-15) found that a description saying "never a real value" is not
 #: itself a guard. Not exhaustive -- a determined author can still evade
 #: this -- but it catches the obvious cases (an email address, a bearer
-#: token, a password= shape, a live https:// endpoint) cheaply.
+#: token, a password assignment, a live https:// endpoint) cheaply.
 _SECRET_SHAPE_PATTERN = re.compile(
     r"@.+\.|bearer\s|password\s*=|secret\s*=|token\s*=|"
     r"-----BEGIN|https?://|sk-[A-Za-z0-9]|AKIA[0-9A-Z]{10}",

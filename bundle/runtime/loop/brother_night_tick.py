@@ -70,6 +70,30 @@ of it with a plausible mechanism. A wrong explanation is worse than a
 misreading, because looking again catches a misreading and looking again
 confirms a wrong explanation.
 
+THE TRAIN STALL CHECK (FLOW1.e). This is the scheduled caller of `scripts/session_relay.py report`: every tick, when
+armed, it writes the line's git log and sha list under .sbe/ and runs the report, and exit 3 (the plan has ready units,
+no unit merged inside the window, and loop_heartbeat does not read the driver as running) becomes a STALL-TRAIN
+finding naming the ready units, which goes to the alert file and the desktop notification. It is armed by environment
+on the agent's plist, and stays silent (no finding at all) while BROTHER_STALL_PLAN is unset:
+  BROTHER_STALL_PLAN          plan files, os.pathsep separated, later files override earlier ones by id (the last is
+                              usually a small overlay holding owner gated units and marking re-made landings)
+  BROTHER_STALL_LEDGER        the session relay ledger the report reads
+  BROTHER_STALL_SINCE         git log --since value bounding the landings read (the plan's first landing is enough)
+  BROTHER_STALL_WINDOW_HOURS  the no-merge window in hours
+  BROTHER_STALL_LINE          the line to read (default HEAD)
+  BROTHER_STALL_HEARTBEAT     the driver heartbeat (default loop_heartbeat.HB, the file loop_until.sh writes)
+Armed but unreadable (a missing variable, git or the relay failing, exit 2) is a NO-DATA finding, never a quiet pass.
+It wakes by alert file and notification only: this layer does not start a session (see above).
+
+THE IDLE-WITH-WORK LOOK (STAB1.l). The same armed tick also runs `loop_watch.py --idle` (the sibling file), the one reader
+that sees a driver which died between passes: no pass is left to look from inside, so this scheduled process is the
+look. Same arming as the stall check (BROTHER_STALL_PLAN) and no new variable; BROTHER_STALL_HEARTBEAT is the train
+driver's pulse and is NOT passed to this look, which reads the loop driver's own pulse (loop_heartbeat.HB). Its ACT answer ("idle_with_work row written", exit 1) becomes an IDLE-WITH-WORK finding that goes to the alert
+file and the notification; an armed look that cannot answer (exit 3, a timeout, a crash) is a NO-DATA finding, and an
+unarmed tick runs nothing. It writes the run's one idle_with_work row through stage_log, which the morning report counts.
+Named limits: the pool's dry look runs in this tick's environment, not the driver's plan and scope, and a run that
+ended with work left answers ACT on every tick (no writer records DONE or FAILED).
+
 PRODUCER: this module is the sole producer of both files it writes. The tick
 log line is appended at `with open(path, "a") as f: f.write(json.dumps(tick)
 + "\n")` inside append_tick(), called from tick_once(). The alert file is
@@ -292,6 +316,90 @@ def run_watchdog():
     return {"exit": got[0], "headline": lines[0] if lines else None}
 
 
+STALL_LOG = os.path.join(REPO_ROOT, ".sbe", "stall-line-log.txt")
+STALL_SHAS = os.path.join(REPO_ROOT, ".sbe", "stall-line-shas.txt")
+RELAY = os.path.join(REPO_ROOT, "scripts", "session_relay.py")
+
+
+def run_stall_report():
+    """None while the stall check is unarmed (BROTHER_STALL_PLAN unset). Otherwise {"exit": code, "line": text}: the
+    relay's report exit code (3 STALL, 0 fine) and its STALL line, or exit None with a NO-DATA line naming what could not
+    be read. Two files under .sbe/ are overwritten each tick; nothing else is written. Under _frozen_code() it is
+    NO-DATA, as run_watchdog is: the relay is read from the watched checkout, which is unfrozen code."""
+    plans = os.environ.get("BROTHER_STALL_PLAN")
+    if not plans:
+        return None
+
+    def nodata(why):
+        return {"exit": None, "line": "NO-DATA: %s" % why}
+
+    if _frozen_code():
+        return nodata("a frozen code root is in force, so the relay in the watched checkout is not run")
+    need = {k: os.environ.get(k) for k in ("BROTHER_STALL_LEDGER", "BROTHER_STALL_SINCE", "BROTHER_STALL_WINDOW_HOURS")}
+    missing = [k for k, v in need.items() if not v]
+    if missing:
+        return nodata("%s not set" % ", ".join(missing))
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import loop_heartbeat
+        heartbeat = os.environ.get("BROTHER_STALL_HEARTBEAT") or loop_heartbeat.HB
+    except ImportError:
+        return nodata("loop_heartbeat could not be imported")
+    line = os.environ.get("BROTHER_STALL_LINE") or "HEAD"
+    log = _run(["git", "log", "--since", need["BROTHER_STALL_SINCE"], "--format=%H %s%n%b", line], TRIAGE_TIMEOUT_S)
+    shas = _run(["git", "rev-list", "--since", need["BROTHER_STALL_SINCE"], line], TRIAGE_TIMEOUT_S)
+    if log is None or log[0] != 0 or shas is None or shas[0] != 0:
+        return nodata("git could not read the line %s since %s" % (line, need["BROTHER_STALL_SINCE"]))
+    try:
+        os.makedirs(os.path.dirname(STALL_LOG), exist_ok=True)
+        for path, text in ((STALL_LOG, log[1]), (STALL_SHAS, shas[1])):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+    except OSError:  # sbe: allow-silent a line file that cannot be written is NO-DATA about the stall check, returned to the caller
+        return nodata("the line files under .sbe could not be written")
+    cmd = [sys.executable, "-B", RELAY, "report", "--ledger", need["BROTHER_STALL_LEDGER"], "--window-hours",
+           need["BROTHER_STALL_WINDOW_HOURS"], "--log", STALL_LOG, "--shas", STALL_SHAS,
+           "--driver-heartbeat", heartbeat]
+    for plan in plans.split(os.pathsep):
+        if plan:
+            cmd += ["--plan", plan]
+    got = _run(cmd, TRIAGE_TIMEOUT_S)
+    if got is None:
+        return nodata("the relay report could not run")
+    lines = [ln for ln in got[1].split("\n") if ln.strip()]
+    if got[0] == 3:
+        stall = [ln for ln in lines if ln.startswith("STALL:")]
+        return {"exit": 3, "line": stall[0] if stall else "STALL: (no line printed)"}
+    if got[0] == 0:
+        return {"exit": 0, "line": None}
+    why = [ln for ln in lines if ln.startswith("NO-DATA")]
+    return {"exit": None, "line": why[0] if why else "NO-DATA: the relay report exited %s" % got[0]}
+
+
+LOOP_WATCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop_watch.py")
+IDLE_TIMEOUT_S = 450    # loop_watch --idle bounds its pool look at 300 s and its monitor at 120 s, so this outlives both
+
+
+def run_idle_look():
+    """None while the look is unarmed (BROTHER_STALL_PLAN unset, as run_stall_report). Otherwise {"exit": code, "line": text}:
+    loop_watch --idle's exit code (0 HEALTHY, 1 ACT idle_with_work, 3 NO-DATA) and its one line; any other exit, a timeout
+    or a missing file is exit None with a NO-DATA line, never a quiet pass. Under _frozen_code() it is NO-DATA, as
+    run_stall_report is."""
+    if not os.environ.get("BROTHER_STALL_PLAN"):
+        return None
+    if _frozen_code():
+        return {"exit": None, "line": "NO-DATA: a frozen code root is in force, so the idle look is not run"}
+    cmd = [sys.executable, "-B", LOOP_WATCH, "--idle"]
+    # No --heartbeat: BROTHER_STALL_HEARTBEAT is the TRAIN driver's pulse, a different file; the loop look keeps loop_heartbeat's own HB.
+    got = _run(cmd, IDLE_TIMEOUT_S)
+    if got is None:
+        return {"exit": None, "line": "NO-DATA: loop_watch --idle could not run or timed out"}
+    lines = [ln for ln in got[1].split("\n") if ln.strip()]
+    if got[0] in (0, 1):
+        return {"exit": got[0], "line": " ".join(lines[0].split()) if lines else None}
+    return {"exit": None, "line": " ".join(lines[0].split()) if lines else "NO-DATA: loop_watch --idle exited %s" % got[0]}
+
+
 def take_tick():
     """One measurement of the estate. Every field is either a real reading or
     null, and null always means the reading could not be taken."""
@@ -306,6 +414,8 @@ def take_tick():
         "live_sessions": live_sessions(),
         "load": load_averages(),
         "watchdog": run_watchdog(),
+        "stall": run_stall_report(),
+        "idle": run_idle_look(),
     }
 
 
@@ -389,6 +499,30 @@ def judge(history):
             "is watching. UNLOCK: start a session and pull the READY row with "
             "the most downstream dependents."
             % (ready["ready"], ", ".join(ready["ready_ids"])))
+
+    stall = latest.get("stall")        # None or absent: the check is not armed, which is no finding
+    if isinstance(stall, dict):
+        if stall.get("exit") == 3:
+            findings.append(
+                "STALL-TRAIN: %s UNLOCK: wake the train driver (start or resume it); the plan has ready units, "
+                "nothing merged inside the window and no live driver heartbeat." % (stall.get("line") or "STALL"))
+        elif stall.get("exit") != 0:
+            findings.append(
+                "NO-DATA: the train stall report could not be taken (%s), so a stalled train was not judged. UNLOCK: "
+                "check the BROTHER_STALL_* variables on the agent and run scripts/session_relay.py report by hand"
+                % (stall.get("line") or "no reason given"))
+
+    idle = latest.get("idle")          # None or absent: the look is not armed, which is no finding
+    if isinstance(idle, dict):
+        if idle.get("exit") == 1:
+            findings.append(
+                "IDLE-WITH-WORK: %s UNLOCK: wake the train driver (start or resume it); work is admissible and the "
+                "driver heartbeat does not read it as alive." % (idle.get("line") or "ACT idle"))
+        elif idle.get("exit") != 0:
+            findings.append(
+                "NO-DATA: the idle with work look could not be taken (%s), so a driver that died between passes was not "
+                "judged. UNLOCK: check the BROTHER_STALL_* variables on the agent and run loop_watch.py --idle by hand"
+                % (idle.get("line") or "no reason given"))
 
     if len(history) < STILL_TICKS:
         return findings
@@ -636,7 +770,40 @@ def selftest():
                    recent=lambda: [], alert=quiet.extend, notify_fn=lambda *a: None)
     assert not any("TICK NOT PERSISTED" in f for f in quiet), (rc, quiet)
 
-    print("night_tick selftest: OK, 19 cases, every condition proven to fire "
+    # 20. THE TRAIN STALL CHECK. Exit 3 fires STALL-TRAIN naming the ready units; exit 0 and an unarmed check stay quiet;
+    # an armed check that could not be taken is NO-DATA, never a pass.
+    base = t("aaa", 5, 0, 0)
+    fired = judge([dict(base, stall={"exit": 3, "line": "STALL: ready units A1.b A1.c; ..."})])
+    assert any(f.startswith("STALL-TRAIN") and "A1.b A1.c" in f for f in fired), fired
+    assert judge([dict(base, stall={"exit": 0, "line": None})]) == [], "a fine report must stay quiet"
+    assert judge([dict(base, stall=None)]) == [] and judge([base]) == [], "an unarmed check must stay quiet"
+    blind = judge([dict(base, stall={"exit": None, "line": "NO-DATA: git could not read the line"})])
+    assert blind and blind[0].startswith("NO-DATA") and not blind[0].startswith("STALL"), blind
+    assert judge([dict(base, stall={"exit": 2, "line": None})])[0].startswith("NO-DATA")
+    # and through the entry point: a STALL-TRAIN tick alerts and exits 1, a NO-DATA one writes the alert but exits 0
+    seen = []
+    notes = []
+    rc = tick_once(verbose=False, take=lambda: dict(base, at=_iso(), stall={"exit": 3, "line": "STALL: x"}),
+                   append=lambda tick: True, recent=lambda: [dict(base, stall={"exit": 3, "line": "STALL: x"})],
+                   alert=seen.extend, notify_fn=notes.append)
+    assert rc == 1 and any(f.startswith("STALL-TRAIN") for f in seen) and notes, (rc, seen, notes)
+
+    # 21. THE IDLE WITH WORK LOOK. Exit 1 fires IDLE-WITH-WORK through the entry point (alert and notification, exit 1); exit 0
+    # and an unarmed look stay quiet; an armed look that could not be taken is NO-DATA, never a pass.
+    ifired = judge([dict(base, idle={"exit": 1, "line": "ACT idle: run r1, 2 unit(s) are admissible"})])
+    assert any(f.startswith("IDLE-WITH-WORK") and "2 unit(s)" in f for f in ifired), ifired
+    assert judge([dict(base, idle={"exit": 0, "line": "HEALTHY run r1"})]) == [], "a healthy look must stay quiet"
+    assert judge([dict(base, idle=None)]) == [] and judge([base]) == [], "an unarmed look must stay quiet"
+    iblind = judge([dict(base, idle={"exit": None, "line": "NO-DATA run r1 kept no state"})])
+    assert iblind and iblind[0].startswith("NO-DATA") and not iblind[0].startswith("IDLE"), iblind
+    assert judge([dict(base, idle={"exit": 7, "line": None})])[0].startswith("NO-DATA")
+    iseen, inotes = [], []
+    rc = tick_once(verbose=False, take=lambda: dict(base, at=_iso(), idle={"exit": 1, "line": "ACT idle: x"}),
+                   append=lambda tick: True, recent=lambda: [dict(base, idle={"exit": 1, "line": "ACT idle: x"})],
+                   alert=iseen.extend, notify_fn=inotes.append)
+    assert rc == 1 and any(f.startswith("IDLE-WITH-WORK") for f in iseen) and inotes, (rc, iseen, inotes)
+
+    print("night_tick selftest: OK, 21 cases, every condition proven to fire "
           "and proven to stay quiet")
     return 0
 

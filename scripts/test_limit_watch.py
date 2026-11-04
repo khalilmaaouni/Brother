@@ -620,8 +620,10 @@ class TestRestartSchedule(unittest.TestCase):
     def test_past_resets_at_schedules_margin_from_now(self):
         now = 1000000000.0
         resets_at = now - 500  # already passed
+        # schedule() writes the plist, so it goes in the run's own temp folder, never a fixed /tmp path
+        plist_path = os.path.join(tempfile.mkdtemp(), "fake.plist")
         out = restart_schedule.schedule(
-            resets_at, margin=120, plist_path="/tmp/does-not-matter",
+            resets_at, margin=120, plist_path=plist_path,
             now=now, reload_fn=None)
         self.assertTrue(out["scheduled"])
         self.assertEqual(out["fire_epoch"], now + 120)

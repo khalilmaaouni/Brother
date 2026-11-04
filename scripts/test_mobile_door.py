@@ -121,6 +121,23 @@ class MobileDoorTest(unittest.TestCase):
                     "Does it fit the SE and the iPad?"):
             self.assertTrue(ask in text, "missing ask: %s" % ask)
 
+    def test_the_mobile_sequence_is_gated_on_the_door_listing_the_mobile_steps(self):
+        """OUT1.n review M1: the door names a route (build-outcome, app-correction) for iPhone words too, so a route is
+        not the gate. The skill and the reference gate the hand-run sequence on `door.py --available` listing the
+        mobile steps, in every copy, and no line calls the sequence the way unconditionally."""
+        for path in (SKILL, REFERENCE, MIRROR_SKILL, MIRROR_REFERENCE):
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            self.assertIn("--available", text, str(path))
+            self.assertIn("mobile.run", text, str(path))
+            self.assertNotIn('door.py" --route "check my change on iPhone 16"', text, str(path))
+            self.assertNotIn("is the shipped way to check a change on a simulator", text, str(path))
+        skill = " ".join(SKILL.read_text(encoding="utf-8").split())
+        self.assertIn("does not unlock them", skill)
+        self.assertIn("do not run the mobile commands by hand", skill)
+        reference = " ".join(REFERENCE.read_text(encoding="utf-8").split())
+        self.assertIn("is not that: those start an ordinary checked run", reference)
+        self.assertIn("When the door lists the mobile steps, the run section above is the way", reference)
+
     def test_no_new_command_is_added(self):
         for path in (SKILL, REFERENCE, MIRROR_SKILL, MIRROR_REFERENCE):
             self.assertNotIn("/brother mobile", path.read_text(encoding="utf-8"), str(path))

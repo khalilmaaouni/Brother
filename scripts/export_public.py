@@ -225,6 +225,16 @@ EXPORT_OVERRIDES = {
     "PROJECT.md": os.path.join("docs", "plan", "PROJECT.public.md"),
 }
 
+#: The capability inventory scripts/reach_check.py checks (OUT1.a slice 2).
+#: Its code_exists facts are claims about the HUB tree; the export rewrites
+#: them over the exported tree (mark_unexported_owners).
+REACH_REL = os.path.join("docs", "plan", "REACH.json")
+
+#: What an exported inventory row says when the hub holds its code but this
+#: export does not carry every source owner. A declared disposition, never a
+#: PASS of the capability.
+NOT_IN_THIS_EDITION = "not in this edition"
+
 #: The product tool that computes both published figures below: the citation
 #: inventory's coverage and the silent-failure lint's counts. A product that
 #: does not ship it has no figures for the export to recompute.
@@ -371,12 +381,18 @@ def load_denylist(path=None):
 #: under 120 seconds when the load was under 35. A timeout is a check that
 #: could not run, NO-DATA, never a FAIL: run_gate below reports it that way.
 GATE_TIMEOUT_FLOOR_SECONDS = 120
-GATE_TIMEOUT_CAP_SECONDS = 1800
+#: 1.2.0 (2026-11-03): 1800 -> 7200. The cap bounds every gate subprocess, and the required-fast gate on the export tree now
+#: runs the hermetic row over every test the release reaches (hundreds, each in its own sandbox); see
+#: REQUIRED_FAST_FLOOR_SECONDS. A timeout is NO-DATA, never a verdict, so a longer budget loosens nothing.
+GATE_TIMEOUT_CAP_SECONDS = 7200
 #: required_fast.sh is not a 60 second gate: it was measured at
 #: 994 s, 1357 s and 961 s in three separate checkouts on
 #: 2026-09-10. Its floor is set above the largest of those so an
 #: unloaded machine still gives it room to finish.
-REQUIRED_FAST_FLOOR_SECONDS = 1500
+#: 1.2.0 (2026-11-03): 1500 -> 5400. MEASURED on this machine: a serial run of the export tree's required-fast gate was still
+#: going at 5400 s (the hermetic row alone reaches 943 tests), and the same row with the bounded parallel first pass in
+#: hermetic_test_check.py (4 workers) took 3091 s for those 943 tests. The floor leaves the measured run its margin.
+REQUIRED_FAST_FLOOR_SECONDS = 5400
 
 
 def gate_timeout(load15=None, cores=None, floor=None, cap=None):
@@ -680,6 +696,8 @@ def build_export_tree(dest, allowlist, root=ROOT):
         override_src = os.path.join(root, override_rel)
         if os.path.isfile(override_src):
             shutil.copy2(override_src, dest_path)
+    scrub_journey_records(dest)
+    mark_unexported_owners(dest)
     regenerate_product_manifests(dest)
     # The manifests come first because the figure regeneration below reads
     # each product's CHECKSUMS.sha256 as its shipped-file list, exactly the
@@ -688,7 +706,135 @@ def build_export_tree(dest, allowlist, root=ROOT):
     changed = regenerate_published_figures(dest)
     if changed:
         regenerate_product_manifests(dest, only=changed)
+    # Last, because the bundle copies product files (CHECKSUMS.sha256
+    # included) that the steps above rewrite, and SHIP1.a's route closure
+    # copies product files the allowlist withholds: regenerated over the
+    # export tree they drop out. Measured 2026-11-01: test_bundle_runtime's
+    # --check red on the export tree naming exactly those files. This is the
+    # ONE regeneration of an export: mark_unexported_owners no longer runs its
+    # own, so a rewritten REACH.json is picked up here, and the generator runs
+    # exactly once whether or not a row moved.
+    regenerate_bundle_runtime(dest)
     return copied
+
+
+def mark_unexported_owners(dest):
+    """docs/plan/REACH.json's inventory, rewritten over the EXPORT tree: a
+    row that claims code_exists while one of its source_owners did not land
+    in `dest` ships with code_exists false and code_exists_reason "not in
+    this edition". Rows are never dropped; the hub's own copy is untouched.
+
+    Same rule as regenerate_published_figures: a fact is a claim about a
+    tree, so a fact that crosses the export boundary must describe the tree
+    the reader has. Measured 2026-11-01: six owners under plugin/ that the
+    allowlist withholds turned reach_check FAIL in every exported clone.
+
+    The predicate is whether the owner landed in `dest`, the same test the
+    EXPORT_OVERRIDES step uses. An owner path that is absolute or escapes
+    the tree leaves its row alone, so reach_check still names it. No
+    REACH.json in `dest` is a no-op; an unreadable one is named and ships
+    as it was, where reach_check then refuses it. Returns True when the
+    file was rewritten."""
+    path = os.path.join(dest, REACH_REL)
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        rows = data.get("inventory") or []
+    except (OSError, ValueError, AttributeError) as e:
+        print("export: %s could not be read (%s), so its code_exists facts "
+              "ship as the hub wrote them" % (REACH_REL, e))
+        return False
+    moved = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get("code_exists") is not True:
+            continue
+        owners = row.get("source_owners")
+        if not isinstance(owners, list) or not all(
+                isinstance(p, str) and p and not os.path.isabs(p)
+                and not os.path.normpath(p).startswith("..") for p in owners):
+            continue
+        if all(os.path.exists(os.path.join(dest, p)) for p in owners):
+            continue
+        row["code_exists"] = False
+        row["code_exists_reason"] = NOT_IN_THIS_EDITION
+        moved.append(str(row.get("id")))
+    if not moved:
+        return False
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=1, ensure_ascii=False)
+        fh.write("\n")
+    print("export: %s marks %d inventory row(s) %s: %s"
+          % (REACH_REL, len(moved), NOT_IN_THIS_EDITION, ", ".join(moved)))
+    return True
+
+
+def scrub_journey_records(dest):
+    """Reduce every docs/plan/JOURNEY-*.json in the export tree to the fields the door reads (bundle_runtime's own
+    ship_journey_record): a walk record also names the temp path of the install it walked and the seat that walked,
+    which are machine internals and never go public. A record that cannot be reduced stops the export."""
+    import bundle_runtime  # the exporter's own generator module; one definition of what ships
+    for path in sorted(glob.glob(os.path.join(dest, "docs", "plan", "JOURNEY-*.json"))):
+        try:
+            with open(path, "rb") as fh:
+                data = bundle_runtime.ship_journey_record(fh.read())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("export: %s cannot be reduced to its shipped fields: %s"
+                               % (os.path.relpath(path, dest), exc))
+        with open(path, "wb") as fh:
+            fh.write(data)
+
+
+def regenerate_bundle_runtime(dest):
+    """The installed bundle ships a copy of REACH.json (bundle_runtime.py
+    DATA_FILES) and hashes it into RUNTIME-MANIFEST.json, so rewriting the
+    source over the export tree leaves that copy and its manifest stale in
+    every exported clone. Regenerate both with the tree's OWN generator,
+    never a hand rolled copy. No generator in `dest` is a no-op; a generator
+    that fails stops the export, since a stale manifest ships a bundle that
+    fails its own check."""
+    gen = os.path.join(dest, "scripts", "bundle_runtime.py")
+    if not os.path.isfile(gen):
+        return
+    stamp = _read_runtime_stamp(dest)
+    got = _run([sys.executable, "-B", gen], dest, timeout=gate_timeout())
+    if got.returncode != 0:
+        raise RuntimeError("export: bundle_runtime.py failed over the export "
+                           "tree (exit %d): %s" % (got.returncode,
+                                                   (got.stderr or got.stdout)[-400:]))
+    _restore_runtime_stamp(dest, stamp)
+    print("export: bundle/runtime regenerated over the export tree")
+
+
+RUNTIME_MANIFEST_REL = os.path.join("bundle", "runtime", "RUNTIME-MANIFEST.json")
+RUNTIME_STAMP_FIELDS = ("source_revision", "source_describe")
+
+
+def _read_runtime_stamp(dest):
+    """The source revision stamp the hub's manifest carried into the export tree, or {} when it is missing or
+    unreadable. An export tree is an orphan with no .git, so the generator cannot name a revision there and would
+    write NO-DATA over the real one (every public install then ships receipts with no engine revision)."""
+    try:
+        with open(os.path.join(dest, RUNTIME_MANIFEST_REL), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    stamp = {k: doc.get(k) for k in RUNTIME_STAMP_FIELDS} if isinstance(doc, dict) else {}
+    return stamp if all(isinstance(v, str) and v for v in stamp.values()) and stamp else {}
+
+
+def _restore_runtime_stamp(dest, stamp):
+    """Put the hub's stamp back after the regeneration. The stamp names the hub revision the bytes were copied
+    from, which is still true for the export; --check ignores it, so this never hides a stale manifest."""
+    if not stamp:
+        return
+    path = os.path.join(dest, RUNTIME_MANIFEST_REL)
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc.update(stamp)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc, indent=1, sort_keys=True) + "\n")
 
 
 def regenerate_product_manifests(dest, only=None):
@@ -2805,6 +2951,8 @@ def check_markdown_links(export_dir):
                 continue
             path = os.path.join(base, name)
             rel = os.path.relpath(path, export_dir)
+            if _is_mirror_of_exported_page(export_dir, rel):
+                continue  # a byte copy of a page the export carries: its links are checked at the source path
             try:
                 with open(path, encoding="utf-8") as fh:
                     text = fh.read()
@@ -2833,6 +2981,25 @@ def check_markdown_links(export_dir):
     lines.append("links: %d resolved, %d external skipped, %d dead"
                  % (resolved, external, len(dead)))
     return not dead, lines
+
+
+#: SHIP1.a's route closure mirrors product files into bundle/runtime/products/<product>/...; a mirrored page keeps
+#: its source's relative links, which point at siblings the mirror does not copy (2026-11-03: 3 dead links).
+MIRROR_PREFIX = os.path.join("bundle", "runtime", "products") + os.sep
+
+
+def _is_mirror_of_exported_page(export_dir, rel):
+    """True only for a page under bundle/runtime/products/ whose source (the same path without bundle/runtime/) is
+    in the export tree with identical bytes, so the link check of that source page already covers it. A mirror that
+    differs from its source, or has no source in the export, is checked like any other page."""
+    if not rel.startswith(MIRROR_PREFIX):
+        return False
+    source = os.path.join(export_dir, rel[len(os.path.join("bundle", "runtime")) + 1:])
+    try:
+        with open(os.path.join(export_dir, rel), "rb") as a, open(source, "rb") as b:
+            return a.read() == b.read()
+    except OSError:
+        return False
 
 
 def readme_prove_commands(text):

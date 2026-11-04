@@ -5529,22 +5529,28 @@ class TheRecurrenceLoopCloses(unittest.TestCase):
             and e["unit_id"] == "U1")
         self.assertEqual(drafted["parent_ids"], [recurrence_event["event_id"]])
 
-    def test_a_drafted_lesson_prints_one_vault_saved_line(self):
-        """VN2, the write notice: the SAME refused-unit draft as the test
-        above, but this one checks stdout rather than the journal. One
-        'Vault saved: <uid> -> <relative path>' line, printed only after
-        the lesson file actually landed under lessons/."""
+    def test_a_run_dir_lesson_prints_one_kept_in_this_run_line(self):
+        """VN2, the write notice (KEY1.a): the SAME refused-unit draft as
+        the test above, but this one checks stdout rather than the journal.
+        The lesson lives in the run directory, not in a configured vault,
+        so one 'Kept in this run, not in the Vault: <uid> -> <relative
+        path>' line, printed only after the lesson file actually landed
+        under lessons/, and no 'Vault saved' line."""
         rec, claims = self._seeded_rec_and_claims()
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             _br.build_report(rec, claims, "abc123", "def456", changed=[])
         out = buf.getvalue()
-        lines = [ln for ln in out.splitlines() if ln.startswith("Vault saved: ")]
+        self.assertNotIn("Vault saved", out, out)
+        lines = [ln for ln in out.splitlines()
+                 if ln.startswith("Kept in this run, not in the Vault: ")]
         self.assertEqual(len(lines), 1, out)
         lessons_dir = os.path.join(self.run_dir, "lessons")
         name = os.listdir(lessons_dir)[0]
-        self.assertEqual(lines[0],
-                         "Vault saved: U1 -> lessons/%s" % name, lines[0])
+        self.assertTrue(
+            lines[0].startswith(
+                "Kept in this run, not in the Vault: U1 -> lessons/%s" % name),
+            lines[0])
         self.assertTrue(os.path.isfile(os.path.join(lessons_dir, name)))
 
     def test_a_failed_lesson_draft_prints_no_vault_saved_line(self):
@@ -8082,6 +8088,42 @@ class CheckWithoutBatchesTheFileRevertInsteadOfOnePairPerFile(unittest.TestCase)
             self.repo, self.unit_rev, self.dep_rev,
             ['kept1.txt', 'created.txt'], 'test ! -e created.txt')
         self.assertEqual(code, 0, note)
+
+class VaultNoticeSiblingFolder(unittest.TestCase):
+    """KEY1.a survivor: a folder named like the vault plus a suffix is NOT inside the vault. A string prefix check
+    reads <tmp>/vault-x/run1 as inside <tmp>/vault; the real path commonpath check does not."""
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="key1a-sibling-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.vault = os.path.join(self.tmp, "vault")
+        os.makedirs(self.vault)
+
+    def _notice(self, folder):
+        os.makedirs(folder, exist_ok=True)
+        note = os.path.join(folder, "U1.md")
+        with open(note, "w", encoding="utf-8") as fh:
+            fh.write("lesson\n")
+        out = io.StringIO()
+        # The notice reads the one resolver (KEY1.f), which answers FAIL when two vault names disagree, so every
+        # name it reads is cleared and only this test's vault is set: a vault name inherited from the machine
+        # (BROTHERMODE_VAULT on the maintainer's shell, kept by the hermetic sandbox) must not decide the answer.
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("BROTHERMODE_VAULT_ROOT", "BM_VAULT_ROOT", "BROTHERMODE_VAULT")}
+        env[_br.VAULT_ROOT_ENV_VAR] = self.vault
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out):
+            _br._print_vault_saved("U1", note, "U1.md")
+        return out.getvalue()
+
+    def test_a_sibling_folder_named_like_the_vault_is_kept_in_this_run(self):
+        got = self._notice(os.path.join(self.tmp, "vault-x", "run1"))
+        self.assertNotIn("Vault saved", got)
+        self.assertIn("Kept in this run, not in the Vault: U1 -> U1.md", got)
+
+    def test_a_note_inside_the_vault_is_vault_saved(self):  # control: the check still says yes inside
+        got = self._notice(os.path.join(self.vault, "50-Reference"))
+        self.assertIn("Vault saved: U1 -> U1.md", got)
+
 
 def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: object) -> unittest.TestSuite:
     """ACC2: BROTHER_TEST_SHARD=k/n runs the k-th of n class shards (scripts/suite_shard.py); unset runs every test."""

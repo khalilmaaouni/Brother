@@ -49,7 +49,7 @@ import ast, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TARGET = os.environ.get("LAND_BATCH") or os.path.join(HERE, "loop", "land_batch.py")
 DECISIONS = ("preflight", "landing_verdict", "after_build", "refusal_reason", "gate_quarantine", "retry_alone",
-             "step_refusal", "exit_code")
+             "step_refusal", "exit_code", "closing_pass")   # closing_pass: LOOP1.c, the closer call after a landing
 
 
 def no_data(msg):

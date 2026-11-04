@@ -50,6 +50,22 @@ reader looks before trusting this module:
   Same NO-DATA refusal as the empty case, for the same reason: an unreadable
   claim to safety is not evidence of safety.
 
+  LEASES (CUT2.e, 2026-11-02). Beside the one holder slot the same file carries a
+  ledger of CAPACITY LEASES under data["leases"]: nested cut jobs (the perturbation
+  workers, each running a whole suite that itself fans out) lease cores, memory
+  and disk out of one stated capacity, so admission counts what the work will
+  demand, not what a load average showed before it ramped up. The holder slot and
+  the ledger never touch each other's keys. A lease dies by the SAME rule as the
+  holder (expired, or its pid gone on this host: _dead_reason), so a crashed
+  nested job frees its share by itself. lease() is read, check and write under
+  one flock on <path>.lock, bounded: a lock held past LOCK_WAIT_S is NO-DATA, not
+  a wait for ever. A refusal for want of capacity starts with CAPACITY: (the one
+  recoverable stop: a lease ending frees it); NO-DATA: means the ledger could not
+  be trusted; anything else is a bad request. A resource named in the demand but
+  absent from the capacity, a negative or non finite number, or a name already
+  leased by a live record is refused, never granted. A DEAD record under the same
+  name is reclaimed (the actor restarted under the same name).
+
   AN ACQUIRE WHILE A REAP IS DUE. acquire() reclaims a dead holder inline
   (naming it in `reclaimed_from`) without needing reap() to have run first.
   reap() exists for a caller with nothing to acquire yet, that just wants
@@ -61,7 +77,10 @@ reader looks before trusting this module:
 Python 3, standard library only, plus claim_store.pid_alive from this same
 estate. No network.
 """
+import contextlib
+import fcntl
 import json
+import math
 import os
 import socket
 import tempfile
@@ -70,6 +89,9 @@ import time
 import claim_store
 
 NODATA = "NO-DATA"
+CAPACITY = "CAPACITY"
+#: How long lease() waits for the ledger's own lock before it answers NO-DATA.
+LOCK_WAIT_S = 10.0
 
 
 def _now(clock=None):
@@ -93,7 +115,7 @@ def _read(path):
     try:
         with open(path, encoding="utf-8") as fh:
             content = fh.read()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:   # bytes that are not text are an unreadable ledger, not a crash
         return None, "the reservation file could not be read: %s" % exc
     if content.strip() == "":
         return None, "the reservation file at %s exists but is empty" % path
@@ -270,3 +292,142 @@ def reap(path, now_value=None, clock=None):
     data["last_reaped"] = detail
     _write(path, data)
     return detail, ""
+
+
+# ------------------------------------------------------------------ leases --
+
+@contextlib.contextmanager
+def _locked(path, wait_s=None):
+    """flock(<path>.lock), exclusive, polled for at most wait_s seconds; TimeoutError past that. The lock file is
+    never removed (removing it is the race it exists to close); it dies with the descriptor, so a crashed holder
+    frees it."""
+    wait_s = LOCK_WAIT_S if wait_s is None else wait_s
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    handle = open(path + ".lock", "a+")
+    try:
+        end = time.monotonic() + wait_s
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= end:
+                    raise TimeoutError("the ledger lock %s.lock was not free within %.0fs" % (path, wait_s))
+                time.sleep(0.02)
+        yield
+    finally:
+        handle.close()
+
+
+def _amounts(what, label):
+    """(dict of float, problem): a non empty mapping of resource name to a finite, non negative number. Anything
+    else (a bool, a string, NaN, an infinity, a negative) is a refusal, never read as zero."""
+    if not isinstance(what, dict) or not what:
+        return None, "%s must name at least one resource, got %r" % (label, what)
+    out = {}
+    for key, value in what.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            return None, "%s[%r] must be a finite number of at least 0, got %r" % (label, key, value)
+        out[str(key)] = float(value)
+    return out, ""
+
+
+def _live_leases(data, now):
+    """{name: record} of the leases still live. None when data["leases"] is present but is not a mapping of
+    records (a corrupt ledger is not an empty one)."""
+    raw = data.get("leases", {})
+    if not isinstance(raw, dict) or not all(isinstance(v, dict) and isinstance(v.get("demand"), dict)
+                                            for v in raw.values()):
+        return None
+    return {n: r for n, r in raw.items() if _live(r, now)}
+
+
+def _sum(records):
+    used = {}
+    for rec in records.values():
+        for key, value in rec["demand"].items():
+            used[key] = used.get(key, 0.0) + float(value)
+    return used
+
+
+def leased(path, clock=None):
+    """(used, problem): per resource, the sum of every live lease. A missing file is an empty ledger; an unreadable
+    or corrupt one is (None, NO-DATA ...)."""
+    now = _now(clock)
+    data, problem = _read(path)
+    if data is None:
+        return None, "%s: %s" % (NODATA, problem)
+    live = _live_leases(data, now)
+    if live is None:
+        return None, "%s: the leases in %s are not a mapping of records" % (NODATA, path)
+    return _sum(live), ""
+
+
+def lease(path, name, demand, capacity, ttl, clock=None):
+    """(record, problem). Leases `demand` (resource to amount) to `name` when every resource still fits under
+    `capacity` after the live leases are counted. The capacity is the caller's current reading (disk free changes),
+    so the ledger holds only what was promised. Refused with CAPACITY: when one resource would pass its capacity
+    (the message names which, the one recoverable stop), with NO-DATA: when the ledger cannot be trusted, and
+    plainly otherwise for a bad request."""
+    bad = _check_ttl(ttl)
+    if bad is not None:
+        return None, bad
+    want, problem = _amounts(demand, "demand")
+    if want is None:
+        return None, problem
+    room, problem = _amounts(capacity, "capacity")
+    if room is None:
+        return None, problem
+    absent = sorted(k for k in want if k not in room)
+    if absent:
+        return None, "%s: no capacity is stated for %s, so it cannot be leased" % (NODATA, ", ".join(absent))
+    if not isinstance(name, str) or not name:
+        return None, "a lease needs a name, got %r" % (name,)
+    now = _now(clock)
+    try:
+        with _locked(path):
+            data, problem = _read(path)
+            if data is None:
+                return None, "%s: %s" % (NODATA, problem)
+            live = _live_leases(data, now)
+            if live is None:
+                return None, "%s: the leases in %s are not a mapping of records" % (NODATA, path)
+            if name in live:
+                return None, "%s is already leased (pid %s)" % (name, live[name].get("pid"))
+            used = _sum(live)
+            for key in sorted(want):
+                if used.get(key, 0.0) + want[key] > room[key] + 1e-9:
+                    return None, ("%s: %s needs %g, %g of %g is already leased"
+                                  % (CAPACITY, key, want[key], used.get(key, 0.0), room[key]))
+            record = {"holder": name, "pid": os.getpid(), "hostname": _hostname(), "acquired_at": now,
+                      "expires_at": now + float(ttl), "demand": want}
+            live[name] = record
+            data["leases"] = live
+            _write(path, data)
+            return record, ""
+    except (TimeoutError, OSError) as exc:
+        return None, "%s: the ledger %s could not be used: %s" % (NODATA, path, exc)
+
+
+def end_lease(path, name, clock=None):
+    """(record, problem). Ends the lease `name`, and only that one. A name with no live lease is (None, a plain
+    message): ending twice is harmless to the caller, and never removes another actor's share."""
+    if not os.path.exists(path):   # nothing to end: a read-shaped call creates no folder and no lock file
+        return None, "no live lease named %s" % (name,)
+    now = _now(clock)
+    try:
+        with _locked(path):
+            data, problem = _read(path)
+            if data is None:
+                return None, "%s: %s" % (NODATA, problem)
+            live = _live_leases(data, now)
+            if live is None:
+                return None, "%s: the leases in %s are not a mapping of records" % (NODATA, path)
+            if name not in live:
+                return None, "no live lease named %s" % (name,)
+            gone = live.pop(name)
+            data["leases"] = live
+            _write(path, data)
+            return gone, ""
+    except (TimeoutError, OSError) as exc:
+        return None, "%s: the ledger %s could not be used: %s" % (NODATA, path, exc)

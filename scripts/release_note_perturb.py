@@ -827,24 +827,56 @@ def _git_out(root, args):
     return proc.stdout, ""
 
 
-def script_tree_key(root=ROOT):
-    """({dir: git tree id at HEAD}, '') for every cut_rehearsal.SCRIPT_DIRS entry, or ({}, reason): a folder whose tree
-    cannot be read, or any uncommitted change under those folders."""
-    import cut_rehearsal
-    dirs = list(cut_rehearsal.SCRIPT_DIRS)
-    status, why = _git_out(root, ["status", "--porcelain", "--"] + dirs)
-    if status is None:
+def _release_paths(version):
+    """The two files a write run of the note generator rewrites for `version` (refresh_cut.release_paths' answer,
+    built here because this module cannot import refresh_cut)."""
+    if not isinstance(version, str) or not version:
+        return set()
+    return {"docs/releases/%s.md" % version, "docs/releases/%s.export-manifest.txt" % version}
+
+
+def _dirty_paths(root):
+    out, why = _git_out(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+    if out is None:
+        return None, why
+    tokens, paths, i = out.split("\0"), [], 0
+    while i < len(tokens):
+        entry = tokens[i]
+        i += 1
+        if len(entry) > 3:
+            paths.append(entry[3:])
+            if entry[0] in "RC":  # a rename or copy carries its origin as the next token
+                if i < len(tokens) and tokens[i]:
+                    paths.append(tokens[i])
+                i += 1
+    return paths, ""
+
+
+def script_tree_key(root=ROOT, version=None):
+    """({key: value}, '') naming everything a stored result may be reused against, or ({}, reason). CUT2.d: the key is
+    HEAD's WHOLE tree id (a suite reads outside the script folders, so a change anywhere is a different tree), the
+    interpreter's resolved real path and version (sys.executable is a symlink that can be retargeted), and it exists
+    only when the working tree is clean ANYWHERE except the two release files the note generator itself rewrites for
+    `version` (the contract pooled_rows and refresh_cut already keep, and the state step 2d reads the receipts in, with
+    the note written and not yet committed): any other uncommitted byte has no tree id. Every reader and writer of a
+    record routes through here. Known limits: the process environment is not in the key, and neither are those two
+    release files, so a suite that reads an environment variable or its own release note can differ between the
+    measured run and a reuse."""
+    dirty, why = _dirty_paths(root)
+    if dirty is None:
         return {}, why
-    if status.strip():
-        return {}, "the script folders carry uncommitted changes, which no tree id can see"
-    trees = {}
-    for rel in dirs:
-        out, why = _git_out(root, ["rev-parse", "HEAD:%s" % rel])
-        tree = (out or "").strip()
-        if out is None or not re.fullmatch(r"[0-9a-f]{40}", tree):
-            return {}, "the tree of %s cannot be read%s" % (rel, (": " + why) if why else "")
-        trees[rel] = tree
-    return trees, ""
+    other = sorted(p for p in dirty if p not in _release_paths(version))
+    if other:
+        return {}, "the working tree carries uncommitted changes (%s), which no tree id can see" % ", ".join(other[:3])
+    out, why = _git_out(root, ["rev-parse", "HEAD^{tree}"])
+    tree = (out or "").strip()
+    if out is None or not re.fullmatch(r"[0-9a-f]{40}", tree):
+        return {}, "the tree of HEAD cannot be read%s" % ((": " + why) if why else "")
+    try:
+        real = os.path.realpath(sys.executable)
+    except (OSError, ValueError) as exc:
+        return {}, "the interpreter path cannot be resolved: %s" % exc
+    return {"head_tree": tree, "interpreter_real": real, "python_version": sys.version}, ""
 
 
 def _file_sha(root, rel):
@@ -852,23 +884,49 @@ def _file_sha(root, rel):
         return sha256_bytes(fh.read())
 
 
-def write_receipts(rows, version, root=ROOT, directory="", now=None):
+def _receipt_id(rec):
+    body = json.dumps({k: rec[k] for k in ("source", "suite", "file_sha256", "suite_sha256", "measured_at")},
+                      sort_keys=True)
+    return sha256_bytes(body.encode("utf-8"))[:16]
+
+
+def write_receipts(rows, version, root=ROOT, directory="", now=None, reused=()):
     """(path, '') after writing one red receipt per (claim, source, suite) row with a suite, atomically; ('', reason)
-    and nothing written on a dirty or unreadable script tree or an unreadable file."""
-    trees, why = script_tree_key(root)
+    and nothing written on a dirty or unreadable tree or an unreadable file. CUT2.d: a (source, suite) pair the caller
+    names in `reused` whose red record already in the file still holds is CARRIED FORWARD as it was (same id, same
+    measured_at, same fields) and marked `reused_from` with that id: only a row measured in this run takes a new
+    `measured_at`, so a reuse never renews the 24 hour window. No production caller passes `reused` today (the
+    renderer measures every row it writes), so nothing is ever inferred as reused. The per-row `command` is None with a
+    note, because the perturbation runs inside the pool's work copy and nothing returns its argv."""
+    trees, why = script_tree_key(root, version)
     if why:
         return "", why
+    stamp = time.time() if now is None else float(now)
+    path = receipt_path(version, directory)
+    held, _why = load_receipts(path, root=root, now=now) if reused else ({}, "")
+    reused = set(reused)
     receipts = []
     for claim, source, suite in rows:
         if suite is None:
             continue
+        old = held.get((source, suite)) if (source, suite) in reused else None
+        if old is not None and _receipt_holds(old, source, suite, root) and isinstance(old.get("id"), str):
+            kept = {k: v for k, v in old.items() if k != "_path"}
+            kept["reused_from"] = old["id"]
+            receipts.append(kept)
+            continue
+        seconds, _why = load_baseline_seconds(suite, version, root=root, directory=directory, now=now)
         try:
-            receipts.append({"claim": claim, "source": source, "suite": suite, "verdict": "red",
-                             "file_sha256": _file_sha(root, source), "suite_sha256": _file_sha(root, suite)})
+            rec = {"claim": claim, "source": source, "suite": suite, "verdict": "red",
+                   "file_sha256": _file_sha(root, source), "suite_sha256": _file_sha(root, suite),
+                   "interpreter": sys.executable, "measured_at": stamp,
+                   "command": None,
+                   "command_note": "NO-DATA: the perturbation ran in the pool's work copy, which does not return its argv",
+                   "clean_probe": None if seconds is None else {"exit": 0, "seconds": seconds}}
+            rec["id"] = _receipt_id(rec)
+            receipts.append(rec)
         except OSError as exc:
             return "", "%s or %s cannot be read: %s" % (source, suite, exc)
-    stamp = time.time() if now is None else float(now)
-    path = receipt_path(version, directory)
     data = {"schema": RECEIPT_SCHEMA, "version": version, "trees": trees, "written_at": stamp,
             "receipts": receipts}
     tmp = "%s.tmp-%d" % (path, os.getpid())
@@ -883,7 +941,7 @@ def write_receipts(rows, version, root=ROOT, directory="", now=None):
     return path, ""
 
 
-def load_receipts(path, root=ROOT, now=None):
+def load_receipts(path, root=ROOT, now=None, version=None):
     """({(source, suite): receipt}, '') when the file at `path` has this schema, is younger than 24 hours and was
     written for exactly today's clean script trees; ({}, reason) otherwise. Each receipt is checked again per row at use
     (drive): a red verdict and today's file and suite digests."""
@@ -902,7 +960,7 @@ def load_receipts(path, root=ROOT, now=None):
     age = (time.time() if now is None else float(now)) - stamp
     if age > RECEIPT_MAX_AGE_S or age < -RECEIPT_FUTURE_SLACK_S:
         return {}, "the receipts file %s is stale or stamped from the future" % path
-    trees, why = script_tree_key(root)
+    trees, why = script_tree_key(root, version if version is not None else data.get("version"))
     if why:
         return {}, why
     if data.get("trees") != trees:
@@ -910,17 +968,29 @@ def load_receipts(path, root=ROOT, now=None):
     items = data.get("receipts")
     if not isinstance(items, list):
         return {}, "the receipts file %s carries no receipt list" % path
-    out = {}
+    out, conflicted = {}, set()
     for item in items:
         if (isinstance(item, dict) and isinstance(item.get("source"), str) and isinstance(item.get("suite"), str)
                 and isinstance(item.get("file_sha256"), str) and isinstance(item.get("suite_sha256"), str)):
-            out[(item["source"], item["suite"])] = dict(item, _path=path)
+            key = (item["source"], item["suite"])
+            measured = item.get("measured_at", stamp)  # CUT2.d: each record ages from ITS measurement
+            if (isinstance(measured, bool) or not isinstance(measured, (int, float)) or measured != measured
+                    or (time.time() if now is None else float(now)) - measured > RECEIPT_MAX_AGE_S
+                    or (time.time() if now is None else float(now)) - measured < -RECEIPT_FUTURE_SLACK_S):
+                continue
+            if key in out and dict(out[key], _path=None) != dict(item, _path=None):
+                conflicted.add(key)  # CUT2.d: two records for one pair that disagree are no record
+            out[key] = dict(item, _path=path)
+    for key in conflicted:
+        del out[key]
     return out, ""
 
 
 def _receipt_holds(receipt, source, suite, root):
-    """True only for a red receipt whose file and suite digests equal today's bytes."""
+    """True only for a red receipt made under this interpreter whose file and suite digests equal today's bytes."""
     if not isinstance(receipt, dict) or receipt.get("verdict") != "red":
+        return False
+    if receipt.get("interpreter") != sys.executable:  # CUT2.d: another interpreter, or none recorded, is a miss
         return False
     try:
         return (_file_sha(root, source) == receipt.get("file_sha256")
@@ -950,7 +1020,7 @@ def write_baseline_receipt(suite_rel, seconds, version, root=ROOT, directory="",
     corrupt existing file is renamed aside and replaced by a file holding the one new entry."""
     if not _finite_positive(seconds):
         return "the baseline seconds %r are not a finite number above 0" % (seconds,)
-    trees, why = script_tree_key(root)
+    trees, why = script_tree_key(root, version)
     if why:
         return why
     try:
@@ -1008,7 +1078,7 @@ def load_baseline_seconds(suite_rel, version, root=ROOT, directory="", now=None)
     age = (time.time() if now is None else float(now)) - stamp
     if age > RECEIPT_MAX_AGE_S or age < -RECEIPT_FUTURE_SLACK_S:
         return None, "the baseline entry for %s is stale or stamped from the future" % suite_rel
-    trees, why = script_tree_key(root)
+    trees, why = script_tree_key(root, version)
     if why:
         return None, why
     if item.get("trees") != trees:

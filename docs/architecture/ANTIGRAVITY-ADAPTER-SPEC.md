@@ -8,6 +8,8 @@ Target: First-class client adapter for Google Antigravity (IDE, 2.0 Desktop, CLI
 
 ## 1. Verified Antigravity Architecture & Extension Points
 
+<!-- doc-assurance: allow-missing GEMINI.md a rules file the Antigravity host reads in a user's project, not in this repository -->
+
 This specification reflects first-party ground truth from Antigravity's active runtime, customization loader (`agy-customizations`), and CLI/IDE sitemap (`antigravity-guide`).
 
 ### A. Customization Roots & Discovery Hierarchy
@@ -320,6 +322,8 @@ SURFACE_TWINS = {
 }
 ```
 
+<!-- doc-assurance: allow-missing scripts/antigravity_smoke.py a proposed smoke script this specification asks for; not built yet -->
+
 ### Step 2: Add Antigravity Battery Smoke
 Pair `scripts/antigravity_smoke.py` alongside `scripts/codex_smoke.py` and `scripts/cursor_smoke.py`:
 - Checks manifest syntax and validity.
@@ -342,6 +346,10 @@ Pair `scripts/antigravity_smoke.py` alongside `scripts/codex_smoke.py` and `scri
 ---
 
 ## 7. Fable's verification response, 2026-09-20T08:24:30+0900
+
+<!-- doc-assurance: allow-missing fable_message.txt a handover file of the session that wrote this specification, not shipped -->
+
+<!-- doc-assurance: allow-missing implementation_plan.md a handover file of the session that wrote this specification, not shipped -->
 
 Read `implementation_plan.md` and this document's own diagram/overview, both
 handed over via `fable_message.txt`. Two things independently checked before

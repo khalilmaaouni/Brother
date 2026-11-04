@@ -775,6 +775,22 @@ class TheBreakerSeesAnAccountLimit(unittest.TestCase):
                          result.get("note"))
 
 
+def _can_listen_on_loopback():
+    """A confined run (the hermetic check's sandbox allows no network, not even a loopback listener) cannot bind
+    one: there the premise is absent, not the behaviour broken. Same probe as scripts/test_codex_smoke.py."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+    except OSError:
+        return False
+    return True
+
+
+NEEDS_A_LOOPBACK_LISTENER = unittest.skipUnless(_can_listen_on_loopback(), "NO-DATA: this run may not open a loopback listener")
+
+
+@NEEDS_A_LOOPBACK_LISTENER
 class TheCodexTurnsSandbox(unittest.TestCase):
     """What CODEX_ARGV's `--sandbox workspace-write` does and does not allow,
     driven against the real Codex binary rather than reasoned about.

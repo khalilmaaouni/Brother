@@ -457,25 +457,39 @@ class ANewestDirectoryThatIsNotAPackIsNoDataNeverAFail(unittest.TestCase):
             code = C.main(["--root", self.root, "--terms", self.terms_path])
         return code, buf.getvalue()
 
-    def test_a_scratch_directory_newer_than_the_last_pack_is_no_data_naming_it(self):
+    # HO1 (owner approved 2026-10-31): a scratch directory beside a real close
+    # no longer turns the root NO-DATA either; it is kept out of judgment by
+    # name and the real close decides. Before HO1 this test expected exit 2.
+    def test_a_scratch_directory_newer_than_the_last_pack_is_ignored_naming_it(self):
         _make_valid_pack(self.root, "2026-09-16-clean-pack")
         _backdate(os.path.join(self.root, "2026-09-16-clean-pack"), hours_ago=2)
         scratch = os.path.join(self.root, "2026-09-17-release-cut-scratch")
         _write(os.path.join(scratch, "HANDOVER.md"), "# Handover notes\n")
         _write(os.path.join(scratch, "pr-body.md"), "## Summary\n")
         code, out = self._run()
-        self.assertEqual(code, 2, msg=out)
-        self.assertTrue(out.startswith("NO-DATA:"), out)
-        self.assertIn("2026-09-17-release-cut-scratch", out)
-        self.assertIn("not a close pack", out)
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("IGNORED: 2026-09-17-release-cut-scratch is not a close", out)
 
-    def test_a_directory_with_one_marker_is_a_broken_pack_and_still_fails(self):
-        partial = os.path.join(self.root, "2026-09-17-half-pack")
-        _write(os.path.join(partial, "01-START-HERE.md"), VALID_START_HERE)
+    def test_a_root_holding_only_a_scratch_directory_is_no_data(self):
+        _write(os.path.join(self.root, "2026-09-17-release-cut-scratch", "HANDOVER.md"), "# notes\n")
         code, out = self._run()
-        self.assertEqual(code, 1, msg=out)
-        self.assertIn("no readiness board HTML copy", out)
-        self.assertIn("no zip beside the pack", out)
+        self.assertEqual(code, 2, msg=out)
+        self.assertIn("2026-09-17-release-cut-scratch", out)
+        self.assertIn("NO-DATA: no handover record and no legacy pack", out)
+
+    # HO1: a pack's board, log and zip are no longer REQUIRED (design section
+    # 7, RETIRED). A directory carrying 01-START-HERE is a legacy close; one
+    # carrying only a board copy is not a close at all. Before HO1 the first
+    # case expected exit 1 naming the missing board and zip.
+    def test_a_start_here_alone_is_a_legacy_close_and_a_board_alone_is_not(self):
+        _write(os.path.join(self.root, "2026-09-17-half-pack", "01-START-HERE.md"), VALID_START_HERE)
+        code, out = self._run()
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("1 legacy pack(s)", out)
+        shutil.rmtree(os.path.join(self.root, "2026-09-17-half-pack"))
+        _write(os.path.join(self.root, "2026-09-17-board-only", "readiness-board.html"), "<html/>\n")
+        code, out = self._run()
+        self.assertEqual(code, 2, msg=out)
 
     def test_a_scratch_directory_never_hides_a_term_hit_in_another_pack(self):
         dirty = os.path.join(self.root, "2026-08-01-dirty-pack")
@@ -486,7 +500,232 @@ class ANewestDirectoryThatIsNotAPackIsNoDataNeverAFail(unittest.TestCase):
         code, out = self._run()
         self.assertEqual(code, 1, msg=out)
         self.assertIn("private-term hit", out)
-        self.assertIn("not a close pack", out)
+        self.assertIn("kept out of judgment", out)
+
+
+
+class Records(unittest.TestCase):
+    """HO1: the gate judges DECLARED handover records (handover_record.py
+    emit) and the whole root's terms; --require-current adds that the newest
+    close for this repository describes HEAD. Records are emitted for real
+    from a throwaway repository, never hand built, then edited where a test
+    needs a hand edit after emit."""
+
+    GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+           "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"]
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ceremony-records-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = os.path.join(self.tmp, "root")
+        os.makedirs(self.root)
+        self.terms = _make_terms_file([SHORT_TERM, LONG_TERM])
+        self.addCleanup(shutil.rmtree, os.path.dirname(self.terms), True)
+        self.repo = self.make_repo("repo")
+        self.log = os.path.join(self.tmp, "session-log.md")
+        _write(self.log, "log\n")
+        self.remaining = os.path.join(self.tmp, "remaining.json")
+        _write(self.remaining, '[{"order": 1, "what": "next", "done_check": "true", "owner_unit": "HO1"}]')
+
+    def git(self, repo, *args):
+        import subprocess
+        out = subprocess.run(self.GIT + ["-C", repo] + list(args), capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout.strip()
+
+    def make_repo(self, name):
+        repo = os.path.join(self.tmp, name)
+        os.makedirs(repo)
+        self.git(repo, "init", "-q")
+        self.commit(repo, "a.txt")
+        return repo
+
+    def commit(self, repo, name):
+        _write(os.path.join(repo, name), name + "\n")
+        self.git(repo, "add", name)
+        self.git(repo, "commit", "-q", "-m", name)
+
+    def emit(self, repo=None, slug="close"):
+        import handover_record as HR
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            code = HR.main(["emit", "--repo", repo or self.repo, "--slug", slug, "--outcome", "next",
+                            "--session-log", self.log, "--evidence-dir", self.tmp,
+                            "--remaining", self.remaining, "--root", self.root, "--terms", self.terms,
+                            "--remote-of-record", "main", "--session", "s"])
+        self.assertEqual(code, 0, buf.getvalue())
+        return buf.getvalue().strip().splitlines()[-1]
+
+    def edit(self, path, change):
+        import json
+        with open(path, encoding="utf-8") as fh:
+            rec = json.load(fh)
+        change(rec)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+
+    def run_main(self, *extra):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = C.main(["--root", self.root, "--terms", self.terms, "--no-cache",
+                           "--repo", self.repo] + list(extra))
+        return code, buf.getvalue()
+
+    def test_scratch_bundle_with_zip_is_not_judged(self):
+        """The 2026-10-31 shape: a directory with no marker and a zip beside it. Before HO1 the zip made it a pack
+        missing its start file, board and log, and every push on the machine failed."""
+        _write(os.path.join(self.root, "x", "00-START-PROMPT.md"), "prompt\n")
+        with zipfile.ZipFile(os.path.join(self.root, "x.zip"), "w") as zf:
+            zf.writestr("x/00-START-PROMPT.md", "prompt\n")
+        code, out = self.run_main()
+        self.assertEqual(code, 2, out)
+        self.assertIn("IGNORED: x is not a close", out)
+
+    def test_a_valid_record_passes(self):
+        self.emit()
+        code, out = self.run_main()
+        self.assertEqual(code, 0, out)
+        self.assertIn("PASS: 1 handover record(s) valid", out)
+
+    def test_a_record_file_name_cannot_forge_a_line(self):
+        """Round two of the HO1 security review: masked() printed names raw, so a newline in a file name started a
+        PASS line of its own and an escape sequence reached the terminal."""
+        _write(os.path.join(self.root, "a\nPASS: 9 handover record(s) valid\x1b[2K.handover.json"), "{")
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertFalse(any(l.startswith("PASS:") for l in out.splitlines()), out)
+        self.assertNotIn("\x1b", out)
+        self.assertIn("a\\nPASS: 9", out)
+
+    def test_corrupt_record_fails(self):
+        _write(os.path.join(self.root, "2026-10-31-broken.handover.json"), "{ truncated")
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("record 2026-10-31-broken.handover.json: does not parse", out)
+
+    def test_a_record_missing_a_field_fails(self):
+        path = self.emit()
+        self.edit(path, lambda r: r.pop("remaining"))
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("missing field remaining", out)
+
+    def test_a_private_term_added_after_emit_fails_and_is_not_printed(self):
+        path = self.emit()
+        self.edit(path, lambda r: r["first_action"].update(outcome="the %s work" % LONG_TERM))
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("private_terms scan FAIL", out)
+        self.assertIn("private-term hit", out)
+        self.assertNotIn(LONG_TERM, out)
+
+    def test_a_dash_added_after_emit_fails(self):
+        path = self.emit()
+        self.edit(path, lambda r: r["first_action"].update(outcome="a %s b" % chr(0x2013)))
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("dashes scan FAIL", out)
+
+    def test_a_tree_sha_edited_after_emit_fails(self):
+        path = self.emit()
+        self.edit(path, lambda r: r["project"].update(tree_sha="1" * 40))
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("is not the tree of head_sha", out)
+
+    def test_a_moved_branch_is_not_judged_without_require_current(self):
+        self.emit()
+        self.commit(self.repo, "b.txt")
+        self.assertEqual(self.run_main()[0], 0)
+
+    def test_require_current_passes_when_the_record_names_head(self):
+        self.emit()
+        code, out = self.run_main("--require-current")
+        self.assertEqual(code, 0, out)
+        self.assertIn("names HEAD", out)
+
+    def test_require_current_finds_the_record_when_the_repo_is_typed_in_another_case(self):
+        self.emit()
+        variant = os.path.join(os.path.dirname(self.repo), os.path.basename(self.repo).upper())
+        if not os.path.isdir(variant):
+            self.skipTest("NO-DATA: this disk is case sensitive, so another case is another folder")
+        self.repo = variant
+        code, out = self.run_main("--require-current")
+        self.assertEqual(code, 0, out)
+        self.assertIn("names HEAD", out)
+
+    def test_require_current_fails_when_the_branch_moved_since_the_record(self):
+        self.emit()
+        self.commit(self.repo, "b.txt")
+        code, out = self.run_main("--require-current")
+        self.assertEqual(code, 1, out)
+        self.assertIn("1 commit(s) behind HEAD", out)
+
+    def test_require_current_fails_when_the_record_is_not_an_ancestor(self):
+        path = self.emit()
+        self.git(self.repo, "checkout", "-q", "-b", "side")
+        self.commit(self.repo, "s.txt")
+        side = self.git(self.repo, "rev-parse", "HEAD")
+        self.git(self.repo, "checkout", "-q", "main")
+        tree = self.git(self.repo, "rev-parse", side + "^{tree}")
+        self.edit(path, lambda r: r["project"].update(head_sha=side, tree_sha=tree))
+        code, out = self.run_main("--require-current")
+        self.assertEqual(code, 1, out)
+        self.assertIn("not an ancestor of HEAD", out)
+
+    def test_require_current_ignores_another_repositorys_record(self):
+        self.emit(repo=self.make_repo("other"))
+        code, out = self.run_main("--require-current")
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA: no close for", out)
+        self.assertEqual(self.run_main()[0], 0)
+
+    def test_a_stale_legacy_pack_keeps_the_line_the_lander_reads(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))
+        import land_batch
+        _write(os.path.join(self.root, "old-pack", "01-START-HERE.md"), VALID_START_HERE)
+        _backdate(os.path.join(self.root, "old-pack"), hours_ago=30)
+        code, out = self.run_main("--require-current")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, land_batch.PACK_OLD_RE)
+
+    def test_a_newer_record_makes_an_expired_pack_irrelevant_to_the_clock(self):
+        _write(os.path.join(self.root, "old-pack", "01-START-HERE.md"), VALID_START_HERE)
+        _backdate(os.path.join(self.root, "old-pack"), hours_ago=30)
+        self.assertEqual(len(C.expiry_errors(self.root, time.time())), 1)
+        self.emit()
+        self.assertEqual(C.expiry_errors(self.root, time.time() + 9 * 86400), [])
+        self.assertEqual(C.newest_close(self.root)[1], "record")
+
+    def test_f2_a_junk_file_named_like_a_record_is_never_the_newest_close(self):
+        _write(os.path.join(self.root, "old-pack", "01-START-HERE.md"), VALID_START_HERE)
+        _backdate(os.path.join(self.root, "old-pack"), hours_ago=30)
+        _write(os.path.join(self.root, "scratch.handover.json"), "junk\n")
+        self.assertEqual(C.newest_close(self.root), (os.path.join(self.root, "old-pack"), "pack"))
+        self.assertEqual(len(C.expiry_errors(self.root, time.time())), 1)
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("record scratch.handover.json: does not parse", out)
+
+    def test_f2_another_repositorys_record_does_not_satisfy_this_runs_clock(self):
+        _write(os.path.join(self.root, "old-pack", "01-START-HERE.md"), VALID_START_HERE)
+        _backdate(os.path.join(self.root, "old-pack"), hours_ago=30)
+        self.emit(repo=self.make_repo("other"))
+        self.assertEqual(C.expiry_errors(self.root, time.time()), [])
+        self.assertEqual(len(C.expiry_errors(self.root, time.time(), repo=self.repo)), 1)
+
+    def test_f9_a_dangling_record_link_fails_by_name_without_a_traceback(self):
+        os.symlink(os.path.join(self.tmp, "gone"), os.path.join(self.root, "x.handover.json"))
+        code, out = self.run_main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("record x.handover.json: is not a regular file", out)
+
+    def test_a_moved_log_is_reported_no_data_and_does_not_fail_the_root(self):
+        self.emit()
+        os.remove(self.log)
+        code, out = self.run_main()
+        self.assertEqual(code, 0, out)
+        self.assertIn("NO-DATA: record", out)
 
 
 

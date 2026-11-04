@@ -29,6 +29,8 @@ STATE.md.bak-*
 
 # JBEQ fixtures and run outputs are data, not residue (2026-09-05)
 !benchmarks/jbeq/**/*.csv
+# BASE1.b's analytics task reads this export as its visible fixture (2026-11-01)
+!benchmarks/competitive/analytics/events.csv
 
 # Machine reservation state written by brother_run on every acquire and release
 # (2026-09-18): tracked, it made the tree dirty after every run, which cut.py

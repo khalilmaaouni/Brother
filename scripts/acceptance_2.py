@@ -228,9 +228,20 @@ def _run(explain, drop_state_before_reconcile):
         if problems:
             return 2, "NO-DATA: could not build a work_record plan: %s" % problems
 
+        # THIS RUN'S OWN RESERVATION (see acceptance_1.py): without it the disk
+        # admission refuses the worker under the 15 GiB cleanup band.
+        try:
+            import machine_reservation
+        except ImportError as exc:
+            return 2, "NO-DATA: could not import the machine reservation: %s" % exc
+        res_store, holder = os.path.join(tmp, "MACHINE-RESERVATION.json"), "acceptance-2-%d" % os.getpid()
+        _held, problem = machine_reservation.acquire(res_store, holder, 600)
+        if _held is None:
+            return 2, "NO-DATA: this run could not hold its own machine reservation: %s" % problem
         proc = sh([sys.executable, LOOP_BRIDGE,
                    "--plan", record["path"], "--claims", store,
                    "--owner", "session-b", "--cwd", repo,
+                   "--reservation-path", res_store, "--reservation-holder", holder,
                    # harness pins slots so the test does not measure free disk
                    "--slots", "2",
                    "--worker-cmd", "sh", worker],

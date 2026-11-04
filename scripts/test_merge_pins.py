@@ -34,9 +34,10 @@ if HERE not in sys.path:
 
 import merge_gate  # noqa: E402
 import merge_pins  # noqa: E402
+from test_merge_verified import sign_review  # noqa: E402  (MERGE1.a: the review a real run now needs)
 
 TOOL_FILES = ("merge_verified.sh", "merge_gate.py", "tmp_sandbox.py", "merge_pins.py", "merge_reach.py",
-              "merge_precompute.py")
+              "merge_precompute.py", "gate_ledger.py")
 RUN_LINE = "loop/run-2026-09-30"
 NO_PTY = "NO-DATA: no pseudo terminal here, so the terminal prompt cannot be exercised"
 
@@ -321,6 +322,34 @@ class TestOpenFrozenPr(unittest.TestCase):
         with self.assertRaises(ValueError):
             merge_pins.open_frozen_pr("o/r", "2", "b" * 40, self.BRANCH, runner="gh")
 
+    DEV = "plan/1.1.9-line-2026-10-25"
+
+    def test_the_frozen_pull_request_targets_the_named_base(self):
+        # MERGE2.a: a dev line merge freezes onto a pull request against the dev line, never against main
+        runner, seen = self.gh()
+        self.assertEqual(merge_pins.open_frozen_pr("o/r", "2", "b" * 40, self.BRANCH, base=self.DEV, runner=runner), "9")
+        argv = [a for a in seen if a[:3] == ["gh", "pr", "create"]][0]
+        self.assertEqual(argv[argv.index("--base") + 1], self.DEV)
+
+    def test_a_base_not_on_the_list_is_refused_before_gh_runs(self):
+        for bad in ("trunk", "hub/main", "refs/heads/main", self.DEV + "/x"):
+            runner, seen = self.gh()
+            with self.assertRaises(merge_gate.MergeGateError, msg=bad):
+                merge_pins.open_frozen_pr("o/r", "2", "b" * 40, self.BRANCH, base=bad, runner=runner)
+            self.assertEqual(seen, [], bad)
+
+    def test_the_command_line_carries_the_base(self):
+        import contextlib
+        import io
+        from unittest import mock
+        runner, seen = self.gh()
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}, clear=True), contextlib.redirect_stdout(out):
+            self.assertEqual(merge_pins.main(["open", "o/r", "2", "b" * 40, self.BRANCH, self.DEV], runner=runner), 0)
+        argv = [a for a in seen if a[:3] == ["gh", "pr", "create"]][0]
+        self.assertEqual(argv[argv.index("--base") + 1], self.DEV)
+        self.assertEqual(out.getvalue(), "9\n")
+
 
 # ---------------------------------------------------------------------------------------------------------------------
 # the hub
@@ -342,6 +371,8 @@ class Fixture(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.hub], check=True)
         self.clone = os.path.join(self.fix, "clone")
         subprocess.run(["git", "clone", "-q", "-o", "hub", self.hub, self.clone], check=True, capture_output=True)
+        # a root commit under the base: the line a review names must not be the root (MERGE1.a round 1)
+        self.git(self.clone, "commit", "-q", "--allow-empty", "-m", "init")
         os.makedirs(os.path.join(self.clone, "scripts"))
         for name in TOOL_FILES:
             shutil.copy(os.path.join(HERE, name), os.path.join(self.clone, "scripts", name))
@@ -431,6 +462,9 @@ class Fixture(unittest.TestCase):
         with open(log, "w") as fh:
             fh.write("pass 3   fail 0   no-data 0\n")
         merge_gate.record_row(self.clone, tree, 0, log, "1", head, base, {}, runner=self.runner())   # the one row writer
+        # MERGE1.a: and the recorded review of that head a real run now needs (the line is the main both PRs were cut from)
+        pr = next(n for n, sha in self.heads.items() if sha == head)
+        sign_review(self.clone, pr, head, self.main)
         return self.git(self.clone, "commit-tree", tree, "-p", base, "-m", "next base"), tree
 
     def sign_chain(self):

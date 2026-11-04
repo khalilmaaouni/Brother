@@ -190,12 +190,25 @@ def run_routing_probe(seam_dir):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _can_listen_on_loopback():
+    """The probe serves over a local HTTP server. A confined run (the hermetic check's sandbox allows no network, not
+    even a loopback listener) cannot bind one: there the premise is absent, not the behaviour broken."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+    except OSError:
+        return False
+    return True
+
+
 class RoutingSeamHoldsIntact(unittest.TestCase):
     """The unmutated seam: the routing function reads the request's own
     tenant field, so no leak occurs. Same assertion the mutated case below
     must FAIL to satisfy."""
 
     @unittest.skipUnless(_tti._seam_present(), "bmu_vault_seam fixture is absent")
+    @unittest.skipUnless(_can_listen_on_loopback(), "NO-DATA: this run may not open a loopback listener")
     def test_intact_routing_holds(self):
         ok, lines = run_routing_probe(SEAM_DIR)
         self.assertIsNotNone(ok, "\n".join(lines))
@@ -209,6 +222,7 @@ class TheMutationProvesTheSeamIsGuarded(unittest.TestCase):
     seam is not actually guarded by any check that exists."""
 
     @unittest.skipUnless(_tti._seam_present(), "bmu_vault_seam fixture is absent")
+    @unittest.skipUnless(_can_listen_on_loopback(), "NO-DATA: this run may not open a loopback listener")
     def test_mutated_routing_is_caught_as_a_leak(self):
         tmp = tempfile.mkdtemp(prefix="bm-routing-mutation-build-")
         try:
@@ -228,6 +242,10 @@ def main():
     if not _tti._seam_present():
         print("NO-DATA: %s is missing one or more of the seam files" % SEAM_DIR)
         return 2
+    if not _can_listen_on_loopback():
+        print("SKIPPED (NO-DATA): this run may not open a loopback listener, so the premise of this probe is absent "
+              "here; it runs wherever a listener may be bound")
+        return 0
 
     print("-- intact routing (scripts/fixtures/bmu_vault_seam) --")
     ok, lines = run_routing_probe(SEAM_DIR)

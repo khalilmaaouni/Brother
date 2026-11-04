@@ -650,7 +650,11 @@ class TheReceiptsAreReusedOnlyOnAnExactRedMatch(unittest.TestCase):
         _git(self.tmp, "init", "-q")
         _git(self.tmp, "add", "-A")
         _git(self.tmp, "commit", "-q", "-m", "fixture")
-        self.ev = os.path.join(self.tmp, "evidence")
+        # CUT2.d: the evidence folder lives OUTSIDE the repository, as the real one (~/.claude/evidence/cut) does: a
+        # record's key refuses any uncommitted byte, so a folder of evidence inside the tree would dirty it.
+        evroot = tempfile.mkdtemp(prefix="test-perturb-receipts-ev-")
+        self.addCleanup(__import__("shutil").rmtree, evroot, True)
+        self.ev = os.path.join(evroot, "evidence")
 
     def write(self, rows=None, now=None):
         rows = self.ROWS[:1] if rows is None else rows
@@ -699,7 +703,7 @@ class TheReceiptsAreReusedOnlyOnAnExactRedMatch(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         self.assertEqual(data["schema"], P.RECEIPT_SCHEMA)
-        self.assertEqual(set(data["trees"]), set(self.CR.SCRIPT_DIRS))
+        self.assertEqual(set(data["trees"]), {"head_tree", "interpreter_real", "python_version"})  # CUT2.d
         self.assertTrue(all(r["verdict"] == "red" for r in data["receipts"]))
 
     def test_a_file_or_suite_changed_after_the_receipt_drives_the_row(self):
@@ -785,6 +789,194 @@ class TheReceiptsAreReusedOnlyOnAnExactRedMatch(unittest.TestCase):
                 with open(path, "w", encoding="utf-8") as fh:
                     json.dump(bad, fh)
                 self.assertEqual(self.load(path)[0], {})
+
+    # ---- CUT2.i: the key every record routes through, the dirt rule, ageing, provenance ----
+    CALLED = "scripts/mod_called.py"
+    SUITE_REL = "scripts/test_calls.py"
+    NOTE_REL = "docs/releases/9.9.9.md"
+    MANIFEST_REL = "docs/releases/9.9.9.export-manifest.txt"
+
+    def put(self, rel, text, mode="w"):
+        os.makedirs(os.path.dirname(os.path.join(self.tmp, rel)), exist_ok=True)
+        with open(os.path.join(self.tmp, rel), mode, encoding="utf-8") as fh:
+            fh.write(text)
+
+    def commit_change(self, rel, text):
+        self.put(rel, text)
+        _git(self.tmp, "add", "-A")
+        _git(self.tmp, "commit", "-q", "-m", "change")
+
+    def write_ok(self, now=None, reused=()):
+        path, why = P.write_receipts(self.ROWS[:1], "9.9.9", root=self.tmp, directory=self.ev, now=now, reused=reused)
+        self.assertEqual(why, "")
+        return path
+
+    def baseline_ok(self, now=None):
+        self.assertEqual(P.write_baseline_receipt(self.SUITE_REL, 2.5, "9.9.9", root=self.tmp, directory=self.ev,
+                                                  now=now), "")
+
+    def baseline_seconds(self):
+        return P.load_baseline_seconds(self.SUITE_REL, "9.9.9", root=self.tmp, directory=self.ev)[0]
+
+    def rewrite_json(self, path, edit):
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        edit(data)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+
+    # ---- step 2d: the existing `--receipts auto` reuse, and exactly when it holds ----
+    def test_step_2d_reuses_a_receipt_with_only_the_notes_two_files_dirty(self):
+        path = self.write_ok()
+        self.put(self.NOTE_REL, "\n<!-- the note, rewritten and not yet committed -->\n", "a")
+        self.put(self.MANIFEST_REL, "manifest\n")
+        receipts, why = self.load(path)
+        self.assertEqual(why, "")
+        code, lines, calls = self.drive(receipts)
+        self.assertEqual(code, 0, "\n".join(lines))
+        self.assertEqual(calls, [], "step 2d drove a row whose receipt holds")
+        self.assertTrue([l for l in lines if l.startswith("REUSED")])
+
+    def test_step_2d_drives_the_row_when_any_other_path_is_dirty(self):
+        path = self.write_ok()
+        self.put("docs/other.txt", "stray\n")
+        receipts, why = self.load(path)
+        self.assertEqual(receipts, {})
+        self.assertIn("uncommitted", why)
+        _code, _lines, calls = self.drive(receipts)
+        self.assertEqual(calls, [self.CALLED])
+
+    def test_a_dirty_script_file_is_refused_too(self):
+        path = self.write_ok()
+        self.put(self.CALLED, "\n# edited\n", "a")
+        self.assertEqual(self.load(path)[0], {})
+
+    def test_a_rename_into_a_release_file_still_names_the_path_it_left(self):
+        path = self.write_ok()
+        _git(self.tmp, "mv", "scripts/mod_imported.py", self.MANIFEST_REL)  # new path allowed, the origin is not
+        self.assertEqual(self.load(path)[0], {})
+
+    def test_another_versions_note_dirty_is_refused(self):
+        path = self.write_ok()
+        self.put("docs/releases/9.9.8.md", "a note for another version\n")
+        self.assertEqual(self.load(path)[0], {})
+
+    # ---- the key: HEAD's whole tree ----
+    def test_a_change_outside_the_script_folders_committed_ends_the_baseline_and_the_receipt(self):
+        # R1: the five script folders, every file digest and the interpreter are unchanged; only the tree id differs.
+        path = self.write_ok()
+        self.baseline_ok()
+        self.commit_change("bundle/flag.txt", "bad\n")
+        self.assertIsNone(self.baseline_seconds())
+        self.assertEqual(self.load(path)[0], {})
+
+    def test_a_change_outside_the_script_folders_left_dirty_ends_the_baseline_and_the_receipt(self):
+        # R2: the same HEAD, the change uncommitted.
+        path = self.write_ok()
+        self.baseline_ok()
+        self.put("bundle/flag.txt", "bad\n")
+        self.assertIsNone(self.baseline_seconds())
+        self.assertEqual(self.load(path)[0], {})
+
+    def test_a_retargeted_interpreter_symlink_is_another_interpreter(self):
+        # R4: sys.executable stays the same string; only the resolved real path in the key differs.
+        path = self.write_ok()
+        self.baseline_ok()
+        with mock.patch("os.path.realpath", lambda p, real=os.path.realpath: "/elsewhere/python3.14"
+                        if p == sys.executable else real(p)):
+            self.assertIsNone(self.baseline_seconds())
+            self.assertEqual(self.load(path)[0], {})
+
+    def test_another_python_version_is_another_interpreter(self):
+        path = self.write_ok()
+        self.baseline_ok()
+        with mock.patch.object(sys, "version", sys.version + " retargeted"):
+            self.assertIsNone(self.baseline_seconds())
+            self.assertEqual(self.load(path)[0], {})
+
+    def test_the_interpreter_string_in_a_receipt_must_equal_this_one(self):
+        path = self.write_ok()
+        self.rewrite_json(path, lambda d: d["receipts"][0].update(interpreter="/usr/bin/other"))
+        _code, _lines, calls = self.drive(self.load(path)[0])
+        self.assertEqual(calls, [self.CALLED])
+
+    # ---- the digests (isolated: the tree key is untouched, only the record is edited) ----
+    def test_a_suite_digest_that_disagrees_ends_the_baseline(self):
+        self.baseline_ok()
+        self.rewrite_json(P.baseline_path("9.9.9", self.ev), lambda d: d["suites"][self.SUITE_REL].update(suite_sha256="0" * 64))
+        self.assertIsNone(self.baseline_seconds())
+
+    def test_a_suite_digest_that_disagrees_drives_the_row(self):
+        path = self.write_ok()
+        self.rewrite_json(path, lambda d: d["receipts"][0].update(suite_sha256="0" * 64))
+        _code, _lines, calls = self.drive(self.load(path)[0])
+        self.assertEqual(calls, [self.CALLED])
+
+    def test_a_source_digest_that_disagrees_drives_the_row(self):
+        path = self.write_ok()
+        self.rewrite_json(path, lambda d: d["receipts"][0].update(file_sha256="0" * 64))
+        _code, _lines, calls = self.drive(self.load(path)[0])
+        self.assertEqual(calls, [self.CALLED])
+
+    def test_a_record_that_is_not_red_drives_the_row(self):
+        path = self.write_ok()
+        for verdict in ("green", "FAIL", "NO-DATA"):
+            with self.subTest(verdict=verdict):
+                self.rewrite_json(path, lambda d, v=verdict: d["receipts"][0].update(verdict=v))
+                _code, _lines, calls = self.drive(self.load(path)[0])
+                self.assertEqual(calls, [self.CALLED])
+
+    def test_two_conflicting_records_for_one_pair_are_no_record(self):
+        path = self.write_ok()
+        # the disagreeing record goes FIRST so the holding red one is last: only the conflict rule keeps it unused
+        self.rewrite_json(path, lambda d: d["receipts"].insert(0, dict(d["receipts"][0], verdict="green")))
+        self.assertEqual(self.load(path)[0], {})
+
+    # ---- ageing and provenance ----
+    def test_a_reused_row_keeps_its_original_measurement_time_and_the_window_ends_on_time(self):
+        t0 = time.time() - 23 * 3600
+        path = self.write_ok(now=t0)
+        old = self.load(path, now=t0 + 1)[0][(self.CALLED, self.SUITE_REL)]
+        self.assertEqual(old["measured_at"], t0)
+        again = self.write_ok(now=t0 + 23 * 3600, reused=[(self.CALLED, self.SUITE_REL)])  # a render 23 h later reused the record
+        new = self.load(again, now=t0 + 23 * 3600)[0][(self.CALLED, self.SUITE_REL)]
+        self.assertEqual(new["measured_at"], t0, "a reuse renewed the window")
+        self.assertEqual(new["id"], old["id"])
+        self.assertEqual(new["reused_from"], old["id"])
+        self.assertEqual(self.load(again, now=t0 + 25 * 3600)[0], {})
+
+    def test_a_row_the_caller_did_not_name_as_reused_is_measured_and_restamped(self):
+        t0 = time.time() - 23 * 3600
+        self.write_ok(now=t0)
+        again = self.write_ok(now=t0 + 23 * 3600)  # no `reused`: nothing is inferred as reused
+        rec = self.load(again, now=t0 + 23 * 3600)[0][(self.CALLED, self.SUITE_REL)]
+        self.assertEqual(rec["measured_at"], t0 + 23 * 3600)
+        self.assertNotIn("reused_from", rec)
+
+    def test_a_stale_record_drives_the_row_and_the_window_is_the_records_own(self):
+        path = self.write_ok(now=time.time() - 25 * 3600)
+        self.assertEqual(self.load(path)[0], {})
+
+    def test_a_record_stamped_from_the_future_is_refused(self):
+        path = self.write_ok()  # the FILE is young; only the record's own stamp is edited
+        self.rewrite_json(path, lambda d: d["receipts"][0].update(measured_at=time.time() + 3600))
+        self.assertEqual(self.load(path)[0], {})
+
+    def test_the_receipt_never_writes_a_reconstructed_command(self):
+        path = self.write_ok()
+        with open(path, encoding="utf-8") as fh:
+            rec = json.load(fh)["receipts"][0]
+        self.assertIsNone(rec["command"])
+        self.assertTrue(rec["command_note"].startswith("NO-DATA"))
+        self.assertEqual(rec["interpreter"], sys.executable)
+
+    def test_the_clean_probe_comes_from_the_baseline_that_holds_and_is_none_otherwise(self):
+        with open(self.write_ok(), encoding="utf-8") as fh:
+            self.assertIsNone(json.load(fh)["receipts"][0]["clean_probe"])
+        self.baseline_ok()
+        with open(self.write_ok(), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["receipts"][0]["clean_probe"], {"exit": 0, "seconds": 2.5})
+
 
     def test_main_reads_the_receipts_only_when_asked(self):
         seen = {}

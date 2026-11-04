@@ -171,11 +171,16 @@ class WholeGateRecord(unittest.TestCase):
         self.assertIn("no PASS record: git could not name the common git directory", out.getvalue())
         self.assertEqual(self.records(repo), [])
 
-    def test_a_fail_row_writes_no_record(self):
+    def test_a_fail_row_writes_no_pass_record_and_one_fail_record(self):
+        # STAB1.c (plan of record, STABILITY-120): a refused gate appends a FAIL record beside the PASS records; it
+        # still never writes a PASS. Was test_a_fail_row_writes_no_record, which asserted no record at all.
         repo = self.build(['run_check "a" true', 'run_check "b" false'])
         code, out = self.run_gate(repo)
         self.assertEqual(code, 1, out)
-        self.assertEqual(self.records(repo), [], out)
+        self.assertEqual([r for r in self.records(repo) if r.get("status") == "PASS"], [], out)
+        fails = [r for r in self.records(repo) if r.get("status") == "FAIL"]
+        self.assertEqual(1, len({json.dumps(r, sort_keys=True) for r in fails}), out)
+        self.assertIn("b", fails[0].get("refused_rows", []), out)
         self.assertIn("no PASS record: row b exited 1", out)
 
     def test_a_no_data_row_writes_no_record_even_when_the_gate_allows_it(self):
@@ -257,11 +262,15 @@ class WholeGateRecord(unittest.TestCase):
         self.assertTrue(ok, why)   # the same clean tree with a readable status: recorded
         self.assertEqual(len(self.records(repo)), 1)
 
-    def test_an_obligation_step_that_fails_writes_no_record_even_when_every_row_passed(self):
+    def test_an_obligation_step_that_fails_writes_no_pass_record_even_when_every_row_passed(self):
+        # STAB1.c: a gate refused by its obligation step records that refusal as FAIL, never as PASS. Was
+        # test_an_obligation_step_that_fails_writes_no_record_even_when_every_row_passed (no record at all).
         repo = self.build(['run_check "a" true'], obligations_text="{ not json")
         code, out = self.run_gate(repo)
         self.assertNotEqual(code, 0, out)
-        self.assertEqual(self.records(repo), [], out)
+        self.assertEqual([r for r in self.records(repo) if r.get("status") == "PASS"], [], out)
+        self.assertTrue(all(r.get("status") == "FAIL" for r in self.records(repo)), out)
+        self.assertTrue(self.records(repo), out)
         self.assertIn("the evidence obligation step exited", out)
 
     def test_the_writer_refuses_rows_it_cannot_read(self):
@@ -296,6 +305,33 @@ class RealGateShape(unittest.TestCase):
         for arg in ('--codes "$codes_file"', '--tree "$whole_gate_tree"', '--obligation "$obligation"'):
             self.assertIn(arg, tail)
 
+
+
+class CheapHermeticJudgedNothing(unittest.TestCase):
+    """STAB1.c review: on a detached head with no ref lines the cheap stage's hermetic check judged nothing, so it
+    answers NO-DATA (exit 2), never a PASS (exit 0)."""
+
+    def setUp(self):
+        import pre_push_gate
+        self.G = pre_push_gate
+
+    def run_main(self, ranges):
+        out = io.StringIO()
+        with mock.patch.object(self.G, "_outgoing_ranges", return_value=ranges), \
+                mock.patch.object(self.G, "check_hermetic_tests",
+                                  return_value=[(self.G.OK, "hermetic", "1 test passes")]), \
+                mock.patch.object(sys, "stdin", io.StringIO("")), contextlib.redirect_stdout(out):
+            code = self.G.main(["--hermetic-only", "--cwd", HERE])
+        return code, out.getvalue()
+
+    def test_a_detached_head_with_no_ref_lines_is_no_data(self):
+        code, out = self.run_main(None)
+        self.assertEqual(self.G.EXIT_NODATA, code)
+        self.assertIn("NO-DATA", out)
+
+    def test_a_range_with_a_passing_test_is_still_a_pass(self):  # control
+        code, out = self.run_main([["b", "--not", "--remotes"]])
+        self.assertEqual(self.G.EXIT_OK, code)
 
 if __name__ == "__main__":
     unittest.main()

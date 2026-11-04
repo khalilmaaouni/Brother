@@ -128,7 +128,28 @@ def receipt_claude(a, evidence, proof):
     import claude_ledger
     t = claude_ledger.tally(claude_ledger.ledger_path(), since=a.start, until=a.end)
     note = claude_ledger.note(t)
+    if not note and t["calls"] == 0 and _native_seat_landed(a.run_dir):
+        return ("NO-DATA: %s landed builds from a native Claude seat session and the call ledger holds no row in [%s, %s], "
+                "so 0.0 would claim a free run" % (os.path.basename(os.path.normpath(a.run_dir)), a.start, a.end))
     return t["usd"] if not note else _no_data(note)
+
+
+def _native_seat_landed(run_dir):
+    """True when a landed build of this run (proof/landings.jsonl, each row's builds[] = <round>/out/<job>-build.json) came
+    from a native seat: native_worker leaves a session folder <round>/fanout/native-<job>/ beside the build. A build that
+    never landed is not seen (known limit), and an unreadable record or row reads as no seat, the pre-STAB1.e answer."""
+    lines, _ = read_landing_lines(run_dir)
+    for line in lines:
+        try:
+            builds = json.loads(line).get("builds")
+        except (ValueError, AttributeError, RecursionError):
+            continue
+        for b in builds if isinstance(builds, list) else []:
+            if isinstance(b, str) and b.endswith("-build.json"):
+                rnd, job = os.path.dirname(os.path.dirname(b)), os.path.basename(b)[:-len("-build.json")]
+                if os.path.isdir(os.path.join(rnd, "fanout", "native-" + job)):
+                    return True
+    return False
 
 
 def receipt_landings(run_dir, evidence, start, end):

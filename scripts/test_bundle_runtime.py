@@ -103,6 +103,11 @@ def copy_scripts_subset(dst_scripts_dir):
     closure = BR.compute_closure(scripts_dir=HERE)
     for name in closure:
         shutil.copy2(os.path.join(HERE, name), os.path.join(dst_scripts_dir, name))
+    # SHIP1.a: REACH.json is an input of the closure (route_targets reads its routed commands and owners), so a
+    # faithful copy carries it beside the scripts, where the generator looks.
+    reach_dst = os.path.join(os.path.dirname(dst_scripts_dir), *BR.REACH_REL)
+    os.makedirs(os.path.dirname(reach_dst), exist_ok=True)
+    shutil.copy2(os.path.join(os.path.dirname(HERE), *BR.REACH_REL), reach_dst)
     return closure
 
 
@@ -119,8 +124,7 @@ class ByteStableRegeneration(unittest.TestCase):
         self.assertEqual(sorted(closure1), sorted(self.closure))
         self.assertTrue(changed1, "first generation must write something")
 
-        before = {name: _read(os.path.join(self.runtime_dir, name))
-                 for name in os.listdir(self.runtime_dir)}
+        before = _tree_bytes(self.runtime_dir)
 
         closure2, changed2 = BR.generate(scripts_dir=self.scripts_dir,
                                          runtime_dir=self.runtime_dir)
@@ -128,8 +132,7 @@ class ByteStableRegeneration(unittest.TestCase):
                                        "must report no changes, found: %s"
                                        % changed2)
 
-        after = {name: _read(os.path.join(self.runtime_dir, name))
-                 for name in os.listdir(self.runtime_dir)}
+        after = _tree_bytes(self.runtime_dir)
         self.assertEqual(before, after, "bytes must be identical across runs")
 
 
@@ -138,9 +141,53 @@ def _read(path):
         return fh.read()
 
 
+def _tree_bytes(root):
+    found = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            found[os.path.relpath(path, root)] = _read(path)
+    return found
+
+
 def _manifest(path):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+class SymlinkedCopiesAndShellRouteOwnersAreRefused(unittest.TestCase):
+    """SHIP1.a review: a symlink reads byte identical through its target, so --check passed one although an install
+    carries no link; and a routed flat .sh owner was dropped by the Python-only closure walk instead of refused."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bundle-runtime-")
+        self.scripts_dir = os.path.join(self.tmp, "scripts")
+        self.runtime_dir = os.path.join(self.tmp, "bundle", "runtime")
+        self.closure = copy_scripts_subset(self.scripts_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_a_symlinked_shipped_copy_is_named(self):
+        BR.generate(scripts_dir=self.scripts_dir, runtime_dir=self.runtime_dir)
+        name = sorted(self.closure)[0]
+        dst = os.path.join(self.runtime_dir, name)
+        os.remove(dst)
+        os.symlink(os.path.join(self.scripts_dir, name), dst)
+        ok, problems, _closure = BR.check(scripts_dir=self.scripts_dir, runtime_dir=self.runtime_dir)
+        self.assertFalse(ok)
+        self.assertIn("%s: a symlink in bundle/runtime" % name, "\n".join(problems))
+
+    def test_a_routed_flat_shell_owner_is_refused_not_dropped(self):
+        reach = os.path.join(self.tmp, *BR.REACH_REL)
+        doc = _manifest(reach)
+        doc["capabilities"].append({"id": "shell-route", "command": "scripts/routed_only.sh"})
+        with open(reach, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        with open(os.path.join(self.scripts_dir, "routed_only.sh"), "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\n")
+        with self.assertRaisesRegex(ValueError, "scripts/routed_only.sh is a routed target"):
+            BR.compute_closure(scripts_dir=self.scripts_dir)
 
 
 class ManifestMatchesTheClosure(unittest.TestCase):
@@ -161,8 +208,9 @@ class ManifestMatchesTheClosure(unittest.TestCase):
         # The launcher and the verifier are the two generated files with no
         # scripts/ source (E80 added the verifier); everything else is the
         # closure.
-        expected_names = set(self.closure) | {BR.LAUNCHER_NAME,
-                                              BR.VERIFIER_NAME}
+        extras = {dest for dest, _src in BR.compute_extra_files(self.closure, self.scripts_dir)}
+        routed = {dest for dest, _src in BR.compute_route_files(self.scripts_dir, self.runtime_dir)}
+        expected_names = set(self.closure) | extras | routed | {BR.LAUNCHER_NAME, BR.VERIFIER_NAME}
         self.assertEqual(set(by_path), expected_names,
                          "the manifest must name exactly the closure plus "
                          "the launcher and the verifier, no more and no less")

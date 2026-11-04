@@ -73,6 +73,8 @@ def read_waits(path):
             except ValueError:
                 bad += 1
                 continue
+            if isinstance(row, dict) and row.get("outcome") == "stale":
+                continue  # GATE1: heavy_slot's stale-holder event, not a wait, so neither a sample nor a bad line
             if _usable(row):
                 rows.append(row)
             else:

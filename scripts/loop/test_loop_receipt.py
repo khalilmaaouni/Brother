@@ -821,5 +821,166 @@ class WindowKnobTests(unittest.TestCase):
                 self.check(bad, 9 * 3600)
 
 
+
+class SilentSeatIsNoData(unittest.TestCase):
+    """STAB1.e, frozen before the implementation (harness owner, 2026-11-01). The contract: receipt_claude returns
+    NO-DATA naming the run tag when the run's builds used a native seat and the ledger holds zero rows for its window;
+    the token lane writes one ledger row per seat call; a truly zero cost run with no seat use still reads 0.0.
+    AGENTS.md: "A field the run cannot answer says NO-DATA and why". A 0.0 beside native seats that wrote no ledger row
+    is a quiet false claim of a free run.
+
+    HOW A RUN'S BUILDS ARE KNOWN TO HAVE USED A NATIVE SEAT, in the artifacts that exist on disk today: the run's own
+    proof/landings.jsonl (loop-landing-v1) names each landed build by path, <unit run>/roundN/out/<job>-build.json. A
+    native seat session leaves its round shaped the way native_worker.fanout and unit_runner write it: a session folder
+    fanout/native-<job>/ (claude.json inside), a results.json row in native_worker's keys (seat_wait false, ok true) and
+    prompts/<sub>-native.md. A blind (OpenRouter) round has none of the three: results.json in or_fanout's keys,
+    prompts/<sub>.md only. The seat fixtures carry every native mark, the no seat fixture none, so the implementation
+    may read any of them and only the seat condition differs between fixtures.
+
+    Every fixture is hermetic: a temp run directory, a temp ledger through BROTHER_CLAUDE_CALLS_LEDGER, a temp HOME; no
+    real evidence file is read or written. Mutation this class kills: "return the tally's 0.0 when seats ran and rows
+    are absent" turns test_seat_used_empty_ledger_is_no_data_naming_the_run_tag red."""
+
+    RUN = "run-20260101-000000-4242"
+    START, END = "2026-01-01T00:00:00+00:00", "2026-01-01T01:00:00+00:00"
+    SUB, JOB = "SX.a", "SX.a-r0"
+    PROOF_ENV = ("BROTHER_PROOF_PHASE", "BROTHER_RUN_DIR", "BROTHER_UNIT_RUN", "BROTHER_CODE_ROOT")
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        self.root = tempfile.mkdtemp(prefix="stab1e-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.home = os.path.join(self.root, "home")
+        os.makedirs(self.home)
+        self.run_dir = os.path.join(self.root, "loop-runs", self.RUN)
+        os.makedirs(os.path.join(self.run_dir, "proof"))
+        self.ledger = os.path.join(self.root, "evidence", "claude-calls.jsonl")
+        os.makedirs(os.path.dirname(self.ledger))
+        patch = mock.patch.dict(os.environ, {"HOME": self.home, "BROTHER_CLAUDE_CALLS_LEDGER": self.ledger})
+        patch.start()
+        self.addCleanup(patch.stop)
+        for k in self.PROOF_ENV:
+            os.environ.pop(k, None)
+
+    def landed_build(self, native):
+        """One landed build in this run's landing record; native says whether a seat session built it."""
+        rnd = os.path.join(self.root, "unit-runs", self.SUB + "-000000", "round0")
+        for d in ("out", "fanout", "prompts"):
+            os.makedirs(os.path.join(rnd, d))
+        build = os.path.join(rnd, "out", self.JOB + "-build.json")
+        for path in (build, os.path.join(rnd, "fanout", self.JOB + "-build.json")):
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"edits": [], "tests": [], "done_check": "true"}, fh)
+        if native:
+            session = os.path.join(rnd, "fanout", "native-" + self.JOB)
+            os.makedirs(session)
+            with open(os.path.join(session, "claude.json"), "w", encoding="utf-8") as fh:
+                fh.write('{"type": "result", "result": "DONE"}\n')
+            rows = [{"id": self.JOB, "model": "opus55", "ok": True, "error": "", "claude_error": False,
+                     "seat_wait": False, "status": "OK", "seconds": 444.5}]
+            prompt = self.SUB + "-native.md"
+        else:
+            rows = [{"id": self.JOB, "model": "deepseek", "ok": True, "effort": "medium",
+                     "actual_model": "deepseek/deepseek-v4.1-flash", "settle_state": "RECONCILED",
+                     "reservation_id": self.JOB + "-1-1-abc", "cost_usd": 0.03, "seconds": 58.7, "attempts": ["ok"]}]
+            prompt = self.SUB + ".md"
+        with open(os.path.join(rnd, "results.json"), "w", encoding="utf-8") as fh:
+            json.dump(rows, fh, indent=1)
+        with open(os.path.join(rnd, "prompts", prompt), "w", encoding="utf-8") as fh:
+            fh.write("brief\n")
+        row = {"schema": "loop-landing-v1", "at": "2026-01-01T00:30:00+00:00", "builds": [build],
+               "checks": [{"command": "true", "exit_code": 0, "label": "fixture"}], "commit": "a" * 40,
+               "files": ["scripts/x.py"], "log": os.path.join(self.root, "land.log"), "subs": [self.SUB],
+               "verdict": "LANDED"}
+        with open(os.path.join(self.run_dir, "proof", "landings.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+
+    def ledger_rows(self, rows):
+        with open(self.ledger, "w", encoding="utf-8") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in rows))
+
+    def claude(self):
+        a = BuildReceiptTests._args(BuildReceiptTests(), run_dir=self.run_dir, start=self.START, end=self.END)
+        return lr.receipt_claude(a, "NO-DATA: not a proof phase", False)
+
+    def test_seat_used_empty_ledger_is_no_data_naming_the_run_tag(self):
+        self.landed_build(native=True)
+        self.ledger_rows([])
+        got = self.claude()
+        self.assertIsInstance(got, str, "a seat ran and the ledger is silent: %r is a false zero" % (got,))
+        self.assertTrue(got.startswith("NO-DATA"), got)
+        self.assertIn(self.RUN, got)
+
+    def test_seat_used_rows_in_the_window_are_summed(self):
+        self.landed_build(native=True)
+        self.ledger_rows([{"call": "native-SX.a-1", "kind": "native", "at": "2026-01-01T00:10:00+00:00",
+                           "expires_at": "2026-01-01T00:40:00+00:00"},
+                          {"call": "native-SX.a-1", "event": "done", "cost_usd": 0.75, "at": "2026-01-01T00:20:00+00:00"},
+                          {"call": "native-SX.a-2", "kind": "native", "at": "2026-01-01T00:21:00+00:00",
+                           "expires_at": "2026-01-01T00:51:00+00:00"},
+                          {"call": "native-SX.a-2", "event": "done", "cost_usd": 0.5, "at": "2026-01-01T00:29:00+00:00"}])
+        got = self.claude()
+        self.assertNotIsInstance(got, str, got)
+        self.assertAlmostEqual(got, 1.25)
+
+    def test_no_seat_and_no_rows_is_a_true_zero(self):
+        self.landed_build(native=False)
+        self.ledger_rows([])
+        got = self.claude()
+        self.assertNotIsInstance(got, str, got)
+        self.assertEqual(got, 0.0)
+
+    def test_seat_used_rows_only_outside_the_window_is_no_data(self):
+        self.landed_build(native=True)
+        self.ledger_rows([{"call": "seat-probe-1", "kind": "seat-probe", "at": "2025-12-31T23:40:00+00:00",
+                           "expires_at": "2025-12-31T23:45:00+00:00"},
+                          {"call": "seat-probe-1", "event": "done", "cost_usd": 0.0038, "at": "2025-12-31T23:40:03+00:00"},
+                          {"call": "native-late", "kind": "native", "at": "2026-01-01T01:10:00+00:00",
+                           "expires_at": "2026-01-01T01:40:00+00:00"},
+                          {"call": "native-late", "event": "done", "cost_usd": 2.0, "at": "2026-01-01T01:20:00+00:00"}])
+        got = self.claude()
+        self.assertIsInstance(got, str, "a seat ran, no row falls in the window: %r is a false zero" % (got,))
+        self.assertTrue(got.startswith("NO-DATA"), got)
+
+    def test_the_written_receipt_carries_no_data_with_a_reason(self):
+        self.landed_build(native=True)
+        self.ledger_rows([])
+        log_path = os.path.join(self.root, "driver.log")
+        with open(log_path, "w", encoding="utf-8") as fh:
+            fh.write("RUN START\nRUN END\n")
+        env = dict(os.environ)
+        r = subprocess.run([sys.executable, "-B", os.path.join(HERE, "loop_receipt.py"), "write",
+                            "--run-dir", self.run_dir, "--pid", "4242", "--start", self.START, "--end", self.END,
+                            "--state", "FINISHED", "--reason", "done", "--deadline", "1800", "--budget", "10.00",
+                            "--spent-before", "1.00", "--spent-after", "1.00", "--log-path", log_path,
+                            "--cwd", self.run_dir], cwd=self.root, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        receipt = json.load(open(r.stdout.strip().splitlines()[-1], encoding="utf-8"))
+        spend = receipt["claude_spend_usd"]
+        self.assertIsInstance(spend, str, "the receipt says the seats cost %r" % (spend,))
+        self.assertTrue(spend.startswith("NO-DATA"), spend)
+        self.assertGreater(len(spend.split(":", 1)[-1].strip()), 10, "NO-DATA with no reason: %r" % spend)
+
+    def test_one_token_lane_seat_call_writes_one_row(self):
+        import datetime
+        import claude_ledger as CL
+        self.ledger_rows([])
+        env = {"BROTHER_UNIT_RUN": "SX.a-000000@1767225600"}
+        at = datetime.datetime(2026, 1, 1, 0, 10, tzinfo=datetime.timezone.utc)
+        lines = lambda: [l for l in open(self.ledger, encoding="utf-8").read().splitlines() if l.strip()]
+        started = CL.start(self.ledger, {"model": "opus55", "effort": "high", "prompt_chars": 5,
+                                         "call": "native-SX.a-abc123", "kind": "native"}, 600, env=env, now=at)
+        self.assertEqual(len(lines()), 1, "a seat call's START is exactly one row")
+        self.assertEqual(json.loads(lines()[0])["call"], "native-SX.a-abc123")
+        CL.finish(self.ledger, {"call": started["call"], "event": "done", "model": "opus55", "cost_usd": 0.4},
+                  now=at + datetime.timedelta(minutes=5))
+        self.assertEqual(len(lines()), 2, "its terminal row is exactly one more")
+        t = CL.tally(self.ledger, since=self.START, until=self.END, now=self.END)
+        self.assertEqual((t["calls"], t["uncosted"], t["inflight"]), (1, 0, 0), t)
+        self.assertAlmostEqual(t["usd"], 0.4)
+        self.assertEqual(CL.note(t), "")
+
+
 if __name__ == "__main__":
     unittest.main()

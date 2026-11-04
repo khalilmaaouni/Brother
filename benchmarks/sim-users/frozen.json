@@ -1,0 +1,11 @@
+{
+ "label": "SIMULATED",
+ "frozen_at": "2026-11-01T13:11:11Z",
+ "filter_sha": "28677c92e73652f2",
+ "grader_sha": "383ca41a6c8e2949",
+ "key_rows_sha": "fc75e570ef1ad123",
+ "holdout_count": 56,
+ "holdout_sha": "273a91168f67ffbf",
+ "holdout_content_sha": "665e3c5bfae5f0cc",
+ "rule": "the grader and the scenarios are never edited to make a cell pass; a change needs a new freeze, and runs graded under an older one are not compared with newer ones"
+}

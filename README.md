@@ -1,5 +1,9 @@
 # Brother
 
+**When AI says done, Brother gives you proof.**
+
+Tasks started through Brother end with a receipt: what changed, which checks ran, and what the evidence does and does not support. Brother is a plugin that records checks and results for tasks started with `/brother` in Claude Code, or through the installed Brother skill in Codex.
+
 ## Start in sixty seconds
 
 ### Claude Code
@@ -36,191 +40,80 @@ To upgrade an existing install, remove the configured marketplace first, then ad
 codex plugin marketplace remove brother && codex plugin marketplace add https://github.com/khalilmaaouni/Brother --ref <new ref> && codex plugin add brother@brother --json
 ```
 
-### Let AI work. Give it boundaries. Make it earn your trust.
+## The problem
 
-**When AI says done, Brother gives you proof.**
+- **A green check can be stale.** A Reddit author says 26 percent of green claims in his 180 days of sessions were stale. Before: edits could follow a passing run without a rerun. [Source](https://www.reddit.com/r/ClaudeAI/comments/1w5y64s/i_measured_how_often_claude_code_told_me_tests/)
+- **“Done” may lack a run.** A GitHub issue poster reports work described as done or ready to test without being run. Before: a completion claim could arrive without evidence that the work ran. [Source](https://github.com/anthropics/claude-code/issues/60177)
+- **Background work can keep spending.** A Reddit poster reports paid test calls continued about 17 hours after the session hit its usage limit, roughly 60,000 calls and about $2.1k by his count. Brother does not change what a coding tool does in the background. Before: the assistant called the process idle while calls continued. [Source](https://www.reddit.com/r/ClaudeAI/comments/1x540si/psa_claude_code_wrote_me_an_uncapped_test_loop/)
+- **Code can be almost right.** In the 2025 Stack Overflow Developer Survey, 66% named “AI solutions that are almost right, but not quite” as a frustration. Before: plausible output could still miss the intended behavior. [Source](https://survey.stackoverflow.co/2025/ai)
 
-Brother connects scoped execution, verification, delivery evidence, and local memory. It helps you define the outcome, check the work, and review what happened. Protection depends on the installed controls, the task, and the quality of its checks. Brother does not guarantee that every task is safe to leave unattended.
+These sources are qualitative, and none mention Brother.
 
-[Who Brother is for](#who-brother-is-for) · [Why this approach](#why-brother) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Documentation](docs/README.md)
+## What Brother does about it
 
-**Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
+These benefits apply to work that goes through Brother’s door.
 
-## What changed in 1.1.9
+| Without Brother | With Brother |
+| --- | --- |
+| A silent or stale check may look like “pass.” | Brother reads the check’s answer. Silence is NO-DATA, never PASS. A check that passed before the work, or still passes when the change is reverted, reads NO-DATA. |
+| “Done” may not say what ran. | A receipt lists changed files and each check’s exact command and exit code. |
+| It may be hard to find where work started. | Asking for status finds a run started through Brother’s door. |
+| A lesson may be forgotten. | The local Vault keeps lessons and recalls them by file or symptom. Memory is not evidence. |
 
-1.1.9 is a recovery release for the cut process, with a faster hook dispatcher and a measured account of what a fresh install can do.
+## What changed in 1.2.0
 
-The cut records each attempt outside the candidate and can resume from the failed phase. Reuse requires matching inputs; an unknown input never counts as a match. Approval is checked early and spent once when the candidate is ready. One coordinator holds the lock while refreshing a login. If renewal cannot complete, the attempt parks. Tests: `python3 -B scripts/test_cut_resume.py`, 14 cases OK on both interpreters. Both rehearsals ran on the real host and are recorded in `docs/plan/CUT-REHEARSAL-1.1.9.json`: the cold rehearsal of the cut took 7781 seconds (preflight 1015, check 6766); the failure and resume rehearsal failed late after the same expensive phases (6996 seconds), and its resume reused the preflight and the check and repeated no expensive execution. The host had 12.87 GiB free, under the 15 GiB default floor, and the rehearsal ran with the floor named at 12 GiB in the command; the record says so.
+**Quiet success is no longer a pass.** A tool that exits without an answer is NO-DATA. If you asked for one check, its answer leads even when a second opinion runs. One kind of second opinion can still say “complete” when no opinion was obtained; that route is hidden for now.
 
-If a tag push fails after the tag reaches the remote, recovery checks the exact commit reported by this export. It does not adopt a foreign tag or create the tag twice. A publish record that cannot be written returns FAIL. Tests: `python3 -B scripts/test_cut.py`, 205 tests OK; the cut mutation sweep left no survivors among 11 mutations.
+**Closing records name the checked version.** Each record says which version of the work the check ran against. A check that merely finishes is not enough, it must also report an answer.
 
-One shell tool event now starts one hook dispatcher process, down from six. On a fresh install, the independent seat's probe read one process per event with a median of 64 ms, against the 312 ms measured for v1.1.4. The first goal journey's hook cost row reads PASS. Reproduce the journey with `BROTHER_JOURNEY_WALKED_BY=<seat> python3 -B scripts/journey/run_journey.py --fresh-install --journey J2`.
+**Fresh projects get a clearer next step.** When a first edit is refused in a brand new project, the message now names Brother’s door and the one thing it needs.
 
-Fresh install checks cover the install, first goal, and review and accept journeys. The first goal has five PASS rows; review and accept has three. Install has one PASS row and four NO-DATA rows. The independent scores are install 2 of 10, first goal 10 of 10, and review and accept 6 of 6. These are scores for the named checks, not a rating of the whole product. `python3 scripts/go_no_go_119.py` reads eight release rows and reports the measured scores. Its required work row reads the plan; an empty required list needs a recorded decision.
+**Status finds the run.** Ask where work started through Brother’s door stands, and Brother finds that run.
 
-Repository sessions have short notes at the root, loop, and bundle. The root imports the repository instructions once. Export checks identify the public tree from its own project record. Tests: `python3 -B scripts/test_notes.py`, 9 tests OK. Work moved to a later release keeps its frozen check owned through the plan's move record; verify with `python3 -B scripts/test_bl_owns_complete.py`.
+**Vault notes are more precise.** A note kept only in the run folder is not called saved to memory. If no memory folder is set up, Brother names the missing setting.
 
-The release target is `v1.1.9`, with manifests reading `1.1.9`. The tag ships an export manifest at `docs/releases/1.1.9.export-manifest.txt`, naming every exported file with its sha256. After publication, a fresh clone can verify the exported files without private access or a network connection: check out `v1.1.9`, then run `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.9`. PASS means the named files match their recorded hashes; missing evidence reads NO-DATA.
+## What a receipt looks like
 
-Not verified in this release: four install checks remain NO-DATA, covering the first screen's paths, internal names, repair through the doctor, and execution of the README's claims. They are recorded as deferred work. The loop token lane reports RENEWED when the login holder answers, not when the provider accepts the login; a seat whose login fails parks. This does not establish automatic renewal. The named checks do not prove that an arbitrary task can finish unattended, that every feature is accessible, or that every branch of the code is covered.
-
-## What changed in 1.1.8
-
-1.1.8 is the release where every delivery report names what was checked and what that proves, and where the Vault refuses to let an author approve their own candidate.
-
-Every delivery report ends with one receipt sentence per unit, the acceptance screen line and, where a risk class was named, the release screen line. It also carries the scoping sentence: `exit 0 means no check failed. It does not mean everything is proven: only the checks named above ran, and a check nobody wrote cannot fail.` Tests: `python3 scripts/test_receipt_door.py`, at 252 OK.
-
-Each wait during a run prints one governor line when it starts and one when it ends. It does not print another line on every poll, so the wait's start and finish are reported without repeating the same notice while it continues. Tests: `python3 scripts/test_brother_run.py`, at 286 OK.
-
-Before an edit of a file the Vault knows, the recall hook prints `Recalled N lesson(s) from the Vault for <file>`. A genuine no-match prints nothing, and the hook writes nothing before consent. Tests: `python3 products/brothermode/tools/test_vault_recall_hook.py`, at 83 OK.
-
-Vault promotion requires a separate approver. An author cannot approve the same candidate, and the rule is on by default: `SEPARATION_OF_DUTIES_ENFORCED` is `True`. Turning that flag off makes the tests for refusing the same author and approver fail, including the case where no enforcement argument is supplied. Tests: `python3 products/brothermode/tools/test_bm_vault_lifecycle.py`, at 42 OK.
-
-The promote command and the approval pane apply the same rule. The refusal of an author's own approval is checked through both paths. Tests: `python3 products/brothermode/tools/test_bm_vault_promotions.py`, at 27 OK, and `python3 products/brothermode/tools/test_bm_vault_pane.py`, at 12 OK.
-
-The 15 legacy command shims remain in this cut, per decision D2.
-
-The public cut is tagged `v1.1.8`, and its manifests read `1.1.8`. The tag ships an export manifest at `docs/releases/1.1.8.export-manifest.txt`, naming 4663 exported files with a sha256 for each. Every file it names ships in the tag. Files under `docs/releases/` are outside the digest, because the release note carrying the digest cannot also be hashed by it.
-
-A fresh clone can check the exported tree with no private access and no network. After `git checkout v1.1.8`, run `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.8`. It prints PASS when every named file matches its recorded hash, FAIL with each file that does not, and NO-DATA when the manifest or digest is missing. The source revision in the release note belongs to the private hub and cannot be resolved from the public clone; the public tag and manifest digest are the checkable claims.
-
-The release note's file checks were measured by breaking each listed file's functions, running the named suite and requiring it to fail, then restoring the file and checking its hash byte for byte. Where a claim's own suite did not catch a broken file, the table names the suite that did. Re-run the table with `python3 scripts/release_note_perturb.py --version 1.1.8`.
-
-Not verified in this release: the file checks do not prove that every branch is covered. They show that replacing a file's functions with ones that raise is noticed by the named suite. A file no suite catches is reported as NO-DATA. A passing delivery report proves only the checks it names ran without a failure; it does not prove behavior for which no check was written.
-
-## What changed in 1.1.7
-
-1.1.7 is the release where a skipped test can no longer pass as done, and where the loop's own tools and judge cannot change without a whole gate, a canary and, for the judge, the owner's code.
-
-A builder or loop seat reports DONE through one proof only: the boxed done check run by `close_unit`. A skipped test reads PARTIAL, never DONE, and before DONE a preflight runs five integration lints over the lane. Tests: `python3 -B scripts/test_builder_preflight.py`.
-
-The deployed loop judges its own next generation. A landing that changes a loop tool deploys only after a boxed whole gate and a canary pass, and a changed judge file stays pending until the owner approves it with a code. On 2026-10-21 the loop landed a real change end to end through the live deploy step; the judge's boxed whole gate read 63 rows with 0 failed and 0 no data. Tests: `python3 -B scripts/test_land_batch_loop_guard.py`.
-
-Every loop launch arms a watcher beside the driver. It announces a stuck run, an unexplained hold or a dead driver once per cause, with a desktop notification and an alarm record in the run folder. It does not stop the run and cannot wake a Claude Code session. Before the driver starts, a landing canary sends one small change through the deployed judge, and the launch refuses unless the canary prints its landing line. Tests: `python3 -B scripts/loop/test_run_watch.py TestRunWatch`, `python3 -B scripts/loop/test_landing_canary.py TestLandingCanary`.
-
-The loop report names suites that went red without any code change. Records that expire on a date make a launch refuse early and name the stale record. Tests: `python3 -B scripts/loop/test_loop_works_fully.py TestLoopWorksFully`, `python3 -B scripts/loop/test_clock_rows.py TestClockRows`.
-
-The installed copy of the loop ships the adapters package its model tools import, and `scripts/loop_alone.py` imports every installed loop tool alone. The redeploy check (`scripts/loop/redeploy.sh`) refuses to run its live seat probe without a positive spending cap, `--probe-cap-usd`. Tests: `python3 -B scripts/test_loop_alone.py`, `python3 -B scripts/loop/test_redeploy_check.py`.
-
-A run's receipt names the unit it landed, its branch and its revision. A run pushes only when it is DONE with an accept recorded on the release screen, so a rejected review pushes nothing. Test: `python3 -B scripts/test_receipt_door.py`.
-
-The cut rehearsal keeps its commits and records the exact tip it proved; a real cut must resume from that tip, and a cold cut needs the owner to say so. The phone approval of the cut that 1.1.6 shipped is now live: the 1.1.7 cut ran only on the owner's six digit codes, each tied to the version and commit. The whole gate checks the committed kernel list against the code, in the private hub only. Tests: `python3 -B scripts/test_cut_keeps_rehearsal.py`, `python3 -B scripts/test_kernel_closure_row.py TestKernelClosureRow`, `python3 -B scripts/test_cut_preflight.py`.
-
-The private terms scan reads escaped and split terms, and no test spells the scratch folder's path any more. Tests: `python3 -B scripts/test_private_terms_escapes.py`, `python3 -B scripts/test_runs_root_one_rule.py`.
-
-Not verified in this release: the unattended run that closed the proof lasted about 20 minutes and landed one sub unit, then stopped itself because nothing else in scope was open; 52 planned units are deferred to later releases. Three units have every sub unit landed but stay open, because their done checks pass with skipped tests and the closer counts a skipped test as not a pass. The loop did not land the proof work untouched: hand repairs were made to the release line during the proof runs. Two cases of `scripts/loop/test_land_apply.py` still fail, as in 1.1.6: `native_worker.py` became a path a build may not write, and the test still assumes a build can edit it. `scripts/loop_alone.py` follows a tool's import only up to the first error that is not a missing module, so a tool that does work at import time (12 of 99) is counted as neither loaded nor a problem. The grader's sandbox needs the real git binary first on PATH; the launch scripts provide it, not the grader itself. Login holding, expiry warnings before a login lapses, the seat gate, relaunch without an operator and an eight hour signed in soak are deferred, and no 24 hour qualifying run was done. The phone code gates the cut command, not every route to a tag: closing the route by which a session holding the maintainer's GitHub login could push a tag directly is planned, not shipped.
-
-## What changed in 1.1.6
-
-1.1.6 is the release where the cut learns to take its approval from your phone, and where a night of the loop is read back from its own ledger instead of from memory.
-
-The cut accepts an approval line with a six digit code from an authenticator app, checked against the exact version and commit, and refuses when the key id pinned in the repository is missing or reads NOT-ENROLLED. The owner's one time enrollment is still pending, so this approval path is not live until the key id pull request is merged. Tests: `python3 -B scripts/loop/test_brother_approve.py`, `python3 -B scripts/test_cut_app_approval.py`.
-
-When the disk runs low, one command lists the worktrees that are clean, pushed, idle for over 24 hours and unleased, and removes them without ever forcing; a leased worktree or one holding an ignored file is refused by name. The cut fetches in its own worktree and does not write into the shared checkout. Every builder branch can carry a precheck record with PASS, FAIL or NO-DATA per row. The deployed program finds its own code root from the deploy stamp or refuses by naming the folder to run from. Tests: `python3 -B scripts/test_worktree_prune.py`, `python3 -B scripts/test_cut_never_writes_shared_checkout.py`, `python3 -B scripts/test_branch_precheck.py`, `python3 -B scripts/loop/test_code_root_from_bin.py`.
-
-The whole gate now includes the landing call site suite and refuses the row being absent. Its ledger accepts a row outside a cut, so a hand run appends rows instead of refusing them. The push check (`scripts/pre_push_gate.py`, asking `gate_ledger.whole_gate_pass_in_repo`) accepts the newest recorded whole gate pass when the delta from its tree is only markdown under `docs/plan/specs/` or `docs/plan/seeds/`; any other byte needs a record of its own. Tests: `python3 -B scripts/test_required_fast_rows.py`, `python3 -B scripts/test_gate_ledger_cut_id.py`, `python3 -B scripts/test_whole_gate_docs_delta.py`.
-
-A reader, `scripts/loop_phase_timings.py`, run by hand over the logs the loop already writes, prints a timing row for each phase of launch, run, land, close and cut, with null seconds and a reason when a source is unreadable; no loop script calls it, and its first run over the night found two defects now logged for 1.1.7 (a UTC run start read against local clock lines, and close and gate rows that read NO-DATA because those writers print no duration). The loop's run summary takes the state word from the ledgers, shows cash as UNKNOWN when the money ledger is unreadable (never 0), and prints no review line when nothing landed. A new tool, `scripts/loop_budget_grant.py`, writes a stated budget into the spend guard as a time boxed project raise, never as the global override; nothing in the loop calls it yet, so a loop launch still does not write your budget. On the night of 2026-10-18 the loop landed 4 of the 4 units it admitted, with 0 seat waits and 0 timeouts in 16 attempts, and that reading is recorded from the ledger. Tests: `python3 -B scripts/test_loop_phase_timings.py`, `python3 -B scripts/loop/test_run_summary_state.py`, `python3 -B scripts/test_loop_budget_grant.py`, `python3 -B scripts/test_donecheck_116.py`.
-
-Export and hermetic check directories use the one scratch root and are removed at the end, and a folder the path finder cannot read is named instead of skipped. A commit that touches `scripts/`, `plugin/`, `bundle/` or `products/` regenerates the runtime mirror, and a generator failure refuses the commit. Tests: `python3 -B scripts/test_export_scratch_root.py`, `python3 -B scripts/test_self_check_bundle_runtime.py`.
-
-The Codex record runs each finished unit's done check through a Codex run: 19 units, PASS 18, FAIL 0, NO-DATA 1. A README section is now required for every release note from 1.1.0 upward, and the 1.1.7 seed register lists the measured slow phases and every issue found with its root cause and test unit. Tests: `python3 -B scripts/test_hosts_116.py`, `python3 -B scripts/test_readme_changed_sections.py`, `python3 -B scripts/test_seed_117.py`.
-
-Not verified in this release: the owner's approval enrollment is not done, so the app approval path is not live. The Codex row for the approval verifier reads NO-DATA because 11 of its cases do not run inside the sandbox. Cost per landing, the notify request rows and relay times, the next action bar, and the run and close phase seconds read NO-DATA for the night. No 24 hour qualifying run was done. The login hold, the seat gate, the mid run seat loss handling, the expiry warning and the ignored file overwrite refusal are not in 1.1.6; the login hold code is in the tree but nothing starts it.
-
-## What changed in 1.1.5
-
-1.1.5 is the Brother.loop release: an unattended night should end with what landed, what is stuck and the one thing to do next, without anyone relaying it.
-
-A check that is red on both the unchanged copy and the built copy is named as an environment defect and the build is held, never charged or parked for it. Tests: `python3 -B scripts/loop/test_land_apply_baseline.py`, `python3 -B scripts/loop/test_land_batch_env_hold.py`.
-
-A landing that changes the loop's own tools runs the deploy's own freeze closure and tool parity before it commits, and is then held for the session's whole gate: the loop never certifies a change to its own governance. A push that changes a loop file needs a whole-gate PASS record for exactly the pushed tree. Tests: `python3 -B scripts/loop/test_land_batch_closure.py`, `python3 -B scripts/loop/test_land_batch_whole_gate.py`, `python3 -B scripts/test_whole_gate_record.py`, `python3 -B scripts/test_pre_push_whole_gate.py`.
-
-Stuck units come back on their own: the diagnostician runs from a stamp verified frozen copy, a diagnosis note written during an attempt counts for the next one, and a pass that is only waiting on a cooldown waits instead of stopping the run. Refusal text reaches the next worker only as fenced, untrusted data. Tests: `python3 -B scripts/loop/test_diag_frozen_root.py`, `python3 -B scripts/loop/test_runner_pool_note_attempt.py`, `python3 -B scripts/loop/test_unproductive_cooldown.py`, `python3 -B scripts/loop/test_brief_untrusted_notes.py`.
-
-One redeploy command checks every deploy and launch refusal before anything is stopped, and the launcher names its remedy (which program is signed in, plug in the charger). Each run writes a summary with one state word and one next action after every pass and at its end, and every landing line shows OpenRouter cash and the Claude plan share. Tests: `python3 -B scripts/loop/test_redeploy_check.py`, `python3 -B scripts/loop/test_start_run_remedy.py`, `python3 -B scripts/loop/test_run_summary.py`, `python3 -B scripts/loop/test_usd_plan_share.py`, `python3 -B scripts/loop/test_loop_golden_journeys.py`.
-
-Not verified in this release: a 24 hour qualifying run, and the night's own loop run, which could not start because the Claude sign in had expired.
-
-## What changed in 1.1.4
-
-Every delivery report ends with one receipt sentence per unit, the acceptance screen line and, when a risk class was named, the release screen line. It also states that exit 0 means no check failed, not that everything is proven. Test: `python3 -B scripts/test_receipt_door.py`.
-
-Each wait during a run prints one governor line when it starts and one when it ends, never once per poll. Test: `python3 -B scripts/test_brother_run.py`.
-
-Before an edit to a file known by the Vault, the recall hook prints the lessons recalled. It prints nothing for a genuine no-match and writes nothing before consent. Test: `python3 -B products/brothermode/tools/test_vault_recall_hook.py`.
-
-Vault promotion enforces separation of duties: an author cannot approve the same candidate. The promote command and approval pane apply the same rule. Tests: `python3 -B products/brothermode/tools/test_bm_vault_lifecycle.py`, `python3 -B products/brothermode/tools/test_bm_vault_promotions.py`, `python3 -B products/brothermode/tools/test_bm_vault_pane.py`.
-
-The 15 legacy command shims remain in this release.
-
-## What changed in 1.1.3
-
-Fast cut reuses each row receipt only when its bytes match, and one resumable driver prints a line for each phase, never pushes, and leaves the release question unanswered. A stopped cut leaves the release branch at the candidate; step 2b runs in parallel clones, and the Linux verdict checks the exact export tree before the question. Tests: `python3 -B scripts/test_cut_receipts.py`, `python3 -B scripts/test_cut_driver.py`, `python3 -B scripts/test_cut_preflight.py`, `python3 -B scripts/test_perturb_pool.py`, `python3 -B scripts/test_linux_canary.py`.
-
-Loop start names the real cause when a model seat is unavailable, times every launch step and prints the total, and refuses a battery launch before slow work. Intake checks run in parallel, content keyed gates are cached, and the READY list cannot be truncated. One maintainer machine measurement on 2026-10-12 took 79 s from command to first claimed unit. Tests: `python3 -B scripts/loop/test_seat_refusal_line.py`, `python3 -B scripts/loop/test_start_run.py`, `python3 -B scripts/loop/test_intake_parallel.py`, `python3 -B scripts/loop/test_loop_gate_cache.py`, `python3 -B scripts/loop/test_ready_contract.py`.
-
-Status, deliver and the engine's `receipt_door.py --verdict` command now read the same receipt verdict. Test: `python3 -B scripts/test_verdict_parity.py`.
-
-Recovery diagnoses a stale packed-refs.lock and refuses with the exact human remedy, without deleting the lock. A killed run resumes without losing a unit or merging one twice. Tests: `python3 -B scripts/test_stale_lock_refusal.py`, `python3 -B scripts/test_kill_boundaries.py`.
-
-Jev second opinions stay in shadow and do not change a verdict. Each check has a readout with measured agreement, review and deliver label second opinions, and the registry ships with installs or gives one NO-DATA reason. Tests: `python3 -B scripts/test_jev_status.py`, `python3 -B scripts/test_jev_door.py`, `python3 -B scripts/test_jev_public_install.py`.
-
-Ask for an iPhone check in plain words to get the doctor, profile-init, reference-init and run sequence, ending in a simulator receipt. It uses simulated devices, and screenshots stay local. Tests: `python3 -B scripts/test_mobile_door.py`, `python3 -B scripts/test_mobile_profile_init.py`, `python3 -B scripts/test_mobile_xcode_canary_local.py`.
-
-Memory now has one vault setting, `BROTHERMODE_VAULT_ROOT`, with the old names as aliases; two names pointing to two folders cause a refusal instead of a guess. Test: `python3 -B products/brothermode/tools/test_vault_resolver.py`.
-
-Human acceptance binds to the exact receipt it accepts. A review skip records who skipped, why and when. Tests: `python3 -B scripts/test_acceptance_binding.py`.
-
-Delivery shows all five assurance gates, not only numbers; an unrun gate reads `NO-DATA`. Test: `python3 -B scripts/test_assurance_matrix.py`.
-
-Safe unwatched time stops at the first human intervention, and a run without capture reads as an upper bound. Test: `python3 -B scripts/test_sut_interventions.py`.
-
-Host claims read certified, advisory or `NO-DATA` from re-parsed evidence. A host is not called enforced without a recorded denial. Test: `python3 -B scripts/test_host_evidence_binding.py`.
-
-Escape attempts are measured per host, door overhead uses samples rather than one run, and benchmark controls refuse a ranking while anything is `NO-DATA`. Tests: `python3 -B scripts/test_escape_measure.py`, `python3 -B scripts/test_door_overhead.py`, `python3 -B scripts/test_bench_controls.py`.
-
-Timing-sensitive tests are found and refused at the push. The battery runs in shards and only the rows a change reaches. Tests: `python3 -B scripts/test_timing_hunt.py`, `python3 -B scripts/test_check_all_merge.py`.
-
-A failed public check is rerun once only when the same export tree already passed on Linux. A refused loop start gets a labelled second opinion that never changes the refusal. Tests: `python3 -B scripts/test_export_public.py`, `python3 -B scripts/test_jev_start_refusal.py`.
-
-For the seven pain point pages, see [docs/pain-points/README.md](docs/pain-points/README.md).
-
-## What changed in 1.1.2
-
-A run that reports PASS beside NO-DATA now exits 2, meaning unverified. If its receipt cannot be written or read back, it exits 1. The result line and exit code now reflect the run’s whole delivery verdict.
-
-Runs record their Work document in `target.json`, and continuity asks the engine to look up that document. When the pointer is doubtful, the run refuses with a reason. The loop now sends every READY build for a planned unit to the lander, while builds with no plan unit are counted but never offered.
-
-The release rehearsal now keeps the machine awake from lock through recording, checks preflight before doing work, and reports the time for each cut step. The cut checks the version rule after the bump, tags the release pull request’s merge commit, and stops incomplete if a requested Release is missing. A manual dispatch job runs only on the private hub.
-
-The Codex install guidance and skill wording are refreshed, and the host capability table distinguishes documented mechanisms from current certification, which remains NO-DATA without matching sealed evidence. Version pages are checked for promises about the version being cut, and the live tree is checked for stale sentences. The run evidence recorder and handover ceremony also improve how interrupted work and repeated lessons are handled.
-
-## What changed in 1.1.1
-
-Brother now has one door and seven skills: `using-brother`, the door, and `brother-start`, `brother-status`, `brother-next`, `brother-review`, `brother-deliver` and `brother-help`. In Claude Code, type `/brother <what you are trying to do>`; the six verbs are optional shortcuts. Every skill name from 1.1.0 still works for this release: it prints a one-line pointer to its new verb, then routes.
-
-A session also starts quietly. In an established project, the start block that 1.1.0 printed before your first prompt (6,014 bytes, measured 2026-10-10 in a fixture) is now 281 bytes. Housekeeping nags, the progress page check, handover and forecast lines, no-drift reconciliation rows and Vault status lines are no longer printed; setup, first run, update, recovery, store health and needs-action lines still are. To bring the full block back, set `BROTHER_VERBOSE_START=1` in the environment that launches your host (`BROTHERMODE_MAINTAINER=1` also works; only the exact value `1` counts). The limits in [Limits before adoption](#limits-before-adoption) still apply.
-
-## What changed in 1.1.0
-
-Brother addresses the trust gap between delegating work and knowing whether the result stayed within scope and has evidence behind it. It aims to reduce the need to watch every action while leaving review and consequential decisions with you.
-
-One plugin named `brother` replaces the three older plugins in the catalog, and its install line has no dependency on another catalog entry. Lesson recall can work in the one plugin when the Vault folder variables are set. The release proof is one completed unattended run of eight hours, not an endurance guarantee. For migration details, see [Migrate to the Brother plugin](docs/how-to/migrate-to-one-plugin.md). The older plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog; pinned installs of `brothermode` and `brothersbe` still resolve. Claim verification, formerly `brotherds`, is not carried by the one plugin and remains experimental. The limits of 1.1.0 are listed in [Limits before adoption](#limits-before-adoption).
-
-## What a receipt tells you
-
-A completed run writes `receipt/receipt.json` inside its run directory and prints that path as its last line. The receipt names changed files, checks and their exact commands and exit codes, who wrote each check, the engine revision, and returned cost fields. If a field cannot be answered, the receipt says `NO-DATA` and why.
-
-The verdicts mean:
+The last line printed points to `receipt/receipt.json` in the run folder. It lists changed files, the exact commands used to check them, each command’s exit code (0 means the command did not fail), who wrote each check, and cost fields. A field it cannot answer says NO-DATA and why.
 
 | Verdict | Meaning |
 | --- | --- |
-| `PASS` | The evidence supports the stated claim. |
-| `FAIL` | The evidence contradicts the stated claim. |
-| `NO-DATA` | The available evidence does not establish either answer. |
+| PASS | Evidence supports the claim |
+| FAIL | Evidence contradicts the claim |
+| NO-DATA | Evidence has not arrived |
 
 A successful command is not proof by itself. A check that was already green, does not exercise the claimed behavior, or stays green when the implementation is reverted can be `NO-DATA`. A receipt makes evidence reviewable; it cannot make a weak check sufficient.
+
+## What Brother does not do
+
+- A plain request may never reach Brother. It cannot police ordinary chat or fix the coding tools it runs inside.
+- A simulated first-time-user trial on this candidate failed: 0 PASS, 9 FAIL, 13 NO-DATA of 22 key rows. The assistant mostly did the task without Brother, and no attempt produced a receipt. This was a simulation with an artificial person, not evidence from real people.
+- Strict mode is optional and blocks edits outside Brother. In a brand new project it can still leave work unable to proceed. The default mode is not affected. A project with no commits cannot start a work lane yet; the message says one commit is needed first.
+- Protection against writing to protected files is unchanged from the previous release; 1.2.0 adds no protection there.
+- Advanced features stay hidden by default until they pass an installed start-to-finish walk. If something you used is missing, it is hidden, not deleted.
+- Some checks that failed before 1.2.0 still fail, and others are waiting to be rerun.
+- Cursor’s protections are advisory only.
+- Brother cannot stop a process a coding tool starts, keep its reasoning when it shortens a long conversation, or act as an operating-system sandbox.
+- Human review, acceptance, and release remain the owner’s decisions.
+
+## Where to go next
+
+[Documentation](docs/README.md)  
+[First verified change](docs/tutorials/first-verified-change.md)  
+[Delegate safely](docs/how-to/delegate-safely.md)  
+[Resume work](docs/how-to/resume-work.md)  
+[Use the Vault](docs/how-to/use-the-vault.md)  
+[Receipt model](docs/reference/receipt-model.md)  
+[Verdicts](docs/reference/verdicts.md)  
+[Safety boundaries](docs/reference/safety-boundaries.md)
+
+**Start small:** [try a verified change](docs/tutorials/first-verified-change.md), then use the [delegation checklist](docs/how-to/delegate-safely.md) before increasing autonomy. For help choosing a workflow, see [What you can do with Brother](docs/explanation/what-you-can-do-with-brother.md) or [Where Brother fits](docs/explanation/choosing-a-workflow.md).
+
+## Go deeper
+
+The sections below are the full reference: how it works, the Vault, the evidence rules, and the limits.
+
+[Who Brother is for](#who-brother-is-for) · [Why this approach](#why-brother) · [The Vault](#the-vault-remember-the-lesson-not-just-the-conversation) · [Documentation](docs/README.md)
 
 ## Problems developers report, and how Brother handles them
 
@@ -479,6 +372,7 @@ The thread pages were opened on 2026-10-23; counts and dates are as the page rea
 [third night this week my coding agent stopped at 1am and waited for me](https://www.reddit.com/r/ChatGPTCoding/comments/1wug2e6/third_night_this_week_my_coding_agent_stopped_at/) (r/ChatGPTCoding, 2026-09-30). Three nights in a row the agent stopped on a prompt or a permission and waited until morning, after one run had already spent about $28. What 1.1.7 does: in Brother's own loop, a launch first sends one small change through the deployed judge and refuses unless it lands, a stale dated record refuses the launch early, and once running the watcher announces a run that stops moving. Limit: nothing answers the prompt for you, and relaunch without an operator is planned, not shipped.
 
 [LOL Claude just removes Hook configs, when it does not like it.](https://www.reddit.com/r/ClaudeCode/comments/1r16p3t/lol_claude_just_removes_hook_configs_when_it_does/) (r/ClaudeCode, 2026-02-10). A blocking hook refused a write, so the agent wrote the hook's mode file through the shell and turned the hook off. What 1.1.7 does: in Brother's own loop, a landing that changes a loop tool deploys only after a boxed whole gate and a canary, and a changed judge file waits for the owner's code. Limit: this covers Brother's own loop, not hooks in your repository; Brother runs under your user account like any agent, so a control kept in a file the agent can write is only as strong as your host's sandbox.
+
 
 ## Installation
 
@@ -849,7 +743,7 @@ It is not an automatic source of truth, a secrets store, or proof that repeat er
 - Antigravity's host data guard is opt in. Set `BROTHER_ANTIGRAVITY_GUARD_HOST_DATA=1` to turn it on; by default Antigravity has full access to its data folder. On Antigravity, the hook does not block a `run_command` whose command reaches outside the workspace.
 - The 1.1.0 release proof was one completed unattended run of eight hours; a second consecutive run did not start, so the two-run proof is not established. The 1.1.7 proof is different: the loop landed all 15 proof sub units across 7 runs with 0 unexplained holds, and its closing unattended run lasted about 20 minutes, landed one sub unit and stopped because nothing else in scope was open. Hand repairs were made to the release line during the proof runs.
 - For 1.1.0, the planned automated pre-cut review was built only in part: its first two parts existed as tooling and the other four did not. That release had independent adversarial reviews for each change set and a machine-wide inventory of everything developed since 1.0.21.
-- Four declared test exceptions stand, with review dates of 2026-10-28 for one and 2026-11-04 for the other three. The external verification score's last recorded run reads 1 of 5. The long release note perturbation check runs only when `BROTHER_LONG_CHECKS=1` is set. Two tag signature tests are skipped on a machine without gpg.
+- The long release note perturbation check (about 90 minutes) runs only when `BROTHER_LONG_CHECKS=1` is set.
 - The loop's launcher and driver ask one power rule: without AC power nothing starts unless its deadline is within `BROTHER_POWER_WINDOW_S` (default 1200 seconds), and an unreadable power source refuses like battery. Keep the machine on AC power for a longer unattended run. The unattended build loop under `scripts/loop` is maintainer tooling, not a supported public feature.
 - A killed then resumed run with a stale `.git/packed-refs.lock` may still refuse one unit after a short bounded retry; the refusal names the lock file and carries git's own advice. Remove the stale lock by hand and resume.
 - Reproduce the export from a clone with `git checkout v1.1.0` then `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.0`.
@@ -878,3 +772,172 @@ To check a fresh clone before you trust it, run `sh scripts/required_fast.sh` fr
 Plan native mobile work with the [mobile workflow](docs/how-to/native-mobile-workflow.md), prepare design briefs, and verify native build and test evidence with the [native evidence guide](docs/how-to/native-evidence.md). Evidence integrity does not establish application quality or human acceptance.
 
 [BrotherDS](products/brotherds/README.md) is available as an experimental Python command-line product. It checks claim evidence, supports reproducible master-data audits, and keeps PASS, FAIL and NO-DATA distinct. Run its local checks with `sh products/brotherds/tests/run_all.sh`.
+
+## Release history
+
+<details>
+<summary>What changed in 1.1.0 to 1.1.9</summary>
+
+## What changed in 1.1.9
+
+1.1.9 is a recovery release for the cut process, with a faster hook dispatcher and a measured account of what a fresh install can do.
+
+The cut records each attempt outside the candidate and can resume from the failed phase. Reuse requires matching inputs; an unknown input never counts as a match. Approval is checked early and spent once when the candidate is ready. One coordinator holds the lock while refreshing a login. If renewal cannot complete, the attempt parks. Tests: `python3 -B scripts/test_cut_resume.py`, 14 cases OK on both interpreters. Both rehearsals ran on the real host and are recorded in `docs/plan/CUT-REHEARSAL-1.1.9.json`: the cold rehearsal of the cut took 7781 seconds (preflight 1015, check 6766); the failure and resume rehearsal failed late after the same expensive phases (6996 seconds), and its resume reused the preflight and the check and repeated no expensive execution. The host had 12.87 GiB free, under the 15 GiB default floor, and the rehearsal ran with the floor named at 12 GiB in the command; the record says so.
+
+If a tag push fails after the tag reaches the remote, recovery checks the exact commit reported by this export. It does not adopt a foreign tag or create the tag twice. A publish record that cannot be written returns FAIL. Tests: `python3 -B scripts/test_cut.py`, 205 tests OK; the cut mutation sweep left no survivors among 11 mutations.
+
+One shell tool event now starts one hook dispatcher process, down from six. On a fresh install, the independent seat's probe read one process per event with a median of 64 ms, against the 312 ms measured for v1.1.4. The first goal journey's hook cost row reads PASS. Reproduce the journey with `BROTHER_JOURNEY_WALKED_BY=<seat> python3 -B scripts/journey/run_journey.py --fresh-install --journey J2`.
+
+Fresh install checks cover the install, first goal, and review and accept journeys. The first goal has five PASS rows; review and accept has three. Install has one PASS row and four NO-DATA rows. The independent scores are install 2 of 10, first goal 10 of 10, and review and accept 6 of 6. These are scores for the named checks, not a rating of the whole product. `python3 scripts/go_no_go_119.py` reads eight release rows and reports the measured scores. Its required work row reads the plan; an empty required list needs a recorded decision.
+
+Repository sessions have short notes at the root, loop, and bundle. The root imports the repository instructions once. Export checks identify the public tree from its own project record. Tests: `python3 -B scripts/test_notes.py`, 9 tests OK. Work moved to a later release keeps its frozen check owned through the plan's move record; verify with `python3 -B scripts/test_bl_owns_complete.py`.
+
+The release target is `v1.1.9`, with manifests reading `1.1.9`. The tag ships an export manifest at `docs/releases/1.1.9.export-manifest.txt`, naming every exported file with its sha256. After publication, a fresh clone can verify the exported files without private access or a network connection: check out `v1.1.9`, then run `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.9`. PASS means the named files match their recorded hashes; missing evidence reads NO-DATA.
+
+Not verified in this release: the four install checks that read NO-DATA now run on a fresh install. Three of them FAIL there (the first screen tells a stranger to run a setup script that is not in their folder, the session start text names internal products, and the doctor's repair advice names scripts that are not in their folder) and one PASSes (the README's installed plugin command runs and exits 0). The three failures are recorded as open work. The loop token lane reports RENEWED when the login holder answers, not when the provider accepts the login; a seat whose login fails parks. This does not establish automatic renewal. The named checks do not prove that an arbitrary task can finish unattended, that every feature is accessible, or that every branch of the code is covered.
+
+## What changed in 1.1.8
+
+1.1.8 is the release where every delivery report names what was checked and what that proves, and where the Vault refuses to let an author approve their own candidate.
+
+Every delivery report ends with one receipt sentence per unit, the acceptance screen line and, where a risk class was named, the release screen line. It also carries the scoping sentence: `exit 0 means no check failed. It does not mean everything is proven: only the checks named above ran, and a check nobody wrote cannot fail.` Tests: `python3 scripts/test_receipt_door.py`, at 252 OK.
+
+Each wait during a run prints one governor line when it starts and one when it ends. It does not print another line on every poll, so the wait's start and finish are reported without repeating the same notice while it continues. Tests: `python3 scripts/test_brother_run.py`, at 286 OK.
+
+Before an edit of a file the Vault knows, the recall hook prints `Recalled N lesson(s) from the Vault for <file>`. A genuine no-match prints nothing, and the hook writes nothing before consent. Tests: `python3 products/brothermode/tools/test_vault_recall_hook.py`, at 83 OK.
+
+Vault promotion requires a separate approver. An author cannot approve the same candidate, and the rule is on by default: `SEPARATION_OF_DUTIES_ENFORCED` is `True`. Turning that flag off makes the tests for refusing the same author and approver fail, including the case where no enforcement argument is supplied. Tests: `python3 products/brothermode/tools/test_bm_vault_lifecycle.py`, at 42 OK.
+
+The promote command and the approval pane apply the same rule. The refusal of an author's own approval is checked through both paths. Tests: `python3 products/brothermode/tools/test_bm_vault_promotions.py`, at 27 OK, and `python3 products/brothermode/tools/test_bm_vault_pane.py`, at 12 OK.
+
+The 15 legacy command shims remain in this cut, per decision D2.
+
+The public cut is tagged `v1.1.8`, and its manifests read `1.1.8`. The tag ships an export manifest at `docs/releases/1.1.8.export-manifest.txt`, naming 4663 exported files with a sha256 for each. Every file it names ships in the tag. Files under `docs/releases/` are outside the digest, because the release note carrying the digest cannot also be hashed by it.
+
+A fresh clone can check the exported tree with no private access and no network. After `git checkout v1.1.8`, run `python3 scripts/reproduce_export.py --verify-tree --tag v1.1.8`. It prints PASS when every named file matches its recorded hash, FAIL with each file that does not, and NO-DATA when the manifest or digest is missing. The source revision in the release note belongs to the private hub and cannot be resolved from the public clone; the public tag and manifest digest are the checkable claims.
+
+The release note's file checks were measured by breaking each listed file's functions, running the named suite and requiring it to fail, then restoring the file and checking its hash byte for byte. Where a claim's own suite did not catch a broken file, the table names the suite that did. Re-run the table with `python3 scripts/release_note_perturb.py --version 1.1.8`.
+
+Not verified in this release: the file checks do not prove that every branch is covered. They show that replacing a file's functions with ones that raise is noticed by the named suite. A file no suite catches is reported as NO-DATA. A passing delivery report proves only the checks it names ran without a failure; it does not prove behavior for which no check was written.
+
+## What changed in 1.1.7
+
+1.1.7 is the release where a skipped test can no longer pass as done, and where the loop's own tools and judge cannot change without a whole gate, a canary and, for the judge, the owner's code.
+
+A builder or loop seat reports DONE through one proof only: the boxed done check run by `close_unit`. A skipped test reads PARTIAL, never DONE, and before DONE a preflight runs five integration lints over the lane. Tests: `python3 -B scripts/test_builder_preflight.py`.
+
+The deployed loop judges its own next generation. A landing that changes a loop tool deploys only after a boxed whole gate and a canary pass, and a changed judge file stays pending until the owner approves it with a code. On 2026-10-21 the loop landed a real change end to end through the live deploy step; the judge's boxed whole gate read 63 rows with 0 failed and 0 no data. Tests: `python3 -B scripts/test_land_batch_loop_guard.py`.
+
+Every loop launch arms a watcher beside the driver. It announces a stuck run, an unexplained hold or a dead driver once per cause, with a desktop notification and an alarm record in the run folder. It does not stop the run and cannot wake a Claude Code session. Before the driver starts, a landing canary sends one small change through the deployed judge, and the launch refuses unless the canary prints its landing line. Tests: `python3 -B scripts/loop/test_run_watch.py TestRunWatch`, `python3 -B scripts/loop/test_landing_canary.py TestLandingCanary`.
+
+The loop report names suites that went red without any code change. Records that expire on a date make a launch refuse early and name the stale record. Tests: `python3 -B scripts/loop/test_loop_works_fully.py TestLoopWorksFully`, `python3 -B scripts/loop/test_clock_rows.py TestClockRows`.
+
+The installed copy of the loop ships the adapters package its model tools import, and `scripts/loop_alone.py` imports every installed loop tool alone. The redeploy check (`scripts/loop/redeploy.sh`) refuses to run its live seat probe without a positive spending cap, `--probe-cap-usd`. Tests: `python3 -B scripts/test_loop_alone.py`, `python3 -B scripts/loop/test_redeploy_check.py`.
+
+A run's receipt names the unit it landed, its branch and its revision. A run pushes only when it is DONE with an accept recorded on the release screen, so a rejected review pushes nothing. Test: `python3 -B scripts/test_receipt_door.py`.
+
+The cut rehearsal keeps its commits and records the exact tip it proved; a real cut must resume from that tip, and a cold cut needs the owner to say so. The phone approval of the cut that 1.1.6 shipped is now live: the 1.1.7 cut ran only on the owner's six digit codes, each tied to the version and commit. The whole gate checks the committed kernel list against the code, in the private hub only. Tests: `python3 -B scripts/test_cut_keeps_rehearsal.py`, `python3 -B scripts/test_kernel_closure_row.py TestKernelClosureRow`, `python3 -B scripts/test_cut_preflight.py`.
+
+The private terms scan reads escaped and split terms, and no test spells the scratch folder's path any more. Tests: `python3 -B scripts/test_private_terms_escapes.py`, `python3 -B scripts/test_runs_root_one_rule.py`.
+
+Not verified in this release: the unattended run that closed the proof lasted about 20 minutes and landed one sub unit, then stopped itself because nothing else in scope was open; 52 planned units are deferred to later releases. Three units have every sub unit landed but stay open, because their done checks pass with skipped tests and the closer counts a skipped test as not a pass. The loop did not land the proof work untouched: hand repairs were made to the release line during the proof runs. Two cases of `scripts/loop/test_land_apply.py` still fail, as in 1.1.6: `native_worker.py` became a path a build may not write, and the test still assumes a build can edit it. `scripts/loop_alone.py` follows a tool's import only up to the first error that is not a missing module, so a tool that does work at import time (12 of 99) is counted as neither loaded nor a problem. The grader's sandbox needs the real git binary first on PATH; the launch scripts provide it, not the grader itself. Login holding, expiry warnings before a login lapses, the seat gate, relaunch without an operator and an eight hour signed in soak are deferred, and no 24 hour qualifying run was done. The phone code gates the cut command, not every route to a tag: closing the route by which a session holding the maintainer's GitHub login could push a tag directly is planned, not shipped.
+
+## What changed in 1.1.6
+
+1.1.6 is the release where the cut learns to take its approval from your phone, and where a night of the loop is read back from its own ledger instead of from memory.
+
+The cut accepts an approval line with a six digit code from an authenticator app, checked against the exact version and commit, and refuses when the key id pinned in the repository is missing or reads NOT-ENROLLED. The owner's one time enrollment is still pending, so this approval path is not live until the key id pull request is merged. Tests: `python3 -B scripts/loop/test_brother_approve.py`, `python3 -B scripts/test_cut_app_approval.py`.
+
+When the disk runs low, one command lists the worktrees that are clean, pushed, idle for over 24 hours and unleased, and removes them without ever forcing; a leased worktree or one holding an ignored file is refused by name. The cut fetches in its own worktree and does not write into the shared checkout. Every builder branch can carry a precheck record with PASS, FAIL or NO-DATA per row. The deployed program finds its own code root from the deploy stamp or refuses by naming the folder to run from. Tests: `python3 -B scripts/test_worktree_prune.py`, `python3 -B scripts/test_cut_never_writes_shared_checkout.py`, `python3 -B scripts/test_branch_precheck.py`, `python3 -B scripts/loop/test_code_root_from_bin.py`.
+
+The whole gate now includes the landing call site suite and refuses the row being absent. Its ledger accepts a row outside a cut, so a hand run appends rows instead of refusing them. The push check (`scripts/pre_push_gate.py`, asking `gate_ledger.whole_gate_pass_in_repo`) accepts the newest recorded whole gate pass when the delta from its tree is only markdown under `docs/plan/specs/` or `docs/plan/seeds/`; any other byte needs a record of its own. Tests: `python3 -B scripts/test_required_fast_rows.py`, `python3 -B scripts/test_gate_ledger_cut_id.py`, `python3 -B scripts/test_whole_gate_docs_delta.py`.
+
+A reader, `scripts/loop_phase_timings.py`, run by hand over the logs the loop already writes, prints a timing row for each phase of launch, run, land, close and cut, with null seconds and a reason when a source is unreadable; no loop script calls it, and its first run over the night found two defects now logged for 1.1.7 (a UTC run start read against local clock lines, and close and gate rows that read NO-DATA because those writers print no duration). The loop's run summary takes the state word from the ledgers, shows cash as UNKNOWN when the money ledger is unreadable (never 0), and prints no review line when nothing landed. A new tool, `scripts/loop_budget_grant.py`, writes a stated budget into the spend guard as a time boxed project raise, never as the global override; nothing in the loop calls it yet, so a loop launch still does not write your budget. On the night of 2026-10-18 the loop landed 4 of the 4 units it admitted, with 0 seat waits and 0 timeouts in 16 attempts, and that reading is recorded from the ledger. Tests: `python3 -B scripts/test_loop_phase_timings.py`, `python3 -B scripts/loop/test_run_summary_state.py`, `python3 -B scripts/test_loop_budget_grant.py`, `python3 -B scripts/test_donecheck_116.py`.
+
+Export and hermetic check directories use the one scratch root and are removed at the end, and a folder the path finder cannot read is named instead of skipped. A commit that touches `scripts/`, `plugin/`, `bundle/` or `products/` regenerates the runtime mirror, and a generator failure refuses the commit. Tests: `python3 -B scripts/test_export_scratch_root.py`, `python3 -B scripts/test_self_check_bundle_runtime.py`.
+
+The Codex record runs each finished unit's done check through a Codex run: 19 units, PASS 18, FAIL 0, NO-DATA 1. A README section is now required for every release note from 1.1.0 upward, and the 1.1.7 seed register lists the measured slow phases and every issue found with its root cause and test unit. Tests: `python3 -B scripts/test_hosts_116.py`, `python3 -B scripts/test_readme_changed_sections.py`, `python3 -B scripts/test_seed_117.py`.
+
+Not verified in this release: the owner's approval enrollment is not done, so the app approval path is not live. The Codex row for the approval verifier reads NO-DATA because 11 of its cases do not run inside the sandbox. Cost per landing, the notify request rows and relay times, the next action bar, and the run and close phase seconds read NO-DATA for the night. No 24 hour qualifying run was done. The login hold, the seat gate, the mid run seat loss handling, the expiry warning and the ignored file overwrite refusal are not in 1.1.6; the login hold code is in the tree but nothing starts it.
+
+## What changed in 1.1.5
+
+1.1.5 is the Brother.loop release: an unattended night should end with what landed, what is stuck and the one thing to do next, without anyone relaying it.
+
+A check that is red on both the unchanged copy and the built copy is named as an environment defect and the build is held, never charged or parked for it. Tests: `python3 -B scripts/loop/test_land_apply_baseline.py`, `python3 -B scripts/loop/test_land_batch_env_hold.py`.
+
+A landing that changes the loop's own tools runs the deploy's own freeze closure and tool parity before it commits, and is then held for the session's whole gate: the loop never certifies a change to its own governance. A push that changes a loop file needs a whole-gate PASS record for exactly the pushed tree. Tests: `python3 -B scripts/loop/test_land_batch_closure.py`, `python3 -B scripts/loop/test_land_batch_whole_gate.py`, `python3 -B scripts/test_whole_gate_record.py`, `python3 -B scripts/test_pre_push_whole_gate.py`.
+
+Stuck units come back on their own: the diagnostician runs from a stamp verified frozen copy, a diagnosis note written during an attempt counts for the next one, and a pass that is only waiting on a cooldown waits instead of stopping the run. Refusal text reaches the next worker only as fenced, untrusted data. Tests: `python3 -B scripts/loop/test_diag_frozen_root.py`, `python3 -B scripts/loop/test_runner_pool_note_attempt.py`, `python3 -B scripts/loop/test_unproductive_cooldown.py`, `python3 -B scripts/loop/test_brief_untrusted_notes.py`.
+
+One redeploy command checks every deploy and launch refusal before anything is stopped, and the launcher names its remedy (which program is signed in, plug in the charger). Each run writes a summary with one state word and one next action after every pass and at its end, and every landing line shows OpenRouter cash and the Claude plan share. Tests: `python3 -B scripts/loop/test_redeploy_check.py`, `python3 -B scripts/loop/test_start_run_remedy.py`, `python3 -B scripts/loop/test_run_summary.py`, `python3 -B scripts/loop/test_usd_plan_share.py`, `python3 -B scripts/loop/test_loop_golden_journeys.py`.
+
+Not verified in this release: a 24 hour qualifying run, and the night's own loop run, which could not start because the Claude sign in had expired.
+
+## What changed in 1.1.4
+
+Every delivery report ends with one receipt sentence per unit, the acceptance screen line and, when a risk class was named, the release screen line. It also states that exit 0 means no check failed, not that everything is proven. Test: `python3 -B scripts/test_receipt_door.py`.
+
+Each wait during a run prints one governor line when it starts and one when it ends, never once per poll. Test: `python3 -B scripts/test_brother_run.py`.
+
+Before an edit to a file known by the Vault, the recall hook prints the lessons recalled. It prints nothing for a genuine no-match and writes nothing before consent. Test: `python3 -B products/brothermode/tools/test_vault_recall_hook.py`.
+
+Vault promotion enforces separation of duties: an author cannot approve the same candidate. The promote command and approval pane apply the same rule. Tests: `python3 -B products/brothermode/tools/test_bm_vault_lifecycle.py`, `python3 -B products/brothermode/tools/test_bm_vault_promotions.py`, `python3 -B products/brothermode/tools/test_bm_vault_pane.py`.
+
+The 15 legacy command shims remain in this release.
+
+## What changed in 1.1.3
+
+Fast cut reuses each row receipt only when its bytes match, and one resumable driver prints a line for each phase, never pushes, and leaves the release question unanswered. A stopped cut leaves the release branch at the candidate; step 2b runs in parallel clones, and the Linux verdict checks the exact export tree before the question. Tests: `python3 -B scripts/test_cut_receipts.py`, `python3 -B scripts/test_cut_driver.py`, `python3 -B scripts/test_cut_preflight.py`, `python3 -B scripts/test_perturb_pool.py`, `python3 -B scripts/test_linux_canary.py`.
+
+Loop start names the real cause when a model seat is unavailable, times every launch step and prints the total, and refuses a battery launch before slow work. Intake checks run in parallel, content keyed gates are cached, and the READY list cannot be truncated. One maintainer machine measurement on 2026-10-12 took 79 s from command to first claimed unit. Tests: `python3 -B scripts/loop/test_seat_refusal_line.py`, `python3 -B scripts/loop/test_start_run.py`, `python3 -B scripts/loop/test_intake_parallel.py`, `python3 -B scripts/loop/test_loop_gate_cache.py`, `python3 -B scripts/loop/test_ready_contract.py`.
+
+Status, deliver and the engine's `receipt_door.py --verdict` command now read the same receipt verdict. Test: `python3 -B scripts/test_verdict_parity.py`.
+
+Recovery diagnoses a stale packed-refs.lock and refuses with the exact human remedy, without deleting the lock. A killed run resumes without losing a unit or merging one twice. Tests: `python3 -B scripts/test_stale_lock_refusal.py`, `python3 -B scripts/test_kill_boundaries.py`.
+
+Jev second opinions stay in shadow and do not change a verdict. Each check has a readout with measured agreement, review and deliver label second opinions, and the registry ships with installs or gives one NO-DATA reason. Tests: `python3 -B scripts/test_jev_status.py`, `python3 -B scripts/test_jev_door.py`, `python3 -B scripts/test_jev_public_install.py`.
+
+Ask for an iPhone check in plain words to get the doctor, profile-init, reference-init and run sequence, ending in a simulator receipt. It uses simulated devices, and screenshots stay local. Tests: `python3 -B scripts/test_mobile_door.py`, `python3 -B scripts/test_mobile_profile_init.py`, `python3 -B scripts/test_mobile_xcode_canary_local.py`.
+
+Memory now has one vault setting, `BROTHERMODE_VAULT_ROOT`, with the old names as aliases; two names pointing to two folders cause a refusal instead of a guess. Test: `python3 -B products/brothermode/tools/test_vault_resolver.py`.
+
+Human acceptance binds to the exact receipt it accepts. A review skip records who skipped, why and when. Tests: `python3 -B scripts/test_acceptance_binding.py`.
+
+Delivery shows all five assurance gates, not only numbers; an unrun gate reads `NO-DATA`. Test: `python3 -B scripts/test_assurance_matrix.py`.
+
+Safe unwatched time stops at the first human intervention, and a run without capture reads as an upper bound. Test: `python3 -B scripts/test_sut_interventions.py`.
+
+Host claims read certified, advisory or `NO-DATA` from re-parsed evidence. A host is not called enforced without a recorded denial. Test: `python3 -B scripts/test_host_evidence_binding.py`.
+
+Escape attempts are measured per host, door overhead uses samples rather than one run, and benchmark controls refuse a ranking while anything is `NO-DATA`. Tests: `python3 -B scripts/test_escape_measure.py`, `python3 -B scripts/test_door_overhead.py`, `python3 -B scripts/test_bench_controls.py`.
+
+Timing-sensitive tests are found and refused at the push. The battery runs in shards and only the rows a change reaches. Tests: `python3 -B scripts/test_timing_hunt.py`, `python3 -B scripts/test_check_all_merge.py`.
+
+A failed public check is rerun once only when the same export tree already passed on Linux. A refused loop start gets a labelled second opinion that never changes the refusal. Tests: `python3 -B scripts/test_export_public.py`, `python3 -B scripts/test_jev_start_refusal.py`.
+
+For the seven pain point pages, see [docs/pain-points/README.md](docs/pain-points/README.md).
+
+## What changed in 1.1.2
+
+A run that reports PASS beside NO-DATA now exits 2, meaning unverified. If its receipt cannot be written or read back, it exits 1. The result line and exit code now reflect the run’s whole delivery verdict.
+
+Runs record their Work document in `target.json`, and continuity asks the engine to look up that document. When the pointer is doubtful, the run refuses with a reason. The loop now sends every READY build for a planned unit to the lander, while builds with no plan unit are counted but never offered.
+
+The release rehearsal now keeps the machine awake from lock through recording, checks preflight before doing work, and reports the time for each cut step. The cut checks the version rule after the bump, tags the release pull request’s merge commit, and stops incomplete if a requested Release is missing. A manual dispatch job runs only on the private hub.
+
+The Codex install guidance and skill wording are refreshed, and the host capability table distinguishes documented mechanisms from current certification, which remains NO-DATA without matching sealed evidence. Version pages are checked for promises about the version being cut, and the live tree is checked for stale sentences. The run evidence recorder and handover ceremony also improve how interrupted work and repeated lessons are handled.
+
+## What changed in 1.1.1
+
+Brother now has one door and seven skills: `using-brother`, the door, and `brother-start`, `brother-status`, `brother-next`, `brother-review`, `brother-deliver` and `brother-help`. In Claude Code, type `/brother <what you are trying to do>`; the six verbs are optional shortcuts. Every skill name from 1.1.0 still works for this release: it prints a one-line pointer to its new verb, then routes.
+
+A session also starts quietly. In an established project, the start block that 1.1.0 printed before your first prompt (6,014 bytes, measured 2026-10-10 in a fixture) is now 281 bytes. Housekeeping nags, the progress page check, handover and forecast lines, no-drift reconciliation rows and Vault status lines are no longer printed; setup, first run, update, recovery, store health and needs-action lines still are. To bring the full block back, set `BROTHER_VERBOSE_START=1` in the environment that launches your host (`BROTHERMODE_MAINTAINER=1` also works; only the exact value `1` counts). The limits in [Limits before adoption](#limits-before-adoption) still apply.
+
+## What changed in 1.1.0
+
+Brother addresses the trust gap between delegating work and knowing whether the result stayed within scope and has evidence behind it. It aims to reduce the need to watch every action while leaving review and consequential decisions with you.
+
+One plugin named `brother` replaces the three older plugins in the catalog, and its install line has no dependency on another catalog entry. Lesson recall can work in the one plugin when the Vault folder variables are set. The release proof is one completed unattended run of eight hours, not an endurance guarantee. For migration details, see [Migrate to the Brother plugin](docs/how-to/migrate-to-one-plugin.md). The older plugins `brothermode`, `brothersbe` and `brotherds` are retired from the catalog; pinned installs of `brothermode` and `brothersbe` still resolve. Claim verification, formerly `brotherds`, is not carried by the one plugin and remains experimental. The limits of 1.1.0 are listed in [Limits before adoption](#limits-before-adoption).
+
+</details>

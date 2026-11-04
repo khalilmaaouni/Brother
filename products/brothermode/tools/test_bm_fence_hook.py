@@ -1868,6 +1868,283 @@ class Cost(FenceHookBase):
 # Structural rules this repo enforces on itself.
 # ---------------------------------------------------------------------------
 
+class FreshProjectFirstEdit(unittest.TestCase):
+    """FENCE1.a (2026-11-02). Measured origin: a first user's cost probe on
+    the INSTALLED plugin, enforced mode, a fresh git project with no
+    BrotherMode store. The fence refused the agent's first Edit with a reason
+    naming `bm_store.py init`; the agent ran that, hit the no-active-claims
+    refusal, claimed by hand, and finished the work outside Brother with no
+    delivery record and no receipt. A refusal whose remedy leads out of the
+    product is a dead end.
+
+    The fix keeps the DENY (the hook still writes nothing and still never
+    opens the store writably) and changes only what it names, and only on a
+    POSITIVELY fresh project: the store folder is absent (lstat says
+    FileNotFoundError, nothing else), the root came from a .git ancestor, and
+    no target is BrotherMode's own enforcement state. There the reason names
+    the Brother door and says only what the door measurably does (round 2,
+    after security review R1 disproved "sets up this project's store"): it
+    works in worktree lanes of its own, which need a commit, and only its
+    spawned worker's lane gets a store and claim (managed_safety.materialize
+    on the LANE), so an edit in the project's own tree stays refused; inside
+    a coding session the door hands its lanes to the session unclaimed, and
+    the fence refuses those edits too. Every claim in the copy has a test
+    below that drives the real lane producer (worktree_lane). Every other
+    state keeps its old refusal, word for word."""
+
+    SID = "sess-fresh-0001"
+    DOOR = "Brother door"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.realpath(self._tmp.name)
+        os.makedirs(os.path.join(self.root, ".git"))
+        os.makedirs(os.path.join(self.root, "src"))
+        for name in ("app.py", "other.py"):
+            with io.open(os.path.join(self.root, "src", name), "w",
+                         encoding="utf-8") as f:
+                f.write("# %s\n" % name)
+        self._env_patch = mock.patch.dict(os.environ, {}, clear=False)
+        self._env_patch.start()
+        for k in ("BROTHERMODE_ROOT", "BM_FENCE_STRICT", "BM_FENCE_SESSION_ID",
+                  "BM_FENCE_MODE"):
+            os.environ.pop(k, None)
+
+    def tearDown(self):
+        self._env_patch.stop()
+        self._tmp.cleanup()
+
+    def store_dir(self):
+        return os.path.join(self.root, bs.STORE_DIRNAME)
+
+    def assertNothingWritten(self):
+        self.assertFalse(os.path.lexists(self.store_dir()),
+                         "the fence wrote BrotherMode state into the project")
+
+    def hook(self, p, env=None):
+        """The real entry point: a bare command, JSON on stdin, enforced,
+        run from the payload's own cwd as the host runs it."""
+        e = {"BM_FENCE_MODE": "enforced"}
+        e.update(env or {})
+        r = subprocess.run([sys.executable, HOOK_PATH],
+                           input=json.dumps(p), text=True, capture_output=True,
+                           cwd=p.get("cwd") or self.root, env=_clean_env(e))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def reason_of(self, r):
+        self.assertTrue(r.stdout.strip(), "expected a deny; got allow. "
+                        "stderr=%r" % r.stderr)
+        d = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(d["permissionDecision"], "deny")
+        return d["permissionDecisionReason"]
+
+    def decide_enforced(self, p):
+        with mock.patch.dict(os.environ, {"BM_FENCE_MODE": "enforced"}):
+            decision, notes = fh.decide(p)
+        self.assertIsNotNone(decision, "expected a deny; got allow: %r" % notes)
+        return decision["hookSpecificOutput"]["permissionDecisionReason"]
+
+    # -- the dead end, and the way out ------------------------------------
+
+    def test_first_edit_names_the_brother_door_not_a_hand_init(self):
+        r = self.hook(payload(self.SID, self.root))
+        reason = self.reason_of(r)
+        self.assertIn(self.DOOR, reason)
+        self.assertIn("receipt", reason)
+        # What the door does NOT do, said plainly (each pinned by a lane
+        # test below): this tree stays refused, the lanes need a commit,
+        # and inside a session the door's lanes are refused too.
+        self.assertIn("this project's own tree stay refused", reason)
+        self.assertIn("at least one commit", reason)
+        self.assertIn("Inside a coding session", reason)
+        self.assertIn("refuses those edits too", reason)
+        # R1's disproved claim: the door never sets up THIS project's store.
+        self.assertNotIn("this project's store", reason)
+        # The dead end the probe measured: a remedy that sends the agent to
+        # the store's own CLI and so out of the product.
+        self.assertNotIn("bm_store.py init`", reason)
+        self.assertNotIn("bm_store.py claim", reason)
+        # Literal copy: nothing from the payload or the machine.
+        self.assertNotIn(self.root, reason)
+        self.assertNotIn("src/app.py", reason)
+        self.assertNotIn(os.path.expanduser("~"), reason)
+        # Still a guard: the hook wrote nothing.
+        self.assertNothingWritten()
+
+    # -- the door's real lane shape, one test per claim the copy makes ----
+
+    def git_init(self, commit):
+        """Turn the fixture's bare .git folder into a real repository, with
+        one commit or none, so the door's own lane producer can run on it."""
+        shutil.rmtree(os.path.join(self.root, ".git"))
+        env = _clean_env({"GIT_CONFIG_NOSYSTEM": "1"})
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.email=t@t", "-c", "user.name=t", "-c",
+                      "commit.gpgsign=false", "commit", "-q", "-m", "R0"]):
+            if args[0] != "init" and not commit:
+                break
+            subprocess.run(["git"] + args, cwd=self.root, env=env,
+                           check=True, capture_output=True)
+
+    def lanes_root(self):
+        """Outside the project, as the door's own lane roots are."""
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return os.path.realpath(d.name)
+
+    def door_lane(self, uid="fix1"):
+        """A lane exactly as the door opens one (worktree_lane.Lanes, what
+        loop_bridge.run and write_handoff both call), under this fixture."""
+        import worktree_lane
+        lanes = worktree_lane.Lanes(self.root, [uid], root=self.lanes_root())
+        self.assertTrue(lanes.isolated, lanes.why())
+        return os.path.realpath(lanes.path_for(uid))
+
+    def test_the_doors_spawned_lane_proceeds_and_this_tree_stays_refused(self):
+        """The spawned route (outside a coding session): LaneWorker._run
+        calls managed_safety.materialize on the LANE and launches the
+        worker under BM_FENCE_STRICT with BROTHERMODE_ROOT set to it. That
+        worker's Edit in its lane is allowed; the same Edit in the project's
+        own tree is still refused with the door copy, and the project root
+        never gets a store."""
+        self.git_init(commit=True)
+        lane = self.door_lane()
+        import managed_safety
+        unit = {"unit_id": "fix1", "objective": "first fix",
+                "write_scope": ["src/app.py"], "read_scope": [],
+                "role": "builder", "risk_class": "normal", "attempt": 1,
+                "prior_failure_note": ""}
+        token, why = managed_safety.materialize(lane, unit)
+        self.assertIsNotNone(token, why)
+        self.assertTrue(os.path.isdir(os.path.join(lane, bs.STORE_DIRNAME)))
+        worker_env = {"BM_FENCE_STRICT": "1", "BROTHERMODE_ROOT": lane,
+                      "BM_FENCE_SESSION_ID": token}
+        r = self.hook(payload(token, lane), env=worker_env)
+        self.assertEqual(r.stdout, "", "the door's lane claim did not open "
+                         "the fence for its worker: %r" % r.stdout)
+        reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+        self.assertIn(self.DOOR, reason)
+        self.assertNothingWritten()
+
+    def test_inside_a_session_the_handed_over_lane_is_refused_too(self):
+        """The session route (brother_run inside a coding session, see
+        scripts/test_brother_run_session_worker.py): write_handoff opens the
+        lanes and claims nothing in them, and the session edits there under
+        its own id. Measured 2026-11-02: enforced mode refuses that edit,
+        which is why the copy says so instead of promising the door."""
+        self.git_init(commit=True)
+        lane = self.door_lane()
+        self.reason_of(self.hook(payload(self.SID, lane)))
+        self.assertFalse(os.path.lexists(os.path.join(lane, bs.STORE_DIRNAME)),
+                         "the fence wrote BrotherMode state into the lane")
+
+    def test_the_doors_lanes_need_a_commit(self):
+        """The copy's commit prerequisite is real: on a repository with no
+        commit the door's lane producer cannot open a lane at all."""
+        self.git_init(commit=False)
+        import worktree_lane
+        lanes = worktree_lane.Lanes(self.root, ["fix1"],
+                                    root=self.lanes_root())
+        self.assertFalse(lanes.isolated)
+        self.assertIn("git worktree add failed", lanes.why())
+        reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+        self.assertIn("at least one commit", reason)
+
+    def test_advisory_mode_is_unchanged_and_writes_nothing(self):
+        r = subprocess.run([sys.executable, HOOK_PATH],
+                           input=json.dumps(payload(self.SID, self.root)),
+                           text=True, capture_output=True, cwd=self.root,
+                           env=_clean_env())
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        self.assertIn("FAILING OPEN", r.stderr)
+        self.assertNothingWritten()
+
+    # -- everything the fence must refuse stays refused, and never by the door
+
+    def test_a_write_into_brothermodes_own_state_gets_no_door(self):
+        for target in (bs.STORE_DIRNAME + "/" + bs.STORE_FILENAME,
+                       bs.STORE_DIRNAME + "/fence/x.token", "."):
+            p = payload(self.SID, self.root, tool_name="Write",
+                        tool_input={"file_path": target, "content": "x"})
+            reason = self.reason_of(self.hook(p))
+            self.assertNotIn(self.DOOR, reason, target)
+            self.assertIn("no BrotherMode store", reason, target)
+        self.assertNothingWritten()
+
+    def test_a_store_folder_without_its_store_keeps_the_old_refusal(self):
+        os.makedirs(self.store_dir())
+        reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+        self.assertNotIn(self.DOOR, reason)
+        self.assertIn("no BrotherMode store", reason)
+
+    def test_a_corrupt_store_blocks_and_is_never_read_as_no_store(self):
+        os.makedirs(self.store_dir())
+        junk = b"this is not a sqlite database, not even a little bit"
+        with io.open(os.path.join(self.store_dir(), bs.STORE_FILENAME),
+                     "wb") as f:
+            f.write(junk)
+        reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+        self.assertNotIn(self.DOOR, reason)
+        self.assertIn("could not be opened read-only", reason)
+        with io.open(os.path.join(self.store_dir(), bs.STORE_FILENAME),
+                     "rb") as f:
+            self.assertEqual(f.read(), junk, "the corrupt store was touched")
+
+    def test_a_symlinked_store_folder_is_never_read_as_fresh(self):
+        foreign = tempfile.TemporaryDirectory()
+        self.addCleanup(foreign.cleanup)
+        for name, dest in (("dangling", os.path.join(foreign.name, "gone")),
+                           ("foreign", foreign.name)):
+            os.symlink(dest, self.store_dir())
+            try:
+                reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+                self.assertNotIn(self.DOOR, reason, name)
+            finally:
+                os.remove(self.store_dir())
+        self.assertEqual(os.listdir(foreign.name), [],
+                         "the fence wrote into a foreign store folder")
+
+    def test_a_store_folder_check_that_errors_is_never_read_as_fresh(self):
+        """'No store' is a positive answer (FileNotFoundError), never the
+        absence of an answer: an lstat that fails any other way keeps the
+        old refusal."""
+        real = os.lstat
+        target = self.store_dir()
+
+        def lstat(path, *a, **kw):
+            if path == target:
+                raise PermissionError(13, "simulated", path)
+            return real(path, *a, **kw)
+        with mock.patch.object(fh.os, "lstat", lstat):
+            reason = self.decide_enforced(payload(self.SID, self.root))
+        self.assertNotIn(self.DOOR, reason)
+
+    def test_an_environment_named_root_is_never_read_as_fresh(self):
+        """BROTHERMODE_ROOT chose the store location, not the project's own
+        .git: the fence never guesses that such a root is a fresh project."""
+        reason = self.reason_of(self.hook(payload(self.SID, self.root),
+                                          env={"BROTHERMODE_ROOT": self.root}))
+        self.assertNotIn(self.DOOR, reason)
+
+    def test_an_initialized_stores_fences_are_unchanged(self):
+        with bs.Store(self.root):
+            pass
+        reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+        self.assertNotIn(self.DOOR, reason)
+        self.assertIn("no active claims", reason)
+        owner = fh.session_label(self.root, "sess-owner-0009")
+        with bs.Store(self.root, create=False) as store:
+            store.claim("api", "ephemeral", objective="t",
+                        files=["src/app.py"], session_id=owner)
+        reason = self.reason_of(self.hook(payload(self.SID, self.root)))
+        self.assertIn("inside the fence of the active record", reason)
+
+
+# ---------------------------------------------------------------------------
+# Structural rules this repo enforces on itself.
+# ---------------------------------------------------------------------------
+
 class Structural(unittest.TestCase):
 
     FILES = (HOOK_PATH, os.path.abspath(__file__), DOCS_PATH)
@@ -2188,6 +2465,58 @@ class MissingGateModuleNamesTheFile(BatteryFenceBase):
         self.assertIn("test_all.py", reason,
                       "the deny reason must name the missing gate module, "
                       "not only the generic battery-unreadable copy")
+
+
+class ExistingLabelIsReadOnly(FenceHookBase):
+    """existing_label is how the sibling BrotherSBE fence learns which bm1-
+    label a harness session id owns, so a claim's owner is not refused out of
+    its own file by the second fence (measured 2026-10-31: owner DENY under
+    the bundle dispatcher). It runs on every write the other fence judges, so
+    it must never create a token: a lookup that minted one would hand every
+    session that merely wrote nearby a fresh identity on disk."""
+
+    def _token_files(self):
+        d = fh.fence_dir(self.root)
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    def test_it_returns_the_label_session_label_minted(self):
+        minted = self.label(self.VICTIM)
+        self.assertEqual(fh.existing_label(self.root, self.VICTIM), minted)
+
+    def test_it_returns_none_and_creates_nothing_for_an_unknown_session(self):
+        before = self._token_files()
+        self.assertIsNone(fh.existing_label(self.root, self.OTHER))
+        self.assertEqual(self._token_files(), before,
+                         "a read-only lookup created a token file")
+
+    def test_another_sessions_token_never_answers_for_this_one(self):
+        self.label(self.VICTIM)
+        self.assertIsNone(fh.existing_label(self.root, self.OTHER))
+
+    def test_a_corrupt_token_is_no_label(self):
+        self.label(self.VICTIM)
+        with io.open(fh.token_path(self.root, self.VICTIM), "w",
+                     encoding="utf-8") as f:
+            f.write("not a token\n")
+        self.assertIsNone(fh.existing_label(self.root, self.VICTIM))
+
+    def test_a_symlinked_token_is_no_label(self):
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        planted = os.path.join(outside.name, "t")
+        with io.open(planted, "w", encoding="utf-8") as f:
+            f.write("a" * 64 + "\n")
+        os.makedirs(fh.fence_dir(self.root), exist_ok=True)
+        os.symlink(planted, fh.token_path(self.root, self.OTHER))
+        self.assertIsNone(fh.existing_label(self.root, self.OTHER))
+
+    def test_hostile_inputs_are_no_label_never_a_raise(self):
+        self.label(self.VICTIM)
+        for bad in (None, "", 7, ["x"], b"sess"):
+            self.assertIsNone(fh.existing_label(self.root, bad), repr(bad))
+        self.assertIsNone(fh.existing_label(None, self.VICTIM))
+        self.assertIsNone(fh.existing_label(
+            os.path.join(self.root, "missing"), self.VICTIM))
 
 
 if __name__ == "__main__":

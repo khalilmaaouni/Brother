@@ -935,5 +935,331 @@ class FrozenPromptSetRouteCorrectness(unittest.TestCase):
                     self.assertIsNone(second["pending_challenge"])
 
 
+# ---------------------------------------------------------------------------
+# VERD1.a: one verdict contract at the capability door. A capability's verdict
+# comes from its OWN evidence: PASS only when its own check passed, FAIL when it
+# contradicts, NO-DATA when no verdict was produced. A child exit code 0 alone is
+# never PASS. Every case isolates one adapter and one input shape, and the
+# handler cases first assert the scripted child really ran, so a refusal that
+# fires before the reader can never pass them by accident.
+# ---------------------------------------------------------------------------
+import importlib.util as _v1_importlib_util  # noqa: E402
+from unittest import mock as _v1_mock  # noqa: E402
+
+_V1_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(_V1_ROOT, "products", "brothersbe", "src"))
+sys.path.insert(0, os.path.join(_V1_ROOT, "products", "brotherds"))
+from brothersbe import cli as _v1_sbe  # noqa: E402
+
+
+def _v1_load(name, *parts):
+    spec = _v1_importlib_util.spec_from_file_location(name, os.path.join(_V1_ROOT, *parts))
+    mod = _v1_importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_v1_bds = _v1_load("bds_for_verd1a", "products", "brotherds", "bds.py")
+_v1_vault = _v1_load("bm_vault_for_verd1a", "products", "brothermode", "tools", "bm_vault.py")
+
+#: exit 0 text that carries no verdict word and none of any handler's own evidence
+V1_JUNK = "Completed. Nothing further to report.\n"
+V1_STRICT_ROW = _v1_sbe.DOOR_HANDLERS["assurance_existing_review"]
+V1_REPORT_ROW = _v1_sbe.DOOR_HANDLERS["assurance_existing_status"]
+import mdm_normalize as _v1_norm  # noqa: E402
+
+_V1_HIT = ("What this estate has already written about that:\n\n  lesson  [lesson, vault]\n"
+           "    id: n-00000000000000aa  authority: casual  temporal: timeless_current\n"
+           "    verified: unknown (no verified_at on record)\n    matched on: wording\n"
+           "    /vault/10-Lessons/lesson.md\nevent: f812d033fdee4f699b6eaf9a9c25659c\n")
+#: what each handler's REAL command prints when it succeeded (captured 2026-11-01 over scratch inputs unless a
+#: comment says the shape was read from the printing line instead). Evidence marker -> printing line:
+V1_BDS_SUCCESS = {
+    # bds.py:661 print("registered %r from claim %s in %s")
+    "data_existing_register": "registered 'weekly_orders' from claim C1 in /w/metric-registry.json\n",
+    # bds.py:2778 print("OUTCOME %s" % state), HELD or MISSED
+    "data_existing_score": ("claim   C2\n        Weekly orders\n\n  recorded  500\n  actual    500\n"
+                            "  observed  today by me\n\nOUTCOME HELD\n        actual 500 fell inside the band\n"
+                            "lesson candidate: NO-DATA: vault not configured\n"),
+    # mdm_eval.py:901 JSON carrying precision_above and recall
+    "data_existing_mdm_review": json.dumps({"merge_threshold": 0.9, "n_rows": 400, "precision_above": {
+        "estimate": 0.98, "lo": 0.94, "hi": 0.99}, "recall": {"recall": 0.56}, "strata": []}, indent=2) + "\n",
+    # mdm_derive.py:186 JSON carrying gold_clusters and pairwise
+    "data_existing_mdm_clusters": json.dumps({"bcubed": {"f1": 0.85}, "gold_clusters": {"pred": [["r1"]], "true": [
+        ["r1"]]}, "n_records": 4, "pairwise": {"f1": 0.66, "tp": 1}}, indent=2) + "\n",
+    # mdm_derive.py:186 JSON carrying psi and score_drift
+    "data_existing_mdm_drift": json.dumps({"band": "major", "bins": 10, "n_current": 3, "n_reference": 3,
+                                           "psi": 16.9, "score_drift": {"current": [0.1], "reference": [0.1]}},
+                                          indent=2) + "\n",
+    # mdm_audit.py:712,727 JSON carrying input_sha256 and n_rows
+    "data_existing_mdm_audit": json.dumps({"collisions": {}, "input_sha256": "ab" * 32, "n_rows": 40}, indent=1) + "\n",
+    # mdm_audit.py:717,727 the same plus review_plan
+    "data_existing_mdm_audit_plan": json.dumps({"input_sha256": "ab" * 32, "n_rows": 40, "review_plan": {
+        "schema": "brotherds.audit-plan.v1", "algorithm": "stratified-random-v1", "input_sha256": "ab" * 32,
+        "input_encoding": "utf-8", "parameters": {"margin": 0.1, "min_n": 10, "max_n": 400, "seed": 7},
+        "columns": ["plan_id", "stratum", "source_id", "reference_id", "pathway", "score", "verifier",
+                    "stratum_population", "stratum_sampled", "label"],
+        "row_count": 32, "plan_sha256": "cd" * 32}}, indent=1) + "\n",
+    # mdm_audit.py:775 JSON carrying strata and pathway_review
+    "data_existing_mdm_evaluate": json.dumps({"pathway_review": {}, "strata": [], "unlabelled": 0,
+                                              "unmatched_review": {}, "verifier": {}}, indent=1) + "\n",
+    # mdm_jan_lookup.py:229
+    "data_existing_mdm_resolve": "wrote 2 rows to o.csv (1 resolved without web research)\n",
+    # mdm_jan_lookup.py:237 one JSON line per name
+    "data_existing_mdm_classify": json.dumps({"name": "Cola 500ml PET", "packaging_type": "loose", "reason": "r"},
+                                             ensure_ascii=False) + "\n",
+}
+V1_VAULT_SUCCESS = {
+    # bm_vault.py:2592 (id line) and its path line, under _print_hits' heading at bm_vault.py:3379
+    "vault_existing_recall": _V1_HIT,
+    # the same hit block under bm_vault.py:3848's heading
+    "vault_existing_context_recall": _V1_HIT.replace("What this estate has already written about that:",
+                                                     "RECORDED FAILURES in the files you are about to touch:"),
+    # bm_vault.py:3978 notes line (one indexed) and the last indexed line
+    "vault_existing_status": ("index: /c/bm_vault_index.sqlite3\nnotes: 1 (vault 1)\nanchors: 0 distinct file or "
+                              "symbol names; links: 0; dense vectors: 0 of 1\nlast indexed: 0.0 hours ago\n"),
+    # bm_vault_intake.py:878
+    "vault_existing_capture": ("CAPTURED 00-Inbox/run-the-kernel-check-first-daf04068.md  id=n-4ff45bc0daf04068  "
+                               "expiry=2026-12-01 (lesson-candidate)\nVault saved: Run the kernel check first.\n"),
+    # bm_vault_promotions.py:173-174, a real state
+    "vault_existing_review": "note: 10-Lessons/lesson.md\nstate: candidate\n",
+    # bm_vault_lifecycle.py:368-369 and the tallies, no FINDINGS line
+    "vault_existing_lifecycle": ("vault: /v\nnotes: 2\n  canonical    0\n  validated    0\n  under_review 0\n"
+                                 "  candidate    2\n  rejected     0\n  revoked      0\n  expired      0\n"
+                                 "  legacy       0  (predates the contract; in retrieval, never canonical)\n"),
+    # bm_vault_promotions.py:242 with --apply
+    "vault_existing_promote": "promoted 10-Lessons/lesson.md: candidate -> validated\n",
+    # bm_vault_attribute_provenance.py:312-314 (read from the printing lines)
+    "vault_existing_provenance": ("provenance history for 10-Lessons/lesson.md / promotion (1 version(s)):\n"
+                                  "  v1 [verified] source=door set_at=2026-11-01 checked_by=bob promoted_by=bob\n"),
+    # bm_vault_asof.py:165-167
+    "vault_existing_asof": ("vault: /v\nas of: 2026-11-01\nnotes: 2 total\n"
+                            "in truth, resting on a declared interval: 0\n"),
+    # bm_vault_retention.py:285 and :291
+    "vault_existing_retention": ("census: 1 file-backed note(s) indexed, 0 stale, 0 correction-rule row(s) skipped\n"
+                                 "clean: every indexed note is present and unrevoked on disk\n"),
+}
+
+
+class VerdictContract(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        home = os.path.join(self.tmp, "home")  # an empty HOME: nothing on this laptop can speak for the work
+        os.makedirs(home)
+        patch = _v1_mock.patch.dict(os.environ, {"HOME": home})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    # -- BrotherSBE _door_verdict ------------------------------------------------------------------------------
+    def test_sbe_exit_zero_with_no_verdict_word_is_no_data(self):
+        for row in (V1_STRICT_ROW, V1_REPORT_ROW):
+            verdict, _ = _v1_sbe._door_verdict(row, 0, V1_JUNK, "")
+            self.assertEqual("NO-DATA", verdict, row["verb"])
+
+    def test_sbe_non_strict_pass_line_beside_a_no_data_line_is_no_data(self):
+        verdict, _ = _v1_sbe._door_verdict(V1_REPORT_ROW, 0, "PASS gate one\nNO-DATA gate two\n", "")
+        self.assertEqual("NO-DATA", verdict)
+
+    def test_sbe_strict_pass_line_beside_a_no_data_line_is_no_data(self):  # control: already true today
+        verdict, _ = _v1_sbe._door_verdict(V1_STRICT_ROW, 0, "PASS gate one\nNO-DATA gate two\n", "")
+        self.assertEqual("NO-DATA", verdict)
+
+    def test_sbe_exit_zero_with_a_real_pass_line_is_pass(self):  # control: the fix must not turn everything NO-DATA
+        for row in (V1_STRICT_ROW, V1_REPORT_ROW):
+            verdict, _ = _v1_sbe._door_verdict(row, 0, "PASS gate migration\n", "")
+            self.assertEqual("PASS", verdict, row["verb"])
+
+    def test_sbe_a_fail_line_beside_exit_zero_is_fail(self):  # control
+        for row in (V1_STRICT_ROW, V1_REPORT_ROW):
+            verdict, _ = _v1_sbe._door_verdict(row, 0, "PASS gate one\nFAIL gate two\n", "")
+            self.assertEqual("FAIL", verdict, row["verb"])
+
+    def test_sbe_door_invoke_end_to_end_exit_zero_with_no_verdict_word_carries_no_pass(self):
+        got = _v1_sbe.door_invoke("assurance_existing_status", {"path": self.tmp},
+                                  lambda argv, cwd: (0, V1_JUNK, ""))
+        self.assertEqual(("NO-DATA", []), (got["verdict"], got["evidence_refs"]))
+
+    # -- BrotherDS door_invoke ---------------------------------------------------------------------------------
+    def _bds_inputs(self, handler):
+        path = os.path.join(self.tmp, "f.csv")
+        with open(path, "w") as fh:
+            fh.write("a\n")
+        by_key = {"claim": {"id": "C1"}, "actual": 1, "merge_threshold": 1, "inputs": [path], "names": ["x"],
+                  "values": ["x"], "kind": "x", "locale": "ja", "text": "x", "dest": "d.json", "plan": "p.json",
+                  "out": "o.json"}
+        required = _v1_bds.DOOR_HANDLERS[handler][2]
+        return {k: by_key.get(k, path) for k in required}
+
+    def _bds_run(self, handler, out, inputs=None):
+        calls = []
+
+        def run(argv, stdin_text):
+            calls.append(argv)
+            return 0, out, ""
+        with _v1_mock.patch.object(_v1_bds, "_door_consented", return_value=True), \
+                _v1_mock.patch.object(_v1_bds, "_door_tool_present", return_value=True):
+            got = _v1_bds.door_invoke(handler, inputs or self._bds_inputs(handler), run)
+        self.assertEqual(1, len(calls), "the scripted child must run, or the reader was never reached")
+        return got
+
+    def test_bds_a_verdict_line_handler_with_no_verdict_line_is_no_data(self):  # control: reader is sound
+        self.assertEqual("NO-DATA", self._bds_run("data_existing_check", V1_JUNK)["verdict"])
+
+    def test_bds_a_verdict_line_handler_with_its_own_pass_line_is_pass(self):  # control
+        got = self._bds_run("data_existing_check", "VERDICT PASS\n")
+        self.assertEqual(("PASS", 1), (got["verdict"], len(got["evidence_refs"])))
+
+    def test_bds_the_ledger_with_a_rate_is_pass(self):  # control
+        self.assertEqual("PASS", self._bds_run("data_existing_ledger", "VERIFIED CLAIM RATE  80%\n")["verdict"])
+
+    # -- BrotherMode Vault door_invoke -------------------------------------------------------------------------
+    def _vault_run(self, handler, out):
+        by_key = {"query": "q", "paths": ["a.md"], "text": "t", "by": "b", "id": "i", "to": "t", "note": "n",
+                  "attribute": "a", "date": "2026-01-01"}
+        required = _v1_vault.DOOR_HANDLERS[handler][2]
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            return 0, out, ""
+        with _v1_mock.patch.object(_v1_vault, "_consented", return_value=True), \
+                _v1_mock.patch.object(_v1_vault, "resolve_vault_root",
+                                      return_value={"verdict": "PASS", "root": self.tmp, "detail": ""}):
+            got = _v1_vault.door_invoke(handler, {k: by_key[k] for k in required}, run)
+        self.assertEqual(1, len(calls), "the scripted child must run, or the reader was never reached")
+        return got
+
+    # -- positive evidence: a handler earns PASS only from its OWN success shape --------------------------------
+    def test_bds_a_normalizer_key_equal_to_the_real_key_for_the_inputs_is_pass(self):
+        text = "株式会社テスト商事"
+        got = self._bds_run("data_existing_mdm_normalize", _v1_norm.company_key(text, "ja") + "\n",
+                            {"kind": "company", "locale": "ja", "text": text})
+        self.assertEqual(("PASS", 1), (got["verdict"], len(got["evidence_refs"])))
+
+    def test_bds_a_normalizer_key_that_is_not_the_real_key_for_the_inputs_is_not_pass(self):
+        text = "株式会社テスト商事"
+        got = self._bds_run("data_existing_mdm_normalize", "some other key\n",
+                            {"kind": "company", "locale": "ja", "text": text})
+        self.assertNotEqual("PASS", got["verdict"])
+
+    def test_bds_validate_with_a_valid_true_row_is_pass(self):  # control: the real shape of mdm_validate.py:489
+        out = '{"jan_prefix": true, "kind": "GTIN-13", "normalized": "4901234567894", "reason": "ok", "valid": true}\n'
+        self.assertEqual("PASS", self._bds_run("data_existing_mdm_validate", out)["verdict"])
+
+    def test_bds_validate_with_a_valid_false_row_is_fail(self):  # control
+        out = '{"kind": null, "normalized": "1234", "reason": "not a GTIN length", "valid": false}\n'
+        self.assertEqual("FAIL", self._bds_run("data_existing_mdm_validate", out)["verdict"])
+
+    def test_bds_score_that_graded_nothing_is_not_pass(self):
+        out = "claim   C2\n\n  actual    5\n\nOUTCOME UNSCOREABLE\n        no interval was stated\n"
+        self.assertNotEqual("PASS", self._bds_run("data_existing_score", out)["verdict"])
+
+    def test_vault_promote_that_only_says_it_would_promote_is_not_pass(self):
+        out = "would promote 10-Lessons/lesson.md: candidate -> validated\n"
+        self.assertNotEqual("PASS", self._vault_run("vault_existing_promote", out)["verdict"])
+
+    def test_vault_review_with_an_unknown_state_is_not_pass(self):
+        out = "note: 10-Lessons/lesson.md\nstate: UNKNOWN\n"
+        self.assertNotEqual("PASS", self._vault_run("vault_existing_review", out)["verdict"])
+
+    def test_vault_status_of_an_empty_never_indexed_vault_is_not_pass(self):
+        out = ("index: /c/bm_vault_index.sqlite3\nnotes: 0 (none)\nanchors: 0 distinct file or symbol names; "
+               "links: 0; dense vectors: 0 of 0\nlast indexed: NEVER, run `bm_vault.py index` first\n")
+        self.assertNotEqual("PASS", self._vault_run("vault_existing_status", out)["verdict"])
+
+    # -- the retired reader ---------------------------------------------------------------------------------------
+    def test_bds_no_handler_reads_its_verdict_with_the_produced_reader(self):
+        self.assertEqual([], sorted(h for h, r in _v1_bds.DOOR_VERDICT_READERS.items() if r == "produced"))
+
+    def test_vault_no_handler_reads_its_verdict_with_the_produced_reader(self):
+        self.assertEqual([], sorted(h for h, r in _v1_vault.DOOR_VERDICT_READERS.items() if r == "produced"))
+
+    # -- the Mobile route in door.py ---------------------------------------------------------------------------
+    def test_mobile_exit_zero_with_unrelated_text_is_not_pass(self):
+        rec = os.path.join(self.tmp, "rec.json")
+        with open(rec, "w") as fh:
+            fh.write("{}")
+        calls = []
+
+        def run(argv, timeout):
+            calls.append(argv)
+            return 0, V1_JUNK, ""
+        got = door_mod.mobile_invoke("mobile_existing_journey", {"record": rec}, run)
+        self.assertEqual(1, len(calls))
+        self.assertNotEqual("PASS", got["verdict"])
+
+    def test_mobile_the_journey_contracts_own_pass_line_is_pass(self):  # mobile_journey_contract.py:85
+        rec = os.path.join(self.tmp, "rec.json")
+        with open(rec, "w") as fh:
+            fh.write("{}")
+        out = "PASS: %s validates as mobile-journey-contract-v1\n" % rec
+        got = door_mod.mobile_invoke("mobile_existing_journey", {"record": rec}, lambda argv, timeout: (0, out, ""))
+        self.assertEqual(("PASS", True), (got["verdict"], bool(got["evidence_refs"])))
+
+    # -- invoke_capability itself --------------------------------------------------------------------------------
+    def test_invoke_capability_a_pass_with_no_evidence_is_unproven_never_complete(self):  # control
+        spec = {"id": "x", "handler": "h", "prerequisites": [], "required_authority": []}
+        got = door_mod.invoke_capability(spec, {}, {"available": [], "authority": []},
+                                         lambda h, i: {"verdict": "PASS", "output": "all good", "evidence_refs": []})
+        self.assertEqual(("UNPROVEN", "PASS", []), (got["state"], got["verdict"], got["evidence_refs"]))
+
+    def test_invoke_capability_a_reply_with_no_verdict_is_no_data_never_pass(self):  # control
+        spec = {"id": "x", "handler": "h", "prerequisites": [], "required_authority": []}
+        got = door_mod.invoke_capability(spec, {}, {"available": [], "authority": []},
+                                         lambda h, i: {"output": "ok", "evidence_refs": ["e1"]})
+        self.assertEqual(("NO-DATA", "NO-DATA"), (got["state"], got["verdict"]))
+
+
+def _v1_add_case(cls, name, fn):
+    fn.__name__ = name
+    setattr(cls, name, fn)
+
+
+def _v1_bds_case(handler):
+    def case(self):
+        got = self._bds_run(handler, V1_JUNK)
+        self.assertNotEqual("PASS", got["verdict"], "%s read PASS on exit 0 with no evidence of its own" % handler)
+        self.assertEqual([], got["evidence_refs"])
+    return case
+
+
+def _v1_vault_case(handler):
+    def case(self):
+        got = self._vault_run(handler, V1_JUNK)
+        self.assertNotEqual("PASS", got["verdict"], "%s read PASS on exit 0 with no evidence of its own" % handler)
+        self.assertEqual([], got["evidence_refs"])
+    return case
+
+
+def _v1_bds_positive(handler):
+    def case(self):
+        got = self._bds_run(handler, V1_BDS_SUCCESS[handler])
+        self.assertEqual(("PASS", 1), (got["verdict"], len(got["evidence_refs"])),
+                         "%s did not earn PASS from its own success shape" % handler)
+    return case
+
+
+def _v1_vault_positive(handler):
+    def case(self):
+        got = self._vault_run(handler, V1_VAULT_SUCCESS[handler])
+        self.assertEqual(("PASS", 1), (got["verdict"], len(got["evidence_refs"])),
+                         "%s did not earn PASS from its own success shape" % handler)
+    return case
+
+
+for _h in sorted(V1_BDS_SUCCESS):
+    _v1_add_case(VerdictContract, "test_bds_%s_own_success_shape_is_pass" % _h, _v1_bds_positive(_h))
+for _h in sorted(V1_VAULT_SUCCESS):
+    _v1_add_case(VerdictContract, "test_vault_%s_own_success_shape_is_pass" % _h, _v1_vault_positive(_h))
+
+
+for _h in sorted(_v1_bds.DOOR_VERDICT_READERS):
+    _v1_add_case(VerdictContract, "test_bds_%s_exit_zero_without_its_own_evidence_is_not_pass" % _h, _v1_bds_case(_h))
+for _h in sorted(_v1_vault.DOOR_VERDICT_READERS):
+    _v1_add_case(VerdictContract, "test_vault_%s_exit_zero_without_its_own_evidence_is_not_pass" % _h,
+                 _v1_vault_case(_h))
+
+
 if __name__ == "__main__":
     unittest.main()

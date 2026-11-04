@@ -382,8 +382,8 @@ def main():
     code, _ = _run([_tool("scripts", "setup.py"), "--consent-state"],
                    capture=True)
     if code != 0:
-        _say("BrotherMode setup is not complete yet; run: "
-             "python3 scripts/setup.py\n")
+        _say("Brother setup is not complete yet. To finish it, say: set up Brother "
+             "(in Claude Code: /brother set up).\n")
         return 0
 
     first_run = _is_first_run()
@@ -394,7 +394,7 @@ def main():
         # thing to type; until now the product's own first words never did.
         # This hook also runs at Codex's SessionStart, which has no slash
         # commands, so the slash command is named for Claude Code only.
-        _say("BrotherMode: new project. To begin, say what you want done "
+        _say("Brother: new project. To begin, say what you want done "
              "(in Claude Code: /brother).\n")
         # Row V2: a fresh install binds no vault at all, and a nag that fires
         # every session stops being read, so this line is gated to the same

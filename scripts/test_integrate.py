@@ -1338,6 +1338,52 @@ class TheKillBetweenTheTwoDeletionStepsLeavesOneNextAction(unittest.TestCase):
                                 "deletion time, not only once at entry")
 
 
+def _real_listing_problem(before, after, made):
+    """Why the real projects/ listing shows this class touched it, or None.
+
+    Two directions only, because a whole-listing compare reads any session
+    started during a gate as this class's write (a false red measured
+    2026-10-31). A name that existed before and is gone is a deletion, the
+    harm cleanup_lane could do. A name that appeared and is one of the slugs
+    this class derived is its own write. Any other new name belongs to a
+    second actor and is allowed. A listing that vanished, or appeared, is a
+    problem either way."""
+    if (before is None) != (after is None):
+        return ("the REAL config dir's projects/ appeared or vanished during "
+                "this class: before=%r after=%r" % (before, after))
+    if before is None:
+        return None
+    removed = sorted(set(before) - set(after))
+    if removed:
+        return ("this test class removed %d name(s) from the REAL config "
+                "dir's projects/: %r" % (len(removed), removed[:5]))
+    ours = sorted((set(after) - set(before)) & set(made))
+    if ours:
+        return ("this test class wrote %r into the REAL config dir's "
+                "projects/" % ours[:5])
+    return None
+
+
+class RealListingProblem(unittest.TestCase):
+    """The check behind TranscriptHygiene's class teardown, one case per
+    direction: a second actor's new folder passes, a removal and this class's
+    own slug do not."""
+
+    def test_a_second_actors_new_folder_is_not_this_class(self):
+        self.assertIsNone(_real_listing_problem(["a"], ["a", "b"], {"x"}))
+        self.assertIsNone(_real_listing_problem(None, None, {"x"}))
+
+    def test_a_removed_name_is_a_problem(self):
+        self.assertIn("removed", _real_listing_problem(["a", "b"], ["b"], set()))
+
+    def test_this_classes_own_slug_is_a_problem(self):
+        self.assertIn("wrote", _real_listing_problem(["a"], ["a", "x"], {"x"}))
+
+    def test_a_listing_that_appears_or_vanishes_is_a_problem(self):
+        self.assertIsNotNone(_real_listing_problem(None, ["x"], set()))
+        self.assertIsNotNone(_real_listing_problem(["a"], None, set()))
+
+
 class TranscriptHygieneRetiresOnlyTheVanishedWorktree(unittest.TestCase):
     """CONT-0, U4, option (a) ONLY: after a lane's worktree is gone,
     cleanup_lane also removes the session-transcript folder under the
@@ -1345,8 +1391,9 @@ class TranscriptHygieneRetiresOnlyTheVanishedWorktree(unittest.TestCase):
     path. Every case here runs under a THROWAWAY CLAUDE_CONFIG_DIR; the
     real one is never read or written, proven by snapshotting its
     projects/ listing (names only) before and after this whole class and
-    asserting it is unchanged (setUpClass/tearDownClass, once, since a
-    per-test snapshot would just repeat the same unchanging assertion)."""
+    asserting that nothing in it was removed and that no slug this class
+    derived appeared (setUpClass/tearDownClass, once; see
+    _real_listing_problem for why other new names are allowed)."""
 
     @classmethod
     def setUpClass(cls):
@@ -1356,14 +1403,28 @@ class TranscriptHygieneRetiresOnlyTheVanishedWorktree(unittest.TestCase):
         cls._real_projects = real_projects
         cls._before = (sorted(os.listdir(real_projects))
                        if os.path.isdir(real_projects) else None)
+        # Every slug this class derives, so the check below can tell this
+        # class's writes from a second actor's (a session started while the
+        # gate runs adds its own folder to the real listing).
+        cls._made = set()
+        slug = I._transcript_slug
+
+        def recording(path):
+            made = slug(path)
+            cls._made.add(made)
+            return made
+        cls._slug_patch = mock.patch.object(I, "_transcript_slug", recording)
+        cls._slug_patch.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls._slug_patch.stop()
+        # A recorder that saw nothing would make the own-slug check vacuous.
+        assert cls._made, "no slug was recorded, so this class's writes cannot be told apart"
         after = (sorted(os.listdir(cls._real_projects))
                 if os.path.isdir(cls._real_projects) else None)
-        assert after == cls._before, (
-            "this test class touched the REAL config dir's projects/ "
-            "listing: before=%r after=%r" % (cls._before, after))
+        problem = _real_listing_problem(cls._before, after, cls._made)
+        assert problem is None, problem
 
     def setUp(self):
         self.throwaway = tempfile.mkdtemp(prefix="transcript-hygiene-config-")

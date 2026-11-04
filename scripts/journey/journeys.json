@@ -7,24 +7,39 @@
      "U02",
      "A07"
     ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_install_paths.py"
+    ],
     "id": "A.first-screen-paths-exist",
-    "measured_by": "FRUN1.a, which makes the printed setup command absolute and runnable from a scratch folder; until then nothing here measures whether the first screen's paths exist"
+    "measured_by": "OUT1.l (2026-11-01): runs the INSTALLED SessionStart hooks from a fresh project folder and reads the door and its skills; every python3 script the start text commands must exist from that folder, and every ${PLUGIN_ROOT} path the door names must exist in the install. FRUN1.a still owns making the printed setup command runnable."
    },
    {
     "atoms": [
      "U05",
      "U07"
     ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_no_internal_names.py"
+    ],
     "id": "D.no-internal-names",
-    "measured_by": "FRUN1.f, whose second requirement is that no session start line names an internal product; measured 2026-10-25 as still false, 3 occurrences in sbe_telemetry.py"
+    "measured_by": "OUT1.l (2026-11-01): reads the same installed SessionStart text through check_install_paths' one helper and fails any line naming BrotherMode, BrotherSBE or BrotherDS. FRUN1.f still owns removing them."
    },
    {
     "atoms": [
      "U08",
      "U04"
     ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_doctor_fixes.py"
+    ],
     "id": "D.doctor-fixes-work",
-    "measured_by": "FRUN1.c and FRUN1.f, which build doctor's remediation from the setup helper and stop it naming a retired plugin"
+    "measured_by": "OUT1.l (2026-11-01): runs the INSTALLED doctor --json from a fresh project folder; every python3 script its advice names must exist from there, none may name a retired plugin, and --fix must leave no more failed checks than before. FRUN1.c and FRUN1.f still own the remediation text."
    },
    {
     "atoms": [
@@ -45,8 +60,13 @@
      "U02",
      "V05"
     ],
+    "check": [
+     "python3",
+     "-B",
+     "scripts/journey/check_readme_claims.py"
+    ],
     "id": "D.readme-claims-executed",
-    "measured_by": "README118, which ties every README claim to the one claims register with an open marker"
+    "measured_by": "OUT1.l (2026-11-01): executes every command the README gives for an installed plugin root (python3 runtime/...) from the install and requires exit 0; a README naming none is NO-DATA. README118's register of every other claim has not landed and is not borrowed here."
    }
   ],
   "title": "install: a stranger installs Brother and reaches a first screen"
@@ -241,6 +261,7 @@
   "cannot produce on an install, which is this journey's own A row. A.accept-recorded could be faked",
   "by counting installed files that name an accept route (measured 2026-10-25: 0 in skills, commands",
   "and hooks), and that count would go green the moment any skill mentioned the route while no",
-  "acceptance had ever been recorded, so it is refused as the hollow substitution this file warns about."
+  "acceptance had ever been recorded, so it is refused as the hollow substitution this file warns about.",
+  "OUT1.l, 2026-11-01: the four J1 rows that read NO-DATA for want of a check now each run one, on the INSTALLED plugin, each with a selftest proving it can say FAIL and NO-DATA as well as PASS."
  ]
 }

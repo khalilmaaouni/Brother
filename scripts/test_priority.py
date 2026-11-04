@@ -136,6 +136,9 @@ class NoDataIsNeverAPass(unittest.TestCase):
         self.assertEqual(P.main(["--roadmap", "/no/such/file.json"]), 2)
 
 
+# docs/plan is not shipped in the public export, so the board this class reads is absent there (the premise,
+# not the behaviour, is missing).
+@unittest.skipUnless(os.path.isfile(P.ROADMAP), "docs/plan is not shipped in the public export; the roadmap is the premise")
 class TheRealBoardOrders(unittest.TestCase):
     def test_the_live_board_produces_an_order_and_exits_zero(self):
         self.assertEqual(P.main([]), 0)

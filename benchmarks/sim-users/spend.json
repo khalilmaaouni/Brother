@@ -1,0 +1,535 @@
+{
+ "label": "SIMULATED",
+ "budget_usd": 10.0,
+ "stages": [
+  {
+   "stage": "probe",
+   "usd": 0.0,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T05:56:12Z"
+  },
+  {
+   "stage": "draft-untiered-v0 (superseded by the tier amendment)",
+   "usd": 0.1716,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T05:56:12Z"
+  },
+  {
+   "stage": "classify",
+   "usd": 0.1116,
+   "model": "deepseek",
+   "at": "2026-11-01T06:08:23Z"
+  },
+  {
+   "stage": "person (deepseek, run-one)",
+   "usd": 0.0004,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:09:11Z"
+  },
+  {
+   "stage": "person (deepseek, run-one)",
+   "usd": 0.0007,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:10:10Z"
+  },
+  {
+   "stage": "person (deepseek, run-one)",
+   "usd": 0.0001,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:15:50Z"
+  },
+  {
+   "stage": "person (deepseek, run-one)",
+   "usd": 0.0019,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:21:06Z"
+  },
+  {
+   "stage": "classify",
+   "usd": 0.11,
+   "model": "deepseek",
+   "at": "2026-11-01T06:24:57Z"
+  },
+  {
+   "stage": "draft",
+   "usd": 0.8997,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:27:41Z"
+  },
+  {
+   "stage": "person (deepseek, smoke before the reply scrub existed; one prompt carried the account email)",
+   "usd": 0.0006,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:29:23Z"
+  },
+  {
+   "stage": "draft stopped for amendment 3 (ESTIMATE, upper bound: about 1 minute, at most 7 batches in flight x 0.0164 USD measured per batch)",
+   "usd": 0.1151,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:32:33Z"
+  },
+  {
+   "stage": "draft",
+   "usd": 0.6591,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:47:02Z"
+  },
+  {
+   "stage": "draft",
+   "usd": 0.2955,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T06:55:18Z"
+  },
+  {
+   "stage": "filter",
+   "usd": 0.0147,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T07:41:57Z"
+  },
+  {
+   "stage": "person (deepseek)",
+   "usd": 0.0103,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T07:59:31Z"
+  },
+  {
+   "stage": "filter",
+   "usd": 0.0119,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T08:26:51Z"
+  },
+  {
+   "stage": "person (deepseek)",
+   "usd": 0.0007,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T08:31:49Z"
+  },
+  {
+   "stage": "classify",
+   "usd": 0.1077,
+   "model": "deepseek",
+   "at": "2026-11-01T10:34:43Z"
+  },
+  {
+   "stage": "classify",
+   "usd": 0.0528,
+   "model": "deepseek",
+   "at": "2026-11-01T10:42:20Z"
+  },
+  {
+   "stage": "draft",
+   "usd": 0.671,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T10:49:40Z"
+  },
+  {
+   "stage": "draft",
+   "usd": 0.5796,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T11:05:08Z"
+  },
+  {
+   "stage": "draft",
+   "usd": 0.2963,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T11:12:07Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:34:42Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:36:50Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:38:51Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0006,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:41:10Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:41:44Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0007,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:42:35Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:43:23Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:46:45Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0006,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:47:00Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0012,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:54:09Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:54:10Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0017,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:54:46Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0013,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:55:49Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0004,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:59:56Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T11:59:57Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:00:46Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0019,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:03:11Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0004,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:03:21Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0031,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:03:31Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:03:50Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0008,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:03:52Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:04:30Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:04:33Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:05:56Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0039,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:06:11Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:06:34Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:08:12Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0003,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:09:09Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0005,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:12:31Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:13:20Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:14:05Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:14:41Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:14:41Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0021,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:15:47Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0003,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:16:36Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:16:47Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:17:11Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:17:31Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0016,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:19:15Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:19:33Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:22:16Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0017,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:22:57Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0003,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:22:58Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:23:47Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:23:50Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0005,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:24:34Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:24:50Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0005,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:24:53Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0025,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:25:31Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:25:56Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:26:20Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:26:28Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:26:46Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:27:03Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0004,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:27:20Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:27:46Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:28:32Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:28:35Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0006,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:29:04Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:29:23Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:29:39Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:29:47Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0002,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:29:57Z"
+  },
+  {
+   "stage": "filter (one cell)",
+   "usd": 0.0001,
+   "model": "typesafe/jev-1.13-20260917",
+   "at": "2026-11-01T12:30:00Z"
+  },
+  {
+   "stage": "person (deepseek)",
+   "usd": 0.0611,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-01T12:35:26Z"
+  },
+  {
+   "stage": "person (deepseek, first-user)",
+   "usd": 0.0006,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "at": "2026-11-02T11:19:17Z"
+  }
+ ],
+ "total_usd": 4.2044
+}

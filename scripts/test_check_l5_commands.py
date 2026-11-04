@@ -178,6 +178,9 @@ class TheFourVerdictsStayFour(unittest.TestCase):
 class TheRealBoardHasNoInventedCommands(unittest.TestCase):
     """The check that keeps the L5 layer honest from here on."""
 
+    # docs/plan is not shipped in the public export, so there the board does not exist: the premise is absent,
+    # not the behaviour broken (the missing board still reads NO-DATA, asserted below on a path that cannot exist).
+    @unittest.skipUnless(os.path.isfile(str(C.ROADMAP)), "this tree carries no L5 readiness roadmap")
     def test_the_live_roadmap_passes(self):
         self.assertEqual(C.main([]), 0)
 

@@ -1,0 +1,1109 @@
+{
+ "capabilities": [
+  {
+   "id": "build-outcome",
+   "verb": "start",
+   "command": "scripts/brother_run.py",
+   "marker": "brother_run: receipt: ",
+   "ask": "build me a login screen",
+   "paraphrases": [
+    "add a dark mode toggle to the app",
+    "implement the export feature"
+   ]
+  },
+  {
+   "id": "resume-work",
+   "verb": "start",
+   "command": "scripts/brother_run.py",
+   "marker": "ap.add_argument(\"--continue\"",
+   "ask": "continue the unfinished task",
+   "paraphrases": [
+    "resume the unfinished task",
+    "continue the work from yesterday"
+   ]
+  },
+  {
+   "id": "app-correction",
+   "verb": "start",
+   "command": "scripts/brother_run.py",
+   "marker": "brother_run: receipt: ",
+   "ask": "fix a bug in the app",
+   "paraphrases": [
+    "the app shows a wrong total, correct it",
+    "repair the price calculation in the app"
+   ]
+  },
+  {
+   "id": "analytics-correction",
+   "verb": "start",
+   "command": "scripts/brother_run.py",
+   "marker": "brother_run: receipt: ",
+   "ask": "fix the wrong numbers in a report",
+   "paraphrases": [
+    "correct a query that counts rows twice",
+    "repair duplicate records in the dashboard"
+   ]
+  },
+  {
+   "id": "where-things-stand",
+   "verb": "status",
+   "command": "scripts/receipt_door.py",
+   "marker": "parser.add_argument(\"--verdict\"",
+   "ask": "where do things stand",
+   "paraphrases": [
+    "show me what happened",
+    "what is the status of the project"
+   ]
+  },
+  {
+   "id": "what-next",
+   "verb": "next",
+   "command": "products/brothermode/skills/next/SKILL.md",
+   "marker": "Recommend the single best next step",
+   "ask": "what should I do next",
+   "paraphrases": [
+    "recommend the next step",
+    "suggest what comes next"
+   ]
+  },
+  {
+   "id": "verify-change",
+   "verb": "review",
+   "command": "products/brothersbe/tools/sbe_gate.py",
+   "marker": "def gate_migration",
+   "ask": "verify this change before merging",
+   "paraphrases": [
+    "review my migration",
+    "audit this pull request"
+   ]
+  },
+  {
+   "id": "mobile-check",
+   "verb": "review",
+   "command": "scripts/door.py",
+   "marker": "def run_mobile_capability",
+   "ask": "check my change on the iPhone simulator",
+   "paraphrases": [
+    "verify the app on the iPad simulator",
+    "check that the screen fits the iPhone SE"
+   ]
+  },
+  {
+   "id": "assurance-check",
+   "verb": "review",
+   "command": "scripts/door.py",
+   "marker": "def run_assurance_capability",
+   "ask": "is this migration safe to merge",
+   "paraphrases": [
+    "check why the approval gate refused",
+    "check my changes stay inside the approved scope"
+   ]
+  },
+  {
+   "id": "team-handover",
+   "verb": "deliver",
+   "command": "scripts/door.py",
+   "marker": "def run_assurance_capability",
+   "ask": "prepare a handover for the receiving team",
+   "paraphrases": [
+    "acknowledge the handover I received",
+    "decline the handover I was given"
+   ]
+  },
+  {
+   "id": "close-with-evidence",
+   "verb": "deliver",
+   "command": "scripts/accept_delivery.py",
+   "marker": "ap.add_argument(\"--reject\"",
+   "ask": "wrap up and close the session",
+   "paraphrases": [
+    "finish with a handover",
+    "ship it with the evidence"
+   ]
+  },
+  {
+   "id": "overnight-loop",
+   "verb": "start",
+   "command": "scripts/loop/start_run.sh",
+   "marker": "--budget-usd",
+   "ask": "run the loop overnight with a 40 dollar budget",
+   "paraphrases": [
+    "start a run until tonight",
+    "begin an unattended run tonight"
+   ]
+  },
+  {
+   "id": "loop-run",
+   "verb": "start",
+   "command": "scripts/door.py",
+   "marker": "def run_loop_capability",
+   "ask": "run my plan overnight within a 40 dollar budget",
+   "paraphrases": [
+    "start an unattended run until morning",
+    "resume the paused overnight run"
+   ]
+  },
+  {
+   "id": "learning-access",
+   "verb": "status",
+   "command": "scripts/door.py",
+   "marker": "def run_learning_capability",
+   "ask": "what lessons did Brother learn and remember from the last task",
+   "paraphrases": [
+    "which remembered lessons apply to this task",
+    "replay a past decision I remembered with a different choice"
+   ]
+  },
+  {
+   "id": "loop-health",
+   "verb": "status",
+   "command": "scripts/loop/loop_watch.py",
+   "marker": "HEALTHY <summary>",
+   "ask": "is the loop healthy",
+   "paraphrases": [
+    "loop status please",
+    "what is blocking the loop"
+   ]
+  },
+  {
+   "id": "board",
+   "verb": "status",
+   "command": "scripts/gen_readiness_board.py",
+   "marker": "def ready_rows",
+   "ask": "show the gantt board",
+   "paraphrases": [
+    "what slipped on the plan",
+    "how is progress against the board"
+   ]
+  },
+  {
+   "id": "cut-release",
+   "verb": "deliver",
+   "command": "scripts/cut.py",
+   "marker": "ap.add_argument(\"--version\"",
+   "ask": "is the release ready to cut",
+   "paraphrases": [
+    "ship the release",
+    "cut version 1.2.3 now"
+   ]
+  },
+  {
+   "id": "vault-notes",
+   "verb": "status",
+   "command": "scripts/door.py",
+   "marker": "def run_vault_capability",
+   "ask": "recall what we learned about the login flow",
+   "paraphrases": [
+    "remember what happened with the payment retry",
+    "recall our notes about the billing service"
+   ]
+  },
+  {
+   "id": "check-a-number",
+   "verb": "review",
+   "command": "scripts/door.py",
+   "marker": "def run_data_capability",
+   "ask": "check this number before I rely on it",
+   "paraphrases": [
+    "verify the revenue figure in this claim",
+    "audit the conversion metric in my report"
+   ]
+  },
+  {
+   "id": "install-health",
+   "verb": "status",
+   "command": "scripts/door.py",
+   "marker": "def run_host_capability",
+   "ask": "is my Brother install healthy",
+   "paraphrases": [
+    "what is the status of my installation",
+    "where does my install stand after the update"
+   ]
+  },
+  {
+   "id": "second-opinion-status",
+   "verb": "status",
+   "command": "scripts/door.py",
+   "marker": "def run_jev_capability",
+   "ask": "what is the status of my second opinions",
+   "paraphrases": [
+    "are the second opinions healthy",
+    "why did the second opinion not happen"
+   ]
+  },
+  {
+   "id": "second-opinion-review",
+   "verb": "review",
+   "command": "scripts/door.py",
+   "marker": "def run_jev_capability",
+   "ask": "get a second opinion on this failing check",
+   "paraphrases": [
+    "verify with a second opinion why this check failed",
+    "review the failing check with another opinion"
+   ]
+  },
+  {
+   "id": "second-opinion-deliver",
+   "verb": "deliver",
+   "command": "scripts/door.py",
+   "marker": "def run_jev_capability",
+   "ask": "get a second opinion on my done note before I ship",
+   "paraphrases": [
+    "ask for a second opinion on the done note before I wrap up",
+    "second opinion on the done note before I close the work"
+   ]
+  },
+  {
+   "id": "how-it-works",
+   "verb": "help",
+   "command": "scripts/door.py",
+   "marker": "def recommend",
+   "ask": "help me understand what Brother does",
+   "paraphrases": [
+    "explain how this works",
+    "orient me in plain language"
+   ]
+  },
+  {
+   "id": "authored-content-report",
+   "verb": "review",
+   "command": "scripts/door.py",
+   "marker": "def run_content_capability",
+   "ask": "review which of my own posts performed well, from my archive",
+   "paraphrases": [
+    "check my archive of posts for what performed well",
+    "audit my own posts from the archive I supplied"
+   ]
+  }
+ ],
+ "inventory_source": "The reviewed capability catalog of the 1.2.0 delivery pack, one row per capability group. installed_execution stays NO-DATA until a fresh install runs the route; consumer exposure beyond the door waits on OUT1.n.",
+ "inventory": [
+  {
+   "id": "vault-recall",
+   "user_benefit": "Find useful prior knowledge with its source.",
+   "operations": [
+    "search",
+    "contextual recall",
+    "citations",
+    "identity filtering",
+    "as-of retrieval"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_vault.py",
+    "products/brothermode/tools/bm_vault_asof.py",
+    "products/brothermode/tools/bm_vault_cite.py",
+    "products/brothermode/tools/bm_vault_context.py",
+    "products/brothermode/tools/vault_recall_hook.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "vault-notes",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.d",
+   "reason": "the door routes vault.recall, vault.context_recall and vault.asof to bm_vault.py's existing handlers, each read only"
+  },
+  {
+   "id": "vault-lifecycle",
+   "user_benefit": "Save useful knowledge without promoting untrusted notes.",
+   "operations": [
+    "intake",
+    "candidate review",
+    "curation",
+    "approval",
+    "promotion",
+    "retier",
+    "retention"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_vault_curate.py",
+    "products/brothermode/tools/bm_vault_intake.py",
+    "products/brothermode/tools/bm_vault_lifecycle.py",
+    "products/brothermode/tools/bm_vault_promote.py",
+    "products/brothermode/tools/bm_vault_retention.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "vault-notes",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.d",
+   "reason": "the door routes vault.capture, vault.review, vault.lifecycle, vault.promote and vault.retention to the existing Vault tools; a capture needs write and a promotion needs approve, and nothing untrusted is promoted by the door"
+  },
+  {
+   "id": "vault-entities",
+   "user_benefit": "Understand what a note says about a system or entity.",
+   "operations": [
+    "entity identity",
+    "attributes",
+    "crosswalks",
+    "lineage",
+    "assertions",
+    "provenance"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_vault_attribute_provenance.py",
+    "products/brothermode/tools/bm_vault_attributes.py",
+    "products/brothermode/tools/bm_vault_crosswalk.py",
+    "products/brothermode/tools/bm_vault_entity.py",
+    "products/brothermode/tools/bm_vault_lineage.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "vault-notes",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.n",
+   "reason": "the door reaches attribute provenance (vault.provenance) only; entity identity, crosswalks and lineage have no door handler, and the 2026-11-01 alignment hides this group from a fresh install's surface (OUT1.n)"
+  },
+  {
+   "id": "vault-conflicts",
+   "user_benefit": "Know which information is conflicting or stale.",
+   "operations": [
+    "contradiction triage",
+    "survivorship report",
+    "staleness",
+    "temporal state",
+    "decay"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_vault_staleness.py",
+    "products/brothermode/tools/bm_vault_survivorship.py",
+    "products/brothermode/tools/bm_vault_temporal.py",
+    "products/brothermode/tools/bm_vault_triage.py",
+    "products/brothermode/tools/bm_vault_contradiction.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.d",
+   "reason": "staleness, survivorship, temporal state and triage ship under the hooks tree, but bm_vault.py's door handlers name none of them, so no door route reaches this group; OUT1.d owns it"
+  },
+  {
+   "id": "vault-maintenance",
+   "user_benefit": "Keep knowledge healthy and portable.",
+   "operations": [
+    "doctor",
+    "binding",
+    "graph checks",
+    "catalog bake",
+    "pack",
+    "exchange",
+    "export",
+    "audit",
+    "policy"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_vault_catalog.py",
+    "products/brothermode/tools/bm_vault_cli.py",
+    "products/brothermode/tools/bm_vault_exchange.py",
+    "products/brothermode/tools/bm_vault_export.py",
+    "products/brothermode/tools/bm_vault_policy.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "vault-notes",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.n",
+   "reason": "the door reaches vault.status only; pack, exchange, export, catalog and policy have no door handler, and the 2026-11-01 alignment hides this group from a fresh install's surface (OUT1.n)"
+  },
+  {
+   "id": "claims-proof",
+   "user_benefit": "Check a number before relying on it.",
+   "operations": [
+    "author typed claim",
+    "derive",
+    "check",
+    "receipt",
+    "metric definition register",
+    "reality score",
+    "ledger"
+   ],
+   "source_owners": [
+    "products/brotherds/audit_provenance.py",
+    "products/brotherds/bds.py",
+    "products/brotherds/forecast_score.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "check-a-number",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.e",
+   "reason": "the door routes data.author, data.check, data.receipt, data.register, data.score and data.ledger to bds.py, but bds.py is not in the edition (the marketplace installs only bundle/), so on an install each answers NO-DATA naming the brotherds plugin; whether the edition carries it is a packaging decision, OUT1.e"
+  },
+  {
+   "id": "claims-packs",
+   "user_benefit": "Use the correct existing analytical checks.",
+   "operations": [
+    "descriptive",
+    "forecast",
+    "causal",
+    "experiment",
+    "detection",
+    "pipeline"
+   ],
+   "source_owners": [
+    "products/brotherds/pack_detection.py",
+    "products/brotherds/pack_experiment.py",
+    "products/brotherds/pack_pipeline.py",
+    "products/brotherds/packs.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "internal",
+   "unit": "OUT1.e",
+   "reason": "no door handler names an analytical pack; internal only under the 2026-11-01 alignment"
+  },
+  {
+   "id": "mdm-identity",
+   "user_benefit": "Match records without losing distinct entities.",
+   "operations": [
+    "normalization",
+    "locale",
+    "identity",
+    "JAN lookup",
+    "match decision",
+    "survivorship evidence"
+   ],
+   "source_owners": [
+    "products/brotherds/mdm_jan_lookup.py",
+    "products/brotherds/mdm_normalize.py",
+    "products/brotherds/pack_mdm_decision.py",
+    "products/brotherds/pack_mdm_identity.py",
+    "products/brotherds/pack_mdm_locale.py"
+   ],
+   "code_exists": false,
+   "shipped": false,
+   "routed": "check-a-number",
+   "installed_execution": "NO-DATA",
+   "disposition": "internal",
+   "unit": "OUT1.e",
+   "reason": "the door routes data.mdm_resolve, data.mdm_classify, data.mdm_normalize and data.mdm_validate to the existing tools, which ship only with BrotherDS; internal only under the 2026-11-01 alignment",
+   "code_exists_reason": "not in this edition"
+  },
+  {
+   "id": "mdm-quality",
+   "user_benefit": "Measure matching quality instead of guessing.",
+   "operations": [
+    "clerical sample",
+    "precision and recall",
+    "cluster evaluation",
+    "drift",
+    "coverage",
+    "calibration",
+    "audit"
+   ],
+   "source_owners": [
+    "products/brotherds/mdm_audit.py",
+    "products/brotherds/mdm_derive.py",
+    "products/brotherds/mdm_eval.py",
+    "products/brotherds/pack_mdm_calibration.py",
+    "products/brotherds/pack_mdm_coverage.py",
+    "products/brotherds/pack_mdm_science.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "check-a-number",
+   "installed_execution": "NO-DATA",
+   "disposition": "internal",
+   "unit": "OUT1.e",
+   "reason": "the door routes data.mdm_review, data.mdm_clusters, data.mdm_drift, data.mdm_audit, data.mdm_audit_plan and data.mdm_evaluate to bds.py, which ships only with BrotherDS; internal only under the 2026-11-01 alignment"
+  },
+  {
+   "id": "data-connectors",
+   "user_benefit": "Use already available data without hand-building receipts.",
+   "operations": [
+    "DuckDB query",
+    "dbt query",
+    "Snowflake query",
+    "Databricks query"
+   ],
+   "source_owners": [
+    "plugin/runtime/brother/data/adapters/base.py",
+    "plugin/runtime/brother/data/adapters/databricks_adapter.py",
+    "plugin/runtime/brother/data/adapters/dbt_adapter.py",
+    "plugin/runtime/brother/data/adapters/duckdb_adapter.py",
+    "plugin/runtime/brother/data/adapters/snowflake_adapter.py"
+   ],
+   "code_exists": false,
+   "shipped": false,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.j",
+   "reason": "the adapters live in the plugin/ skeleton, which no marketplace installs: the marketplace installs only bundle/; OUT1.j connects them",
+   "code_exists_reason": "not in this edition"
+  },
+  {
+   "id": "mobile-plan",
+   "user_benefit": "Turn a mobile outcome into an executable journey.",
+   "operations": [
+    "profile",
+    "journey",
+    "canonical actions",
+    "plan compilation",
+    "ownership",
+    "reference lock"
+   ],
+   "source_owners": [
+    "scripts/mobile_canonical_action.py",
+    "scripts/mobile_journey_contract.py",
+    "scripts/mobile_ownership_resolver.py",
+    "scripts/mobile_plan_compiler.py",
+    "scripts/mobile_project_profile.py",
+    "scripts/mobile_reference_lock.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "mobile-check",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.f",
+   "reason": "the door routes each of these to its existing script (mobile.profile_detect, mobile.journey, mobile.canonical_action, mobile.plan, mobile.ownership, mobile.reference_lock); an installed host answers NO-DATA naming any script it does not carry, and installed_execution stays NO-DATA until a fresh install runs the route"
+  },
+  {
+   "id": "mobile-run",
+   "user_benefit": "Exercise the actual mobile experience.",
+   "operations": [
+    "driver selection",
+    "native iOS",
+    "Appium",
+    "visual fallback",
+    "screen observation",
+    "state reset",
+    "state hooks",
+    "simulator run",
+    "device and simulator checks",
+    "toolchain probe",
+    "canary"
+   ],
+   "source_owners": [
+    "scripts/mobile_appium_adapter.py",
+    "scripts/mobile_deterministic_hooks.py",
+    "scripts/mobile_driver_contract.py",
+    "scripts/mobile_hybrid_action_router.py",
+    "scripts/mobile_native_ios_adapter.py",
+    "scripts/mobile_screen_observation.py",
+    "scripts/mobile_simulator_pool.py",
+    "scripts/mobile_state_fixture.py",
+    "scripts/mobile_state_reset.py",
+    "scripts/mobile_test_route.py",
+    "scripts/mobile_toolchain_probe.py",
+    "scripts/mobile_visual_fallback_adapter.py",
+    "scripts/mobile_workflow.py",
+    "scripts/mobile_xcode_canary_local.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "mobile-check",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.f",
+   "reason": "the door routes each of these (mobile.driver_select, mobile.native_ios, mobile.appium, mobile.visual_only, mobile.screen_observation, mobile.run) to its existing script and checks the simulator, a physical device permission and an Appium server before it starts anything; the visual only route says a screenshot proves no interaction; an installed host answers NO-DATA naming any script it does not carry, and installed_execution stays NO-DATA until a fresh install runs the route"
+  },
+  {
+   "id": "mobile-evidence",
+   "user_benefit": "Know what was tested and what can be released.",
+   "operations": [
+    "native test evidence",
+    "design/media records",
+    "product claims",
+    "passport",
+    "release state"
+   ],
+   "source_owners": [
+    "scripts/journey_passport.py",
+    "scripts/mobile_design.py",
+    "scripts/mobile_product_claims.py",
+    "scripts/native_evidence.py",
+    "scripts/native_evidence_v2.py",
+    "scripts/release_state_tracker.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "mobile-check",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.f",
+   "reason": "the door routes each of these to its existing script (mobile.test_bundle_record, mobile.test_bundle_validate, mobile.test_bundle_v2, mobile.design_*, mobile.claims_*, mobile.passport, mobile.release_state); a screenshot or a technical result is never human acceptance, and an installed host answers NO-DATA naming any script it does not carry"
+  },
+  {
+   "id": "jev-observe",
+   "user_benefit": "Understand which second opinions are available.",
+   "operations": [
+    "status",
+    "calibration coverage",
+    "prerequisites",
+    "budget",
+    "breaker",
+    "canary state"
+   ],
+   "source_owners": [
+    "bundle/runtime/data/jev-registry.json",
+    "bundle/runtime/data/jev-seams.json",
+    "data/jev-registry.json",
+    "data/jev-seams.json",
+    "scripts/jev_calibration.py",
+    "scripts/jev_canary.py",
+    "scripts/jev_status.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "second-opinion-status",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.h",
+   "reason": "the door routes calibrated.status to jev_status.py --effective, which reads the installed seams config, registry, ledger, budget, promotions and canary failure marker and asks nothing: no model, no bridge, no seam call, nothing written. Each configured seam shows its configured and effective mode, why one would not run, its calibration coverage and its signed promotion. The canary itself (jev_canary.py) is maintainer-run and does not ship; the door reads only the reset marker it leaves. No installed end to end run on a supported host exists yet, so this row stays pending until one is walked"
+  },
+  {
+   "id": "jev-review",
+   "user_benefit": "Get a bounded second opinion without weakening proof.",
+   "operations": [
+    "review failure interpretation",
+    "delivery-note verification",
+    "gate-log triage",
+    "worker completion",
+    "scope review"
+   ],
+   "source_owners": [
+    "scripts/jev_checks.py",
+    "scripts/jev_door.py",
+    "scripts/jev_seam.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "second-opinion-review",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.h",
+   "reason": "the door routes calibrated.review (J065, a failing check's output) and calibrated.deliver (J102, a done note) to the existing jev_door.py, which keeps the seam's mode, registry, privacy gate, deadline, daily budget, canary and abstention rules. The seam's failure breaker is not kept across door calls: it counts in one process's memory and each door call is a fresh process, so the daily budget is the only cap across calls. Both need approve, ask only a seam already switched on in the seams config (J065 ships off), and answer beside the check: the reply echoes the person's own check verdict unchanged and is never release evidence. Gate-log triage, worker completion and scope review stay with their own call sites inside Brother and are not routed here. No installed end to end run exists yet, so this row stays pending"
+  },
+  {
+   "id": "jev-promotion",
+   "user_benefit": "Use calibrated automation only where established.",
+   "operations": [
+    "abstention",
+    "cascade",
+    "calibration",
+    "promotion expiry",
+    "drift fail-off"
+   ],
+   "source_owners": [
+    "scripts/jev_calibration.py",
+    "scripts/jev_cascade.py",
+    "scripts/jev_seam.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.h",
+   "reason": "ships, but promotion is not established for any seam. calibrated.status shows each seam's signed promotion (active, expired, revoked, none or corrupt) read only; no door route signs, renews or revokes one, and a mode never moves toward advise or act because a feature became reachable. OUT1.h keeps this row maintainer-only"
+  },
+  {
+   "id": "learning-lessons",
+   "user_benefit": "Avoid repeating established mistakes.",
+   "operations": [
+    "capture lesson",
+    "atomicity",
+    "applicability",
+    "recurrence",
+    "review candidate"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_learn.py",
+    "products/brothermode/tools/bm_learning.py",
+    "products/brothermode/tools/bm_recurrence.py",
+    "scripts/lesson_candidate.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "learning-access",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.i",
+   "reason": "the door routes learning.report, learning.reuse, learning.capture and learning.recurrence to the existing bm_learn.py and bm_recurrence.py, which ship under the hooks tree beside the door; capture writes a proposal only and approval stays with the owner's own question and receipt. No installed end to end run exists yet, so this row stays pending; OUT1.i owns it"
+  },
+  {
+   "id": "learning-replay",
+   "user_benefit": "Inspect why a decision helped or failed.",
+   "operations": [
+    "record decision",
+    "join outcome",
+    "offline replay",
+    "report",
+    "unsupported counterfactual"
+   ],
+   "source_owners": [
+    "plugin/runtime/brother/core/dream_record.py",
+    "plugin/runtime/brother/core/dream_replay.py",
+    "plugin/runtime/brother/core/dream_report.py",
+    "scripts/dream_bridge.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "learning-access",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.i",
+   "reason": "the door routes learning.decision, learning.outcome, learning.decisions and learning.replay to the recorder, which now ships with its report and offline replay beside dream_bridge.py; an alternative that was never chosen answers UNSUPPORTED and NO-DATA, never an invented outcome. No installed end to end run exists yet, so this row stays pending; OUT1.i owns it"
+  },
+  {
+   "id": "learning-governance",
+   "user_benefit": "Retain control over remembered knowledge.",
+   "operations": [
+    "forget",
+    "retention"
+   ],
+   "source_owners": [
+    "products/brothermode/tools/bm_vault_retention.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "learning-access",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.i",
+   "reason": "the door routes learning.forget (approve, with the owner's own words) to the existing forget, then checks retrieval, the search index and what is retained; promotion, rollback policy and evaluation independence stay in the plugin skeleton and are not routed on purpose, because consumer access does not authorize promotion; OUT1.i owns the forget route, nothing here is installed end to end yet"
+  },
+  {
+   "id": "learning-promotion",
+   "user_benefit": "Promote a remembered lesson only on an independent decision.",
+   "operations": [
+    "promotion",
+    "rollback policy",
+    "evaluation independence"
+   ],
+   "source_owners": [
+    "plugin/runtime/brother/core/dream_policy.py",
+    "plugin/runtime/brother/core/dream_promote.py"
+   ],
+   "code_exists": false,
+   "shipped": false,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.i",
+   "reason": "promotion, rollback policy and evaluation independence stay in the plugin skeleton and are not routed on purpose, because consumer access does not authorize promotion; split out of learning-governance so the registry claims as routed only what learning.forget reaches",
+   "code_exists_reason": "not in this edition"
+  },
+  {
+   "id": "execution-outcome",
+   "user_benefit": "Get a requested change through to acceptance.",
+   "operations": [
+    "intake",
+    "decompose",
+    "validate contract",
+    "schedule",
+    "integrate",
+    "receipt",
+    "accept"
+   ],
+   "source_owners": [
+    "scripts/accept_delivery.py",
+    "scripts/brother_run.py",
+    "scripts/door.py",
+    "scripts/integrate.py",
+    "scripts/work_record.py",
+    "scripts/loop_bridge.py",
+    "scripts/model_worker.py",
+    "scripts/receipt_door.py",
+    "scripts/continuity.py",
+    "scripts/handover_record.py",
+    "products/brothermode/tools/bm_controller.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "build-outcome",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.a"
+  },
+  {
+   "id": "loop-close",
+   "user_benefit": "Finish bounded unattended work.",
+   "operations": [
+    "admit",
+    "build",
+    "grade",
+    "land",
+    "close",
+    "resume"
+   ],
+   "source_owners": [
+    "scripts/close_unit.py",
+    "scripts/loop/land_batch.py",
+    "scripts/loop/start_run.sh",
+    "scripts/loop/unit_runner.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "loop-run",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.g",
+   "reason": "the door routes loop.start (approve) and loop.close (write) to the existing launcher start_run.sh and to close_unit.py, which now ships in the runtime beside the door and the loop tools. A start that launched a driver answers NO-DATA with delivered false, because nothing has landed or closed until the handoff (loop.handoff) shows it; admit, build, grade and land stay inside the loop itself. No installed end to end run of the admit to close cycle exists yet, so this row stays pending until one is walked"
+  },
+  {
+   "id": "loop-control",
+   "user_benefit": "Control unattended work without losing progress.",
+   "operations": [
+    "status",
+    "stop",
+    "interruption",
+    "recovery",
+    "morning report"
+   ],
+   "source_owners": [
+    "scripts/loop/loop_report.py",
+    "scripts/loop/loop_watch.py",
+    "scripts/loop/stop_loop.sh",
+    "scripts/managed_safety.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "loop-health",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.g"
+  },
+  {
+   "id": "assurance-review",
+   "user_benefit": "Understand and check the risk of a change.",
+   "operations": [
+    "intake tier",
+    "design",
+    "impact",
+    "policy",
+    "review routing",
+    "hard gates",
+    "convergence"
+   ],
+   "source_owners": [
+    "products/brothersbe/src/brothersbe/cli.py",
+    "products/brothersbe/src/brothersbe/reviewroute.py",
+    "products/brothersbe/tools/sbe_gate.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "assurance-check",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.k",
+   "reason": "the door routes each of these to the existing BrotherSBE command line (assurance.review, assurance.gate, assurance.design, assurance.score, assurance.impact, assurance.policy, assurance.review_route, assurance.converge and the rest of the review verb), generates its list of supported operations from the handlers the command line declares, and answers NO-DATA naming a handler this edition lacks; installed_execution stays NO-DATA until a fresh install runs the route"
+  },
+  {
+   "id": "assurance-control",
+   "user_benefit": "Keep changes inside approved boundaries.",
+   "operations": [
+    "scope",
+    "fences",
+    "instruction surface",
+    "approvals",
+    "protections",
+    "isolated work"
+   ],
+   "source_owners": [
+    "products/brothersbe/src/brothersbe/cli.py",
+    "products/brothersbe/tools/sbe_instruction_surface.py",
+    "products/brothermode/tools/bm_fence_hook.py",
+    "products/brothersbe/tools/sbe_authority_hook.py",
+    "products/brothersbe/tools/sbe_fence_hook.py",
+    "products/brothersbe/tools/sbe_bash_write_guard.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "assurance-check",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.k",
+   "reason": "the door routes scope, fences, the instruction surface, approvals, protections, pull request approval and isolated work to the existing BrotherSBE commands (assurance.scope_verify, assurance.fences, assurance.instruction_surface, assurance.protections_verify, assurance.pr_verify, assurance.work_start); anything that saves a file or records a decision needs write or approve permission, and installed_execution stays NO-DATA until a fresh install runs the route"
+  },
+  {
+   "id": "assurance-handover",
+   "user_benefit": "Hand off work with evidence and clear ownership.",
+   "operations": [
+    "evidence",
+    "lineage",
+    "handover",
+    "testkit",
+    "program",
+    "map",
+    "book"
+   ],
+   "source_owners": [
+    "products/brothersbe/src/brothersbe/cli.py",
+    "scripts/handover_ceremony.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "team-handover",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "OUT1.k",
+   "reason": "the door routes evidence, lineage, handover, testkit, program, map and book (assurance.evidence_run, assurance.lineage, assurance.handover_prepare, assurance.testkit_sheet, assurance.program_board, assurance.map, assurance.book_check) to the existing BrotherSBE commands; preparing a handover (write) never reports receiver acceptance, acknowledging it is its own request needing the receiver's name and approve permission, and the unbuilt exceptions command answers NO-DATA with a supported alternative; installed_execution stays NO-DATA until a fresh install runs the route"
+  },
+  {
+   "id": "host-health",
+   "user_benefit": "Recover an ordinary installation without scavenging for commands.",
+   "operations": [
+    "install",
+    "identity",
+    "update",
+    "doctor",
+    "repair",
+    "package verification"
+   ],
+   "source_owners": [
+    "scripts/door.py",
+    "products/brothermode/scripts/doctor.py",
+    "products/brothermode/tools/brothermode_cli.py",
+    "scripts/bundle_runtime.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "install-health",
+   "installed_execution": "FAIL",
+   "disposition": "consumer",
+   "unit": "OUT1.l",
+   "reason": "the door routes host.identity, host.update, host.diagnose, host.verify (read) and host.repair (write) to tools inside the INSTALLED plugin: its runtime manifest, verify_runtime.py (written by bundle_runtime.py), the doctor and the brothermode command line. Install itself is the host's own command, given as the one setup action when the plugin is missing; scripts/brother_install.py is the Codex clone installer and stays a maintainer path",
+   "installed_evidence": {
+    "journey": "J1",
+    "rows": [
+     "D.doctor-fixes-work"
+    ],
+    "identity": "2aa0e528ecefb56007de0a84c95f9c6d891aef4460666e946ed706ab45ea901b",
+    "walked": "2026-11-01",
+    "host": "macos",
+    "finding": "on a fresh install the doctor's own remediation names python3 scripts/install.py and python3 scripts/setup.py, which do not exist from the folder a stranger is in, so its advice cannot be followed; FRUN1.c owns the remediation text",
+    "record": "~/.claude/evidence/out1l-2026-11-01/walk-1/JOURNEY-J1.json"
+   }
+  },
+  {
+   "id": "authority-budget",
+   "user_benefit": "Run autonomously within the agreed limits.",
+   "operations": [
+    "grant readback",
+    "login renewal",
+    "provider acceptance",
+    "budget",
+    "stop at bound"
+   ],
+   "source_owners": [
+    "scripts/burn_guard.py",
+    "scripts/loop/brother_login.py",
+    "scripts/loop/native_worker.py",
+    "scripts/loop_budget_grant.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "internal",
+   "unit": "AUTH1.a",
+   "reason": "budget, sign in and grant guards run inside unattended runs and are never asked for directly; owned by AUTH1.a"
+  },
+  {
+   "id": "release-cut",
+   "user_benefit": "Deliver a verified release quickly and clearly.",
+   "operations": [
+    "prepare",
+    "freeze",
+    "reuse evidence",
+    "final gate",
+    "approve",
+    "publish",
+    "verify remote"
+   ],
+   "source_owners": [
+    "scripts/cut.py",
+    "scripts/cut_driver.py",
+    "scripts/cut_rehearsal.py",
+    "scripts/reproduce_export.py"
+   ],
+   "code_exists": true,
+   "shipped": false,
+   "routed": "cut-release",
+   "installed_execution": "NO-DATA",
+   "disposition": "internal",
+   "unit": "CUT2.a",
+   "reason": "maintainer release path, run from a checkout of the Brother repository; cut.py does not ship in the installed plugin; owned by CUT2.a"
+  },
+  {
+   "id": "status-acceptance",
+   "user_benefit": "Understand progress and decide whether the result is useful.",
+   "operations": [
+    "status",
+    "next",
+    "receipt card",
+    "accept",
+    "reject",
+    "handoff"
+   ],
+   "source_owners": [
+    "scripts/accept_delivery.py",
+    "scripts/proof_card.py",
+    "scripts/receipt_door.py"
+   ],
+   "code_exists": true,
+   "shipped": true,
+   "routed": "where-things-stand",
+   "installed_execution": "NO-DATA",
+   "disposition": "consumer",
+   "unit": "UI1.a",
+   "reason": "where things stand reads the run's receipt through receipt_door.py --verdict and accept or reject goes through accept_delivery.py, both in the installed runtime; scripts/delivery_status.py, scripts/board_status.py and scripts/daybook.py read the maintainer's own plan files and stay maintainer only"
+  },
+  {
+   "id": "authored-content",
+   "user_benefit": "Analyze an existing body of authored content.",
+   "operations": [
+    "archive ingestion",
+    "deduplication",
+    "permitted collection",
+    "dataset",
+    "counts report"
+   ],
+   "source_owners": [
+    "plugin/runtime/brother/rtm/voice_pipeline.py",
+    "plugin/skills/voice-miner/walker.js"
+   ],
+   "code_exists": false,
+   "shipped": true,
+   "routed": "authored-content-report",
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.m",
+   "reason": "the door routes content.analyze (write) and content.collect (approve) to the existing pipeline plugin/runtime/brother/rtm/voice_pipeline.py, which now ships flat beside the door in the runtime: a supplied archive folder outside every repository (ids.txt, slugs.txt or Shares.csv) is deduplicated, rebuilt into dataset.jsonl and a counts report, and the door reads the counts back from the dataset. It is not speech recognition and publishes nothing; the only network path is the pipeline's own fetch of public pages under its own limits, behind approve. The in-page walker stays a skill procedure. No installed end to end run exists yet, so this row stays pending until one is walked",
+   "code_exists_reason": "not in this edition"
+  },
+  {
+   "id": "composition",
+   "user_benefit": "Combine capabilities into one checked result.",
+   "operations": [
+    "typed capability lookup",
+    "cross-domain invocation",
+    "one run receipt",
+    "decision record"
+   ],
+   "source_owners": [
+    "plugin/runtime/brother/core/receipt.py",
+    "plugin/runtime/brother/core/registry.py"
+   ],
+   "code_exists": false,
+   "shipped": false,
+   "routed": null,
+   "installed_execution": "NO-DATA",
+   "disposition": "pending",
+   "unit": "OUT1.a",
+   "reason": "the typed registry and receipt live in the plugin/ skeleton, which no marketplace installs; today the door composes through brother_run.py; a later OUT1.a slice owns it",
+   "code_exists_reason": "not in this edition"
+  }
+ ]
+}

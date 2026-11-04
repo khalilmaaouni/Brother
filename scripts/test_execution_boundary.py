@@ -193,6 +193,18 @@ class CredentialDelegationTest(unittest.TestCase):
         self.assertNotIn("the-real-secret", repr(grant))
 
 
+def _process_table_readable():
+    """True when the process table can be read here. A confined run (the hermetic check's sandbox) cannot read it, and
+    process_containment then says so (verified False), which is its contract: the premise of the tests below is absent,
+    not the behaviour broken."""
+    try:
+        process_containment._read_process_table()
+    except process_containment.EnumerationError:
+        return False
+    return True
+
+
+@unittest.skipUnless(_process_table_readable(), "the process table cannot be read in this confined run")
 class ProcessDelegationTest(unittest.TestCase):
     """DOM-40.05: spawn_contained() and cancel_process_tree() must be the
     REAL functions, verified by a real OS effect (a real process actually

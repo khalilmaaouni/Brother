@@ -108,7 +108,10 @@ EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_REFUSED = 4
 
-SETUP_SENTENCE = "python3 scripts/setup.py"
+#: FRUN1: the sentence names the installed file by its absolute path, never the source-tree relative one.
+SETUP_SENTENCE = "/scripts/setup.py"
+#: FRUN1: session start sends a stranger to the door, which shows the notice and asks; it names no file.
+START_SETUP_SENTENCE = "say: set up Brother"
 
 
 def _telemetry_constant(name):
@@ -203,7 +206,7 @@ class SessionStartPreConsentCase(unittest.TestCase):
         before_project = _files_under(self.project)
         r = self.run_sessionstart()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(SETUP_SENTENCE, r.stdout)
+        self.assertIn(START_SETUP_SENTENCE, r.stdout)
         # Exactly one line of output: no digest, no nags, no store health.
         self.assertEqual(len([ln for ln in r.stdout.splitlines() if ln.strip()]), 1,
                          "pre-consent sessionstart printed more than the one "
@@ -222,7 +225,7 @@ class SessionStartPreConsentCase(unittest.TestCase):
         before_home = _files_under(self.home)
         r = self.run_sessionstart()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(SETUP_SENTENCE, r.stdout)
+        self.assertIn(START_SETUP_SENTENCE, r.stdout)
         self.assertEqual(_files_under(self.home), before_home,
                          "sessionstart wrote a file under HOME with "
                          "setup_complete: false")
@@ -234,7 +237,7 @@ class SessionStartPreConsentCase(unittest.TestCase):
             fh.write("{ not valid json")
         r = self.run_sessionstart()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(SETUP_SENTENCE, r.stdout)
+        self.assertIn(START_SETUP_SENTENCE, r.stdout)
 
 
 class SessionStartPostConsentCase(unittest.TestCase):
@@ -318,7 +321,7 @@ class SessionStartPostConsentCase(unittest.TestCase):
         # BROTHER_VERBOSE_START=1; with the switch the gate's property holds
         # exactly as before, and without it the established project is quiet.
         out = self._sessionstart_stdout(dict(self.env, BROTHER_VERBOSE_START="1"))
-        self.assertNotIn("BrotherMode: new project", out,
+        self.assertNotIn("Brother: new project", out,
                          "an established project is being greeted as new")
         self.assertIn("no close pack exists in this checkout at all", out,
                       "suppression outlived the first run, so a real debt "
@@ -326,7 +329,7 @@ class SessionStartPostConsentCase(unittest.TestCase):
         quiet = self._sessionstart_stdout()
         self.assertNotIn("no close pack exists in this checkout at all", quiet,
                          "the quiet start (QS1) printed a routine owed line")
-        self.assertNotIn("BrotherMode: new project", quiet)
+        self.assertNotIn("Brother: new project", quiet)
 
     def test_consented_sessionstart_still_prints_the_digest(self):
         digest_first_line = _read_text(DIGEST).splitlines()[0]
@@ -1135,6 +1138,14 @@ class SetupShowCase(unittest.TestCase):
         r = self.run_setup("--show")
         self.assertEqual(r.returncode, EXIT_OK, r.stdout + r.stderr)
         self.assertIn("NOT SET UP", r.stdout)
+        self.assertFalse(os.path.exists(self.config))
+
+    def test_notice_prints_the_notice_and_writes_nothing(self):
+        """FRUN1: the door shows this text before asking for a yes, so it must be the whole notice and a read."""
+        r = self.run_setup("--notice")
+        self.assertEqual(r.returncode, EXIT_OK, r.stdout + r.stderr)
+        self.assertIn("before anything is written", r.stdout)
+        self.assertNotIn("BrotherMode", r.stdout.splitlines()[0])
         self.assertFalse(os.path.exists(self.config))
 
     def test_show_after_setup_reports_the_real_values(self):

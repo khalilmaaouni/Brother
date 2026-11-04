@@ -455,7 +455,7 @@
   },
   {
    "path": "brothermode/scripts/doctor.py",
-   "sha256": "9d1fb84b24d072f3570531374f7beff8558d4ea06253d62444d7156d8b54292d"
+   "sha256": "d196233c1f487b637fb6e568f47c7ac1af27c6b8d2ab32e0b0d8919c33e4d538"
   },
   {
    "path": "brothermode/scripts/install.py",
@@ -463,7 +463,7 @@
   },
   {
    "path": "brothermode/scripts/setup.py",
-   "sha256": "47df69de05e8a006d153fbfa42c1dd7e9f2159e683e0e1ac0623c0fd7cb7a5e9"
+   "sha256": "643f39c8cef152298a7192f5e308a44928ba063dbe453e7a849076c47d6918a7"
   },
   {
    "path": "brothermode/tools/_jevpath.py",
@@ -471,7 +471,7 @@
   },
   {
    "path": "brothermode/tools/attempt_hook.py",
-   "sha256": "103c616f724565b41be656043508f802b95191f0c330724f7e9211cad86cd9b8"
+   "sha256": "75d4d21a3c51bf7599eb6c54f9b2cad7e463301b69a7f1ff6ca07871178d95f0"
   },
   {
    "path": "brothermode/tools/attempt_ledger.py",
@@ -483,11 +483,11 @@
   },
   {
    "path": "brothermode/tools/bm_autosave.py",
-   "sha256": "cd57c83b6b147bee8c2d40a591a79b8649686b549870feb0ff6b6a7c53788668"
+   "sha256": "6e617ad6bd61dc64506d407272bed28833aca7bfa042cb96d154e832e173501e"
   },
   {
    "path": "brothermode/tools/bm_bash_audit.py",
-   "sha256": "ea574050e70a9b043ef0b3edaff0ef1c8ef3871e5715f1748a48988c3b18eac8"
+   "sha256": "d38ea91b265ea0b648abc6de6a6f10d294f661e1102009583b2c4cc67d766417"
   },
   {
    "path": "brothermode/tools/bm_bbstatus.py",
@@ -503,7 +503,7 @@
   },
   {
    "path": "brothermode/tools/bm_clock_guard.py",
-   "sha256": "17a993b71d3bae88f5db8d01af7762299a27f859b40130760d6cb4a485261f3e"
+   "sha256": "568d68ace60b637a6154bff3dc3b148df6e69b9cd88828b6fd46368ee5aa7432"
   },
   {
    "path": "brothermode/tools/bm_connectors.py",
@@ -559,7 +559,7 @@
   },
   {
    "path": "brothermode/tools/bm_fence_hook.py",
-   "sha256": "63717396b03828545e5d4f4952950fb8c10819b1213f26a5e632e04166489cf8"
+   "sha256": "368ee82dc551cfeb1106cc4c13ccbc727f772014406880c57918fa1bfc8834a5"
   },
   {
    "path": "brothermode/tools/bm_forecast.py",
@@ -591,7 +591,7 @@
   },
   {
    "path": "brothermode/tools/bm_lead.py",
-   "sha256": "e7e511471781056a3f00cad4e621b62f27c479a0d92c769dda15e47858ea5be9"
+   "sha256": "217a43d906e08b1c7bd6447ff4a8bb707a7d4a5fa81f6dcadc974eee86eb60d7"
   },
   {
    "path": "brothermode/tools/bm_learn.py",
@@ -599,7 +599,7 @@
   },
   {
    "path": "brothermode/tools/bm_learning.py",
-   "sha256": "6ffcd4ac965540dda4bd4fc79bdff54e453d2c0f0ba1dbb5e1a48840ef8e9da6"
+   "sha256": "cb8fc269645d5c61137b5f90e242e000065abaf73cfeb45d1c879411eb675fd3"
   },
   {
    "path": "brothermode/tools/bm_ledger.py",
@@ -647,7 +647,7 @@
   },
   {
    "path": "brothermode/tools/bm_profile.py",
-   "sha256": "a08b863eb02e8cbbf2a46a7c012ee80388744c7d942ab6fd18626711987e2c92"
+   "sha256": "f31d48c203a2f02ac345d21799d120f6c10c280405e68b875833b7da2e9ec8d0"
   },
   {
    "path": "brothermode/tools/bm_progress_check.py",
@@ -659,7 +659,7 @@
   },
   {
    "path": "brothermode/tools/bm_project_facts.py",
-   "sha256": "fbc8ef248b16670a076e5b23eaeea1283d655ac9c4bbe204e2c602883e1230c2"
+   "sha256": "3f8e1e8ebfc6267bbadd4677da228681ec82838106ad3e8872e2bdddd34dbe9b"
   },
   {
    "path": "brothermode/tools/bm_queue_numbers.py",
@@ -715,7 +715,7 @@
   },
   {
    "path": "brothermode/tools/bm_sessionstart.py",
-   "sha256": "c02d541c637bc36a2448b739656e9f9935d403a83785ecbf06222648a758a9b8"
+   "sha256": "31b6f895425c4cd7666f279a31a545e919862a869042b3db38468f97843483ea"
   },
   {
    "path": "brothermode/tools/bm_stall.py",
@@ -735,7 +735,7 @@
   },
   {
    "path": "brothermode/tools/bm_telemetry.py",
-   "sha256": "8fdedd81d21da5ec382236ba794ef0d9ff27934729b65384312eac4f44a15e92"
+   "sha256": "3bedd3ad9b19d93bff7d367eaf7843553aac2253d580a659174c5449a4716fbd"
   },
   {
    "path": "brothermode/tools/bm_threads.py",
@@ -747,7 +747,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault.py",
-   "sha256": "149d220855bcd3253e64e438ed5e0ff7600c1d0663d6ba6bb63ebdbf11510b8c"
+   "sha256": "75bb14c1aefd8aa94314b8e4be6de308d1ed13072241238dbac57068a9d49fc6"
   },
   {
    "path": "brothermode/tools/bm_vault_analyzer.py",
@@ -763,11 +763,11 @@
   },
   {
    "path": "brothermode/tools/bm_vault_attribute_provenance.py",
-   "sha256": "e749bc5e913fbeb2e21d6353b608a24f466311f06b481654c1d9b041e4436fa8"
+   "sha256": "5e31b3a1e2e604765b6b68ec806b0a936de73855ad5b40056acaaad618771ea8"
   },
   {
    "path": "brothermode/tools/bm_vault_attributes.py",
-   "sha256": "8f1112991a05efa19052dcc814636f39df85f22660db1cb1974ebb0ee9a1a97c"
+   "sha256": "13bd0772f876164639be52a36b3ba6efabcfd3f16c12bb185870a5c368172cfa"
   },
   {
    "path": "brothermode/tools/bm_vault_audit.py",
@@ -779,7 +779,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_catalog.py",
-   "sha256": "eb2a7b541d0ccedc39468d65c6297fbe08868c1f1785a8c61d434d539c386c1b"
+   "sha256": "7c1123955e7c91eecdfdcb743df40630619147d42aac053cc94092b73452aec8"
   },
   {
    "path": "brothermode/tools/bm_vault_census_ext.py",
@@ -799,7 +799,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_compose.py",
-   "sha256": "959e83bdca530ed29f2b6eaf70b6a2c2b830409d0dd1baeba2c12b59e0868797"
+   "sha256": "a3716064f421899877077c3ac2f531c4183c749b94e2786850154e0bd9cc154f"
   },
   {
    "path": "brothermode/tools/bm_vault_context.py",
@@ -807,7 +807,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_contract.py",
-   "sha256": "74b3094dd053dedf6b878a02d22dd720ea033be6b9a63bd4790cee0b95abf7ce"
+   "sha256": "7e92da73f3b81556ae5961b7a0ac5d348d6393cf37b905084c6c4628087c10e9"
   },
   {
    "path": "brothermode/tools/bm_vault_contradiction.py",
@@ -819,7 +819,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_curate.py",
-   "sha256": "d967bb6d759ca2623b6317e362bb03f834b8a32098b6bd07b0fb76d421a587f9"
+   "sha256": "1fdb1faf426f441e1b9f8ea26b50a76136ddc2fa7b358ec1d91f641e70c22095"
   },
   {
    "path": "brothermode/tools/bm_vault_decay.py",
@@ -831,7 +831,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_distill.py",
-   "sha256": "82627f4d2987bf758e2bfb33a13130aa3cc24159d12d951828fa94d34d65813d"
+   "sha256": "8fbc0a10c1b362651ee491349d85315eb9c3bac69ad0702a16e0fa25090a500f"
   },
   {
    "path": "brothermode/tools/bm_vault_enrich.py",
@@ -863,7 +863,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_graph.py",
-   "sha256": "c8aa3e35d8ce07706df2aa5272068ed4e43cd6d5fc12739444234e7f64838a86"
+   "sha256": "0cf0daf68793fea9f17ae6838049c3951b2d656471be9743cd5d761c28c9ea47"
   },
   {
    "path": "brothermode/tools/bm_vault_heat_temporal.py",
@@ -911,11 +911,11 @@
   },
   {
    "path": "brothermode/tools/bm_vault_lint.py",
-   "sha256": "4be236830efcd6cad6e0bd8d015cbc020b9d0bdfae6ac444e968178b0f6b07f5"
+   "sha256": "7adb076108d20db7ad83bc688bb01624922cacf7896ac203258ee4429d5167ed"
   },
   {
    "path": "brothermode/tools/bm_vault_lock.py",
-   "sha256": "23f3372a5600ef9bb20439a4c96de4904406bde7241a1453721146ebaec9b03c"
+   "sha256": "729b0aa7d97717df730de29d87d263c106d30c58b670e33d64c63bb8f62b4a55"
   },
   {
    "path": "brothermode/tools/bm_vault_notify.py",
@@ -943,7 +943,7 @@
   },
   {
    "path": "brothermode/tools/bm_vault_promote.py",
-   "sha256": "d55b942c7f22d1284400e16e6aeed3334bf8d792d8e244c61de95f62c2249825"
+   "sha256": "d5d60d12fc1793e993d6f662ba321247826a176c19ef0cc92ddbdd80421aa54d"
   },
   {
    "path": "brothermode/tools/bm_vault_promotions.py",
@@ -1011,7 +1011,7 @@
   },
   {
    "path": "brothermode/tools/bm_view.py",
-   "sha256": "5b441e14836929c1027e143d6773ec36627caa837c9455e5a6a7b5d53dcb6dc1"
+   "sha256": "7e0f2a6dbf78a1f93ed292e6bc8b5a1c30c4e61c468f28f45d4ffe2cb4e05a2f"
   },
   {
    "path": "brothermode/tools/bm_visual.py",
@@ -1031,11 +1031,11 @@
   },
   {
    "path": "brothermode/tools/find_out.py",
-   "sha256": "e22d737cec70a42c5a1c85f77ae4f004a49c6424ab64fcec68cde8642b87f343"
+   "sha256": "065ed7a08d002baf25ef6d38159fd90ee79fc9aad0844807d9daacb1cedb7ccf"
   },
   {
    "path": "brothermode/tools/pattern_note.py",
-   "sha256": "37b6b7a3ec2a322d46a38a07b05680757499c0371cc7498a295080b8961f8b02"
+   "sha256": "77ab950e0d7c7fdff4ca886f90b5d0e48769d407122bf19b0fe7f064dfce850f"
   },
   {
    "path": "brothermode/tools/test_all.py",
@@ -1051,7 +1051,7 @@
   },
   {
    "path": "brothermode/tools/vault_recall_hook.py",
-   "sha256": "11e03baba732e77eb886a2ad5f5e0c3f8effd3a12599748a28fd6449cb107bad"
+   "sha256": "8e66159ce7dfc5137bb603670fa7acd4d27fbd94705374ce9b9df36054b16312"
   },
   {
    "path": "brothersbe/hooks/hooks.json",
@@ -1075,7 +1075,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_bash_write_guard.py",
-   "sha256": "41cca4aa607b98ddd8420025cde480654ff4317d17067ad6384a936fe6ca7aa1"
+   "sha256": "42e334e64f0f31332e38253b7d0f9aa01503946bf2cb978f0066bd952f389d06"
   },
   {
    "path": "brothersbe/tools/sbe_checks.py",
@@ -1087,11 +1087,11 @@
   },
   {
    "path": "brothersbe/tools/sbe_fence_hook.py",
-   "sha256": "b69ddf020c817cd00609b67618119be7ae8e4bb0aeaab28810ae50c40a21710a"
+   "sha256": "744f430c9ef8e26a1c1a3ba056d2142bd4839b4888d4474b7b2a0aa1147dc2bb"
   },
   {
    "path": "brothersbe/tools/sbe_gate.py",
-   "sha256": "0fc647e39b208abc2e394230a20b41acc6636adb1be067c2af7a1e351219bf81"
+   "sha256": "16bc79865d83cc25f370395ab8405b9cabffe4a281d0e9e1be373ff9f7543a1c"
   },
   {
    "path": "brothersbe/tools/sbe_guard_common.py",
@@ -1135,7 +1135,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_session_reconcile.py",
-   "sha256": "f28158ec5fce3175597dc7f130f00852d31cc557c988c99dd962f3a5bce30834"
+   "sha256": "c3b07c39cc23f4652ff18616a4855e346b268284c24aa5dca80b9ba03c86cb16"
   },
   {
    "path": "brothersbe/tools/sbe_sessionstart.py",
@@ -1143,7 +1143,7 @@
   },
   {
    "path": "brothersbe/tools/sbe_telemetry.py",
-   "sha256": "ced44da596b3eb9f178f77c00cd7df4321a5b781373cc521dd2ac596c23f205e"
+   "sha256": "7fc5adb6ce531f364d01d014963b352c3ca0dcf2aa7cb9e1c6cdc8bfc215b625"
   },
   {
    "path": "hook_guard.py",

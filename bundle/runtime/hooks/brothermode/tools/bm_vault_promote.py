@@ -19,7 +19,8 @@ import os
 import re
 import sys
 
-DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pattern_note  # noqa: E402  KEY1.f: the vault default is the one resolver's answer
 SESSION_THRESHOLD_DEFAULT = 5
 NOTE_THRESHOLD_DEFAULT = 8
 
@@ -28,7 +29,7 @@ FRONT_CREATED = re.compile(r"""^created:\s*["']?(\d{4}-\d{2}-\d{2})["']?\s*$""",
 
 
 def _vault_root(cli_vault):
-    return cli_vault or DEFAULT_VAULT
+    return pattern_note.require_vault_root(cli_vault, "bm_vault_promote")
 
 
 def _read(path):

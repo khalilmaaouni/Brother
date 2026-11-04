@@ -231,5 +231,255 @@ class Night0912PatternNote(unittest.TestCase):
             self.assertIn("description: ", body)
 
 
+# ---------------------------------------------------------------------------
+# KEY1.b harness: no shipped copy carries an owner-specific default vault.
+#
+# Contract (plan, KEY1.b): "The vault is read from BROTHERMODE_VAULT or the
+# configured vault setting; no shipped copy carries an owner-specific default
+# folder. With no vault configured the note step reports NO-DATA naming the
+# missing setting and the acceptance itself is still recorded. Every shipped
+# copy is regenerated, never hand edited."
+#
+# The one resolver is bm_vault.resolve_vault_root (products/brothermode/tools/
+# bm_vault.py): env names, then the installer config's "vault" key, and NO
+# guessed path. Every case runs the SHIPPED COPY AS A PROGRAM under a tempdir
+# HOME (a subprocess, so import-time state cannot hide a default), and
+# compares where the note lands with what the resolver answers for the same
+# inputs. The owner's folder is never spelled here: a default is detected by
+# SHAPE (an expanduser("~/...") literal in the source) and planted by reading
+# that literal back out of the shipped file.
+# ---------------------------------------------------------------------------
+import json as _json  # noqa: E402
+import re as _re  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import subprocess as _sp  # noqa: E402
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_TOOLS = os.path.join(_REPO, "products", "brothermode", "tools")
+SHIPPED_COPIES = (
+    "products/brothermode/tools/pattern_note.py",
+    "scripts/pattern_note.py",
+    "bundle/runtime/pattern_note.py",
+    "bundle/runtime/hooks/brothermode/tools/pattern_note.py",
+)
+_VAULT_ENVS = ("BROTHERMODE_VAULT_ROOT", "BM_VAULT_ROOT", "BROTHERMODE_VAULT")
+_HOME_LITERAL = _re.compile(r"expanduser\(\s*[\"'](~/[^\"']*)[\"']\s*\)")
+
+
+def _resolver():
+    sys.path.insert(0, _TOOLS)
+    try:
+        import bm_vault
+    finally:
+        sys.path.remove(_TOOLS)
+    return bm_vault.resolve_vault_root
+
+
+def _tree(root):
+    out = set()
+    for dp, dn, fn in os.walk(root):
+        out.update(os.path.join(dp, n) for n in dn + fn)
+    return out
+
+
+class NoOwnerDefault(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="key1b-"))
+        self.home = os.path.join(self.tmp, "home")
+        self.cfg = os.path.join(self.home, "cfg")
+        self.work = os.path.join(self.tmp, "work")
+        for d in (self.home, self.cfg, self.work):
+            os.makedirs(d)
+        self.addCleanup(_shutil.rmtree, self.tmp, True)
+
+    # -- helpers ----------------------------------------------------------
+    def _env(self, **extra):
+        env = {k: v for k, v in os.environ.items()
+               if k not in _VAULT_ENVS and k not in (
+                   "PATTERN_DATE", "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR",
+                   "BROTHER_RUNS_ROOT", "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")}
+        env.update(HOME=self.home, BROTHER_CONFIG_DIR=self.cfg,
+                   CLAUDE_CONFIG_DIR=self.cfg, PATTERN_DATE="2026-11-01")
+        env.update(extra)
+        return env
+
+    def _make_vault(self, name):
+        v = os.path.join(self.tmp, name)
+        os.makedirs(os.path.join(v, P.FOLDER))
+        return v
+
+    def _set_config(self, vault):
+        with open(os.path.join(self.cfg, "bm_vault.json"), "w") as fh:
+            _json.dump({"vault": vault}, fh)
+
+    def _plant_shipped_default(self, rel):
+        """If the shipped source holds an expanduser("~/...") default, create
+        that folder (with the note folder inside) under the tempdir HOME, so
+        a copy that still guesses finds a real vault and writes into it.
+        Returns the planted folder or None. The literal is read from the
+        shipped file, never spelled in this test."""
+        with open(os.path.join(_REPO, rel), encoding="utf-8") as fh:
+            m = _HOME_LITERAL.search(fh.read())
+        if not m:
+            return None
+        planted = os.path.join(self.home, m.group(1)[2:])
+        os.makedirs(os.path.join(planted, P.FOLDER), exist_ok=True)
+        return planted
+
+    def _run_write(self, rel, env, name="Key one b pattern"):
+        return _sp.run(
+            [sys.executable, "-B", os.path.join(_REPO, rel), "write",
+             "--name", name, "--solves", "a check that passes with no vault",
+             "--what", "do the thing", "--evidence", "it ran once"],
+            cwd=self.work, env=env, capture_output=True, text=True,
+            timeout=120)
+
+    def _notes_under(self, root):
+        return sorted(p for p in _tree(root)
+                      if p.endswith(".md") and P.FOLDER in p)
+
+    # -- static shape: no owner default in any shipped copy ----------------
+    def test_no_shipped_copy_has_a_home_relative_vault_default(self):
+        bad = []
+        for rel in SHIPPED_COPIES:
+            with open(os.path.join(_REPO, rel), encoding="utf-8") as fh:
+                if _HOME_LITERAL.search(fh.read()):
+                    bad.append(rel)
+        self.assertEqual(bad, [], "these shipped copies still carry an "
+                         "expanduser(\"~/...\") default folder: %s" % bad)
+
+    # -- unset: nothing configured, nothing written, NO-DATA names the setting
+    def test_unset_writes_nothing_anywhere_under_home(self):
+        for rel in SHIPPED_COPIES:
+            with self.subTest(copy=rel):
+                self._plant_shipped_default(rel)
+                before = _tree(self.home)
+                proc = self._run_write(rel, self._env())
+                self.assertNotEqual(proc.returncode, 0, proc.stdout)
+                self.assertEqual(sorted(_tree(self.home) - before), [],
+                                 "%s wrote under HOME with no vault "
+                                 "configured" % rel)
+
+    def test_unset_reports_no_data_naming_the_missing_setting(self):
+        for rel in SHIPPED_COPIES:
+            with self.subTest(copy=rel):
+                proc = self._run_write(rel, self._env())
+                text = proc.stdout + proc.stderr
+                self.assertIn("NO-DATA", text, text)
+                self.assertIn("BROTHERMODE_VAULT", text,
+                              "NO-DATA must name the setting to fix:\n" + text)
+
+    # -- the resolver is the one answer (environment, config, unset) -------
+    def test_env_set_note_lands_where_the_resolver_says(self):
+        v = self._make_vault("vault-env")
+        env = self._env(BROTHERMODE_VAULT=v)
+        want = _resolver()(None, env, {})
+        self.assertEqual((want["verdict"], want["root"]), ("PASS", v))
+        for rel in SHIPPED_COPIES:
+            with self.subTest(copy=rel):
+                proc = self._run_write(rel, env, "Env %s" % rel)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertTrue(
+                    [n for n in self._notes_under(v) if "env-" in n],
+                    "no note under the resolver's root %s: %s"
+                    % (v, proc.stdout + proc.stderr))
+
+    def test_configured_setting_note_lands_where_the_resolver_says(self):
+        v = self._make_vault("vault-config")
+        self._set_config(v)
+        want = _resolver()(None, self._env(), {"vault": v})
+        self.assertEqual((want["verdict"], want["root"], want["source"]),
+                         ("PASS", v, "config"))
+        for rel in SHIPPED_COPIES:
+            with self.subTest(copy=rel):
+                proc = self._run_write(rel, self._env(), "Config %s" % rel)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertTrue(
+                    [n for n in self._notes_under(v) if "config-" in n],
+                    "no note under the configured vault %s: %s"
+                    % (v, proc.stdout + proc.stderr))
+
+    def test_env_beats_config_like_the_resolver(self):
+        ve = self._make_vault("vault-env2")
+        vc = self._make_vault("vault-config2")
+        self._set_config(vc)
+        env = self._env(BROTHERMODE_VAULT=ve)
+        want = _resolver()(None, env, {"vault": vc})
+        self.assertEqual(want["root"], ve)
+        for rel in SHIPPED_COPIES:
+            with self.subTest(copy=rel):
+                proc = self._run_write(rel, env, "Both %s" % rel)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertTrue([n for n in self._notes_under(ve)
+                                 if "both-" in n])
+                self.assertEqual([n for n in self._notes_under(vc)
+                                  if "both-" in n], [])
+
+    def test_two_env_names_on_two_folders_writes_nothing_like_the_resolver(self):
+        a = self._make_vault("vault-a")
+        b = self._make_vault("vault-b")
+        env = self._env(BROTHERMODE_VAULT_ROOT=a, BROTHERMODE_VAULT=b)
+        want = _resolver()(None, env, {})
+        self.assertEqual((want["verdict"], want["root"]), ("FAIL", None))
+        for rel in SHIPPED_COPIES:
+            with self.subTest(copy=rel):
+                self._run_write(rel, env, "Clash %s" % rel)
+                self.assertEqual(self._notes_under(a), [])
+                self.assertEqual(self._notes_under(b), [])
+
+    # -- the acceptance is the primary act; the note is a side effect ------
+    def _accept(self, env, *extra):
+        d = os.path.join(self.tmp, "deliveries")
+        proc = _sp.run(
+            [sys.executable, "-B",
+             os.path.join(_REPO, "scripts", "accept_delivery.py"),
+             "--name", "key1b delivery", "--ref", "owner/repo#1",
+             "--accepted-by", "A Tester", "--accepted-at", "2026-11-01",
+             "--recorded-by", "person", "--dir", d, *extra],
+            cwd=self.work, env=env, capture_output=True, text=True,
+            timeout=120)
+        return proc, d
+
+    def test_acceptance_is_recorded_when_the_note_step_is_no_data(self):
+        proc, d = self._accept(self._env())
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        recs = os.listdir(d) if os.path.isdir(d) else []
+        self.assertEqual(len(recs), 1, "acceptance not recorded: %s%s"
+                         % (proc.stdout, proc.stderr))
+
+    def test_acceptance_with_no_vault_writes_no_note_anywhere_under_home(self):
+        self._plant_shipped_default("scripts/pattern_note.py")
+        before = _tree(self.home)
+        self._accept(self._env())
+        self.assertEqual(sorted(_tree(self.home) - before), [],
+                         "the note step wrote under HOME with no vault set")
+
+    def test_acceptance_no_data_line_names_the_missing_setting(self):
+        proc, _ = self._accept(self._env())
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        no_data = [ln for ln in proc.stdout.splitlines() if "NO-DATA" in ln]
+        self.assertEqual(len(no_data), 1, proc.stdout)
+        self.assertIn("BROTHERMODE_VAULT", no_data[0], no_data[0])
+
+    # GREEN control: with a vault configured the same acceptance writes its
+    # pattern there, so a fix cannot pass by never writing a note.
+    def test_acceptance_writes_its_pattern_into_the_configured_vault(self):
+        v = self._make_vault("vault-accept")
+        proc, d = self._accept(self._env(BROTHERMODE_VAULT=v))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue([n for n in self._notes_under(v)
+                         if "delivery-" in n], proc.stdout + proc.stderr)
+        self.assertEqual(len(os.listdir(d)), 1)
+
+    # GREEN control: an explicit --pattern-root still wins, no vault needed.
+    def test_explicit_pattern_root_still_receives_the_pattern(self):
+        v = self._make_vault("vault-explicit")
+        proc, _ = self._accept(self._env(), "--pattern-root", v)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue([n for n in self._notes_under(v)
+                         if "delivery-" in n], proc.stdout + proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

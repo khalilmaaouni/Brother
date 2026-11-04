@@ -28,7 +28,7 @@ CLASSES = ("SHIP", "INTERNAL", "DELETE")
 ORIGINAL_KEYS = ("schema", "chain", "router", "passport", "receipt",
                  "capabilities", "adapter_policy", "invariants")
 EXTRA_MODULES = ("context_action_adapter",)
-PROPOSED = ("context_action_adapter", "mobile_product_claims")
+PROPOSED = ("context_action_adapter",)
 
 
 def mobile_modules(scripts_dir: str) -> List[str]:
@@ -147,7 +147,8 @@ class MobileShipMapTest(unittest.TestCase):
                 self.assertEqual(a.read(), b.read(), "%s bundle copy is stale" % name)
 
     def test_a_module_with_no_production_caller_is_internal_with_a_reason(self):
-        roots = {n[:-3] for n in (B.ENTRY,) + tuple(B.SUPPORT_ENTRIES)}
+        # SHIP1.a: a script the door routes to by name (mobile_tool, no .py in the source) has a production caller.
+        roots = {n[:-3] for n in (B.ENTRY,) + tuple(B.SUPPORT_ENTRIES) + tuple(B._route_scripts(B.SCRIPTS_DIR))}
         entry = {e["module"]: e for e in self.entries}
         orphans = set()
         for name in self.modules:

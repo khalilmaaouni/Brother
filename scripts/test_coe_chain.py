@@ -22,6 +22,7 @@ import coe_arbitrate  # noqa: E402
 import coe_gate  # noqa: E402
 import coe_loop  # noqa: E402
 import coe_nominate  # noqa: E402
+import coe_registry  # noqa: E402
 import coe_score  # noqa: E402
 
 PROBLEM = {
@@ -48,7 +49,14 @@ def answers(score):
     return ask
 
 
+# docs/plan is not shipped in the public export, so there the seat registry does not exist: the premise is absent,
+# not the behaviour broken. A tree that carries the registry still runs every case that nominates from it.
+NEEDS_REGISTRY = unittest.skipUnless(os.path.isfile(coe_registry.DEFAULT_REGISTRY_PATH),
+                                     "this tree carries no COE seat registry")
+
+
 class TheChainRunsEndToEnd(unittest.TestCase):
+    @NEEDS_REGISTRY
     def test_nomination_feeds_scoring_feeds_arbitration(self):
         council = coe_nominate.nominate(PROBLEM)
         self.assertTrue(council.seats, "nomination returned no seats")
@@ -58,6 +66,7 @@ class TheChainRunsEndToEnd(unittest.TestCase):
                                           criteria=CRITERIA)
         self.assertIn(verdict.outcome, coe_arbitrate.OUTCOMES)
 
+    @NEEDS_REGISTRY
     def test_a_single_low_seat_caps_the_verdict_downward(self):
         council = coe_nominate.nominate(PROBLEM)
         seats = list(council.seats)
@@ -72,6 +81,7 @@ class TheChainRunsEndToEnd(unittest.TestCase):
                             "one seat scoring 4 must not average away into a PASS")
         self.assertEqual(verdict.capping_criterion, CRITERIA[1])
 
+    @NEEDS_REGISTRY
     def test_loop_terminates_and_the_gate_takes_its_result(self):
         rounds = {"n": 0}
 

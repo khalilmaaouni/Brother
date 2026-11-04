@@ -100,6 +100,21 @@ def _ctx(**overrides):
     return argparse.Namespace(**base)
 
 
+def _can_listen_on_loopback():
+    """A confined run (the hermetic check's sandbox allows no network, not even a loopback listener) cannot bind
+    one: there the premise is absent, not the behaviour broken. Same probe as scripts/test_codex_smoke.py."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+    except OSError:
+        return False
+    return True
+
+
+NEEDS_A_LOOPBACK_LISTENER = unittest.skipUnless(_can_listen_on_loopback(), "NO-DATA: this run may not open a loopback listener")
+
+
 class MobileStateResetTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="brother-state-reset-tests-")
@@ -389,11 +404,13 @@ class MobileStateResetTests(unittest.TestCase):
         r = R.fixture_api_hook(fixture, _ctx())
         self.assertEqual(r["status"], "NO-DATA")
 
+    @NEEDS_A_LOOPBACK_LISTENER
     def test_fixture_api_hook_real_success(self):
         with self.http_server(200) as url:
             r = R.fixture_api_hook(_valid_fixture(), _ctx(fixture_api_url=url))
         self.assertEqual(r["status"], "PASS")
 
+    @NEEDS_A_LOOPBACK_LISTENER
     def test_fixture_api_hook_real_error_status_is_fail_not_no_data(self):
         # Regression: urllib raises HTTPError (a URLError subclass) for a
         # real bad status; it must be reported as FAIL, never NO-DATA.
@@ -405,11 +422,13 @@ class MobileStateResetTests(unittest.TestCase):
         r = R.fixture_api_hook(_valid_fixture(), _ctx(fixture_api_url="http://127.0.0.1:1/"))
         self.assertEqual(r["status"], "NO-DATA")
 
+    @NEEDS_A_LOOPBACK_LISTENER
     def test_backend_namespace_reset_real_success(self):
         with self.http_server(200) as url:
             r = R.backend_namespace_reset(_valid_fixture(), _ctx(backend_reset_url=url))
         self.assertEqual(r["status"], "PASS")
 
+    @NEEDS_A_LOOPBACK_LISTENER
     def test_backend_namespace_reset_real_error_status_is_fail(self):
         with self.http_server(503) as url:
             r = R.backend_namespace_reset(_valid_fixture(), _ctx(backend_reset_url=url))

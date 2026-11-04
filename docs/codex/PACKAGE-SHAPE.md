@@ -124,6 +124,8 @@ Their remaining fields differ as follows:
 | Host keyword | `codex` | `claude code` |
 | Hook declaration | No `hooks` field. | No `hooks` field in the manifest; Claude Code loads the conventional `hooks/hooks.json` the bundle ships. |
 
+<!-- doc-assurance: allow-missing union.json the retired name of the hooks file; the sentence says it is retired -->
+
 From 1.1.0 the generated hooks live at `bundle/hooks/hooks.json`, the name
 Claude Code loads by itself. The one plugin declares no dependent products,
 and `union.json` is the retired name.

@@ -36,7 +36,8 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAM
 REH_READY = (0, "...\nREHEARSAL READY %s abc exit 0 record /ev/rehearsal-%s-abc-1.json\n" % (V, V))
 GREEN = [("close_ceremony_check.py", (0, "PASS ceremony\n")),
          ("cut_preflight.py", (0, "CLEAR  x\ncut-preflight: CLEAR\n")),
-         ("cut_rehearsal.py", REH_READY)]
+         ("cut_rehearsal.py", REH_READY),
+         ("bundle_runtime.py", (0, "")), ("system_doc.py", (0, ""))]   # CUT2.c: the freeze's generators
 
 
 def git(cwd, *args):
@@ -135,7 +136,7 @@ class Fixture(unittest.TestCase):
         return st
 
     def passed(self, *names):
-        return dict((n, {"verdict": "PASS", "started": 0, "seconds": 1, "detail": "d", "record": "",
+        return dict((n, {"verdict": "PASS", "started": time.time() - 2, "seconds": 1, "detail": "d", "record": "",
                          "head_after": self.cand}) for n in names)
 
 
@@ -146,6 +147,7 @@ class ThePhaseLinesAndTheStop(Fixture):
         self.assertEqual(code, 1)
         self.assertEqual(len(lines), 2, lines)
         self.assertTrue(lines[0].startswith("PHASE freeze PASS "), lines)
+        self.assertTrue(runner.saw("close_ceremony_check.py --require-current"), runner.calls)  # HO1
         self.assertTrue(lines[1].startswith("PHASE preflight FAIL "), lines)
         self.assertIn("REFUSED  plugin  bump missing", lines[1])
         self.assertEqual(runner.saw("cut_rehearsal.py"), [])
@@ -252,6 +254,20 @@ class TheStateIsResumedOnlyForThisCandidate(Fixture):
         D.save_state(D.state_path(V, self.cand), self.state(self.passed(*D.PHASES)))
         code, lines, runner = self.drive()
         self.assertEqual(code, 0)
+        self.assertIn("already complete", lines[0])
+        self.assertEqual([c for c in runner.calls if c[0] != "git"], [])
+
+    def test_already_complete_is_judged_on_the_drivers_own_clock(self):
+        """CUT2.h: the kept entries are judged against the clock the driver runs on, not the wall clock. On a driver
+        clock 29 hours behind the wall, entries made 1 driver hour before it are valid; on the wall clock (the
+        mutation) they would be 29 hours old, past the window, and the cut would not read complete."""
+        behind = time.time() - 29 * 3600
+        phases = self.passed(*D.PHASES)
+        for entry in phases.values():
+            entry["started"] = behind - 3600
+        D.save_state(D.state_path(V, self.cand), self.state(phases, started_at=behind - 3600))
+        code, lines, runner = self.drive(clock=lambda: behind)
+        self.assertEqual(code, 0, lines)
         self.assertIn("already complete", lines[0])
         self.assertEqual([c for c in runner.calls if c[0] != "git"], [])
 

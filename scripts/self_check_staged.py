@@ -60,31 +60,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from private_terms_scan import load_terms, scan_text  # noqa: E402
 
-#: Built from code points, not literals, for the same reason pre_push_gate.py
-#: builds its own DASHES the same way: a scanner must not contain what it
-#: forbids. Same two characters as pre_push_gate.py's DASHES; replicated
-#: rather than imported (see the module docstring for why).
-DASHES = (chr(0x2014), chr(0x2013))  # em dash, en dash
-
-#: A credit line names a model or tool as the author or drafter of the text
-#: around it. Owner law 2026-09-26: only the owner is credited, and no model
-#: may add a credit. The shape is an authorship verb, then "by" or "with",
-#: then a model or tool name. Assembled from these word lists, never written
-#: as one phrase, for the same reason DASHES is built from code points: a
-#: scanner must not contain what it forbids. Naming a tool without claiming
-#: authorship (a routing note, a billing figure, "reviewed by") is not a
-#: credit and does not match. scripts/test_export_public.py applies this same
-#: pattern to the whole exported tree.
-CREDIT_VERBS = ("drafted", "written", "authored", "co-authored", "generated",
-                "produced", "created", "prepared", "composed", "made",
-                "built", "powered")
-CREDIT_NAMES = ("Codex", "ChatGPT", "OpenAI", "GPT", r"gpt-\d", "Claude",
-                "Anthropic", "Opus", "Sonnet", "Haiku", "Fable", "DeepSeek",
-                "Muse", "Jev", "Typesafe", "Gemini", "Copilot", "Nemotron",
-                "Llama", "Mistral", "Qwen")
-MODEL_CREDIT = re.compile(r"\b(?:%s)\s+(?:by|with)\s+\[?(?:%s)\b"
-                          % ("|".join(CREDIT_VERBS), "|".join(CREDIT_NAMES)),
-                          re.IGNORECASE)
+#: DASHES and the credit line pattern live in credit_marks.py (HO1, 2026-10-31),
+#: one definition shared with handover_record.py; re-exported here unchanged.
+from credit_marks import CREDIT_NAMES, CREDIT_VERBS, DASHES, MODEL_CREDIT  # noqa: E402,F401
 
 EXIT_CLEAN, EXIT_FOUND, EXIT_NO_DATA = 0, 1, 2
 

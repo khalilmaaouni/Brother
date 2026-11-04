@@ -71,6 +71,11 @@ class ClaimScoringBoundaryTests(unittest.TestCase):
                           "BrotherDS claim value inside the mobile path: %s "
                           "-- mobile names claim IDs, it never scores them" % violations)
 
+    # docs/decisions is not shipped in the public export, so there the referenced decision record does not exist:
+    # the premise is absent, not the behaviour broken.
+    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "docs", "decisions",
+                                                     "convergence-1.0.17-baseline-2026-09-13.json")),
+                         "this tree carries no docs/decisions record to reference")
     def test_journey_contract_smoke_accepts_claim_ids_as_plain_strings(self):
         import mobile_journey_contract as MJC
         with open(MJC.DEFAULT_SCHEMA, encoding="utf-8") as fh:

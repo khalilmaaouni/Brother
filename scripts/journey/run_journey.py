@@ -252,7 +252,8 @@ def guard_reason(journey, row_id, guards=None):
 
 def measure(row, install, journey="", guards=None):
     """One row's verdict and its words. A row declares a `check` (argv list) run under the installed
-    sandbox; exit 0 is PASS, any other exit is FAIL, and a check that cannot run at all is NO-DATA.
+    sandbox; exit 0 is PASS, exit 2 (each check's own NO-DATA) is NO-DATA, any other exit is FAIL, and a check
+    that cannot run at all is NO-DATA.
     A row with no check is NO-DATA by name: an undeclared measurement is not a passing one.
 
     A row DECLARED in GUARDS, and declaring no check of its own, reads PASS carrying the recorded
@@ -283,7 +284,9 @@ def measure(row, install, journey="", guards=None):
         return NODATA, "the check could not run: %s" % exc
     said = (done.stdout + done.stderr).strip().splitlines()
     tail = said[-1][:160] if said else ""
-    return (PASS if done.returncode == 0 else FAIL), tail
+    # Exit 2 is every journey check's own NO-DATA ("EXIT 0 PASS, 1 FAIL, 2 NO-DATA" in each of their headers):
+    # reading it as FAIL turned "this machine could not measure the row" into "the product failed it".
+    return (PASS if done.returncode == 0 else NODATA if done.returncode == 2 else FAIL), tail
 
 
 #: The variable families that configure BROTHER ITSELF. A stranger's machine has none of them,
@@ -296,7 +299,13 @@ def measure(row, install, journey="", guards=None):
 #: The client's own CLAUDE_* variables are LEFT ALONE deliberately. They configure the harness
 #: that installs the plugin, not the plugin, and they carry the sign in this walk needs; stripping
 #: them would turn every row NO-DATA, which is a worse answer than a real one.
-STRANGER_STRIPS = ("BROTHERMODE_", "BROTHERSBE_", "BROTHERDS_", "BROTHER_")
+#: BM_ joined 2026-11-02 (STRIP1.a): the fence and vault tools read BM_FENCE_MODE and BM_VAULT_ROOT, so
+#: this Mac's BM_FENCE_MODE reached every stranger walk until it was stripped like the other families.
+#: BROTHERME_, SBE_ and FIND_OUT_ joined the same day (STRIP1.a round 3): each is maintainer-only too.
+#: BROTHERME_CONFIG moves the consent file the hook tools read through setup.py; SBE_ carries the
+#: BrotherSBE profile and intake settings; FIND_OUT_ points attempt_hook.py's research at a chosen vault.
+STRANGER_STRIPS = ("BROTHERMODE_", "BROTHERSBE_", "BROTHERDS_", "BROTHER_", "BM_",
+                   "BROTHERME_", "SBE_", "FIND_OUT_")
 
 
 def stranger_env(**overrides):
@@ -452,6 +461,8 @@ def selftest(out=None):
     cases = [
         ("a check that exits 0 is PASS", {"id": "t", "check": ["true"]}, installed, PASS),
         ("a check that exits non zero is FAIL", {"id": "t", "check": ["false"]}, installed, FAIL),
+        ("a check that exits 2, its own NO-DATA, is NO-DATA", {"id": "t", "check": ["sh", "-c", "exit 2"]},
+         installed, NODATA),
         ("a row with no check is NO-DATA", {"id": "t"}, installed, NODATA),
         ("a row with an empty check is NO-DATA", {"id": "t", "check": []}, installed, NODATA),
         ("a check that is not a list is NO-DATA", {"id": "t", "check": "true"}, installed, NODATA),

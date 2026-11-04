@@ -48,6 +48,15 @@ order, so an overlapping (serialized) submission is only ever landed once
 every earlier batch has already been decided, against whatever canonical
 IS by then, never a stale tip.
 
+A TRAIN (FLOW1.a, `merge_queue.py train`) reuses all of the above rather than
+adding a tool: it takes only heads carrying MERGE1.a's recorded review for that
+exact head (merge_gate.review_check), keeps the first conflict-free batch of
+plan_queue (two members whose owned files overlap never ride together), puts the
+members onto the line tip in ONE branch, runs ONE whole gate on that tree
+through gate_merge_seq.sh, and writes the PR body and the one merge command. A
+member whose head moves leaves the train; a line move rebuilds the train on the
+new tip and the gate answers again. It never pushes.
+
 Python 3, standard library only for the planning half; git and subprocess
 for the execution half (worktree_lane and integrate already depend on
 both, so this does not widen the estate's dependency surface).
@@ -55,14 +64,20 @@ both, so this does not widen the estate's dependency surface).
 import argparse
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import graph_loop  # noqa: E402  reuse conflicts()/qualify(): the same write-set logic W5 already proved, never reimplemented
 import integrate  # noqa: E402  reuse integrate_one(): the same merge-verify-unwind primitive W's single-unit path already proved
 import worktree_lane  # noqa: E402  reuse acquire()/release(): the same worktree isolation primitive P0.2 already proved
+import merge_gate  # noqa: E402  FLOW1.a: review_check, merged_tree, verify_tree: the one review rule and the one tree verdict
+import merge_precompute  # noqa: E402  FLOW1.a: default_runner, the chain step's commit-tree, REMOTE and BRANCH of the gate worker
 
 
 def held_reason(sub):
@@ -493,6 +508,315 @@ def execute_queue(repo, submissions, root=None, runner=None, run_id=None):
     return {'merged': merged, 'rejected': rejected, 'held': held}
 
 
+# ----------------------------------------------------------------- train --
+#
+# FLOW1.a. One train = one branch = one whole gate. The pieces are the estate's
+# own: merge_gate.review_check decides who may ride, plan_queue decides who may
+# ride TOGETHER, merge_gate.merged_tree + commit-tree assemble without a
+# checkout, gate_merge_seq.sh gates the assembled head once (and restarts from
+# a moved line itself), merge_gate.verify_tree is the final word. Nothing here
+# pushes, merges into a real branch, or types a gate verdict.
+
+TRAIN_NAME_RE = re.compile(r'\A[A-Za-z0-9][A-Za-z0-9._-]{0,60}\Z')
+BRANCH_RE = re.compile(r'\A[A-Za-z0-9][A-Za-z0-9._/-]*\Z')   # no colon, plus, caret, tilde or leading dash: never a refspec
+TRAIN_MAX_RESTARTS = 3
+TRAIN_GATE_TIMEOUT_S = 3600
+ZEROS = '0' * 40
+TRAIN_REFS_FILE = 'brother-train-refs.json'   # <git common dir>: the sha each train branch had when THIS tool last wrote it
+
+
+def _run(clone, argv, runner):
+    """(code, stdout, stderr) of one git call in `clone` through the injected runner (merge_gate._call's contract)."""
+    return merge_gate._call(runner, ['git'] + argv, clone)
+
+
+def _fetch_sha(clone, branch, runner):
+    """The sha of REMOTE/branch right now (fetched, so its objects are local), or None. The branch name is checked
+    first (a refspec in a members file must not write a local ref), and the sha is read from a private ref, never
+    FETCH_HEAD, which any other fetch in this clone rewrites."""
+    if not isinstance(branch, str) or not BRANCH_RE.match(branch) or _run(clone, ['check-ref-format', '--branch', branch], runner)[0] != 0:
+        return None
+    private = 'refs/train-fetch/%s' % branch
+    if _run(clone, ['fetch', '--quiet', merge_precompute.REMOTE, '+refs/heads/%s:%s' % (branch, private)], runner)[0] != 0:
+        return None
+    code, out, _err = _run(clone, ['rev-parse', '--verify', '--quiet', private], runner)
+    _run(clone, ['update-ref', '-d', private], runner)
+    sha = out.strip() if code == 0 else ''
+    return sha if merge_gate.TREE_RE.match(sha) else None
+
+
+def _train_ref_state(clone, branch, runner):
+    """(old, problem): the sha refs/heads/<branch> holds now (ZEROS when absent) and why this tool may not write it, or
+    None. It may write a branch that does not exist, or one whose tip is exactly the sha this tool recorded when it last
+    wrote it, and never one checked out in any worktree. A record that cannot be read refuses: unknown blocks."""
+    ref = 'refs/heads/%s' % branch
+    code, listing, _err = _run(clone, ['worktree', 'list', '--porcelain'], runner)
+    if code != 0:
+        return ZEROS, 'git worktree list failed, so a checked out %s cannot be ruled out' % ref
+    if any(line.strip() == 'branch ' + ref for line in listing.splitlines()):
+        return ZEROS, '%s is checked out in a worktree' % ref
+    code, old, _err = _run(clone, ['rev-parse', '--verify', '--quiet', ref], runner)
+    old = old.strip() if code == 0 else ZEROS
+    if old == ZEROS:
+        return old, None
+    try:
+        with open(_train_refs_path(clone, runner), encoding='utf-8') as fh:
+            recorded = json.load(fh).get(ref)
+    except (OSError, ValueError, AttributeError):
+        recorded = None
+    if recorded != old:
+        return old, '%s exists at %s and this tool did not write that tip' % (ref, old[:12])
+    return old, None
+
+
+def _train_refs_path(clone, runner):
+    code, common, _err = _run(clone, ['rev-parse', '--path-format=absolute', '--git-common-dir'], runner)
+    if code != 0 or not common.strip():
+        raise merge_gate.MergeNoData('git could not name the common git directory of %s' % clone)
+    return os.path.join(common.strip(), TRAIN_REFS_FILE)
+
+
+def _record_train_ref(clone, branch, head, runner):
+    path = _train_refs_path(clone, runner)
+    try:
+        with open(path, encoding='utf-8') as fh:
+            recorded = json.load(fh)
+    except (OSError, ValueError):
+        recorded = {}
+    if not isinstance(recorded, dict):
+        recorded = {}
+    recorded['refs/heads/%s' % branch] = head
+    try:
+        with open(path + '.tmp', 'w', encoding='utf-8') as fh:
+            json.dump(recorded, fh, sort_keys=True)
+        os.replace(path + '.tmp', path)
+    except OSError as exc:
+        raise merge_gate.MergeNoData('the train branch was written but its record at %s was not (%s); the next rebuild will refuse it' % (path, exc))
+
+
+def _admit(clone, members, tip, runner):
+    """(riders, left): who may enter a train built on `tip`, and everyone else with the reason.
+
+    A member rides only when it names its pull request and pinned head, its branch still IS that
+    head on the remote (a head that moved LEFT: the review and the gate were of the old one), and
+    merge_gate.review_check passes for that exact head against `tip`. Every refusal reads as a
+    refusal, never as a pass, and never as a silent drop."""
+    riders, left = [], []
+    for m in members:
+        pr, pin = str(m.get('pr', '')), m.get('head')
+        if not pr.isdigit() or not isinstance(pin, str) or not merge_gate.TREE_RE.match(pin):
+            left.append((m, 'REFUSED', 'no pinned pull request number and 40 hex head'))
+            continue
+        m = dict(m, pr=pr)
+        if _fetch_sha(clone, m['branch'], runner) != pin:
+            left.append((m, 'LEFT', 'its head moved (or could not be read) since it was pinned at %s' % pin[:12]))
+            continue
+        try:
+            merge_gate.review_check(clone, pr, pin, tip, runner=runner)
+        except merge_gate.MergeGateError as exc:
+            left.append((m, 'REFUSED', 'no recorded review of this exact head: %s' % exc))
+            continue
+        try:   # a member that edits a gate check is merged by hand (CHECKS-EDITED): it must not sink a whole gate
+            fork = merge_precompute._git(runner, clone, ['merge-base', tip, pin])
+            edited = merge_gate._changed_checks(clone, fork, pin, runner)
+        except merge_gate.MergeGateError as exc:
+            left.append((m, 'REFUSED', 'its edited gate checks could not be read: %s' % exc))
+            continue
+        if edited:
+            left.append((m, 'REFUSED', 'it edits gate checks (%s): merge it by hand' % ' '.join(edited)))
+            continue
+        riders.append(m)
+    return riders, left
+
+
+def _one_train(riders):
+    """(train, deferred, held): the first conflict-free batch plan_queue makes; the rest wait for a later train."""
+    plan = plan_queue(riders)
+    return (plan['batches'][0] if plan['batches'] else []), [s for b in plan['batches'][1:] for s in b], plan['held']
+
+
+def _assemble(clone, tip, train, runner):
+    """(head, aboard, conflicts): the members merged one after another onto `tip` with plumbing only (merge-tree,
+    commit-tree), so no checkout and no ref moves. A member that does not merge cleanly is left out, the rest go on."""
+    head, aboard, conflicts = tip, [], []
+    mt_runner = merge_precompute._merge_tree_runner(runner)
+    for m in train:
+        try:
+            tree = merge_gate.merged_tree(clone, head, m['head'], runner=mt_runner)
+        except merge_gate.MergeConflict as exc:
+            conflicts.append((m, 'CONFLICT', 'does not merge cleanly onto the train: %s' % exc))
+            continue
+        head = merge_precompute._git(runner, clone, ['commit-tree', tree, '-p', head, '-p', m['head'],
+                                                     '-m', 'train: %s (#%s)' % (m['id'], m['pr'])])
+        aboard.append(m)
+    return head, aboard, conflicts
+
+
+def _review_line(clone, pr, head):
+    """(reviewer, whole gate id, review row hash) of the newest review record for pr at head, read for the body."""
+    gl, _whole, common = merge_gate._records_dir(clone)
+    rows = merge_gate._read_jsonl(os.path.join(common, merge_gate.REVIEW_FILE), 'the review record file')
+    mine = [r for r in rows if str(r.get('pr')) == pr and r.get('head') == head]
+    if not mine:   # review_check passed moments ago, so a row that is gone now is a record that cannot be trusted
+        raise merge_gate.MergeNoData('no review record for #%s at %s any more' % (pr, head))
+    row = mine[-1]
+    return row.get('reviewer'), row.get('whole_gate'), gl._line_hash(row)
+
+
+def render_train_body(name, base, tip, head, tree, aboard, left, gate_row, tree_of):
+    """The PR body: one proof row per member (head, tree, declared tests, review, the member's own gate record),
+    the train's gate record, and everyone who is NOT on the train with the reason. `aboard` is [(member, review)]."""
+    lines = ['Train %s: %d reviewed pull request(s) onto %s %s, gated once.' % (name, len(aboard), base, tip[:12]), '',
+             'Train head %s, tree %s.' % (head, tree), '',
+             '| PR | member | head | tree | tests | review | member gate record |',
+             '| --- | --- | --- | --- | --- | --- | --- |']
+    for m, (reviewer, gate_id, row_hash) in aboard:
+        lines.append('| #%s | %s | %s | %s | %s | %s, row %s | %s |' % (
+            m['pr'], m['id'], m['head'], tree_of(m['head']), ' '.join(m.get('check_cmd') or []) or 'none declared',
+            reviewer, row_hash[:12], gate_id))
+    lines += ['', 'Train gate record (one whole gate for the whole tree): rc %s, tree %s, gate script sha256 %s, '
+              'log sha256 %s, finished %s.' % (gate_row.get('rc'), gate_row.get('tree'),
+              gate_row.get('gate_sha256'), gate_row.get('log_sha256'), gate_row.get('finished'))]
+    if left:
+        lines += ['', 'Not on this train:']
+        lines += ['- #%s %s: %s %s' % (m.get('pr', '?'), m.get('id'), verdict, why) for m, verdict, why in left]
+    return '\n'.join(lines) + '\n'
+
+
+def build_train(members, name, body_path, pr='0', timeout=TRAIN_GATE_TIMEOUT_S, runner=None, env=None, out=None,
+                base=merge_precompute.BRANCH):
+    """Assemble the reviewed members onto the tip of `base` (main, or a dev line on merge_gate.ALLOWED_BASES) in one
+    branch, gate it once, write the PR body and print the steps to the merge. Exit code: 0 the train is gated and a
+    reviewer can take it, 1 the gate failed or nobody could ride, 2 NO-DATA (the gate could not answer, a ref or the
+    base is refused, or the line would not hold still). Never pushes."""
+    out = out or sys.stdout
+    runner = runner or merge_precompute.default_runner
+    env = dict(os.environ if env is None else env)
+    code, top, _err = _run(os.path.join(HERE, '..'), ['rev-parse', '--show-toplevel'], runner)
+    clone = top.strip() if code == 0 else ''
+    if not clone or not TRAIN_NAME_RE.match(name or '') or not str(pr).isdigit():
+        out.write('NO-DATA: no clone around %s, or the train name or pull request number is not plain\n' % HERE)
+        return 2
+    try:
+        merge_gate.base_ref(base)   # the one allow list (MERGE2.a): an unlisted base is refused by name, before anything runs
+        branch = 'train/%s' % name
+        _old, problem = _train_ref_state(clone, branch, runner)
+    except merge_gate.MergeGateError as exc:
+        out.write('NO-DATA: %s\n' % exc)
+        return 2
+    if problem:
+        out.write('NO-DATA: the train branch is refused, nothing was built: %s\n' % problem)
+        return 2
+    restarts = 0
+    scratch = tempfile.mkdtemp(prefix='merge-train-', dir=env.get('TMPDIR') or None)
+    try:
+        while True:
+            tip = _fetch_sha(clone, base, runner)
+            if tip is None:
+                out.write('NO-DATA: cannot fetch %s/%s\n' % (merge_precompute.REMOTE, base))
+                return 2
+            riders, left = _admit(clone, members, tip, runner)
+            train, deferred, held = _one_train(riders)
+            left += [(m, 'DEFERRED', 'its write set overlaps a member of this train; it rides the next train') for m in deferred]
+            left += [(m, 'HELD', why) for m, why in held]
+            head, aboard, conflicts = _assemble(clone, tip, train, runner)
+            left += conflicts
+            if not aboard:
+                out.write('EMPTY TRAIN: no member could ride\n')
+                for m, verdict, why in left:
+                    out.write('  #%s %s: %s %s\n' % (m.get('pr', '?'), m.get('id'), verdict, why))
+                return 1
+            list_path = os.path.join(scratch, 'train.list')
+            with open(list_path, 'w', encoding='utf-8') as fh:
+                fh.write('%s %s\n' % (pr, head))
+            try:
+                gate = subprocess.run(['sh', os.path.join(HERE, 'gate_merge_seq.sh'), list_path, base], env=env,
+                                      capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                out.write('NO-DATA: the train gate could not run: %s\n' % exc)
+                return 2
+            if gate.returncode != 0:
+                tail = (gate.stdout + gate.stderr).strip()[-800:]
+                if gate.returncode == 1:   # one gate covers the whole train: it cannot name a member
+                    out.write('FAIL: the train gate failed; one gate covers the whole train, so it names no culprit among the members\n%s\n' % tail)
+                    return 1
+                out.write('NO-DATA: the train gate could not answer (exit %d), which is no verdict on any member (a line that keeps moving ends here)\n%s\n'
+                          % (gate.returncode, tail))
+                return 2
+            moved = [m for m in aboard if _fetch_sha(clone, m['branch'], runner) != m['head']]
+            if _fetch_sha(clone, base, runner) != tip or moved:
+                restarts += 1
+                if restarts > TRAIN_MAX_RESTARTS:
+                    out.write('NO-DATA: STALE-BASE, the line or a member moved %d times after a gate; nothing is ready\n' % restarts)
+                    return 2
+                continue
+            break
+        tree = merge_precompute._git(runner, clone, ['rev-parse', head + '^{tree}'])
+        verdict, why = merge_gate.verify_tree(clone, tree, env, runner, base=base)
+        if verdict != 'PASS':
+            out.write('%s: the train tree %s has no whole gate PASS row (%s); nothing is ready\n' % (verdict, tree, why))
+            return 1 if verdict == 'FAIL' else 2
+        rows = [r for r in merge_gate.read_ledger(merge_gate.ledger_path(clone, env)) if r.get('tree') == tree]
+        reviews = [(m, _review_line(clone, m['pr'], m['head'])) for m in aboard]
+        body = render_train_body(name, base, tip, head, tree, reviews, left, rows[-1],
+                                 lambda sha: merge_precompute._git(runner, clone, ['rev-parse', sha + '^{tree}']))
+        with open(body_path, 'w', encoding='utf-8') as fh:
+            fh.write(body)
+        old, problem = _train_ref_state(clone, branch, runner)   # read again: the gate took minutes
+        if problem:
+            out.write('NO-DATA: the train branch is refused, nothing was written to it: %s\n' % problem)
+            return 2
+        code, _out, err = _run(clone, ['update-ref', 'refs/heads/%s' % branch, head, old], runner)   # old value: a racing writer loses
+        if code != 0:
+            out.write('NO-DATA: cannot write %s: %s\n' % (branch, err.strip()[:200]))
+            return 2
+        _record_train_ref(clone, branch, head, runner)
+        merge_list = body_path + '.merge-list'
+        if pr != '0':
+            with open(merge_list, 'w', encoding='utf-8') as fh:
+                fh.write('%s %s\n' % (pr, head))
+        q, train_pr = shlex.quote, (pr if pr != '0' else '<train pull request number>')
+        out.write('TRAIN %s READY FOR REVIEW: %d member(s) on %s, base %s, head %s, tree %s, %d restart(s)\n'
+                  % (name, len(aboard), branch, base, head, tree, restarts))
+        for m, verdict, why in left:
+            out.write('  NOT ABOARD #%s %s: %s %s\n' % (m.get('pr', '?'), m.get('id'), verdict, why))
+        out.write('BODY: %s\n' % body_path)
+        out.write('STEP 1 (a person): git push %s %s, then open the pull request into %s with the body above\n'
+                  % (merge_precompute.REMOTE, branch, base))
+        out.write('STEP 2 (a reviewer who wrote none of the train commits; merge_verified.sh stops without this record, it is NOT written for you): '
+                  'python3 scripts/merge_gate.py review-record %s %s %s %s <reviewer> PASS\n' % (q(clone), train_pr, head, tip))
+        out.write('MERGE: sh scripts/merge_verified.sh --base %s %s%s\n' % (base, q(merge_list), '' if pr != '0' else
+                  '   (write "%s %s" into it first)' % (train_pr, head)))
+        return 0
+    except merge_gate.MergeGateError as exc:   # a git call, the ledger or a record that cannot answer is NO-DATA, never ready
+        out.write('NO-DATA: %s\n' % exc)
+        return 2
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def train_main(argv):
+    ap = argparse.ArgumentParser(prog='merge_queue.py train', description=build_train.__doc__)
+    ap.add_argument('--members', required=True, help='JSON file: a list of members, each {"id", "pr", "head", '
+                    '"branch", "owns", "check_cmd"}; head is the pinned sha the review was recorded for')
+    ap.add_argument('--name', required=True, help='the train name; the branch is train/<name>')
+    ap.add_argument('--body', required=True, help='where the pull request body is written')
+    ap.add_argument('--pr', default='0', help='the train pull request number, once it exists')
+    ap.add_argument('--timeout', type=int, default=TRAIN_GATE_TIMEOUT_S, help='seconds the one gate may take')
+    ap.add_argument('--base', default=merge_precompute.BRANCH, help='the base the train lands on: main, or a dev line on '
+                    'merge_gate.ALLOWED_BASES (the one list); anything else is refused')
+    args = ap.parse_args(argv)
+    try:
+        members = load_submissions(args.members)
+    except (OSError, ValueError) as exc:
+        print('merge-queue: NO-DATA, cannot read members: %s' % exc, file=sys.stderr)
+        return 2
+    if not isinstance(members, list) or not all(isinstance(m, dict) and m.get('id') and m.get('branch') for m in members):
+        print('merge-queue: NO-DATA, members must be a list of objects with an id and a branch', file=sys.stderr)
+        return 2
+    return build_train(members, args.name, args.body, args.pr, args.timeout, base=args.base)
+
+
 #: Built-in fixture driving all three verdicts in one run: S1/S2 disjoint
 #: (batch together), S3 overlaps S1 (serializes into its own batch), S4 has
 #: no check command (HELD), S5 has no declared write set (HELD).
@@ -511,6 +835,9 @@ def load_submissions(path):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ['train']:
+        return train_main(argv[1:])
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--submissions', help='JSON file: a list of submissions, each '
                      '{"id", "branch", "owns", "check_cmd", "repo" (optional)}')

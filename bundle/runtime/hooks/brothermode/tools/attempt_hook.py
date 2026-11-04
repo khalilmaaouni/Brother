@@ -100,8 +100,10 @@ number rather than an unbounded walk.
 FIND_OUT_VAULT, FIND_OUT_PATTERNS, FIND_OUT_MEMORY: overridable the same way
 ATTEMPT_LEDGER already is (read from the environment once, at import time),
 so a test can point every source at a temp fixture instead of the real
-vault, pattern store, and memory index. Unset, they default to find_out.py's
-own VAULT and MEMORY constants.
+vault, pattern store, and memory index. Unset, the vault and the pattern
+store are the one resolver's answer (pattern_note.vault_root, KEY1.f), asked
+only when the research branch runs, and the memory index is find_out.py's
+own MEMORY constant.
 
 THE SLIDING WINDOW, borrowed (readiness row E57, mechanism 3). Source page:
 https://www.opengsd.net/docs/v1/features, GSD's own loop-detection and
@@ -161,8 +163,11 @@ except Exception as _find_out_exc:  # sbe: allow-silent defensive fallback; find
 #: See the module docstring's FIND_OUT_VAULT/FIND_OUT_PATTERNS/FIND_OUT_MEMORY
 #: section: read once at import time so a subprocess test gets an isolated
 #: set of stores, exactly like ATTEMPT_LEDGER above.
-_FIND_OUT_VAULT = os.environ.get("FIND_OUT_VAULT", find_out.VAULT if find_out else "")
-_FIND_OUT_PATTERNS = os.environ.get("FIND_OUT_PATTERNS", find_out.VAULT if find_out else "")
+#: None when unset: find_out keeps no folder of its own (KEY1.f), so
+#: _find_out_sources asks the one resolver, and an unresolved vault is a
+#: source that did not answer (NO-DATA), never a guessed or relative folder.
+_FIND_OUT_VAULT = os.environ.get("FIND_OUT_VAULT")
+_FIND_OUT_PATTERNS = os.environ.get("FIND_OUT_PATTERNS")
 _FIND_OUT_MEMORY = os.environ.get("FIND_OUT_MEMORY", find_out.MEMORY if find_out else "")
 #: See the module docstring's BOUNDED section.
 _FIND_OUT_BUDGET_SECONDS = 2.0
@@ -404,10 +409,14 @@ def _find_out_sources(problem_text):
     own order. A thunk, not a called value, so a budget check can run
     between sources without paying for one it will not use."""
     words = find_out._words(problem_text)
+    vault = _FIND_OUT_VAULT
+    if vault is None:
+        vault = find_out.pattern_note.vault_root()[0]
+    patterns = vault if _FIND_OUT_PATTERNS is None else _FIND_OUT_PATTERNS
     return (
-        ("vault failures", lambda: find_out.vault_failures(words, _FIND_OUT_VAULT)),
-        ("vault learned", lambda: find_out.vault_learned(words, _FIND_OUT_VAULT)),
-        ("patterns", lambda: find_out.patterns(problem_text, _FIND_OUT_PATTERNS)),
+        ("vault failures", lambda: find_out.vault_failures(words, vault) if vault else None),
+        ("vault learned", lambda: find_out.vault_learned(words, vault) if vault else None),
+        ("patterns", lambda: find_out.patterns(problem_text, patterns) if patterns else None),
         ("memory index", lambda: find_out.memory_index(words, _FIND_OUT_MEMORY)),
     )
 

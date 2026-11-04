@@ -6,6 +6,8 @@ Amended 2026-10-03 by OP1.a (`docs/plan/specs/OP1.md` section 5.1, council
 findings against the landed guard): a blocking event is wrapped and always
 RUN, and the guard trusts fewer inputs (Decision 3 and Failure direction).
 
+<!-- doc-assurance: allow-missing bundle/hooks/union.json the retired hooks file this record explains; it was removed on purpose and the text says so -->
+
 ## Context
 
 Until 1.1.0 the `brother` bundle declared `brothermode`, `brothersbe` and
@@ -19,6 +21,10 @@ into a plugin with no fence, no clock guard and no session memory at all
 (architecture review 2026-09-30, findings F1 and F16).
 
 ## Decision
+
+<!-- doc-assurance: allow-missing plugins/installed_plugins.json a file in the host's own plugin folder, not in this repository -->
+
+<!-- doc-assurance: allow-missing union.json the retired name of the hooks file; the text below says it is retired -->
 
 1. `scripts/bundle_runtime.py` writes the merged hooks to
    `bundle/hooks/hooks.json` (`HOOKS_JSON_NAME`), the name Claude Code auto

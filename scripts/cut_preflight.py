@@ -153,11 +153,12 @@ def check_exceptions(root, at, runner=None):
 
 
 def check_pack_clock(root, horizon_hours, runner=None):
-    """P2a: the newest handover pack is still fresh when the cut ends."""
+    """P2a: the newest close describes HEAD (a handover record naming it), or is a legacy pack still fresh when the
+    cut ends."""
     allowed = max(PACK_MAX_AGE_HOURS - _finite_hours(horizon_hours), 0)
     proc = _run([sys.executable, os.path.join(root, "scripts",
                                              "close_ceremony_check.py"),
-                 "--max-age-hours", "%g" % allowed], root, runner)
+                 "--require-current", "--max-age-hours", "%g" % allowed], root, runner)
     if proc.returncode == 0:
         return OK, "pack-clock", _last(proc)
     verdict = NODATA if proc.returncode == 2 else REFUSED
@@ -543,7 +544,9 @@ def check_virgin_gate(root, runner=None, build=None, keep=None):
 #: ~/.claude/bin loop in the exporter's loop-tool-parity row only after the y,
 #: because the rehearsal and the virgin gate both ran under an empty HOME.
 EXPORT_ROW_NAME = "export-real-home"
-EXPORT_ROW_TIMEOUT_S = 3600
+# 1.2.0: 3600 -> 9000. The row wraps the exporter, whose required-fast gate may now take up to export_public.GATE_TIMEOUT_CAP_SECONDS
+# (7200 s: the hermetic row reaches 943 tests, measured 3091 s with 4 workers) after the export build and the other gates.
+EXPORT_ROW_TIMEOUT_S = 9000
 
 
 def real_home_refusal(home=None):

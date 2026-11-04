@@ -1,0 +1,66 @@
+{
+ "label": "SIMULATED",
+ "version": 1,
+ "bar": "first-user",
+ "authority": "HUMAN-TRIAL-GATE.md rule 10 (owner ruling, Two bars); unit SIM1.c",
+ "status": "FROZEN before the first scored run on the first-user set. Each rule below carries the reason it is valid, written without citing any result. A change after a scored run is refused; a change before one needs a new reason that cites no result, and a new freeze (frozen.json).",
+ "bars": {
+  "product": 9.0,
+  "acceptable": 7.5,
+  "share": 0.9,
+  "min_attempts_per_row": 10,
+  "min_distinct_sources_per_row": 3
+ },
+ "points": {
+  "benefit": ["completion 4", "informed acceptance 2", "rerunnable receipt 2", "recovery 2"],
+  "ease": ["no rescue 4", "necessary decisions 2", "state and next step 2", "plain-language flow 2"],
+  "note": "The point values and their wording are those of the boundary rubric (sim_trial.RUBRIC, version 2); this file freezes only how the first-user bar uses them."
+ },
+ "rules": [
+  {
+   "id": "uninterrupted-success",
+   "rule": "Benefit and ease are each reported out of 10 on the points open to the run. A point that no event could make available, recovery when no interruption fired, is left out of both what is earned and what is available, so a correct uninterrupted run reaches 10 of 10. A point left out is never a deduction and never free marks.",
+   "reason": "Recovery is worth 2 of the 10 benefit points and can only be earned when an interruption lands inside the work. A first user who is never interrupted cannot earn it, so counting it as lost would cap every natural success at 8 of 10 and place the 9 of 10 bar out of reach of correct behaviour. A bar that correct behaviour cannot meet measures the rubric and not the product. The cap follows from the point arithmetic alone."
+  },
+  {
+   "id": "correct-rejection",
+   "rule": "When a scenario's correct outcome is a rejection, the person's rejection with a written rejection record earns the 2 acceptance points, exactly as an acceptance record does for an accept scenario. The rerunnable receipt point does not apply to a rejection and is left out under the first rule. Accepting a result that should have been rejected is a correctness failure. A rejection scenario whose run did not record the person's decision is NO-DATA.",
+   "reason": "Rejecting a delivery that does not meet the person's need is the process working as intended. Scoring that as a lost acceptance would reward a product for pushing every delivery through, and would make honest incomplete work look worse than a false claim of completion. A decision that was not recorded cannot be graded either way, so it is NO-DATA and never a guessed value."
+  },
+  {
+   "id": "cell-aggregation",
+   "rule": "A cell is one key row. A participant is at a bar when benefit and ease are both at or above it out of 10 and the outcome is proven (or is a correct rejection); a rescue costs 4 of the 10 ease points, so a rescued attempt cannot be at either bar. The cell's share is the participants at the bar divided by ALL attempts, with failed, abandoned and rescued attempts kept in the denominator. An attempt that could not be graded makes the cell NO-DATA. Product grade needs a share of at least 0.9 at 9 of 10. Acceptable grade needs 0.9 at 7.5 of 10 with the lost points named. Below that the cell is FAIL. A mean or a median never decides a cell. The release is PASS only when every key row is PASS.",
+   "reason": "The phrase every cell at 9 of 10 did not say what is aggregated. A mean lets a few perfect runs hide broken ones, a median can hide up to half of them, and requiring every participant makes a cell depend on a single outlier. A claim that nine in ten first users succeed is a share of participants, and a share with every attempt in the denominator cannot be improved by dropping attempts. Ten successes in ten still leave a one-sided 95 percent lower bound near 74 percent on the true rate, so the share describes the sample and is not proof of a rate."
+  },
+  {
+   "id": "rescue",
+   "rule": "Rescue is only: the person's own words naming plugin internals, client configuration paths, debugging commands, copied internal prompts, deleting retry history or steering workers (the persona rescue patterns); or the agent reading the plugin's own source, running the plugin's hooks by hand to debug them, or deleting the product's run state (the agent rescue patterns). The agent reading, running or debugging the person's own project, running its tests, or retrying its own commands is ordinary work and is never rescue. A plain-language reply from the person to the assistant's question is not rescue.",
+   "reason": "Rescue must mean someone supplying knowledge a first user could not have, which is knowledge of the product's insides. The assistant investigating the person's project is the product doing its job, and counting it would penalise thoroughness. Defining rescue by named patterns lets two scorers reach the same count from the same record."
+  },
+  {
+   "id": "question",
+   "rule": "A question counts when the final reply of a turn ends with a question to the person, meaning its last sentence ends with a question mark, or when a tool call was denied. A question asking for the person's accept or reject decision is the delivery's closing step and never counts. A question mark inside the body of a reply never counts. Counted questions give 2 points at most one, 1 point at most three, and 0 above that.",
+   "reason": "The acceptance decision is the human step the product exists to produce, so counting it as friction would penalise the process for working. A question mark inside prose, a rhetorical question or a quoted message is not a request for the person to decide anything. A rule stated on the final sentence can be applied by a script and by a scorer in the same way."
+  },
+  {
+   "id": "hidden-rows",
+   "rule": "A key row whose capability is hidden from consumers in the release under test, or whose admission is unknown or unreadable, reads NO-DATA and is never counted as a pass. Only an admission record that says admitted lets a row be graded at all. Any score from the set is labelled SIMULATED.",
+   "reason": "Publication before the human gate (rule 9) keeps unproven capabilities hidden from consumers. A pass for something consumers cannot reach would claim evidence about a capability the release does not offer. An unknown admission blocks and never reads as admitted, so a missing record cannot raise a score."
+  },
+  {
+   "id": "label",
+   "rule": "Every output of this bar is labelled SIMULATED and is never reported as human evidence or as the human trial score of BASE1.e.",
+   "reason": "Rule 5 of the human trial gate: simulated evidence never stands in for human evidence, and a label that can be dropped is not a control."
+  },
+  {
+   "id": "scenario-shape",
+   "rule": "The first-user set covers every key row with at least 3 scenarios from distinct public sources, in a mix of about 45 percent easy, 45 percent medium and 10 percent hard. It holds fixtures in more than one language, novice and non-developer personas, and the kinds install day, broken plugin, pasted error message, explain the repository, small feature on a repository the person did not write, add a test, documentation, a cost question and first-run confusion. At most 20 percent of scenarios carry a scripted interruption, so the common case is an ordinary session. Hostile-note and double-start cases stay in the boundary bar. Each scenario names its public source and the basis of its shape.",
+   "reason": "A first-user bar has to look like what a first user brings, and a set of boundary cases cannot do that. A mix weighted to easy and medium work is what makes a natural success possible to score. Coverage of every key row is what lets a release claim speak about the whole key population and not a part of it. Scripted interruption on every scenario would turn the exception path into the common case. Naming the source keeps every scenario traceable."
+  },
+  {
+   "id": "freeze",
+   "rule": "This file, the scenario file and the grading functions are frozen together before the first scored run, by a record of their hashes. Any later change makes the freeze check refuse. Once a scored run exists the freeze record is never rewritten. A change needs a new reason that cites no result, and a new set.",
+   "reason": "Rule 3 of the human trial gate: a bar edited after it has produced a number can be tuned to that number. Hashing the file, the set and the code that grades makes tuning visible, and refusing a refreeze after a run makes it impossible without leaving the bar."
+  }
+ ]
+}

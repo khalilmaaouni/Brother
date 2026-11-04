@@ -152,6 +152,8 @@ def _run_harness(script_text, calls, preamble=(), stdout_path=None):
         "REQUIRED_FAST_PRINT_FAILURES=0",
         "GITHUB_ACTIONS=",
         'export TMPDIR="%s"' % work,
+        # the script sets keep_dir once at its top (line 133); the harness extracts functions only, so it states it
+        'keep_dir="%s"' % work,
         'export GATE_LEDGER_PATH="%s"' % os.path.join(work, "gate-ledger.jsonl"),
         'codes_file="%s"' % codes,
         'gate_ledger="%s"' % ledger,
@@ -162,7 +164,7 @@ def _run_harness(script_text, calls, preamble=(), stdout_path=None):
         # check_now; one job in the first phase sends each call straight
         # through it, so these calls cross the real dispatch path.
         "jobs=1",
-        "phase=parallel",
+        "phase=first",
     ]
     lines.extend(preamble)
     lines.extend(calls)

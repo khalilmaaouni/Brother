@@ -2255,7 +2255,7 @@ The second was block 1 of `docs/book/04-install-day.md`, and the first
 diagnosis of it was flatly wrong. It was read as a recording artifact that
 could never match off the machine that captured it, because `install.sh` echoes
 `$origin_url` and a `$HOME` derived clone path into its dry run line and the
-committed transcript carried `/Users/...` paths and a `.git` suffixed origin.
+committed transcript carried macOS home folder paths and a `.git` suffixed origin.
 That reading came from the tool's printed diff, which shows RAW `want` against
 RAW `got`. The comparison it actually performs is `stable(want) != stable(got)`,
 so the printed diff is not the residual and reading it as one is a trap. Asking
@@ -2270,7 +2270,7 @@ side folded to a placeholder while the LIVE side stayed literal. That is a ONE
 SIDED mask, which is a worse failure than a lenient one, because no version of
 the tool could make the page match on such a host. `root` now sits in that
 anchor set, on the ground that it is where uid 0's home lives on Linux and so
-is the same category as `/Users/<name>` and `/home/<name>` rather than a new
+is the same category as a macOS or Linux per user home folder rather than a new
 one. The shape difference is what hid it: those two carry a name segment after
 the anchor and `/root` carries none, because `/root` IS the home directory.
 

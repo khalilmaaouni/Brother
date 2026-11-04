@@ -1,0 +1,484 @@
+#!/usr/bin/env python3
+"""self_check_staged: catch a new dash or a private term before it is even
+committed, not only after a manual grep run after the fact.
+
+WHY THIS EXISTS. Tonight a session introduced 2 new em-dashes into its own
+newly-written markdown (while separately fixing dashes elsewhere), and
+separately spelled out real private client terms in its own tracking-file
+prose, twice, on two separate occasions (while writing ABOUT the importance
+of never doing that). Both mistakes were self-caught, but only by manually
+re-running a grep after the fact. scripts/pre_push_gate.py already blocks a
+PUSH carrying either defect over the outgoing range; this script exists
+because "before the push" is still a whole commit later than it needs to be.
+It scans the STAGED diff at commit time, before either mistake ever gets a
+SHA of its own.
+
+REUSE, NOT REINVENTION, per this estate's rule against a second copy of a
+check that already exists:
+
+  * The private-terms rule (whole-word matching for short terms, the term
+    list at ~/.brothersbe-private-names, NO-DATA rather than a silent pass
+    on a missing or empty list) is IMPORTED directly from
+    scripts/private_terms_scan.py: load_terms() and scan_text() are plain
+    module-level functions with no import-time side effects (they do not
+    touch outgoing_range()/scan_range(), which this tool has no use for),
+    so importing them pulls in nothing this script does not already need.
+    This mirrors the reuse shape scripts/export_public.py already uses for
+    scripts/pre_push_gate.py's SECRET_SHAPES tuple.
+
+  * The dash rule (em dash U+2014, en dash U+2013) is REPLICATED rather than
+    imported from scripts/pre_push_gate.py. That module's own DASHES is a
+    two-character tuple, but importing the module for it also imports
+    edition_guard.py (the public-export edition guard), an unrelated,
+    heavier dependency a commit-time hygiene check has no business
+    carrying. Two named Unicode code points is the smaller, more honest
+    dependency, and it is still built from chr() calls rather than written
+    as a literal, for the same reason pre_push_gate.py gives for its own
+    DASHES: a scanner must not contain what it forbids.
+
+SCOPE, and why it differs from the push gate. This reads ONLY the staged
+diff (git diff --cached), and ONLY added ("+") lines: a dash or a term
+already committed further back, or one that only ever appeared in a
+REMOVED line, is pre_push_gate.py's job over the outgoing range, not this
+hook's job over one commit-in-progress. A private term is never printed,
+only its length, matching private_terms_scan.py's own discipline; a dash
+finding names its file and line only, so both findings read the same shape.
+
+Usable two ways:
+  manual command: python3 scripts/self_check_staged.py
+  pre-commit hook: python3 scripts/self_check_staged.py --install-hook
+
+Python 3, standard library only. No network.
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from private_terms_scan import load_terms, scan_text  # noqa: E402
+
+#: DASHES and the credit line pattern live in credit_marks.py (HO1, 2026-10-31),
+#: one definition shared with handover_record.py; re-exported here unchanged.
+from credit_marks import CREDIT_NAMES, CREDIT_VERBS, DASHES, MODEL_CREDIT  # noqa: E402,F401
+
+EXIT_CLEAN, EXIT_FOUND, EXIT_NO_DATA = 0, 1, 2
+
+#: How this tool recognises a pre-commit hook it installed, to avoid
+#: reinstalling on top of itself and to tell its own block apart from
+#: somebody else's when composing.
+MARK = "# brother-self-check-staged"
+
+
+def parse_added_lines(diff_text):
+    """Yields (path, lineno, content) for every line a staged commit would
+    ADD, at that line's number in the NEW file. A removed line, or an
+    unchanged context line, never appears here: run with --unified=0, the
+    diff carries no context lines at all, so every content line seen is
+    either a real addition or a real removal, and only additions consume a
+    new-file line number."""
+    path = None
+    new_line = None
+    expect_plus_header = False
+    for raw in diff_text.splitlines():
+        if raw.startswith("diff --git "):
+            path = None
+            new_line = None
+            expect_plus_header = False
+            continue
+        if raw.startswith("--- "):
+            expect_plus_header = True
+            continue
+        if expect_plus_header and raw.startswith("+++ "):
+            expect_plus_header = False
+            p = raw[4:]
+            path = None if p == "/dev/null" else (p[2:] if p.startswith("b/") else p)
+            continue
+        expect_plus_header = False
+        if raw.startswith("@@"):
+            m = re.search(r"\+(\d+)", raw)
+            new_line = int(m.group(1)) if m else None
+            continue
+        if raw.startswith("+"):
+            if path is not None and new_line is not None:
+                yield path, new_line, raw[1:]
+                new_line += 1
+            continue
+        if raw.startswith("-"):
+            continue
+        # "index ...", "Binary files ... differ", "\ No newline at end of
+        # file", rename/copy headers: none of these carry added content.
+
+
+def scan_dashes(added_lines):
+    """[(path, lineno)] for every added line carrying an em or en dash."""
+    return [(path, lineno) for path, lineno, content in added_lines
+            if any(d in content for d in DASHES)]
+
+
+def scan_model_credits(added_lines):
+    """[(path, lineno)] for every added line crediting a model or tool."""
+    return [(path, lineno) for path, lineno, content in added_lines
+            if MODEL_CREDIT.search(content)]
+
+
+def scan_private_terms(added_lines, terms):
+    """[(path, lineno, [length, ...])] for every added line carrying a
+    private term. The matched term is never kept past this call and never
+    printed, matching private_terms_scan.py's own discipline: only its
+    length is reported."""
+    out = []
+    for path, lineno, content in added_lines:
+        matched = scan_text(content, terms)
+        if matched:
+            out.append((path, lineno, [len(t) for t in matched]))
+    return out
+
+
+def staged_diff(cwd=None, runner=None):
+    runner = runner or (lambda cmd: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd))
+    return runner(["git", "diff", "--cached", "--no-color", "--unified=0"])
+
+
+def drop_merge_carried(added, cwd=None, runner=None):
+    """ACC9 (2026-09-26): (kept, carried). During a merge the staged diff is
+    taken against the branch HEAD, so every line the merge brings from the
+    other branch looks added, and merging main forward was blocked on lines
+    main already carried. A line whose exact text is already in MERGE_HEAD's
+    copy of the same file is the other branch's, not the committer's: it is
+    not counted. Everything else is still scanned, including anything written
+    while resolving the merge. No merge in progress, or MERGE_HEAD or that
+    file's copy unreadable: nothing is dropped, so a failure here scans more,
+    never less."""
+    run = runner or (lambda cmd: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd))
+    probe = run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD^{commit}"])
+    if probe.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", (probe.stdout or "").strip()):
+        return added, 0
+    theirs = {}
+    kept, carried = [], 0
+    for path, lineno, content in added:
+        if path not in theirs:
+            shown = run(["git", "show", "MERGE_HEAD:" + path])
+            theirs[path] = set((shown.stdout or "").splitlines()) if shown.returncode == 0 else None
+        if theirs[path] is not None and content in theirs[path]:
+            carried += 1
+        else:
+            kept.append((path, lineno, content))
+    return kept, carried
+
+
+def run_scan(cwd=None, terms_path=None, runner=None):
+    """Returns (exit_code, [message_lines]). Never raises on a missing terms
+    file or an unreadable diff: NO-DATA IS NEVER A PASS, so both come back as
+    EXIT_NO_DATA, never EXIT_CLEAN."""
+    proc = staged_diff(cwd, runner)
+    if proc.returncode != 0:
+        return EXIT_NO_DATA, ["NO-DATA: could not read the staged diff: %s"
+                               % (proc.stderr or "").strip()]
+    added, carried = drop_merge_carried(list(parse_added_lines(proc.stdout or "")), cwd, runner)
+    dash_hits = scan_dashes(added)
+    terms = load_terms(terms_path)
+
+    lines = []
+    if carried:
+        lines.append("note: %d line(s) already in MERGE_HEAD's copy of their file "
+                     "were not counted: the merge brings them from the other branch"
+                     % carried)
+    found = False
+    for path, lineno in dash_hits:
+        found = True
+        lines.append("BLOCK dash: %s:%d" % (path, lineno))
+    for path, lineno in scan_model_credits(added):
+        found = True
+        lines.append("BLOCK model credit: %s:%d (only the owner is "
+                     "credited; record provenance in a local evidence log)"
+                     % (path, lineno))
+
+    if terms is None:
+        lines.append(
+            "NO-DATA: no terms file at %s, so the private-terms check did "
+            "not run. This is not a pass."
+            % (terms_path or os.path.expanduser("~/.brothersbe-private-names")))
+    elif not terms:
+        lines.append("NO-DATA: the terms file is empty, so the "
+                      "private-terms check did not run.")
+    else:
+        for path, lineno, lengths in scan_private_terms(added, terms):
+            found = True
+            # The term itself is NEVER printed, only how long it is.
+            lines.append(
+                "BLOCK private term: %s:%d (matched term length %s, term "
+                "not printed)"
+                % (path, lineno, ",".join(str(n) for n in lengths)))
+
+    if found:
+        return EXIT_FOUND, lines
+    if terms is None or not terms:
+        return EXIT_NO_DATA, lines
+    lines.append("PASS: %d added line(s) checked, no new dash, no model "
+                  "credit and no private term" % len(added))
+    return EXIT_CLEAN, lines
+
+
+#: SP7 (2026-10-16): the command a refused commit prints, the same one the
+#: pre-push docs-current check names.
+SYSTEM_DOC_FIX = "python3 scripts/system_doc.py && git add SYSTEM.md"
+
+
+def _described(path):
+    """True for a path scripts/system_doc.py reads (read 2026-10-16 in its
+    parts() and battery_checks()): a .py file directly under scripts/, or
+    scripts/check_all.sh."""
+    return path == "scripts/check_all.sh" or (
+        os.path.dirname(path) == "scripts" and path.endswith(".py"))
+
+
+#: C3 (1.1.6): the command a refused bundle refresh prints, and where the bundle generator reads and writes. The four
+#: prefixes are the trigger the spec names (the closure is computed from scripts/brother_run.py over scripts/*.py and
+#: bundle/skills, products/ carries the hook and MCP sources, plugin/ the manifests), so a narrower one misses edges.
+BUNDLE_FIX = "python3 scripts/bundle_runtime.py && git add -A bundle"
+BUNDLE_PREFIXES = ("scripts", "plugin", "bundle", "products")
+
+#: Seconds a generator's check or write may take before the commit is refused (a hung generator never passes).
+GEN_TIMEOUT = 120
+
+
+def bundle_trigger(staged):
+    """C3: True when any staged path is under scripts/, plugin/, bundle/ or products/ (the whole first component, so
+    scriptsx/ or x/scripts/ never trigger). Empty: False."""
+    return any(p.split("/", 1)[0] in BUNDLE_PREFIXES and "/" in p for p in staged)
+
+
+def _refresh_generated(cwd, gen_rel, scope, triggers, watched, add, thing, label, fix, done):
+    """(exit_code, [lines]), the one shape refresh_system_doc and refresh_bundle_runtime share. When the staged change
+    triggers, run `<gen> --check`; only when it says stale, regenerate and `git add -A -- <add>`, then confirm nothing in
+    scope still differs from the index. A regeneration that fails, a check still stale after it, an add that fails, a
+    tree still differing after the add, or a git call that cannot run REFUSES the commit with the command to run. A
+    tree with no generator has nothing to keep. When a watched path differs between the working tree and the index
+    (untracked, unstaged), or the commit names its paths and so stages through a temporary index, the generator would
+    describe files this commit does not carry, so nothing is regenerated and a NO-DATA note says so."""
+    def run(cmd, where):
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=where,
+                              timeout=GEN_TIMEOUT)
+
+    def refuse(why):
+        return EXIT_FOUND, ["BLOCK %s: %s. Run: %s" % (label, why, fix)]
+
+    def status(root):
+        st = run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                  "--no-renames", "--"] + list(scope), root)
+        if st.returncode != 0:
+            return None
+        return [(e[0], e[1], e[3:]) for e in (st.stdout or "").split("\0") if len(e) >= 4]
+
+    try:
+        top = run(["git", "rev-parse", "--show-toplevel"], cwd)
+        root = (top.stdout or "").strip()
+        if top.returncode != 0 or not root:
+            return refuse("could not find the repository root")
+        gen = os.path.join(root, gen_rel)
+        if not os.path.isfile(gen):
+            return EXIT_CLEAN, []
+        entries = status(root)
+        if entries is None:
+            return refuse("could not read git status")
+        staged = [path for x, _, path in entries if x not in " ?"]
+        dirty = [path for _, y, path in entries if y != " " and watched(path)]
+        if not triggers(staged):
+            return EXIT_CLEAN, []
+        # `git commit -- <paths>` hands the hook a temporary index (probed
+        # 2026-10-16: .git/next-index-<pid>.lock; a plain commit gives
+        # .git/index, -a and --include give .git/index.lock). A file added
+        # there lands in the commit but never in the real index, which then
+        # carries the old copy as a staged revert. Any index name not known to
+        # be the real one is treated the same way: nothing is regenerated.
+        index = os.path.basename(os.environ.get("GIT_INDEX_FILE", "index"))
+        if index not in ("index", "index.lock"):
+            return EXIT_CLEAN, [
+                "NO-DATA: %s was not regenerated: this commit names its "
+                "paths, so it stages through a temporary index (%s). Run: %s, "
+                "then commit" % (thing, index, fix)]
+        if dirty:
+            return EXIT_CLEAN, [
+                "NO-DATA: %s was not regenerated: %d path(s) it is built "
+                "from differ from the index (first: %s). Stage them, then run: %s"
+                % (thing, len(dirty), sorted(dirty)[0], fix)]
+        check = [sys.executable, "-I", gen, "--check"]
+        if run(check, root).returncode == 0:
+            return EXIT_CLEAN, []
+        regen = run([sys.executable, "-I", gen], root)
+        if regen.returncode != 0:
+            return refuse("regenerating %s failed (exit %d): %s" % (
+                thing, regen.returncode, (regen.stderr or regen.stdout or "").strip()[-160:]))
+        again = run(check, root)
+        if again.returncode != 0:
+            return refuse("%s is still stale after regenerating: %s"
+                          % (thing, (again.stderr or again.stdout or "").strip()[-160:]))
+        added = run(["git", "add", "-A", "--", add], root)
+        if added.returncode != 0:
+            return refuse("git add %s failed: %s" % (thing, (added.stderr or "").strip()[:160]))
+        after = status(root)
+        if after is None:
+            return refuse("could not read git status after staging")
+        left = sorted(path for _, y, path in after if y != " " and watched(path))
+        if left:
+            return refuse("%d path(s) still differ from the index after staging %s (first: %s)"
+                          % (len(left), thing, left[0]))
+    except (OSError, subprocess.SubprocessError) as exc:
+        return refuse("could not run: %s" % exc)
+    return EXIT_CLEAN, [done]
+
+
+def refresh_system_doc(cwd=None):
+    """SP7 (2026-10-16): (exit_code, [lines]). When the staged change touches a
+    file system_doc.py describes, run `system_doc.py --check`; only when it says
+    stale, regenerate and `git add SYSTEM.md`, the way land_batch regenerates
+    before its own check. A regeneration that fails, a check still stale after
+    it, or a git call that cannot run REFUSES the commit with the command to
+    run. A staged change touching nothing described costs one git status call.
+    A tree with no scripts/system_doc.py has no SYSTEM.md to keep: nothing to
+    do. When a described path, or SYSTEM.md itself, differs between the working
+    tree and the index (untracked, unstaged), or the commit names its paths
+    and so stages through a temporary index, the generator would describe
+    files this commit does not carry, so nothing is regenerated and a NO-DATA
+    note says so; the commit goes on as before and pre_push_gate.py's
+    docs-current check still refuses a stale copy. The work is
+    _refresh_generated's, shared with refresh_bundle_runtime."""
+    return _refresh_generated(
+        cwd, os.path.join("scripts", "system_doc.py"), ("scripts", "SYSTEM.md"),
+        lambda staged: any(_described(p) for p in staged),
+        lambda p: _described(p) or p == "SYSTEM.md", "SYSTEM.md", "SYSTEM.md", "system doc",
+        SYSTEM_DOC_FIX, "SYSTEM.md regenerated and staged: the staged change "
+        "touches what scripts/system_doc.py describes")
+
+
+def refresh_bundle_runtime(cwd=None):
+    """C3 (1.1.6): (exit_code, [lines]). When any staged path is under scripts/, plugin/, bundle/ or products/
+    (bundle_trigger), run `bundle_runtime.py --check`; only when it says stale, regenerate both mirrors it keeps
+    (bundle/runtime and the Codex one, bundle/codex-skills, plus the hooks, MCP and antigravity copies it writes under
+    bundle/) and `git add -A -- bundle`. Every path in those four prefixes must match the index before the generator
+    runs (else NO-DATA, nothing regenerated), so what the add stages is the generator's own output; a tree still
+    differing after the add (a generator writing outside bundle/, a partial stage) refuses. A failing or still stale
+    generator refuses with the command. A tree without scripts/bundle_runtime.py has nothing to keep."""
+    return _refresh_generated(
+        cwd, os.path.join("scripts", "bundle_runtime.py"), BUNDLE_PREFIXES, bundle_trigger,
+        lambda p: True, "bundle", "the bundle mirror", "bundle mirror", BUNDLE_FIX,
+        "bundle mirror regenerated and staged: the staged change touches what "
+        "scripts/bundle_runtime.py mirrors")
+
+
+def hooks_dir(cwd=None, runner=None):
+    """The real hooks directory for the repository containing cwd, resolved
+    with `git rev-parse --git-path hooks` rather than a literal
+    "<toplevel>/.git/hooks": inside a git WORKTREE (this task's own repo is
+    one), `.git` is a file pointing elsewhere, hooks are shared at the
+    common git dir, and a literal join would try to descend into a file.
+    None on any git failure (e.g. not a repository)."""
+    runner = runner or (lambda cmd: subprocess.run(
+        cmd, capture_output=True, text=True, cwd=cwd))
+    proc = runner(["git", "rev-parse", "--git-path", "hooks"])
+    if proc.returncode != 0:
+        return None
+    path = (proc.stdout or "").strip()
+    if not path:
+        return None
+    if not os.path.isabs(path):
+        path = os.path.join(cwd or os.getcwd(), path)
+    return os.path.abspath(path)
+
+
+def install_hook(cwd=None):
+    """Install (or compose into) .git/hooks/pre-commit. Unlike
+    install_gate_hook.sh's pre-push installer, which backs up and REPLACES a
+    foreign hook wholesale, this COMPOSES with one: an existing pre-commit
+    hook is somebody else's work, so the fix is to append our call, never to
+    move it aside."""
+    hd = hooks_dir(cwd)
+    if hd is None:
+        print("NO-DATA: not inside a git repository, nothing installed",
+              file=sys.stderr)
+        return EXIT_NO_DATA
+    os.makedirs(hd, exist_ok=True)
+    hook_path = os.path.join(hd, "pre-commit")
+    call = ('python3 "$(git rev-parse --show-toplevel)/scripts/'
+            'self_check_staged.py" || exit 1\n')
+    if os.path.exists(hook_path):
+        with open(hook_path, encoding="utf-8") as fh:
+            existing = fh.read()
+        if MARK in existing:
+            print("ALREADY INSTALLED: %s already calls "
+                  "self_check_staged.py" % hook_path)
+            return EXIT_CLEAN
+        with open(hook_path, "a", encoding="utf-8") as fh:
+            if existing and not existing.endswith("\n"):
+                fh.write("\n")
+            fh.write("\n%s\n%s" % (MARK, call))
+        print("COMPOSED: appended self_check_staged.py to the existing "
+              "pre-commit hook at %s" % hook_path)
+        return EXIT_CLEAN
+    with open(hook_path, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\n%s\n"
+                 "# installed by scripts/self_check_staged.py --install-hook\n"
+                 "%s" % (MARK, call))
+    os.chmod(hook_path, 0o755)
+    print("INSTALLED: %s now runs self_check_staged.py before every commit"
+          % hook_path)
+    return EXIT_CLEAN
+
+
+def check_hook(cwd=None):
+    hd = hooks_dir(cwd)
+    if hd is None:
+        print("NO-DATA: not inside a git repository", file=sys.stderr)
+        return EXIT_NO_DATA
+    hook_path = os.path.join(hd, "pre-commit")
+    if not os.path.exists(hook_path):
+        print("NOT INSTALLED: %s does not exist" % hook_path)
+        return EXIT_FOUND
+    with open(hook_path, encoding="utf-8") as fh:
+        content = fh.read()
+    if MARK in content:
+        print("INSTALLED: %s calls self_check_staged.py" % hook_path)
+        return EXIT_CLEAN
+    print("FOREIGN HOOK: %s exists but does not call self_check_staged.py "
+          "yet" % hook_path)
+    return EXIT_FOUND
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--terms", help="private-terms file "
+                     "(default ~/.brothersbe-private-names)")
+    ap.add_argument("--repo", default=None,
+                     help="run git diff --cached in this directory "
+                          "(default: current directory)")
+    ap.add_argument("--install-hook", action="store_true",
+                     help="install, or compose into, .git/hooks/pre-commit")
+    ap.add_argument("--check-hook", action="store_true",
+                     help="report whether the pre-commit hook is installed")
+    args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+
+    if args.install_hook:
+        return install_hook(args.repo)
+    if args.check_hook:
+        return check_hook(args.repo)
+
+    code, lines = run_scan(args.repo, args.terms)
+    if code == EXIT_CLEAN:
+        code, more = refresh_system_doc(args.repo)
+        lines += more
+    if code == EXIT_CLEAN:
+        code, more = refresh_bundle_runtime(args.repo)
+        lines += more
+    stream = sys.stdout if code == EXIT_CLEAN else sys.stderr
+    for line in lines:
+        print(line, file=stream)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

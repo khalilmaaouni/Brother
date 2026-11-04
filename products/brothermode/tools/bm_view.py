@@ -87,7 +87,7 @@ bl = bv.bl
 # ---------------------------------------------------------------------------
 
 CONSENT_REFUSAL = ("bm_view: setup is not complete yet; run: "
-                   "python3 scripts/setup.py")
+                   "python3 " + os.path.join(os.path.dirname(HERE), "scripts", "setup.py"))
 
 
 class ConsentMissing(Exception):

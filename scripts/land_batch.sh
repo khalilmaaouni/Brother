@@ -41,7 +41,10 @@ SERIAL_QLOG="$EVDIR/serial-queue.log"
 LAND_LOG="$EVDIR/serial-land.log"
 LOCK="$EVDIR/land-batch.lock"
 STAMP="$(date +%Y%m%d-%H%M%S)-$$"
-WT="/private/tmp/bh-batch-$STAMP"
+# Where the integration worktrees go. /private/tmp stays the default (the tool has always used it); a confined run
+# (the hermetic check's sandbox cannot write there) names its own writable folder.
+WTROOT="${LAND_BATCH_WTROOT:-/private/tmp}"
+WT="$WTROOT/bh-batch-$STAMP"
 GATE_LOG="$EVDIR/batch-gate-$STAMP.log"
 
 dry_run=0
@@ -314,7 +317,7 @@ overall_rc=1
 gate_and_merge_half() {  # gate_and_merge_half <label> <pr...>
   local label="$1"; shift
   [ $# -eq 0 ] && return 0
-  local hw="/private/tmp/bh-batch-$STAMP-$label"
+  local hw="$WTROOT/bh-batch-$STAMP-$label"
   git -C "$REPO_DIR" worktree add -q "$hw" origin/main || { for n in "$@"; do note_leftover "$n" "could not build the $label bisect worktree"; done; return 1; }
   CLEANUP_WT+=("$hw")
   (cd "$hw" && git checkout -q -b "batch-$STAMP-$label")

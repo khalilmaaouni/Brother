@@ -15,8 +15,10 @@ import os
 import json
 import shutil
 import re
+import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -400,34 +402,37 @@ class ParallelPhase(unittest.TestCase):
         self.assertEqual([n for n in os.listdir(self.tmp) if n.startswith("required-fast-pool.")], [])
 
 
-class TheLongSuitesRunAsTwoShards(unittest.TestCase):
+class TheLongSuitesRunAsFourShards(unittest.TestCase):
+    """GATE1, 2026-11-01: quarters, so no shard of the two longest suites is the
+    gate's critical path alone (halves of brother-run took 321 s and 144 s)."""
     LONG = {"brother-run": "test_brother_run.py", "export-public": "test_export_public.py"}
+    SUFFIXES = ("", "-2", "-3", "-4")
 
     def _rows(self) -> dict:
         return dict(re.findall(r'^run_check "([^"]+)"\s+(.+)$', _SOURCE, re.M))
 
-    def test_each_long_suite_is_declared_as_two_shards(self) -> None:
+    def test_each_long_suite_is_declared_as_four_shards(self) -> None:
         rows = self._rows()
         for name, filename in self.LONG.items():
-            self.assertEqual(rows.get(name),
-                             "env BROTHER_TEST_SHARD=1/2 python3 scripts/%s -v" % filename)
-            self.assertEqual(rows.get(name + "-2"),
-                             "env BROTHER_TEST_SHARD=2/2 python3 scripts/%s -v" % filename)
+            for k, suffix in enumerate(self.SUFFIXES, 1):
+                self.assertEqual(rows.get(name + suffix),
+                                 "env BROTHER_TEST_SHARD=%d/4 python3 scripts/%s -v" % (k, filename))
             matching = sorted(n for n, cmd in rows.items() if "scripts/%s" % filename in cmd)
-            self.assertEqual(matching, sorted([name, name + "-2"]))
+            self.assertEqual(matching, sorted(name + s for s in self.SUFFIXES))
 
     def test_every_shard_starts_in_the_parallel_phase(self) -> None:
         start = _SOURCE.index('  case "$1" in')
         end = _SOURCE.index(') check_phase=parallel ;;', start)
         words = re.findall(r"[a-z0-9-]+", _SOURCE[start:end])
         for name in self.LONG:
-            self.assertIn(name, words)
-            self.assertIn(name + "-2", words)
+            for suffix in self.SUFFIXES:
+                self.assertIn(name + suffix, words)
 
-    def test_the_four_shards_start_right_after_version_truth(self) -> None:
+    def test_the_eight_shards_start_right_after_version_truth(self) -> None:
         names = re.findall(r'^run_check "([^"]+)"', _SOURCE, re.M)
-        self.assertEqual(names[:5], ["version-truth", "brother-run", "export-public",
-                                     "brother-run-2", "export-public-2"])
+        self.assertEqual(names[:9], ["version-truth", "brother-run", "export-public",
+                                     "brother-run-2", "export-public-2", "brother-run-3",
+                                     "export-public-3", "brother-run-4", "export-public-4"])
 
     def test_both_long_suites_hand_their_loader_to_suite_shard(self) -> None:
         import ast
@@ -492,6 +497,8 @@ class ReceiptSuitesRunSideBySide(unittest.TestCase):
         self.assertIn("pass 2   fail 0   no-data 0", out)
         self.assertLess(wall, 2.8, "the two receipt suites did not overlap")
 
+    # A stub tree carries no heavy_slot.py, so it runs at 4, the width of a tree
+    # without the load controller (GATE1, 2026-11-01; GateOneWideGate drives the ceiling).
     FOUR = ['run_check "version-truth" sh -c "sleep 1.5"',
             'run_check "bundle-runtime" sh -c "sleep 1.5"',
             'run_check "surface" sh -c "sleep 1.5"',
@@ -508,6 +515,308 @@ class ReceiptSuitesRunSideBySide(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("pass 5   fail 0   no-data 0", out)
         self.assertGreaterEqual(wall, 3.0, "the default ran a fifth check side by side")
+
+
+class GateOneWideGate(unittest.TestCase):
+    """GATE1, 2026-11-01: the default width is heavy_slot's load ceiling, each
+    check side by side gets its own TMPDIR, and the six audited serial rows
+    joined the side by side passes."""
+
+    AUDITED = ("deploy-canary", "bm-hookbench", "integrate", "bm-hookperf",
+               "plugin-runtime-tests-fast", "supply-chain-gate")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=_FIXTURES.name)
+
+    def gate(self, stubs, ceiling=None, **env):
+        path = build_stub_script(stubs)
+        if ceiling is not None:
+            with open(os.path.join(os.path.dirname(path), "heavy_slot.py"), "w") as fh:
+                fh.write("def load_ceiling(env):\n    return %r\n" % ceiling)
+        full = dict(os.environ)
+        for k in ("BROTHER_JEV_STATE_DIR", "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+                  "BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_LOG",
+                  "REQUIRED_FAST_JOBS", "REQUIRED_FAST_ORDER_PIN", "BROTHER_LOAD_CEILING"):
+            full.pop(k, None)
+        full.update(TMPDIR=self.tmp, BROTHER_HEAVY_SLOT="off")
+        full.update(env)
+        proc = subprocess.run(["sh", path], capture_output=True, text=True, timeout=60, env=full)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def width(self, out):
+        found = re.findall(r"^width (\d+)", out, re.M)
+        self.assertEqual(len(found), 1, out)
+        return int(found[0])
+
+    def test_the_default_width_is_the_load_ceiling(self):
+        for ceiling, expected in ((6.0, 6), (3.0, 3), (0.5, 1)):
+            code, out = self.gate(['run_check "version-truth" true'], ceiling=ceiling)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.width(out), expected, out)
+
+    def test_a_named_width_still_wins_over_the_ceiling(self):
+        code, out = self.gate(['run_check "version-truth" true'], ceiling=6.0, REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.width(out), 2, out)
+
+    def test_no_heavy_slot_falls_back_to_four_and_says_so(self):
+        code, out = self.gate(['run_check "version-truth" true'])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.width(out), 4, out)
+        self.assertIn("no load ceiling read from scripts/heavy_slot.py; width 4", out)
+
+    def test_each_check_side_by_side_gets_its_own_tmpdir_and_its_output_outlives_it(self):
+        a, b = os.path.join(self.tmp, "a"), os.path.join(self.tmp, "b")
+        code, out = self.gate([
+            'run_check "version-truth" sh -c \'echo "$TMPDIR" > %s; test -d "$TMPDIR"\'' % a,
+            'run_check "surface" sh -c \'echo "$TMPDIR" > %s; test -d "$TMPDIR"\'' % b,
+        ], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 0, out)
+        with open(a) as fa, open(b) as fb:
+            one, two = fa.read().strip(), fb.read().strip()
+        self.assertNotEqual(one, two, "two checks side by side shared one TMPDIR")
+        for private in (one, two):
+            self.assertTrue(private.startswith(os.path.join(self.tmp, "required-fast-pool.")), private)
+            self.assertFalse(os.path.exists(private), "a private TMPDIR outlived the run: %s" % private)
+        kept = re.findall(r"\[full: ([^\]]+)\]", out)
+        self.assertEqual(len(kept), 2, out)
+        for path in kept:
+            self.assertEqual(os.path.dirname(path), self.tmp, path)
+            self.assertTrue(os.path.isfile(path), "a kept output named on a summary line is gone: %s" % path)
+
+    def test_a_failing_check_side_by_side_keeps_its_output_after_the_run(self):
+        code, out = self.gate(['run_check "version-truth" sh -c "echo boom; exit 1"',
+                               'run_check "surface" true'], REQUIRED_FAST_JOBS="2")
+        self.assertEqual(code, 1, out)
+        kept = re.findall(r"\[full: ([^\]]*required-fast-fail-[^\]]+)\]", out)
+        self.assertEqual(len(kept), 1, out)
+        self.assertEqual(os.path.dirname(kept[0]), self.tmp, kept[0])
+        with open(kept[0]) as fh:
+            self.assertIn("boom", fh.read())
+
+    def test_the_six_audited_rows_run_side_by_side(self):
+        start = _SOURCE.index('  case "$1" in')
+        end = _SOURCE.index(') check_phase=parallel ;;', start)
+        words = re.findall(r"[a-z0-9-]+", _SOURCE[start:end])
+        declared = re.findall(r'^\s*run_check "([^"]+)"', _SOURCE, re.M)
+        for name in self.AUDITED:
+            self.assertIn(name, words)
+            self.assertIn(name, declared)
+
+
+class AWholeGateRunsAlone(unittest.TestCase):
+    """GATE1, orchestrator decision 2026-11-01: three whole gates ran at once that day (five waits "unqueued" after
+    the 3600 s bound, five admissions "of 4 slots"). A whole gate now holds heavy_slot's machine lock exclusively,
+    waits with no bound, refuses without a live slot and goes stale after GATE_STALE_S. The real heavy_slot.py runs
+    here on a private slot directory with the load seam, never on the machine's own line."""
+
+    ROW = 'run_check "version-truth" true'
+
+    def setUp(self):
+        self.work = tempfile.mkdtemp(dir=_FIXTURES.name)
+        self.slots = os.path.join(self.work, "slots")
+        self.load = os.path.join(self.work, "load1")
+        with open(self.load, "w") as fh:
+            fh.write("0\n")
+
+    def env(self, **extra):
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("BROTHER_HEAVY_SLOT", "BROTHER_JEV", "BROTHER_LOAD", "REQUIRED_FAST_"))
+               and k not in ("LOCAL_SLOTS", "BROTHER_SLOT_DIR", "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR",
+                             "CODEX_HOME", "BROTHER_MACHINE_RESERVATION_PATH")}
+        env.update(LOCAL_SLOTS="1", BROTHER_SLOT_DIR=self.slots, BROTHER_LOAD_READING_FILE=self.load,
+                   TMPDIR=tempfile.mkdtemp(dir=self.work))
+        env.update(extra)
+        return env
+
+    def gate_tree(self, rows, real_slot=True):
+        path = build_stub_script(rows)
+        here = os.path.dirname(path)
+        if real_slot:
+            for name in ("heavy_slot.py", "resource_gate.py", "brother_paths.py"):
+                shutil.copyfile(os.path.join(HERE, name), os.path.join(here, name))
+        else:
+            with open(os.path.join(here, "heavy_slot.py"), "w") as fh:
+                fh.write("import os\n"
+                         "def load_ceiling(env):\n    return 6.0\n"
+                         "if __name__ == '__main__':\n"
+                         "    print('queued with ' + ' '.join('%s=%s' % (k, os.environ.get('BROTHER_HEAVY_SLOT_' + k))"
+                         " for k in ('WAIT', 'DEADLINE', 'EXCLUSIVE', 'WEIGHT')))\n")
+        return path
+
+    def test_the_gate_queues_alone_with_no_bound_whatever_its_caller_names(self):
+        code, out = self.run_gate(self.gate_tree([self.ROW], real_slot=False),
+                                  self.env(BROTHER_HEAVY_SLOT_WAIT="1", BROTHER_HEAVY_SLOT_WEIGHT="4"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("queued with WAIT=inf DEADLINE=5982 EXCLUSIVE=1 WEIGHT=1", out)
+
+    def test_the_stale_age_can_be_lowered_and_never_raised(self):
+        for given, expected in (("3", "3"), ("99999", "5982"), ("0", "5982"), ("x", "5982")):
+            code, out = self.run_gate(self.gate_tree([self.ROW], real_slot=False),
+                                      self.env(REQUIRED_FAST_STALE_S=given))
+            self.assertEqual(code, 0, out)
+            self.assertIn("DEADLINE=%s " % expected, out, given)
+
+    def test_a_gate_handed_an_unqueued_slot_refuses_with_no_data(self):
+        # this process is the gate shell's parent, standing in for the heavy_slot that gave up
+        code, out = self.run_gate(self.gate_tree([self.ROW]), self.env(BROTHER_HEAVY_SLOT_HELD="unqueued",
+                                                                     BROTHER_HEAVY_SLOT_HOLDER=str(os.getpid())))
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA: this whole gate holds no machine slot", out)
+        self.assertNotIn("pass 1", out)
+
+    def test_an_unqueued_slot_from_any_ancestor_refuses(self):
+        """GATE1 review round 2: a process between the unqueued wrapper and the gate (sh -c 'cd . && sh ...')
+        must not turn the refusal off, so whoever handed HELD=unqueued down, a real-tree gate refuses."""
+        code, out = self.run_gate(self.gate_tree([self.ROW]), self.env(BROTHER_HEAVY_SLOT_HELD="unqueued",
+                                                                     BROTHER_HEAVY_SLOT_HOLDER=str(os.getppid())))
+        self.assertEqual(code, 2, out)
+        self.assertIn("NO-DATA: this whole gate holds no machine slot", out)
+
+    def test_a_stub_fixture_runs_straight_under_an_unqueued_battery(self):
+        """check_all.sh past its bound hands HELD=unqueued to every row: a stub tree (no heavy_slot.py) still runs."""
+        code, out = self.run_gate(build_stub_script([self.ROW]), self.env(BROTHER_HEAVY_SLOT_HELD="unqueued",
+                                                                        BROTHER_HEAVY_SLOT_HOLDER=str(os.getppid())))
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 1   fail 0", out)
+
+    def test_off_runs_straight_through_whatever_slot_it_inherits(self):
+        """GATE1 review MEDIUM 1: off is the documented harness switch, so it beats every refusal."""
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        for held, holder in (("unqueued", str(os.getpid())), ("0", str(gone.pid))):
+            code, out = self.run_gate(self.gate_tree([self.ROW]),
+                                      self.env(BROTHER_HEAVY_SLOT="off", BROTHER_HEAVY_SLOT_HELD=held,
+                                               BROTHER_HEAVY_SLOT_HOLDER=holder))
+            self.assertEqual(code, 0, out)
+            self.assertIn("pass 1   fail 0", out)
+
+    def test_a_gate_whose_holder_has_ended_refuses_with_no_data(self):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        code, out = self.run_gate(self.gate_tree([self.ROW]),
+                                  self.env(BROTHER_HEAVY_SLOT_HELD="0", BROTHER_HEAVY_SLOT_HOLDER=str(gone.pid)))
+        self.assertEqual(code, 2, out)
+        self.assertIn("which has ended", out)
+        self.assertNotIn("pass 1", out)
+
+    def test_a_gate_nested_under_a_live_holder_runs_at_once(self):
+        code, out = self.run_gate(self.gate_tree([self.ROW]),
+                                  self.env(BROTHER_HEAVY_SLOT_HELD="0", BROTHER_HEAVY_SLOT_HOLDER=str(os.getpid())))
+        self.assertEqual(code, 0, out)
+        self.assertIn("pass 1   fail 0", out)
+
+    def test_a_stale_gate_ends_as_no_data_and_says_so(self):
+        started = time.time()
+        code, out = self.run_gate(self.gate_tree(['run_check "version-truth" sleep 120']),
+                                  self.env(REQUIRED_FAST_STALE_S="5"))
+        self.assertEqual(code, 2, out)
+        self.assertLess(time.time() - started, 60)
+        self.assertIn("STALE holder: pid", out)
+        self.assertNotIn("pass 1", out)
+        with open(os.path.join(self.slots, "waits.jsonl")) as fh:
+            self.assertEqual(sum('"stale"' in line for line in fh), 1)
+
+    def test_a_four_slot_run_does_not_start_while_a_whole_gate_holds_the_machine(self):
+        span = os.path.join(self.work, "gate-span")
+        row = ('run_check "version-truth" sh -c \'python3 -c "import time; print(time.time())" > "%s"; sleep 4; '
+               'python3 -c "import time; print(time.time())" >> "%s"\'' % (span, span))
+        gate = subprocess.Popen(["sh", self.gate_tree([row])], env=self.env(), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+        deadline = time.time() + 30
+        while time.time() < deadline and not os.path.exists(span):
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(span), "the gate never started its row")
+        mark = os.path.join(self.work, "four-slot-start")
+        other = subprocess.run([sys.executable, os.path.join(HERE, "heavy_slot.py"), sys.executable, "-c",
+                                "import time; open(%r, 'w').write(str(time.time()))" % mark],
+                               env=self.env(LOCAL_SLOTS="4", BROTHER_HEAVY_SLOT_WAIT="60"),
+                               capture_output=True, text=True, timeout=90)
+        out = gate.communicate(timeout=60)[0]
+        self.assertEqual(gate.returncode, 0, out)
+        self.assertEqual(other.returncode, 0, other.stderr)
+        with open(span) as fh:
+            gate_end = float(fh.read().split()[1])
+        with open(mark) as fh:
+            other_start = float(fh.read())
+        self.assertGreaterEqual(other_start, gate_end, "a LOCAL_SLOTS=4 run started inside a whole gate")
+
+    def run_gate(self, path, env, timeout=120):
+        proc = subprocess.run(["sh", path], env=env, capture_output=True, text=True, timeout=timeout)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def overlap(self, **extra):
+        spans, procs = [], []
+        for i in (1, 2):
+            span = os.path.join(self.work, "span-%d" % i)
+            spans.append(span)
+            row = ('run_check "version-truth" sh -c \'python3 -c "import time; print(time.time())" > "%s"; sleep 2; '
+                   'python3 -c "import time; print(time.time())" >> "%s"\'' % (span, span))
+            procs.append(subprocess.Popen(["sh", self.gate_tree([row])], stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT, text=True, env=self.env(**extra)))
+        outs = [p.communicate(timeout=120)[0] for p in procs]
+        for p, out in zip(procs, outs):
+            self.assertEqual(p.returncode, 0, out)
+            self.assertNotIn("UNQUEUED", out)
+        times = []
+        for span in spans:
+            with open(span) as fh:
+                times.append([float(x) for x in fh.read().split()])
+        (a0, a1), (b0, b1) = times
+        self.assertTrue(a1 <= b0 or b1 <= a0, "two slotted gates overlapped: %.2f-%.2f and %.2f-%.2f"
+                        % (a0, a1, b0, b1))
+
+    def test_two_gates_started_together_never_overlap(self):
+        self.overlap()
+
+    def test_a_caller_with_four_slots_still_gets_one_whole_gate_at_a_time(self):
+        self.overlap(LOCAL_SLOTS="4")
+
+    def test_the_checks_inside_still_see_their_callers_slot_count(self):
+        row = 'run_check "version-truth" sh -c \'echo "inside=${LOCAL_SLOTS:-none} held=$BROTHER_HEAVY_SLOT_HELD"\''
+        for caller, inside in (("4", "inside=4"), (None, "inside=none")):
+            env = self.env()
+            if caller is None:
+                env.pop("LOCAL_SLOTS")
+            else:
+                env["LOCAL_SLOTS"] = caller
+            code, out = self.run_gate(self.gate_tree([row]), env)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn("is more than the", out, "the gate asked for more slots than its pinned one")
+            kept = re.findall(r"\[full: ([^\]]+)\]", out)
+            self.assertEqual(len(kept), 1, out)
+            with open(kept[0]) as fh:
+                self.assertEqual(fh.read().strip(), "%s held=0" % inside, caller)
+
+    def test_a_dead_holder_frees_the_slot_for_a_waiting_gate(self):
+        holder = subprocess.Popen([sys.executable, os.path.join(HERE, "heavy_slot.py"), sys.executable, "-c",
+                                   "import time; time.sleep(120)"], env=self.env(), start_new_session=True,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            label = os.path.join(self.slots, "slot-0")
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                if os.path.exists(label):
+                    with open(label) as fh:
+                        if ("pid %d" % holder.pid) in fh.read():
+                            break
+                time.sleep(0.1)
+            else:
+                self.fail("the holder never took slot 0")
+            gate = subprocess.Popen(["sh", self.gate_tree([self.ROW])], env=self.env(), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+            time.sleep(3)
+            self.assertIsNone(gate.poll(), "the gate ran while slot 0 was held")
+            os.killpg(holder.pid, signal.SIGKILL)
+            out = gate.communicate(timeout=60)[0]
+            self.assertEqual(gate.returncode, 0, out)
+            self.assertIn("pass 1   fail 0", out)
+        finally:
+            try:
+                os.killpg(holder.pid, signal.SIGKILL)
+            except OSError:
+                pass  # sbe: allow-silent the holder already ended
+            holder.wait()
 
 
 class TwoWorktreesShareOneTempDirectory(unittest.TestCase):

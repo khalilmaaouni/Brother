@@ -412,11 +412,22 @@ def selftest():
     a human reading the text described the same run differently. Cases are built EAGERLY, so one
     raising expression takes the whole run with it; this wrapper is what turns that into a readable
     refusal. It does not make a broken module pass: it still returns non zero."""
+    # THE SELFTEST NEVER WRITES THE LIVE BRIDGE LEDGER (STAB1.b, measured 2026-11-01: 2244 of 2350 rows in
+    # ~/.claude/evidence/bridge-calls.jsonl were this selftest's fake x/ models). Its rows go to a scratch folder it
+    # removes, the way model_call's selftest does it.
+    import shutil, tempfile
+    _root = tempfile.mkdtemp(prefix="selftest-model-bench-")
+    _prev_b = os.environ.get("BROTHER_BRIDGE_CALLS_LEDGER")
+    os.environ["BROTHER_BRIDGE_CALLS_LEDGER"] = os.path.join(_root, "bridge-calls.jsonl")
     try:
         return _selftest_body()
     except Exception as exc:
         print("selftest: FAILED before it could finish, %s: %s" % (type(exc).__name__, str(exc)[:120]))
         return 1
+    finally:
+        if _prev_b is None: os.environ.pop("BROTHER_BRIDGE_CALLS_LEDGER", None)
+        else: os.environ["BROTHER_BRIDGE_CALLS_LEDGER"] = _prev_b
+        shutil.rmtree(_root, ignore_errors=True)   # sbe: allow-silent selftest scratch
 
 
 def _selftest_body():

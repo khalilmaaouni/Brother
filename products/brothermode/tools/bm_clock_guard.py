@@ -18,6 +18,30 @@ _SHELL_META_RE = re.compile(r"[;&|<>$`(){}\n\r\\]")
 # A date +FORMAT counts only when built from conversions (a percent sign, an optional padding flag, a letter) and
 # fixed separators: a digit prints itself and a glob or a tilde lets the shell substitute a file name, so either
 # could print any time (security review of c96aecd19, 2026-10-21).
+#: Read-only commands that print STORED state (a file's bytes or metadata, a commit's record), whose output can only
+#: carry a time that already existed. A time generator (date, clock, printf, echo, an interpreter) is never one: its
+#: output is a time the call produced, which the 2026-10-21 adversarial review proved can be steered.
+OBSERVER_COMMANDS: tuple = ("ls", "stat", "cat", "head", "tail", "grep", "rg", "git", "sort", "uniq", "cut", "wc")
+#: git observes only through these subcommands; find is not an observer (-printf and -exec produce output). Options
+#: that hand control to another program (rg --pre, sort --compress-program, git textconv and external diff, an output
+#: file) make a command a producer too (security reviews of dc2004d9d, 2026-10-31).
+_GIT_OBSERVER_SUBCOMMANDS: tuple = ("log", "show", "blame")
+_PRODUCER_OPTION_PREFIXES: tuple = ("--pre", "--compress-program", "--textconv", "--ext-diff", "--output", "-c")
+#: Observers that read only metadata (a listing, a stat, a commit record), never a file's bytes.
+_METADATA_OBSERVERS: tuple = ("ls", "stat", "git")
+#: Tools and shell forms that write a file during the turn (third security review, 2026-10-31).
+_FILE_EDIT_TOOLS: tuple = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+_WRITES_FILES_RE = re.compile(r">|\btee\b|\btouch\b|\bcp\b|\bmv\b|\bdd\b|\binstall\b")
+
+
+def _metadata_only(command: str) -> bool:
+    """True when every pipeline stage after an optional leading cd is a metadata observer."""
+    text = re.sub(r"^\s*cd\s+\S+\s*&&\s*", "", command or "")
+    try:
+        return all(shlex.split(seg)[:1] and shlex.split(seg)[0] in _METADATA_OBSERVERS for seg in text.split("|"))
+    except ValueError:
+        return False
+_OBSERVER_SEGMENT_META_RE = re.compile(r"[;&<>$`(){}\n\r\\]")
 _DATE_FORMAT_RE = re.compile(r"\+(?:%[-_^#]?[A-Za-z%]|[ :/,.TZ-])*")
 
 
@@ -182,18 +206,111 @@ def parse_clock_evidence(transcript_text: str) -> list[int]:
             minutes.append(hour * 60 + minute)
     return minutes
 
-def decide(outgoing_text: str, clock_minutes: list[int]) -> tuple[str, str]:
+def _is_producer_option(token: str) -> bool:
+    """True for an option that hands control to another program, including the unique abbreviation git and other
+    GNU style parsers accept (--textc for --textconv): any long option that is a prefix of a dangerous one counts
+    (third security review, 2026-10-31). Every dangerous long option is a prefix of itself, so the exact form needs no
+    separate check; git -c is refused by the subcommand rule (an exact-prefix branch here was measured redundant,
+    mutation F2, and removed)."""
+    if token.startswith("--") and len(token) > 2:
+        name = token.split("=", 1)[0]
+        return any(p.startswith("--") and p.startswith(name) for p in _PRODUCER_OPTION_PREFIXES)
+    return False
+
+
+def _observes_stored_state(command: str) -> bool:
+    """True for a command whose every pipeline stage is an OBSERVER_COMMANDS program, optionally after one leading
+    `cd <dir> &&`. Any substitution, redirection, sequence or second `&&` makes it False: such a command can print a
+    time it produced rather than one it read."""
+    if not isinstance(command, str):
+        return False
+    text = command.strip()
+    lead = re.match(r"cd\s+(\S+)\s*&&\s*", text)
+    if lead and not _OBSERVER_SEGMENT_META_RE.search(lead.group(1)):
+        text = text[lead.end():]
+    if not text or _OBSERVER_SEGMENT_META_RE.search(text):
+        return False
+    for segment in text.split("|"):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            return False
+        if not tokens or tokens[0] not in OBSERVER_COMMANDS:
+            return False
+        # A format directive builds output from pieces (git --format %x3a, stat -f), so it is produced, not read.
+        if any("%" in t or _is_producer_option(t) for t in tokens[1:]):
+            return False
+        if tokens[0] == "git" and (len(tokens) < 2 or tokens[1] not in _GIT_OBSERVER_SUBCOMMANDS):
+            return False
+    return True
+
+
+def parse_observed_times(evidence_text: str) -> frozenset:
+    """Time tokens that appear in the OUTPUT of an observer command (_observes_stored_state) in the evidence
+    extract_evidence kept (this turn only), minus any token that also appears in that command's own text. A Read
+    result carries no command and stays outside, as m13 pins. Limit, named: an observer can still print a time someone
+    wrote into a file earlier; this guard stops a session inventing a time, it does not judge what a file says."""
+    evidence_text = _require_text(evidence_text, "evidence_text")
+    seen: set = set()
+    records = []
+    typed: list = []
+    wrote_this_turn = False
+    for raw_line in evidence_text.splitlines():
+        try:
+            record = json.loads(raw_line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("type") != "tool_result":
+            continue
+        records.append(record)
+        # Any time typed into ANY tool input this turn (a Write's content, an Edit, a command) is never evidence:
+        # write a time into a file, then cat it, is the model observing itself.
+        command = record.get("command") if isinstance(record.get("command"), str) else ""
+        # The input as extract_evidence serialised it: json.dumps never escapes an ASCII digit or a colon, so every
+        # time typed into any field is verbatim in this text (a walk of the decoded values was measured equivalent,
+        # mutation R4, and is not kept).
+        typed.append(record.get("input") if isinstance(record.get("input"), str) else "")
+        typed.append(command)
+        if record.get("tool") in _FILE_EDIT_TOOLS or _WRITES_FILES_RE.search(command):
+            wrote_this_turn = True
+    # One rule covers every typed form: a typed time's four digits stay contiguous once non-digits are removed, also
+    # when shell quoting splits it ("13"":24") or a touch -t stamp embeds it. A separate typed-token set and a shell
+    # decode were measured redundant on the final code (mutations F3, F4) and removed.
+    typed_digits = [re.sub(r"\D", "", s) for s in typed]
+    for record in records:
+        command = record.get("command")
+        if record.get("tool", "Bash") != "Bash" or not _observes_stored_state(command):
+            continue
+        # A file this turn could have written is read back only by its metadata (ls, stat, git), never its bytes: two
+        # pieces written separately and joined by cat would otherwise read as one observed time.
+        if wrote_this_turn and not _metadata_only(command):
+            continue
+        output = next((record[f] for f in CLOCK_RESULT_FIELDS if isinstance(record.get(f), str)), None)
+        if output is None:
+            continue
+        for token, _s, _e, _h, _m in find_times(output):
+            digits = token.replace(":", "")
+            if not any(digits in d for d in typed_digits):
+                seen.add(token)
+    return frozenset(seen)
+
+
+def decide(outgoing_text: str, clock_minutes: list[int], observed: frozenset = frozenset()) -> tuple[str, str]:
+    """`observed` holds times seen verbatim in a tool's output earlier in this turn (parse_observed_times): a copied
+    time is evidence of a past moment, not a claim about now, so it needs no clock read (B1 to B3, 2026-10-31)."""
     outgoing_text = _require_text(outgoing_text, "outgoing_text")
     clock_minutes = _require_minutes(clock_minutes, "clock_minutes")
+    if not isinstance(observed, (set, frozenset)):
+        raise ValueError("observed must be a set of time tokens")
     candidate_times = find_times(outgoing_text)
     if not candidate_times:
         return ("ALLOW", "NO-TIME")
     required: list[tuple[str, int, int]] = []
     for token, start, end, hour, minute in candidate_times:
-        if not is_estimate_labeled(outgoing_text, start, end):
+        if not is_estimate_labeled(outgoing_text, start, end) and token not in observed:
             required.append((token, hour, minute))
     if not required:
-        return ("ALLOW", "ESTIMATE-ONLY")
+        return ("ALLOW", "OBSERVED" if any(t[0] in observed for t in candidate_times) else "ESTIMATE-ONLY")
     if not clock_minutes:
         return ("BLOCK", "NO-DATA")
     offenders: list[str] = []
@@ -332,6 +449,8 @@ def extract_evidence(payload: dict) -> str:
                 break
     kept: list[str] = []
     commands: dict[str, str] = {}
+    inputs: dict[str, str] = {}
+    names: dict[str, object] = {}
     for index in range(last_user + 1, stop_at):
         record = parsed[index]
         if not isinstance(record, dict):
@@ -345,14 +464,27 @@ def extract_evidence(payload: dict) -> str:
             if record.get("type") == "assistant" and block.get("type") == "tool_use":
                 tool_input = block.get("input")
                 command = tool_input.get("command") if isinstance(tool_input, dict) else None
-                if isinstance(block.get("id"), str) and isinstance(command, str):
+                # Only the built-in Bash tool runs a command: another tool's input that happens to carry a
+                # "command" key is not one, for the clock read and the observed time alike (security review,
+                # 2026-10-31).
+                if isinstance(block.get("id"), str) and isinstance(command, str) and block.get("name") == "Bash":
                     commands[block["id"]] = command
+                if isinstance(block.get("id"), str):
+                    inputs[block["id"]] = json.dumps(tool_input)
+                    names[block["id"]] = block.get("name")
             elif record.get("type") == "user" and block.get("type") == "tool_result":
-                command = commands.get(block.get("tool_use_id"))
+                use_id = block.get("tool_use_id")
+                command = commands.get(use_id)
                 output = _block_text(block)
-                if command is not None and output is not None:
-                    kept.append(json.dumps({"type": "tool_result", "tool_use_id": block.get("tool_use_id"),
-                                            "command": command, "stdout": output}))
+                if output is None or use_id not in inputs:
+                    continue
+                # Every tool's output is kept with its own input, for parse_observed_times; only a record with a
+                # command is one parse_clock_evidence can read as a clock, exactly as before.
+                flat = {"type": "tool_result", "tool_use_id": use_id, "input": inputs[use_id], "stdout": output,
+                        "tool": names.get(use_id)}
+                if command is not None:
+                    flat["command"] = command
+                kept.append(json.dumps(flat))
     return "\n".join(kept)
 
 
@@ -488,14 +620,16 @@ def _stop_verdict(payload: dict) -> int:
     # two linear passes over the file; a tail read with a record boundary
     # scan if transcripts of tens of MB ever make that bite.
     try:
-        evidence_minutes = parse_clock_evidence(extract_evidence(payload))
+        stop_evidence = extract_evidence(payload)
+        evidence_minutes = parse_clock_evidence(stop_evidence)
+        observed = parse_observed_times(stop_evidence)
     except ValueError:
-        evidence_minutes = []
+        evidence_minutes, observed = [], frozenset()
     except Exception:
         _warn("bm_clock_guard: CORRUPT at Stop: the transcript could not be parsed for clock evidence")
         return 0
     try:
-        decision, reason = decide(text, evidence_minutes)
+        decision, reason = decide(text, evidence_minutes, observed)
     except Exception:
         _warn("bm_clock_guard: CORRUPT at Stop: the last assistant message could not be judged")
         return 0
@@ -545,8 +679,9 @@ def _warn(text: str) -> None:
 
 
 _REMEDY = {
-    "NO-DATA": "no clock read earlier in this turn backs it; run date first and quote its output, write the time as "
-               "15h20, or label it an estimate",
+    "NO-DATA": "no clock read and no tool output earlier in this turn backs it; run date first and quote its output, "
+               "quote the time from a command or file output read earlier in this turn, write it as 15h20, or label "
+               "it an estimate",
     "MISMATCH": "it is more than 2 minutes from every clock read in this turn; quote the clock's own time",
 }
 
@@ -556,7 +691,7 @@ def _deny_reason(reason: str, times: list[str]) -> str:
     (2026-10-21: the matched token was a UTC offset, invisible as a time to the reader)."""
     if not times:
         return reason
-    return "%s: the clock time(s) %s in this call: %s" % (reason, ", ".join(times),
+    return "%s: bm_clock_guard (no fabrication): the clock time(s) %s in this call: %s" % (reason, ", ".join(times),
                                                          _REMEDY.get(reason, "see bm_clock_guard.py"))
 
 
@@ -778,8 +913,9 @@ def main(argv: list[str]) -> int:
         return _emit_guard_verdict(payload, "BLOCK", "CORRUPT", [])
     try:
         evidence_minutes = parse_clock_evidence(evidence_text)
-        decision, verdict_reason = decide(text, evidence_minutes)
-        report_times = _times_to_report(text)
+        observed = parse_observed_times(evidence_text)
+        decision, verdict_reason = decide(text, evidence_minutes, observed)
+        report_times = [t for t in _times_to_report(text) if t not in observed]
     except Exception:
         return _emit_guard_verdict(payload, "BLOCK", "CORRUPT", [])
     return _emit_guard_verdict(payload, decision, verdict_reason, report_times)

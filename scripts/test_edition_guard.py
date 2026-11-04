@@ -22,13 +22,22 @@ ROOT = os.path.dirname(HERE)
 PUBLIC_HTTPS = "https://github.com/khalilmaaouni/Brother"
 PUBLIC_SSH = "git@github.com:khalilmaaouni/Brother.git"
 
+# editions/ and the root edition marker are not shipped in the public export, so there the premise of the cases that
+# read them is absent, not the behaviour broken. A tree that carries the markers still runs every one of them.
+PERSONAL_MARKER = os.path.join(ROOT, "editions", "personal", ".brother-edition")
+CORE_MARKER = os.path.join(ROOT, ".brother-edition")
+NEEDS_PERSONAL = unittest.skipUnless(os.path.isfile(PERSONAL_MARKER), "this tree carries no personal edition marker")
+NEEDS_CORE = unittest.skipUnless(os.path.isfile(CORE_MARKER), "this tree carries no root edition marker")
+
 
 class FindingTheNearestEditionFile(unittest.TestCase):
+    @NEEDS_PERSONAL
     def test_it_finds_the_edition_file_directly_above(self):
         path = EG.find_edition_file(os.path.join(ROOT, "editions", "personal"))
         self.assertEqual(
             path, os.path.join(ROOT, "editions", "personal", ".brother-edition"))
 
+    @NEEDS_PERSONAL
     def test_a_directory_below_the_edition_root_still_finds_it(self):
         """Walks UP: a directory nested under editions/personal inherits its
         edition without needing its own marker file."""
@@ -48,6 +57,7 @@ class FindingTheNearestEditionFile(unittest.TestCase):
 
 
 class ParsingTheMarkerFile(unittest.TestCase):
+    @NEEDS_PERSONAL
     def test_edition_and_vault_are_read(self):
         edition, vault = EG.parse_edition_file(
             os.path.join(ROOT, "editions", "personal", ".brother-edition"))
@@ -91,6 +101,7 @@ class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):
         self.personal = os.path.join(ROOT, "editions", "personal")
         self.core = ROOT  # carries the root .brother-edition (public-core)
 
+    @NEEDS_PERSONAL
     def test_from_editions_personal_https_form(self):
         code, msg = EG.check_push(PUBLIC_HTTPS, cwd=self.personal, env={})
         self.assertEqual(code, EG.EXIT_REFUSED)
@@ -98,12 +109,14 @@ class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):
         self.assertIn("REFUSED", msg)
         self.assertIn("read-only export target", msg)
 
+    @NEEDS_PERSONAL
     def test_from_editions_personal_ssh_form(self):
         """Both remote spellings of the same GitHub repository must match:
         an owner switching between https and ssh must not slip past this."""
         code, msg = EG.check_push(PUBLIC_SSH, cwd=self.personal, env={})
         self.assertEqual(code, EG.EXIT_REFUSED)
 
+    @NEEDS_CORE
     def test_the_law_binds_public_core_too_not_only_private_editions(self):
         """The ground rule is that NO session holds the public remote, not
         merely that private editions may not: the root checkout is bound
@@ -111,6 +124,7 @@ class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):
         code, _msg = EG.check_push(PUBLIC_HTTPS, cwd=self.core, env={})
         self.assertEqual(code, EG.EXIT_REFUSED)
 
+    @NEEDS_PERSONAL
     def test_a_non_public_remote_is_never_refused(self):
         code, msg = EG.check_push(
             "https://github.com/khalilmaaouni/brother-hub",
@@ -119,6 +133,7 @@ class APushTowardThePublicRemoteFromAnEditionIsRefused(unittest.TestCase):
 
 
 class TheExportersOwnMarkedInvocationIsTheSingleAllow(unittest.TestCase):
+    @NEEDS_PERSONAL
     def test_the_marker_lets_the_same_push_through(self):
         env = {EG.EXPORT_ENV: EG.EXPORT_MARK}
         code, msg = EG.check_push(
@@ -127,6 +142,7 @@ class TheExportersOwnMarkedInvocationIsTheSingleAllow(unittest.TestCase):
         self.assertEqual(code, EG.EXIT_OK)
         self.assertIn(EG.EXPORT_MARK, msg)
 
+    @NEEDS_PERSONAL
     def test_the_wrong_value_does_not_count(self):
         """A session cannot invent the escape hatch by setting the variable
         to anything convenient; only the exporter's own exact marker
@@ -139,6 +155,7 @@ class TheExportersOwnMarkedInvocationIsTheSingleAllow(unittest.TestCase):
 
 
 class TheWhereCLIMatchesStepThreesDoneCheck(unittest.TestCase):
+    @NEEDS_PERSONAL
     def test_where_prints_edition_and_vault(self):
         import contextlib
         import io

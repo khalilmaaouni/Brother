@@ -48,7 +48,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pattern_note  # noqa: E402
 import bm_learning  # noqa: E402  the print choke point for the --file lines
 
-VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
 MEMORY = os.path.expanduser(
     "~/.claude/projects/-Users-khalil-maaouni-Brother/memory/MEMORY.md")
 NODATA = "NO-DATA"
@@ -282,11 +281,13 @@ def main(argv=None):
     ap.add_argument("problem", nargs="?", help="the problem, in plain words")
     ap.add_argument("--file", help="answer from 40-Failures frontmatter "
                     "applies_to anchors only: one line per lesson anchored to this path")
-    ap.add_argument("--vault", default=VAULT)
-    ap.add_argument("--patterns", default=VAULT)
+    ap.add_argument("--vault", default=None)
+    ap.add_argument("--patterns", default=None)
     ap.add_argument("--memory", default=MEMORY)
     ap.add_argument("--top", type=int, default=3)
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    args.vault = pattern_note.require_vault_root(args.vault, "find_out")
+    args.patterns = args.patterns or args.vault
     if args.file:
         return _print_file(args.file, args.vault)
     if not args.problem:

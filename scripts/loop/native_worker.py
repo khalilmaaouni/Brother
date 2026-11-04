@@ -665,6 +665,25 @@ def _seat_go(runner, wt, child_env, login_fd):
 PING_PROMPT = "Reply with the single word ok and nothing else. Use no tools."
 REFRESH_TIMEOUT_S = 90
 SEAT_PROBE_TIMEOUT_S = 180
+#: AUTH1.b, a TEST ONLY seam (BROTHER_LOGIN_SEAM): each name stands in for (holder answered, provider accepted), so an
+#: expiry and its recovery walk the real coordinator (brother_login.refresh_once, on a scope of its own per seam, never
+#: the host's) with no login and no call. Every line it prints names the seam, and its words are none of the driver's
+#: OK, SKIPPED or FAILED, so a seam run is never read as the host. Any other value is refused by name.
+SEAMS = {"renewable": (True, True), "expired": (True, False), "missing": (False, None)}
+SIGN_IN = "run brother-login (python3 scripts/loop/brother_login.py) in Terminal"
+
+
+def _seam_refresh(seam, env):
+    """(RENEWED | PARKED | NO-DATA | REFUSED | FAIL, line) for one seam run; the line always begins "seam: <name>"."""
+    if seam not in SEAMS:
+        return "REFUSED", "seam: %s is not a login seam (expired, renewable or missing); nothing was refreshed" % BL._scrub(seam)
+    held, accepted = SEAMS[seam]
+    verdict, detail = BL.refresh_once("seam-" + seam, lambda: (BL.refresh_verdict(held, accepted), "synthetic holder "
+                                      "answered %s, provider accepted %s" % (held, accepted)),
+                                      os.path.dirname(CL.ledger_path(env)) or ".", attempts=1)
+    if verdict != "RENEWED":
+        detail += "; " + SIGN_IN
+    return verdict, "seam: %s; %s" % (seam, detail)
 
 
 def refresh_hint(transport="claude"):
@@ -729,6 +748,8 @@ def refresh(reg=None, runner=None, env=None, timeout_s=REFRESH_TIMEOUT_S):
     holder refusing) is parked once with its class. runner(argv, stdin, timeout) replaces the child for tests.
     Cost: one minimal call per pass, none while another worker's renewal is under a minute old."""
     env = os.environ if env is None else env
+    if "BROTHER_LOGIN_SEAM" in env:   # set at all, even empty: a seam run never falls through to the host's refresh
+        return _seam_refresh(env["BROTHER_LOGIN_SEAM"], env)
     if not SW.native_on(env):
         return "SKIPPED", "native seats are off, so no seat needs the login"
     skipped = []
@@ -741,7 +762,11 @@ def refresh(reg=None, runner=None, env=None, timeout_s=REFRESH_TIMEOUT_S):
         if not value:
             skipped.append("the loop token lane is on and no login holder is named here: seats read the saved login")
             return "SKIPPED", skipped[-1]
-        return "RENEWED", "the loop token lane: the run's login holder answered"
+        # AUTH1.b: the holder's bytes are not the provider's acceptance (refresh_verdict(True, None) is not RENEWED), so
+        # this lane makes no renewal claim and writes no renewal another consumer would reuse; a seat's call proves it
+        skipped.append("the loop token lane: the run's login holder answered, but no provider accepted it here (%s), "
+                       "so this is not a renewal" % BL.refresh_verdict(True, None))
+        return "SKIPPED", skipped[-1]
 
     def ping():
         reg_ = reg or R.registry()
@@ -761,8 +786,8 @@ def refresh(reg=None, runner=None, env=None, timeout_s=REFRESH_TIMEOUT_S):
         _answer, why = MC._claude_result(r.get("stdout"))
         if why:
             cls = call_class(r, why)
-            return ("EXPIRED" if cls == "login" else "FAILED"), cls
-        return "RENEWED", "%s answered through %s" % (name, inv.program)
+            return (BL.refresh_verdict(True, False) if cls == "login" else "FAILED"), cls
+        return BL.refresh_verdict(True, True), "%s answered through %s" % (name, inv.program)   # the provider answered
 
     token_lane = SW.on("BROTHER_LOOP_TOKEN")
     # attempts=1: the driver bounds the whole refresh at 150 s (loop_until.sh), one 90 s call fits, two do not
@@ -1016,9 +1041,9 @@ def main(argv):
         except Exception as exc:   # sbe: allow-silent named on the line: a refresh that cannot run is FAILED, never silent
             state, detail = "FAILED", "no-answer (%s)" % type(exc).__name__
         print("REFRESH %s %s" % (state, detail), flush=True)
-        if state not in ("OK", "SKIPPED"):   # the driver reads the one REFRESH line on stdout; a hand run sees the remedy
+        if state not in ("OK", "SKIPPED", "RENEWED"):   # the driver reads the one REFRESH line; a hand run sees the remedy
             print("REMEDY %s" % refresh_hint(), file=sys.stderr, flush=True)
-        return 0 if state in ("OK", "SKIPPED") else 1
+        return 0 if state in ("OK", "SKIPPED", "RENEWED") else 1   # RENEWED: only a seam run says it (AUTH1.b)
     if argv[:1] == ["seat-probe"]:   # the intake's seat proof, by hand
         state, detail = seat_probe()
         print("SEAT %s %s" % (state, detail), flush=True)

@@ -27,9 +27,9 @@ or contradicts, so recall follows edges instead of scanning folders.
 health and resolution report), `census` (retrieval-index census), `recall
 <query>` (the query above, as a command), `bind PATH` (the one first-run
 binding step, row V2), plus `check`, `measure`, `lint`, `contract`, `curate`
-and `commit`. Never a new command of its own: the plain words "vault
-doctor", "vault census" and "vault recall <query>" typed to `start` or
-`brotherme` route straight to `bm_vault_cli.py doctor` / `census` / `recall`
-and print exactly what that call itself would, since nothing sits between
-the word and the same subprocess call either way.
+and `commit`. Never a new command of its own. These are the maintainer's
+commands: a consumer reaches the vault only through what the door offers
+(ask the door for help), and the words "vault doctor", "vault census" and
+"vault recall <query>" are not routed to `bm_vault_cli.py` for a consumer
+until the door lists them.
 

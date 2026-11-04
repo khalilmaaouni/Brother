@@ -54,11 +54,11 @@
   },
   {
    "name": "brother_login.py",
-   "sha256": "729825bf7abb49169e4d3b59e32b8648fe56066c5dfb0cadad8cb6d547d0d503"
+   "sha256": "00a604cbae580684538b591e7da526dc2d6319e081a61579b553f15eb43739f7"
   },
   {
    "name": "brother_night_tick.py",
-   "sha256": "bbed9ed28ae38c0290fadc55cc0deb8988ebf4fe0ba56adbe220ba7e88f13e35"
+   "sha256": "0d33b9c7881f4cb44b0b6d32341fd77d65a815d909e0d0d957e33362ec0c2413"
   },
   {
    "name": "build_brief.py",
@@ -142,7 +142,7 @@
   },
   {
    "name": "grade_build.py",
-   "sha256": "7c495f7c9b9de1e454f73645835368a5c28c8a11c2fae4f912ec43fd10b3a4fc"
+   "sha256": "82a36fefc9bac66d0679da4e0f23144302c847bdd5bf8406ad6229fe92ac921c"
   },
   {
    "name": "grade_lane.sh",
@@ -174,7 +174,7 @@
   },
   {
    "name": "land_batch.py",
-   "sha256": "76e6ffb6b2d8322fd57f2610bff086227c9dc9f3fe5e45868445073bcea8f13c"
+   "sha256": "3fb2db4e3b31c4937c3229d72bfc9aeebd4739ec19510ee04ec7883f917d7feb"
   },
   {
    "name": "land_fuzz_child.py",
@@ -214,19 +214,19 @@
   },
   {
    "name": "loop_pass.sh",
-   "sha256": "c6c51309670d5f6ff87ecebe7ef273fed4bd6907672d9b420ee6ac7550f42417"
+   "sha256": "13d9c71241e60eb2fef4d2dddf8325b75fbe48a647c04708da74414d19450d43"
   },
   {
    "name": "loop_procs.py",
-   "sha256": "e0a9dbbf5b011a950f1006f502c416c047a5ba93d5a4ead2cb287d466757df9e"
+   "sha256": "cea65033975d3570bc857a8471cfd25e3b7dd1913b6a41eb80c3aca93cc0407a"
   },
   {
    "name": "loop_receipt.py",
-   "sha256": "291210962e156d8ce766106964c1ad15e4d21461f92a0f59c7734e346623fd33"
+   "sha256": "4ef400d37ba63946d4811db3fbe575475c370400d3682c2e10f5c8680f9d2102"
   },
   {
    "name": "loop_report.py",
-   "sha256": "be88163d7f3e7f80e3f2194d98cb54b308f9fd35e2aac698a94e10e9e6da258c"
+   "sha256": "a263d96ceec10cfa7e3795f9327e49c7ab4c6f7ffc303c8e24cbdbbf334f45ae"
   },
   {
    "name": "loop_roles.py",
@@ -242,11 +242,11 @@
   },
   {
    "name": "loop_until.sh",
-   "sha256": "9fb7706661cf268c6da9a847c6913acc7ef046d1c5709794360771854fc59d6c"
+   "sha256": "79e9f759ee0f28c4bcf2032a8be701a3f32eb18ad55023d03308d98478fdaf3e"
   },
   {
    "name": "loop_watch.py",
-   "sha256": "492b59f7c0162a450e6e4eb7bc77d6e2efab47febf758f67a03288a68f5fe028"
+   "sha256": "31cdd952b64247fa33032873a7c2ca7c3b182caa59da7e84dac218d122a3c34a"
   },
   {
    "name": "mix_advice.py",
@@ -254,11 +254,11 @@
   },
   {
    "name": "model_bench.py",
-   "sha256": "3be2f5d2368c147e7629fd9934f39af32b4b8375bef5c2f2fe55d269ace41673"
+   "sha256": "a4fce6c4c267ac59a083dd9a3b49d0c3fcb3b54dff8686277b236f7549dc7e1c"
   },
   {
    "name": "model_call.py",
-   "sha256": "768bf78a7b73e906c67f90b00f1f7d36575c5ffb5270e47db0c0429933e8f7fd"
+   "sha256": "67657a8241f88d7dd7b3a900f01a8dce0e1566ad3973d79334ad076d5ba1d222"
   },
   {
    "name": "model_reachability.py",
@@ -274,7 +274,7 @@
   },
   {
    "name": "native_worker.py",
-   "sha256": "e1accaf7ecb941ce63605a59d655e0e4b02128ea5ef9931360b53966316d8fe0"
+   "sha256": "aacc17f1082ffd8af6b85e74e28294fd0e8097b8a68f7bca34d5c2081427a6e8"
   },
   {
    "name": "or_ask.py",
@@ -290,7 +290,7 @@
   },
   {
    "name": "pass_pulse.py",
-   "sha256": "3d32fdcb5b0e5d4055fe126f9573e78caf112f7c656ef8e68b2c3e8daef00fcf"
+   "sha256": "5af078e2131e7fae2446f1f3bf68a066a3e41559fc49a24ccab6ff0fadc88fac"
   },
   {
    "name": "peak_bench.py",
@@ -306,7 +306,7 @@
   },
   {
    "name": "plan_store.py",
-   "sha256": "2a88b86c94a1242bfa407a3afb838a61afe5684503e787fd11adfdf14c5105b5"
+   "sha256": "ba3e8b6f84196bf9b2e5664232129a40a4c7e6ded8e3d25d4806b499024b103c"
   },
   {
    "name": "power_rule.py",
@@ -378,7 +378,7 @@
   },
   {
    "name": "runner_pool.py",
-   "sha256": "7479aca05617bc3b1b45b05c21e24b21798816ec5d4a4be33fc4961979daf066"
+   "sha256": "21fe6421fa5d128a95962f32942977cd12e014c2254538cc1363ce0a0f55fe88"
   },
   {
    "name": "salvage.py",
@@ -430,11 +430,11 @@
   },
   {
    "name": "stage_log.py",
-   "sha256": "190f3321f676428f9b4499cdc5ce0ec56e4b533c3b6b82429354fbe12258e2a2"
+   "sha256": "36809b95556d04a7700190e3f0250dd3b7c6c8ebc305c848f31aa70d0daef693"
   },
   {
    "name": "start_run.sh",
-   "sha256": "1f67c3a5b715eafbeb21dcd13b5f8840b0d97b806794aeb6ac5787ea050b1bfd"
+   "sha256": "a3181c21fcc48e79c44c308c09389778fe382eb0e2d0324e1883be456a59c52e"
   },
   {
    "name": "stop_loop.sh",
@@ -482,11 +482,11 @@
   },
   {
    "name": "test_clock_rows.py",
-   "sha256": "0613378c6a5d896a3b251ef51fb58f40e6a310884151f4249ac3808751d4bf4a"
+   "sha256": "c57f5d66776346e899980ff656fcc2dd5e62a9976face121ccf244e507f87456"
   },
   {
    "name": "test_close_reason_captured.py",
-   "sha256": "b0b537e68d97a64dfde3140d3409d6e3cf92b6414194cf604c860db5c3850ee4"
+   "sha256": "9d95913add24adbbb58438a7da71bdc0b1650b996043a9d89c3163a31f280335"
   },
   {
    "name": "test_code_root_from_bin.py",
@@ -618,7 +618,7 @@
   },
   {
    "name": "test_land_batch_landings.py",
-   "sha256": "dabf71a611164a7d1ba02e58571d9891b20fdff2c7dfba35a39ce1976b89d1c1"
+   "sha256": "204515be6851d460978621352235d1bf732941c3572e0f144c4f9e14132b98c5"
   },
   {
    "name": "test_land_batch_mirror.py",
@@ -678,7 +678,7 @@
   },
   {
    "name": "test_loop_receipt.py",
-   "sha256": "37b9e6b6d3ee0bc09806d24b443bf02f4cc1844354d196c0240a553c9f899632"
+   "sha256": "98b9b742bb2c109efaf7ace71b32c932b741410f73dd830f33fac10aa43b8bb0"
   },
   {
    "name": "test_loop_report_abandoned.py",
@@ -726,7 +726,7 @@
   },
   {
    "name": "test_one_closure_attempt.py",
-   "sha256": "3bcdd362c8a34949a5a329f4a826bf1517a8363aca7dfcd574f54fccd25d0128"
+   "sha256": "96d39798bcfa16f2ad2387269fdbf739b297f54de19e9f305cdc7ae6d32171f3"
   },
   {
    "name": "test_or_ask.py",
@@ -754,7 +754,7 @@
   },
   {
    "name": "test_plan_lint.py",
-   "sha256": "6129fb8df072967ac00770008c23c713dde0a52df6babc1a64b8dae5bb2c8738"
+   "sha256": "2e5333681954902f02d03e7d97a409c021cc59faaec6e1fdbe16bf290d0b5851"
   },
   {
    "name": "test_plan_lint_after_order.py",
@@ -874,15 +874,15 @@
   },
   {
    "name": "test_runner_pool_load.py",
-   "sha256": "031206a065e3ce332002095e4ebbafad08bcb18c12eadd24e384c0b5bbc7cf4f"
+   "sha256": "e1a9e7dcb7e125af998834cc700d861d90424adae1e53c7a49f5d9322686ff39"
   },
   {
    "name": "test_runner_pool_note_attempt.py",
-   "sha256": "94f561375cf29e71b1542bc4ef9075911b9a35487640cf0c0e03d46845f9c9e9"
+   "sha256": "3929e5a7d0b7a0b6cb67f96a7d7b4fae8bdea83fd1ee8165196f05a81a96068b"
   },
   {
    "name": "test_runner_pool_seats.py",
-   "sha256": "0423e84211abc0aabc7ab068355788893fd55771f422155932794081566658b3"
+   "sha256": "187ae2e2f3c3a230a19d7e93ea4583659e92a743730bc8e3ad2c91ad164a670b"
   },
   {
    "name": "test_runner_pool_shared_files.py",
@@ -914,11 +914,11 @@
   },
   {
    "name": "test_seat_login_refresh.py",
-   "sha256": "b56dbdf63282c9e4b6665b98a50ec0754eebc98d1130cda85e28e0818de8760a"
+   "sha256": "3fc65db1ea8612b972fd66b6a6ec33679eafbf28142f1c816e5ece881769eb7a"
   },
   {
    "name": "test_seat_lost_parks_once.py",
-   "sha256": "aa7dbb0b3b4795b8d7b1a42e216650dcdbf5327fad37ff85a5c9c56bad660300"
+   "sha256": "6814420e2498e768048a5c44c8b6b3fd6579738ede91229f83d3b3f7ebe5bc47"
   },
   {
    "name": "test_seat_refusal_line.py",
@@ -978,7 +978,7 @@
   },
   {
    "name": "test_unproductive_cooldown.py",
-   "sha256": "1da6ad5e9501d406dce247c0d365bca385b403680e022485534850b1c0871123"
+   "sha256": "95655568da0e879dddcf691495f7094baa1b0a3d3d2afef04d593de8939f4715"
   },
   {
    "name": "test_usd_plan_share.py",

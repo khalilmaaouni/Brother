@@ -370,6 +370,9 @@ class TheRealRunStore(unittest.TestCase):
         root = os.path.join(REPO_ROOT, "docs", "plan", "runs")
         if not os.path.isdir(root):
             self.skipTest("no docs/plan/runs in this tree")
+        # The public export carries no committed run directory: the premise is absent, not the behaviour broken.
+        if not any(os.path.isdir(os.path.join(root, n)) for n in os.listdir(root)):
+            self.skipTest("no committed run directory under docs/plan/runs in this tree")
         seen = 0
         for name in sorted(os.listdir(root)):
             run = os.path.join(root, name)

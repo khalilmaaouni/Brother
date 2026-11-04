@@ -32,6 +32,8 @@ python3 scripts/host_live_proof.py --print-owner-commands codex
 ^# HP1 Codex live proof, run \S+: sign in once, then run the three probes non interactively$
 ```
 
+<!-- doc-assurance: allow-missing auth.json the Codex login file in the user's own home, not in this repository -->
+
 The throwaway home reuses your existing ChatGPT login through a symlinked `auth.json`; do not sign in separately in that home. Run the printed command lines, including the three probes, and use the same throwaway home named in those lines. End this host's steps by collecting its trace with `python3 scripts/host_live_proof.py --collect codex --home <same-home>`, replacing `<same-home>` with that exact home.
 
 ## Step 3: Claude Code live run
@@ -49,5 +51,7 @@ python3 scripts/host_live_proof.py --print-owner-commands claude
 Follow the printed commands to run the three probes, and use the same throwaway home named in those commands. End this host's steps by collecting its trace with `python3 scripts/host_live_proof.py --collect claude --home <same-home>`, replacing `<same-home>` with that exact home.
 
 ## Read the verdict
+
+<!-- doc-assurance: allow-missing docs/plan/evidence/HP1-host-live.jsonl written by the collect command on the user's machine; absent until live evidence is recorded, as the text says -->
 
 The collect command prints the host verdict after writing its evidence rows. The verifier reads `docs/plan/evidence/HP1-host-live.jsonl`. Its line names the host and condition. Exit codes are 0 for GREEN, 1 for RED, and 3 for NO-DATA. A NO-DATA line means that required live evidence has not been recorded yet.

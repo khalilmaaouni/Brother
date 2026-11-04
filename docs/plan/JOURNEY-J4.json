@@ -1,0 +1,12 @@
+{
+ "candidate_identity": "shipped",
+ "clean_home": true,
+ "host": "macos",
+ "identity": "shipped",
+ "journey": "J4",
+ "rows": {
+  "A.accept-recorded": "PASS",
+  "A.reject-pushes-nothing": "PASS",
+  "C.one-proof-source": "PASS"
+ }
+}

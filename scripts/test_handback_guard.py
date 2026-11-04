@@ -132,6 +132,19 @@ class AllowEscapeHatchSkipsAndSaysSo(unittest.TestCase):
         self.assertIn("SKIPPED", out)
 
 
+def _checkout_has_a_default_branch():
+    """True when this checkout names a remote whose default branch the gate can resolve. An export tree has no remote, so
+    the gate answers NO-DATA there instead of "no push in flight": the premise of the case below is absent, not the
+    behaviour broken."""
+    sys.path.insert(0, str(GATE.parent))
+    try:
+        import pre_push_gate
+        return pre_push_gate._default_branch(str(GATE.parent.parent), None) is not None
+    except Exception:  # noqa: BLE001  anything unreadable here means the premise cannot be shown
+        return False
+
+
+@unittest.skipUnless(_checkout_has_a_default_branch(), "this tree has no remote default branch to resolve")
 class NoPushInFlightNeverBlocks(unittest.TestCase):
     def test_battery_style_run_on_a_main_checkout_is_ok(self):
         # CORRECTED 2026-08-30, driven before trusted: the first version of

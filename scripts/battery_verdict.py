@@ -66,9 +66,11 @@ sys.path.insert(0, HERE)
 # depend on it -- see that function's own docstring for the C1 guarantee.
 try:
     import jev_checks
+    import jev_outcome
     import jev_seam
 except Exception:  # noqa: BLE001
     jev_checks = None
+    jev_outcome = None
     jev_seam = None
 
 
@@ -168,14 +170,27 @@ def _jev_gate_line_shadow(lines):
     J049/J050 call site: return value intentionally discarded, shadow-only
     by contract). Never raises; a missing jev_checks/jev_seam or an empty
     `lines` makes this a no-op."""
-    if jev_checks is None or jev_seam is None or not lines:
+    if jev_checks is None or jev_seam is None or jev_outcome is None or not lines:
         return
     try:
-        jev_checks.check_gate_log_lines(
+        ledger_dir = jev_seam.DEFAULT_LEDGER_DIR
+        results = jev_checks.check_gate_log_lines(
             lines, seams_config=jev_seam.load_seams_config(),
             registry=jev_seam.load_registry(),
-            ledger_dir=jev_seam.DEFAULT_LEDGER_DIR)
-        # C1: return value intentionally discarded, shadow-only by contract
+            ledger_dir=ledger_dir)
+        # JEV1.a: the shadow's answer is still never read back into this
+        # script's verdict (C1), but each decision is GRADED from its own
+        # line's deterministic verdict word through the writer loop_bridge
+        # uses. drain() first: label_attempt reads the worker's terminal
+        # row, which lands after consult() returns (PENDING otherwise). A
+        # NO-DATA line is no rule answer and an abstain Jev answer is not
+        # graded by label_attempt itself, so neither writes a row.
+        jev_seam.drain()
+        for line, res in zip(lines, results):
+            word = line.split()[0]
+            aid = getattr(res, "attempt_id", "")
+            if word in ("PASS", "FAIL") and aid:
+                jev_outcome.label_attempt(ledger_dir, aid, word == "PASS")
     except Exception:  # noqa: BLE001  # sbe: allow-silent this seam is advisory only, never worth risking this script's byte-identical verdict/exit code
         pass
 

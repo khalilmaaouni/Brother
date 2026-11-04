@@ -1747,3 +1747,95 @@ def resolve_anchor_line(lines, line, digest):
                       % (claimed, len(matches),
                          ", ".join(str(n) for n in matches[:8])))
     return out
+
+
+# ---------------------------------------------------------------------------
+# HOW A STORED LESSON STANDS, FOR A PERSON (OUT1.i). Pure, like everything in
+# this file. scripts/dream_bridge.py's learning door reads the rules, the
+# candidates, the conflicts and the applications the EXISTING bm_learn.py
+# prints and hands them here, so the word a report uses for "this lesson
+# applies" is decided in the one place that already owns the states, and a
+# candidate nobody approved can never be worded like one somebody did.
+# ---------------------------------------------------------------------------
+
+LESSON_STANDINGS = ("established", "in_conflict", "retired", "forgotten",
+                    "proposed", "adopted", "declined", "unknown")
+
+
+def lesson_standing(kind, state):
+    """{"standing", "applies"} for one stored lesson. `kind` is "rule" (a
+    stored, founder-approved lesson) or "candidate" (a proposal still waiting
+    for an answer). `applies` is true ONLY for a rule in INJECTABLE_STATES: a
+    candidate never applies, whatever its status says, because only an
+    approved rule is ever retrieved. An unknown kind or state is "unknown" and
+    does not apply: an unreadable row never reads as the safe case."""
+    if kind == "rule":
+        if state in INJECTABLE_STATES:
+            return {"standing": "established", "applies": True}
+        verdict = {"contradicted": "in_conflict", "deprecated": "retired",
+                   "superseded": "retired", "forgotten": "forgotten"}
+        return {"standing": verdict.get(state, "unknown") if isinstance(state, str) else "unknown",
+                "applies": False}
+    if kind == "candidate":
+        # "adopted" candidates became (or fed) a rule: that rule's row carries the standing, so the candidate row
+        # itself never applies and is never worded as established.
+        verdict = {"pending": "proposed", "under_review": "proposed", "approved": "adopted", "merged": "adopted",
+                   "split": "adopted", "rejected": "declined", "expired": "declined"}
+        return {"standing": verdict.get(state, "unknown") if isinstance(state, str) else "unknown",
+                "applies": False}
+    return {"standing": "unknown", "applies": False}
+
+
+def lessons_view(rules, candidates, conflicts, applications):
+    """The lessons a person is asked about, grouped by how each stands.
+
+    rules: the rows `bm_learn.py rules --json --all` prints. candidates: the
+    rows of `candidates --json` (pending and under review). conflicts: the dict
+    of `conflicts --json`. applications: the rows of `applications --json`.
+    Returns {"established", "in_conflict", "retired", "forgotten" (a count),
+    "proposed", "contradictions", "duplicates", "unreadable" (a count)}.
+    An `established` rule carries `doubt` (counts of negative outcomes recorded
+    after it was followed) and `conflicts_with` (live rules it is paired with).
+    A wrong top level type raises ValueError; a row that is not a record is
+    counted under `unreadable`, never dropped quietly."""
+    if not isinstance(rules, list) or not isinstance(candidates, list) or not isinstance(applications, list):
+        raise ValueError("rules, candidates and applications must be lists")
+    if not isinstance(conflicts, dict):
+        raise ValueError("conflicts must be a dict")
+    pairs = [p for key in ("contradictions", "duplicates") for p in (conflicts.get(key) or [])
+             if isinstance(p, dict) and isinstance(p.get("a"), dict) and isinstance(p.get("b"), dict)]
+    peers = {}
+    for p in pairs:
+        a, b = p["a"].get("rule_uuid"), p["b"].get("rule_uuid")
+        peers.setdefault(a, []).append(b)
+        peers.setdefault(b, []).append(a)
+    doubt = {}
+    for app in applications:
+        if isinstance(app, dict) and app.get("outcome") in NEGATIVE_OUTCOMES:
+            counts = doubt.setdefault(app.get("rule_uuid"), {})
+            counts[app["outcome"]] = counts.get(app["outcome"], 0) + 1
+    out = {"established": [], "in_conflict": [], "retired": [], "forgotten": 0, "proposed": [],
+           "contradictions": [p for p in (conflicts.get("contradictions") or []) if isinstance(p, dict)],
+           "duplicates": [p for p in (conflicts.get("duplicates") or []) if isinstance(p, dict)],
+           "unreadable": 0}
+    for rule in rules:
+        if not isinstance(rule, dict):
+            out["unreadable"] += 1
+            continue
+        standing = lesson_standing("rule", rule.get("state"))["standing"]
+        if standing == "forgotten":
+            out["forgotten"] += 1
+        elif standing in ("established", "in_conflict", "retired"):
+            row = dict(rule)
+            if standing == "established":
+                row["doubt"] = doubt.get(rule.get("rule_uuid"), {})
+                row["conflicts_with"] = peers.get(rule.get("rule_uuid"), [])
+            out[standing].append(row)
+        else:
+            out["unreadable"] += 1
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            out["unreadable"] += 1
+        elif lesson_standing("candidate", cand.get("status"))["standing"] == "proposed":
+            out["proposed"].append(dict(cand))
+    return out

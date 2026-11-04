@@ -2919,6 +2919,7 @@ def _not_built(name, wave, reason):
             "exits 3 rather than printing an empty result, because a command that succeeds at "
             "nothing is the failure this project exists to stop.\n" % (name, reason, wave))
         return EXIT_NOT_BUILT
+    run.not_built = (wave, reason)  # the door's discovery reads this: an unbuilt command is never offered as supported
     return run
 
 
@@ -3318,11 +3319,422 @@ def build_parser():
     return parser
 
 
+# ---------------------------------------------------------------------------
+# THE DOOR'S HANDLERS (OUT1.k). The Brother door's invoke_capability() runs
+# `sbe door HANDLER` with the person's typed inputs as one JSON object on
+# stdin. Each handler is ONE existing subcommand of this CLI (its words, the
+# typed way each input becomes an argument, and the permission it needs):
+# nothing here re-decides a gate, a tier, a policy, a review route, a fence or
+# a handover. A handler adds the argument shape, the type check of each input,
+# and the honest reply: PASS needs exit 0 AND output AND no NO-DATA line of
+# the command's own; exit 1 is a FAIL that carries the command's own words,
+# never a paraphrase; exit 2 and 3 are NO-DATA; only a PASS carries evidence
+# (the command, its exit code and the sha256 of what it printed, plus the
+# hash of every file the person named).
+#
+# `door` is reached by hand in main(), beside the commands but NOT one of
+# them, so the public surface that `--help` and COMMANDS describe is unchanged.
+#
+# DISCOVERY IS GENERATED, never typed: door_discovery() walks the parser's own
+# subcommands and DOOR_HANDLERS. A subcommand added to the parser shows up as
+# "not_routed" until a handler is declared for it, a command whose body is
+# `_not_built` shows up as "unavailable" (never supported), and a handler
+# naming a command this parser lacks shows up as "absent".
+#
+# AUTHORITY. read: nothing is written. write: a file, a receipt, a decision
+# package or a ledger line is. approve: a human decision is recorded (a review
+# verdict, a handover acknowledged or declined). Where a command may write as
+# a side effect (impact records a decision package when it raises a tier,
+# review-route counts its routing, converge writes its report, verify mints
+# receipts), the row says write: a read that quietly writes is the failure.
+# `--force`, `--apply`, plan's `--write` and every free form command are never
+# passed: acceptance over absent evidence and arbitrary commands do not travel
+# through the door.
+# ---------------------------------------------------------------------------
+DOOR_TIMEOUT_S = 900
+DOOR_DISCOVER = "assurance_existing_discover"
+#: the files each command needs from THIS edition of BrotherSBE, under the installation root. The public export and
+#: a partial install leave some out; a handler whose files are not all there answers NO-DATA and runs nothing.
+DOOR_COMMAND_FILES = {
+    "review": ("tools/sbe_gate.py", "tools/sbe_design.py", "tools/sbe_score.py"),
+    "verify": ("tools/sbe_gate.py", "tools/sbe_design.py", "tools/sbe_score.py"),
+    "score": ("tools/sbe_score.py",),
+    "gate": ("tools/sbe_gate.py",),
+    "design": ("tools/sbe_design.py",),
+    "intake": ("tools/sbe_intake.py",),
+    "impact": ("src/brothersbe/impact.py",),
+    "policy": ("src/brothersbe/policy.py",),
+    "review-route": ("src/brothersbe/reviewroute.py",),
+    "converge": ("src/brothersbe/converge.py",),
+    "explain": ("src/brothersbe/decisions.py",),
+    "lineage": ("src/brothersbe/decisions.py",),
+    "status": ("src/brothersbe/status.py",),
+    "scope": ("tools/sbe_session_reconcile.py",),
+    "fences": ("tools/sbe_fence_hook.py",),
+    "fence-audit": ("tools/sbe_fence_hook.py",),
+    "instruction-surface": ("tools/sbe_instruction_surface.py",),
+    "task": ("src/brothersbe/tasks.py",),
+    "evidence": ("src/brothersbe/evidence.py",),
+    "handover": ("src/brothersbe/handover.py",),
+    "program": ("src/brothersbe/program.py",),
+    "protections": ("src/brothersbe/protections.py",),
+    "pr": ("src/brothersbe/prverify.py",),
+    "work": ("src/brothersbe/work.py",),
+    "plan": ("tools/sbe_plan.py",),
+    "adopt": ("src/brothersbe/adopt.py",),
+    "testkit": ("tools/sbe_testkit.py",),
+    "map": ("src/brothersbe/mapgen.py",),
+    "book": ("src/brothersbe/book.py",),
+}
+#: the supported way to learn what an unbuilt command would have told you
+DOOR_ALTERNATIVES = {
+    "exceptions": "assurance.policy shows which waivers a change carries (each needs a reason, an owner, an expiry "
+                  "and a protected approval, and renders WAIVED, never PASS); assurance.status shows where the "
+                  "change stands",
+}
+DOOR_VERBS = ("review", "status", "next", "deliver")
+_VERDICT_WORD = re.compile(r"^\s*(?:[\w./-]+\s+)?(PASS|FAIL|NO-DATA|WAIVED|MISSING)\b", re.M)
+
+
+def _handler(verb, words, args=(), need=(), authority="read", fixed=(), choices=None):
+    """One door handler. args: (input name, kind, form); form is "pos" for a positional word, else the flag.
+    kinds: str, dir (must exist), file (must exist), out (a path the command writes), list (the flag repeated),
+    switch (a boolean flag), cwd (the folder the command runs in, not an argument)."""
+    return {"verb": verb, "words": tuple(words), "args": tuple(args), "need": tuple(need), "authority": authority,
+            "fixed": tuple(fixed), "choices": choices or {}}
+
+
+def _gate_names():
+    import sbe_gate
+    return tuple(sbe_gate.GATES)
+
+
+_PATH = ("path", "dir", "pos")
+_DOSSIER = ("dossier", "dir", "pos")
+_CWD = ("cwd", "cwd", "")
+_BASE = ("base", "str", "--base")
+_HEAD = ("head", "str", "--head")
+_STRICT = ("strict", "switch", "--strict")
+DOOR_HANDLERS = {
+    # review: is this change safe, and why did a gate say what it said
+    "assurance_existing_review": _handler("review", ("review",), (_PATH,), ("path",)),
+    "assurance_existing_review_record": _handler(
+        "review", ("review",), (_PATH, ("reviewer", "str", "--reviewer"), ("reviewer_type", "str", "--reviewer-type"),
+                                ("result", "str", "--result"), ("accept_risk", "list", "--accept-risk"),
+                                ("findings_json", "file", "--findings-json")),
+        ("path", "reviewer", "reviewer_type", "result"), "approve", fixed=("--write",)),
+    "assurance_existing_verify": _handler(
+        "review", ("verify",), (_PATH, ("since", "str", "--since"), ("named_paths", "list", "--path")), ("path",),
+        "write"),
+    "assurance_existing_gate": _handler(
+        "review", ("gate",), (("gate", "str", "pos"), _PATH, _STRICT), ("path",), fixed=("--no-decisions",),
+        choices={"gate": _gate_names}),
+    "assurance_existing_design": _handler("review", ("design",), (_PATH, _STRICT), ("path",)),
+    "assurance_existing_score": _handler("review", ("score",), (_PATH,), ("path",), fixed=("--no-decisions",)),
+    "assurance_existing_intake": _handler(
+        "review", ("intake",), (("answers", "file", "--answers"), _PATH), ("answers", "path"), "write"),
+    "assurance_existing_impact": _handler(
+        "review", ("impact",), (_PATH, _BASE, _HEAD, ("intake", "file", "--intake"),
+                                ("disposition", "file", "--disposition"), _STRICT), ("path",), "write"),
+    "assurance_existing_policy": _handler(
+        "review", ("policy", "evaluate"),
+        (_PATH, _BASE, _HEAD, ("policy", "file", "--policy"), ("receipts_dir", "dir", "--receipts-dir"),
+         ("dossier", "dir", "--dossier"), ("intake", "file", "--intake"), ("approvals", "file", "--approvals"),
+         ("waivers", "file", "--waivers"), ("decision", "file", "--decision"),
+         ("strict_waivers", "switch", "--strict-waivers")), ("path",)),
+    "assurance_existing_review_route": _handler(
+        "review", ("review-route",), (_PATH, _BASE, _HEAD, ("work_profile", "str", "--work-profile")), ("path",),
+        "write"),
+    "assurance_existing_converge": _handler(
+        "review", ("converge",), (_DOSSIER, ("base", "str", "--base"), ("head", "str", "--head"), _CWD),
+        ("dossier", "base", "head"), "write"),
+    "assurance_existing_explain": _handler(
+        "review", ("explain",), (("target", "str", "pos"), ("path", "dir", "--path")), ("target",), "write"),
+    # status: where does it stand, from what is recorded
+    "assurance_existing_status": _handler(
+        "status", ("status",), (_PATH, ("team", "switch", "--team"), _BASE), ("path",)),
+    "assurance_existing_scope_report": _handler("status", ("scope", "report"), (_CWD,), ("cwd",)),
+    "assurance_existing_scope_verify": _handler(
+        "status", ("scope", "verify"), (("base", "str", "--base"), _HEAD, _STRICT, _CWD), ("base", "cwd")),
+    "assurance_existing_fences": _handler("status", ("fences",), (_CWD,), ("cwd",)),
+    "assurance_existing_fence_audit": _handler("status", ("fence-audit",), (_CWD,), ("cwd",)),
+    "assurance_existing_instruction_surface": _handler(
+        "status", ("instruction-surface",), (_PATH, ("base_ref", "str", "pos"), ("declared", "file", "--declared"),
+                                             _STRICT), ("path",)),
+    "assurance_existing_task_list": _handler("status", ("task", "list"), (_CWD,), ("cwd",)),
+    "assurance_existing_task_check": _handler("status", ("task", "check"), (_CWD,), ("cwd",)),
+    "assurance_existing_lineage": _handler(
+        "status", ("lineage",), (("artifact", "str", "pos"), ("path", "dir", "--path")), ("artifact",)),
+    "assurance_existing_evidence_verify": _handler(
+        "status", ("evidence", "verify"), (("receipt", "file", "pos"), _STRICT, _CWD), ("receipt",)),
+    "assurance_existing_evidence_show": _handler(
+        "status", ("evidence", "show"), (("receipt", "file", "pos"), _CWD), ("receipt",)),
+    "assurance_existing_handover_show": _handler(
+        "status", ("handover", "show"), (_DOSSIER,), ("dossier",)),
+    "assurance_existing_program_status": _handler("status", ("program", "status"), (_PATH,), ("path",)),
+    "assurance_existing_program_check": _handler("status", ("program", "check"), (_PATH,), ("path",)),
+    "assurance_existing_protections_verify": _handler(
+        "status", ("protections", "verify"), (("repository", "str", "--repository"), ("branch", "str", "--branch"),
+                                              _CWD), ("repository", "branch")),
+    "assurance_existing_pr_verify": _handler(
+        "status", ("pr", "verify"), (("number", "str", "pos"), ("repo", "str", "--repo"), _CWD), ("number", "repo")),
+    "assurance_existing_work_check": _handler(
+        "status", ("work", "check"), (("task_id", "str", "pos"), ("change", "str", "--change"), _CWD), ("task_id",)),
+    "assurance_existing_doctor": _handler("status", ("doctor",), (_CWD,), ()),
+    "assurance_existing_book_check": _handler("status", ("book",), (_PATH,), ("path",), fixed=("--check",)),
+    "assurance_existing_exceptions": _handler("status", ("exceptions",), (), ()),
+    # next: the one thing to do about it
+    "assurance_existing_plan": _handler("next", ("plan",), (_DOSSIER, _STRICT), ("dossier",)),
+    "assurance_existing_adopt": _handler("next", ("adopt",), (_PATH,), ("path",)),
+    "assurance_existing_work_brief": _handler(
+        "next", ("work", "brief"), (("plan", "file", "--plan"), ("task", "str", "--task"), _CWD), ("plan", "task")),
+    "assurance_existing_testkit_sheet": _handler("next", ("testkit", "sheet"), (_DOSSIER,), ("dossier",), "write"),
+    # deliver: close with evidence, hand over, and the receiver's own answer
+    "assurance_existing_handover_prepare": _handler(
+        "deliver", ("handover", "prepare"), (_DOSSIER, ("outgoing", "str", "--outgoing"),
+                                             ("receiver", "str", "--receiver")),
+        ("dossier", "outgoing", "receiver"), "write"),
+    "assurance_existing_handover_acknowledge": _handler(
+        "deliver", ("handover", "acknowledge"), (_DOSSIER, ("receiver", "str", "--receiver")),
+        ("dossier", "receiver"), "approve"),
+    "assurance_existing_handover_reject": _handler(
+        "deliver", ("handover", "reject"), (_DOSSIER, ("receiver", "str", "--receiver"),
+                                            ("reason", "str", "--reason")),
+        ("dossier", "receiver", "reason"), "approve"),
+    "assurance_existing_evidence_run": _handler(
+        "deliver", ("evidence", "run"), (("check", "str", "--check"), ("out", "out", "--out"), _BASE, _HEAD,
+                                         ("covers", "list", "--covers"), ("kind", "list", "--kind"),
+                                         ("checks_file", "file", "--checks-file"), _CWD), ("check", "out"), "write"),
+    "assurance_existing_work_start": _handler(
+        "deliver", ("work", "start"), (("task_id", "str", "pos"), ("plan", "file", "--plan"),
+                                       ("agent", "str", "--agent"), _CWD), ("task_id", "plan"), "write"),
+    "assurance_existing_work_finish": _handler(
+        "deliver", ("work", "finish"), (("task_id", "str", "pos"), ("change", "str", "--change"), _CWD),
+        ("task_id",), "write"),
+    "assurance_existing_program_board": _handler(
+        "deliver", ("program", "board"), (_PATH, ("out", "out", "--out")), ("out",), "write"),
+    "assurance_existing_map": _handler("deliver", ("map",), (_PATH, ("out", "out", "--out")), ("out",), "write"),
+}
+
+
+def _door_present(rel):
+    """True when this edition of BrotherSBE carries the file (the public export leaves some out)."""
+    return os.path.isfile(os.path.join(repo_root(), rel))
+
+
+def _door_commands():
+    """{command name: its run function} exactly as COMMANDS declares them."""
+    return dict((name, run) for (name, _help, run) in COMMANDS)
+
+
+def _door_problem(row, inputs, base):
+    """(argv words after the command's own, OS working directory, problem). A wrong type, a missing path, or a
+    positional word starting with a dash is a problem and nothing starts."""
+    cwd, words, flags = None, [], []
+    known = dict((name, kind) for (name, kind, _form) in row["args"])
+    stray = sorted(k for k in inputs if k not in known)
+    if stray:
+        return None, None, "%s is not an input of this operation; it takes %s" % (
+            stray[0], ", ".join(sorted(known)) or "no inputs")
+    for name, kind, form in row["args"]:
+        value = inputs.get(name)
+        if value is None or value in ("", [], {}):
+            continue
+        if kind == "switch":
+            if not isinstance(value, bool):
+                return None, None, "%s must be true or false" % name
+            if value:
+                flags.append(form)
+            continue
+        if kind == "list":
+            if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+                return None, None, "%s must be a list of non-empty text" % name
+            flags.extend("%s=%s" % (form, v) for v in value)
+            continue
+        if not isinstance(value, str) or not value:
+            return None, None, "%s must be non-empty text" % name
+        where = os.path.abspath(os.path.expanduser(value)) if kind == "cwd" else \
+            os.path.join(base, os.path.expanduser(value))
+        if kind in ("dir", "cwd") and not os.path.isdir(where):
+            return None, None, "%s names a folder that is not there: %s; supply that folder" % (name, value)
+        if kind == "file" and not os.path.isfile(where):
+            return None, None, "%s names a file that is not there: %s; supply that file" % (name, value)
+        if kind == "cwd":
+            cwd = where
+            continue
+        allowed = row["choices"].get(name)
+        names = allowed() if callable(allowed) else allowed
+        if names is not None and value not in names:
+            return None, None, "%s must be one of %s" % (name, ", ".join(names))
+        if form == "pos":
+            if value.startswith("-"):
+                return None, None, "%s starts with a dash, so it could be taken for an option" % name
+            words.append(value)
+        else:
+            flags.append("%s=%s" % (form, value))
+    return list(row["words"][1:]) + words + flags + list(row["fixed"]), cwd, None
+
+
+def _door_run(argv, cwd):
+    """(exit code, stdout, stderr) of one sbe command through this installation's own launcher."""
+    proc = subprocess.run([sys.executable, "-B", os.path.join(repo_root(), "bin", "sbe")] + argv, cwd=cwd,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True, timeout=DOOR_TIMEOUT_S)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _door_verdict(row, code, out, err):
+    """(verdict, output) from what the command itself said. Its words are passed through whole: a refusal reaches the
+    person as the gate wrote it. Exit 0 never overrides a FAIL line, a
+    NO-DATA, MISSING or WAIVED line stops a PASS on every row, and exit 0 with no verdict word is NO-DATA."""
+    text, tail = (out or "").strip(), (err or "").strip()
+    both = "\n".join(t for t in (text, tail) if t)
+    if code == 1:
+        return "FAIL", both or "exited 1 with nothing to show"
+    if code in (2, 3):
+        return "NO-DATA", both or "exited %s with nothing to show" % code
+    if code != 0:
+        return "FAIL", "exited %s; %s" % (code, both)
+    if not text:
+        return "NO-DATA", tail or "exited 0 with nothing to show"
+    seen = set(m.group(1) for m in _VERDICT_WORD.finditer(text))
+    if "FAIL" in seen:
+        return "FAIL", both
+    if seen & set(("NO-DATA", "MISSING", "WAIVED")) or "PASS" not in seen:
+        return "NO-DATA", both  # a held row stops a PASS on every command, and exit 0 with no verdict word is no verdict
+    return "PASS", both
+
+
+def _door_file_ref(path):
+    """'path sha256:HEX' for a readable file, 'path (folder)' for a folder, '' for anything else."""
+    try:
+        if os.path.isdir(path):
+            return "%s (folder)" % path
+        with open(path, "rb") as fh:
+            return "%s sha256:%s" % (path, hashlib.sha256(fh.read()).hexdigest())
+    except OSError:
+        return ""
+
+
+def door_discovery():
+    """What the door can honestly offer, generated from the parser's own subcommands and DOOR_HANDLERS.
+    commands: every subcommand with state supported (a built command with a handler), unavailable (declared and
+    not built: it exits 3), or not_routed (it exists and no handler reaches it, so use sbe directly). handlers:
+    every declared handler with its capability id, verb, command, permission and inputs, state supported,
+    unavailable or absent (its command is not in this parser)."""
+    names = []
+    for action in build_parser()._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            names = list(action.choices)
+    runs = _door_commands()
+    handlers, by_command = [], {}
+    for hid in sorted(DOOR_HANDLERS):
+        row = DOOR_HANDLERS[hid]
+        command = row["words"][0]
+        if command not in names:
+            state = "absent"
+        elif getattr(runs.get(command), "not_built", None):
+            state = "unavailable"
+        else:
+            state = "supported"
+        by_command.setdefault(command, []).append(hid)
+        entry = {"id": hid, "capability": "assurance." + hid[len("assurance_existing_"):], "verb": row["verb"],
+                 "command": " ".join(row["words"]), "state": state, "authority": row["authority"],
+                 "required_inputs": list(row["need"]),
+                 "optional_inputs": [n for (n, _k, _f) in row["args"] if n not in row["need"]]}
+        if state == "unavailable":
+            entry["reason"] = runs[command].not_built[1]
+            if command in DOOR_ALTERNATIVES:
+                entry["alternative"] = DOOR_ALTERNATIVES[command]
+        handlers.append(entry)
+    commands = []
+    for name in names:
+        if getattr(runs.get(name), "not_built", None):
+            state = "unavailable"
+        elif name in by_command:
+            state = "supported"
+        else:
+            state = "not_routed"
+        commands.append({"command": name, "state": state, "handlers": by_command.get(name, [])})
+    return {"verbs": list(DOOR_VERBS), "commands": commands, "handlers": handlers}
+
+
+def door_invoke(handler, inputs, run=None):
+    """{"verdict", "output", "evidence_refs"} for one door handler. Nothing runs for an unknown handler, an unbuilt or
+    absent command, a file this edition lacks, or an input that is the wrong type; each answers NO-DATA naming why."""
+    def reply(verdict, output, evidence=()):
+        return {"verdict": verdict, "output": output, "evidence_refs": list(evidence)}
+    if handler == DOOR_DISCOVER:
+        text = json.dumps(door_discovery(), indent=2, sort_keys=True)
+        return reply("PASS", text, ["sbe door discovery sha256:%s" % hashlib.sha256(text.encode("utf-8")).hexdigest()])
+    row = DOOR_HANDLERS.get(handler) if isinstance(handler, str) else None
+    if row is None:
+        return reply("NO-DATA", "no BrotherSBE handler is named %r; known: %s"
+                     % (handler, ", ".join(sorted(DOOR_HANDLERS))))
+    if not isinstance(inputs, dict):
+        return reply("NO-DATA", "the door's inputs were not a set of named values")
+    command = row["words"][0]
+    runs = _door_commands()
+    if command not in runs:
+        return reply("NO-DATA", "this BrotherSBE has no %s command, so %s cannot run here; nothing was run"
+                     % (command, handler))
+    built = getattr(runs[command], "not_built", None)
+    if built:
+        alt = DOOR_ALTERNATIVES.get(command)
+        return reply("NO-DATA", "sbe %s is NOT BUILT: %s It lands in wave %s. Nothing was run, and an empty result "
+                                "would claim something that does not exist.%s"
+                     % (command, built[1], built[0], " Supported instead: " + alt + "." if alt else ""))
+    gone = [rel for rel in DOOR_COMMAND_FILES.get(command, ()) if not _door_present(rel)]
+    if gone:
+        return reply("NO-DATA", "%s is not in this edition of BrotherSBE, so %s cannot run here; nothing was run"
+                     % (gone[0], handler))
+    missing = [k for k in row["need"] if inputs.get(k) is None or inputs.get(k) in ("", [], {})]
+    if missing:
+        return reply("NO-DATA", "missing input: %s" % ", ".join(missing))
+    base = os.path.abspath(os.path.expanduser(inputs["cwd"])) \
+        if isinstance(inputs.get("cwd"), str) and inputs["cwd"] else os.getcwd()
+    argv, cwd, problem = _door_problem(row, inputs, base)
+    if problem:
+        return reply("NO-DATA", "nothing was started: " + problem)
+    label = " ".join(row["words"])
+    try:
+        code, out, err = (run or _door_run)([command] + argv, cwd)
+    except subprocess.TimeoutExpired:
+        return reply("NO-DATA", "sbe %s did not finish within %d seconds" % (label, DOOR_TIMEOUT_S))
+    except OSError as exc:
+        return reply("NO-DATA", "sbe %s could not start: %s" % (label, exc))
+    verdict, text = _door_verdict(row, code, out, err)
+    if verdict != "PASS":
+        return reply(verdict, text)
+    refs = ["sbe %s exit 0 stdout sha256:%s" % (label, hashlib.sha256((out or "").encode("utf-8")).hexdigest())]
+    for name, kind, _form in row["args"]:
+        value = inputs.get(name)
+        if kind in ("dir", "file", "out") and isinstance(value, str) and value:
+            refs.append(_door_file_ref(os.path.join(base, os.path.expanduser(value))))
+    last = (out or "").strip().splitlines()[-1].strip()  # a command that wrote a record names it on its last line
+    if os.path.isabs(last) and os.path.isfile(last):
+        refs.append(_door_file_ref(last))
+    return reply("PASS", text, [r for r in refs if r])
+
+
+def _cmd_door(argv):
+    """`sbe door HANDLER`, inputs as one JSON object on stdin: the reply as one JSON line, exit 0 (the verdict is in
+    the reply)."""
+    try:
+        inputs = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        inputs = None
+    sys.stdout.write(json.dumps(door_invoke(argv[0] if argv else None, inputs), ensure_ascii=False) + "\n")
+    return EXIT_OK
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     if argv and argv[0] in ("--version", "-V"):
         return _cmd_version(None)
+    if argv and argv[0] == "door":
+        return _cmd_door(argv[1:])
     if not argv:
         parser.print_help()
         return EXIT_USAGE

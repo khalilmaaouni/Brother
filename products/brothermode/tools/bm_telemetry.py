@@ -736,7 +736,7 @@ def scan_corrections(sid, project, user_texts):
 
 def cmd_outcomes_append():
     if not _consented():
-        print("bm_telemetry: setup is not complete yet; run: python3 scripts/setup.py")
+        say("bm_telemetry: setup is not complete yet; run: python3 " + os.path.join(SKILL_DIR, "scripts", "setup.py"))
         return
     try:
         payload = json.load(sys.stdin)
@@ -1975,7 +1975,7 @@ def cmd_intent(argv):
     founder, so it prints the same explanatory sentence
     cmd_outcomes_append already uses rather than returning silently."""
     if not _consented():
-        print("bm_telemetry: setup is not complete yet; run: python3 scripts/setup.py")
+        say("bm_telemetry: setup is not complete yet; run: python3 " + os.path.join(SKILL_DIR, "scripts", "setup.py"))
         return
     text = " ".join(argv).strip()
     if not text:

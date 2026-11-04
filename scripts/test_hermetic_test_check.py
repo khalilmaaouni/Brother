@@ -202,10 +202,34 @@ class TheRun(Base):
         res = H.check(self.root, ["scripts/test_door.py"], r,
                       build=self.ships("test_door.py"))
         self.assertEqual(res[0][0], H.REFUSED)
-        self.assertIn("red in the checkout too: not a hermeticity defect, "
-                      "fix the code or the test", res[0][2])
+        self.assertIn("red in the checkout too", res[0][2])
+        self.assertIn("fix the code or the test", res[0][2])
         self.assertNotIn("own fixture", res[0][2])
         self.assertEqual(H.P.exit_code(res), H.P.EXIT_REFUSED)
+
+    def test_red_in_the_checkout_too_does_not_rule_out_a_home_dependency(self):
+        """2026-10-31: test_skills_portable.py reached PyYAML only through user site packages under the real HOME. The
+        checkout rerun ALSO runs under an empty HOME, so it was red there too and the refusal said "not a hermeticity
+        defect, fix the code or the test", pointing away from the cause. A red rerun clears the export tree, never the
+        home folder, and the words must say so. The verdict is unchanged."""
+        r = Runner({"test_door.py": [(1, "FAILED (errors=1)\n"), (1, "FAILED (errors=1)\n")]})
+        res = H.check(self.root, ["scripts/test_door.py"], r, build=self.ships("test_door.py"))
+        self.assertEqual(res[0][0], H.REFUSED)
+        self.assertNotIn("not a hermeticity defect", res[0][2])
+        self.assertIn("the rerun also had an empty HOME", res[0][2])
+        self.assertIn("user site packages", res[0][2])
+        self.assertIn("under your own HOME", res[0][2])
+        self.assertEqual(H.P.exit_code(res), H.P.EXIT_REFUSED)
+
+    def test_green_in_the_checkout_names_the_tree_not_a_home_folder(self):
+        """Both runs had an empty HOME, so a green rerun proves the difference is the tree: "or this home folder" named
+        a cause the rerun had already excluded."""
+        r = Runner({"test_door.py": [(1, "FAILED\n"), (0, "OK\n")]})
+        res = H.check(self.root, ["scripts/test_door.py"], r, build=self.ships("test_door.py"))
+        self.assertEqual(res[0][0], H.REFUSED)
+        self.assertNotIn("home folder has", res[0][2])
+        self.assertIn("both runs had an empty HOME", res[0][2])
+        self.assertIn("own fixture", res[0][2])
 
     def test_a_checkout_rerun_that_cannot_run_says_unknown_and_still_refuses(self):
         r = Runner({"test_door.py": [(1, "FAILED\n"), ("timeout", "")]})
@@ -1313,6 +1337,9 @@ class ADeclaredHarness(Base):
         self.assertEqual(res[0][0], H.OK)
         self.assertIn("RED BY DESIGN as declared", res[0][2])
         self.assertIn("red by design while its unit is OPEN", res[0][2])
+        # the rerun had an empty HOME too, so its red clears the export tree and nothing more (2026-10-31)
+        self.assertNotIn("not a hermeticity defect", res[0][2])
+        self.assertIn("the rerun also had an empty HOME", res[0][2])
 
     def test_declared_but_green_in_the_checkout_is_still_refused(self):
         self.declare("EXEMPT = {'test_door.py': 'red by design while its unit is OPEN'}\n")
@@ -1330,6 +1357,118 @@ class ADeclaredHarness(Base):
         self.assertEqual(H.declared_red(self.root, "scripts/test_door.py"), "")
         self.declare("EXEMPT = {'test_door.py': 'x'\n")
         self.assertEqual(H.declared_red(self.root, "scripts/test_door.py"), "")
+
+
+class TheParallelFirstPass(Base):
+    """1.2.0: 168 reached tests ran strictly one after another and outgrew every budget the export check had. A first pass
+    now runs them side by side, one export-tree clone per worker. It may only ever clear a test as OK; everything else is
+    judged by the original one at a time code, so the worker count changes how long the run takes, never what it says."""
+
+    def test_the_worker_count_follows_the_caller_then_the_environment_and_never_exceeds_the_tests(self):
+        env = {k: v for k, v in os.environ.items() if k != H.WORKERS_ENV}
+        saved = dict(os.environ)
+        try:
+            os.environ.clear()
+            os.environ.update(env)
+            self.assertEqual(H._worker_count(3, None, 10), 3)
+            self.assertEqual(H._worker_count(8, None, 2), 2, "never more workers than tests")
+            self.assertEqual(H._worker_count(1, None, 5), 1)
+            self.assertEqual(H._worker_count(6, Runner(), 10), 1, "an injected stub runner is never shared")
+            default = H._worker_count(None, None, 100)
+            self.assertTrue(1 <= default <= H.DEFAULT_WORKERS_CAP, default)
+            for hostile in (0, -1, True, 2.5, "3", None.__class__):
+                with self.assertRaises(ValueError, msg=repr(hostile)):
+                    H._worker_count(hostile, None, 10)
+            os.environ[H.WORKERS_ENV] = "2"
+            self.assertEqual(H._worker_count(None, None, 10), 2)
+            for unreadable in ("abc", "0", "-3", "1.5"):
+                os.environ[H.WORKERS_ENV] = unreadable
+                self.assertEqual(H._worker_count(None, None, 10), 1, "an unreadable setting means one at a time")
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def test_results_come_back_in_test_order_and_a_crash_or_a_decline_is_none(self):
+        tests = ["t%d" % i for i in range(12)]
+
+        def run_fn(tree, test):
+            if test == "t3":
+                raise RuntimeError("worker died")
+            if test == "t5":
+                return None
+            return ("OK", test, tree)
+
+        got = H._parallel_pass(tests, ["A", "B", "C"], run_fn)
+        self.assertEqual(len(got), 12)
+        self.assertIsNone(got[3], "a crashed worker is None, handed to the one at a time judgment")
+        self.assertIsNone(got[5], "a declined test stays None")
+        for i, item in enumerate(got):
+            if i not in (3, 5):
+                self.assertEqual(item[1], tests[i], "result %d is not for test %d" % (i, i))
+
+    def test_two_workers_never_share_a_tree(self):
+        import threading
+        import time
+        busy, clashes, lock = set(), [], threading.Lock()
+
+        def run_fn(tree, test):
+            with lock:
+                if tree in busy:
+                    clashes.append((tree, test))
+                busy.add(tree)
+            time.sleep(0.02)
+            with lock:
+                busy.discard(tree)
+            return ("OK", test, tree)
+
+        H._parallel_pass(["t%d" % i for i in range(24)], ["A", "B", "C", "D"], run_fn)
+        self.assertEqual(clashes, [])
+
+    def test_check_clears_only_exit_zero_in_the_pass_and_leaves_no_clone_behind(self):
+        """End to end with real subprocesses (the sandbox wrap stubbed out, the nested sandbox cannot run here): the passing
+        tests are cleared in the first pass, the failing one and the absent one go to the original judgment, and every clone
+        folder is gone afterwards."""
+        used_trees, judged = set(), []
+
+        def build(dest):
+            os.makedirs(os.path.join(dest, "scripts"))
+            for name in ("test_a.py", "test_b.py", "test_c.py", "test_d.py"):
+                with open(os.path.join(dest, "scripts", name), "w") as fh:
+                    fh.write("import sys\nsys.exit(0)\n")
+            with open(os.path.join(dest, "scripts", "test_bad.py"), "w") as fh:
+                fh.write("import sys\nsys.exit(1)\n")
+
+        real_confined, real_judge = H._confined, H._judge_one
+
+        def confined(cmd, root, home):
+            used_trees.add(root)
+            return list(cmd), dict(os.environ, HOME=home)
+
+        def judge(root, tree, home, test, runner, timeout):
+            judged.append(test)
+            if test == "scripts/test_bad.py":
+                return (H.REFUSED, test, "judged by the original code")
+            return real_judge(root, tree, home, test, runner, timeout)
+
+        H._confined, H._judge_one = confined, judge
+        try:
+            tests = ["scripts/test_a.py", "scripts/test_bad.py", "scripts/test_b.py", "scripts/test_gone.py",
+                     "scripts/test_c.py", "scripts/test_d.py"]
+            res = H.check(self.root, tests, build=build, workers=3)
+        finally:
+            H._confined, H._judge_one = real_confined, real_judge
+        self.assertEqual([t for _, t, _ in res], tests, "result order is the test order")
+        verdicts = dict((t, v) for v, t, _ in res)
+        self.assertEqual(verdicts["scripts/test_bad.py"], H.REFUSED, res)
+        for name in ("a", "b", "c", "d"):
+            self.assertEqual(verdicts["scripts/test_%s.py" % name], H.OK, res)
+        self.assertEqual(verdicts["scripts/test_gone.py"], H.OK, "an unshipped test reads as before")
+        self.assertIn("scripts/test_bad.py", judged, "a failure in the pass is judged by the original code")
+        self.assertNotIn("scripts/test_a.py", judged, "a test the pass cleared is not run a second time")
+        self.assertGreater(len(used_trees), 1, "the pass used more than the one tree")
+        for tree in used_trees:
+            if "hermetic-clone-" in tree:
+                self.assertFalse(os.path.exists(tree), "a clone folder was left behind: %s" % tree)
 
 
 if __name__ == "__main__":

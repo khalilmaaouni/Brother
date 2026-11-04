@@ -61,11 +61,15 @@ class Room(unittest.TestCase):
         home = tempfile.mkdtemp(prefix="pool-dry-")
         ev = os.path.join(home, ".claude", "evidence")
         os.makedirs(ev)
-        plan = os.path.join(home, "BROTHER-TEST-WBS.json")
-        with open(plan, "w") as fh:
+        # FIXTURE CORRECTED 2026-10-31 by the integrator (assertions unchanged): the frozen fixture passed an absolute
+        # BROTHER_WBS, which plan_path.validate has refused since 2026-10-10 ("a plan path is relative to the launch
+        # tree", under docs/plan/), so no build could pass it. The plan now sits in a throwaway launch tree and is named
+        # relative to it, the shape plan_path admits.
+        os.makedirs(os.path.join(home, "docs", "plan"))
+        with open(os.path.join(home, "docs", "plan", "BROTHER-TEST-WBS.json"), "w") as fh:
             json.dump({"units": []}, fh)
-        env = dict(os.environ, HOME=home, BROTHER_WBS=plan)
-        p = subprocess.run([sys.executable, "-B", os.path.join(LOOP, "runner_pool.py"), "--dry"], cwd=ROOT, env=env,
+        env = dict(os.environ, HOME=home, BROTHER_WBS="docs/plan/BROTHER-TEST-WBS.json")
+        p = subprocess.run([sys.executable, "-B", os.path.join(LOOP, "runner_pool.py"), "--dry"], cwd=home, env=env,
                            capture_output=True, text=True, timeout=600)
         self.assertIn("room for", p.stdout + p.stderr, "no room line: %s" % (p.stdout + p.stderr)[-400:])
         self.assertIn("limit:", p.stdout + p.stderr, "the room line names no limit")

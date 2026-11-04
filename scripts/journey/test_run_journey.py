@@ -393,5 +393,189 @@ class WritesARecordTheGateCanRead(_Base):
                       "clean walk, because its rows describe another tree")
 
 
+class InstallRowsMeasure(unittest.TestCase):
+    """OUT1.l: the four J1 rows that read NO-DATA for want of a check, each driven through its check's own
+    entry point (main, as the walker runs it) against a scripted install: green, red, and no install at all.
+
+    Hermetic: every install is a temp folder shaped like the host's cache (runtime/RUNTIME-MANIFEST.json,
+    hooks/hooks.json, commands/, skills/), HOME is a temp folder, and nothing reaches the network."""
+
+    ROWS = {"A.first-screen-paths-exist": "check_install_paths.py",
+            "D.no-internal-names": "check_no_internal_names.py",
+            "D.doctor-fixes-work": "check_doctor_fixes.py",
+            "D.readme-claims-executed": "check_readme_claims.py"}
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="j1-rows-")
+        self.home = os.path.join(self.tmp, "home")
+        os.makedirs(self.home)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def install(self, start_text="Brother is ready.", door="", doctor_body=None, verify_exit=0):
+        """A scripted install under a fresh config dir; returns the config dir."""
+        import json as _json
+        config = os.path.join(self.tmp, "config-%d" % len(os.listdir(self.tmp)))
+        root = os.path.join(config, "plugins", "cache", "brother", "brother", "0.0.0")
+        for d in ("runtime/hooks/brothermode/scripts", "hooks", "commands", "skills/brother-help"):
+            os.makedirs(os.path.join(root, d))
+        with open(os.path.join(root, "runtime", "RUNTIME-MANIFEST.json"), "w") as fh:
+            _json.dump({"files": [], "source_revision": "f" * 40}, fh)
+        with open(os.path.join(root, "runtime", "start_text.py"), "w") as fh:
+            fh.write("import sys\nsys.stdin.read()\nprint(%r)\n" % start_text)
+        with open(os.path.join(root, "hooks", "hooks.json"), "w") as fh:
+            _json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command":
+                       'python3 "${CLAUDE_PLUGIN_ROOT}/runtime/start_text.py"'}]}]}}, fh)
+        with open(os.path.join(root, "commands", "brother.md"), "w") as fh:
+            fh.write(door or 'Run python3 "${CLAUDE_PLUGIN_ROOT}/runtime/start_text.py".\n')
+        with open(os.path.join(root, "skills", "brother-help", "SKILL.md"), "w") as fh:
+            fh.write("help\n")
+        body = doctor_body if doctor_body is not None else {"checks": [{"key": "ok", "status": "PASS",
+                                                                       "message": "fine"}]}
+        with open(os.path.join(root, "runtime", "hooks", "brothermode", "scripts", "doctor.py"), "w") as fh:
+            fh.write("import json, sys\nprint(json.dumps(%r))\nsys.exit(0)\n" % body)
+        with open(os.path.join(root, "runtime", "verify_runtime.py"), "w") as fh:
+            fh.write("import sys\nprint('verify_runtime: scripted')\nsys.exit(%d)\n" % verify_exit)
+        return config
+
+    def run_row(self, row, config, *extra):
+        import subprocess
+        import sys as _sys
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("BROTHER", "BM_"))}
+        env.update(HOME=self.home, CLAUDE_CONFIG_DIR=config)
+        done = subprocess.run([_sys.executable, "-B", os.path.join(HERE, self.ROWS[row])] + list(extra),
+                              env=env, cwd=ROOT, capture_output=True, text=True, timeout=300)
+        return done.returncode, done.stdout + done.stderr
+
+    def readme(self, text):
+        path = os.path.join(self.tmp, "README.md")
+        with open(path, "w") as fh:
+            fh.write(text)
+        return path
+
+    def test_every_row_declares_a_check_that_exists(self):
+        doc = loaded(JOURNEYS)
+        rows = {r["id"]: r for r in doc["J1"]["rows"]}
+        for row, script in self.ROWS.items():
+            self.assertEqual(["python3", "-B", "scripts/journey/" + script], rows[row].get("check"), row)
+            self.assertTrue(os.path.isfile(os.path.join(HERE, script)), script)
+
+    def test_first_screen_paths_green_and_red(self):
+        row = "A.first-screen-paths-exist"
+        self.assertEqual(0, self.run_row(row, self.install())[0])
+        code, out = self.run_row(row, self.install(start_text="setup is not complete; run: python3 scripts/setup.py"))
+        self.assertEqual(1, code, out)
+        self.assertIn("scripts/setup.py", out)
+        code, out = self.run_row(row, self.install(door='Run "${BROTHER_PLUGIN_ROOT}/runtime/gone.py".\n'))
+        self.assertEqual(1, code, out)
+        self.assertIn("runtime/gone.py", out)
+
+    def test_no_internal_names_green_and_red(self):
+        row = "D.no-internal-names"
+        self.assertEqual(0, self.run_row(row, self.install())[0])
+        code, out = self.run_row(row, self.install(start_text="BrotherMode setup is not complete yet"))
+        self.assertEqual(1, code, out)
+
+    def test_doctor_fixes_green_and_red(self):
+        row = "D.doctor-fixes-work"
+        self.assertEqual(0, self.run_row(row, self.install())[0])
+        red = {"checks": [{"key": "settings", "status": "FAIL",
+                           "message": "run that to create it: python3 scripts/install.py"}]}
+        code, out = self.run_row(row, self.install(doctor_body=red))
+        self.assertEqual(1, code, out)
+        self.assertIn("scripts/install.py", out)
+        retired = {"checks": [{"key": "update", "status": "FAIL", "message": "/plugin update brothermode"}]}
+        self.assertEqual(1, self.run_row(row, self.install(doctor_body=retired))[0])
+
+    def test_readme_claims_green_and_red(self):
+        row = "D.readme-claims-executed"
+        claim = self.readme("From an installed plugin root run `python3 runtime/verify_runtime.py`.\n")
+        self.assertEqual(0, self.run_row(row, self.install(), "--readme", claim)[0])
+        code, out = self.run_row(row, self.install(verify_exit=1), "--readme", claim)
+        self.assertEqual(1, code, out)
+        none = self.readme("No installed-root command here.\n")
+        self.assertEqual(2, self.run_row(row, self.install(), "--readme", none)[0])
+
+    def test_no_install_is_no_data_for_every_row(self):
+        empty = os.path.join(self.tmp, "empty-config")
+        os.makedirs(empty)
+        for row in self.ROWS:
+            code, out = self.run_row(row, empty)
+            self.assertEqual(2, code, "%s: %s" % (row, out))
+            self.assertIn("NO-DATA", out, row)
+
+
+class AcceptRunComesFromTheEngine(unittest.TestCase):
+    """D2, OUT1.l: A.accept-recorded binds a run the INSTALLED engine made. When the engine makes no run, the
+    accept tool must never be reached with a run this check built itself: a scripted accept tool that records
+    whatever it is handed stays empty, and the row is not PASS."""
+
+    def test_no_engine_run_means_no_acceptance(self):
+        import subprocess
+        import sys as _sys
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="j4-accept-")
+        tools = os.path.join(tmp, "config", "plugins", "cache", "brother", "brother", "0.0.0", "runtime")
+        os.makedirs(tools)
+        with open(os.path.join(tools, "brother_run.py"), "w") as fh:
+            fh.write("import sys\nsys.exit(1)\n")
+        with open(os.path.join(tools, "bm_project.py"), "w") as fh:
+            fh.write("import json, sys\nout = sys.argv[sys.argv.index('--out') + 1]\n"
+                     "json.dump({'success_checks': [{'id': 'c', 'command': 'python3 t.py'}]}, open(out, 'w'))\n")
+        with open(os.path.join(tools, "accept_delivery.py"), "w") as fh:
+            fh.write("import os, sys\nd = sys.argv[sys.argv.index('--dir') + 1]\n"
+                     "open(os.path.join(d, 'accepted.json'), 'w').write('{}')\n")
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("BROTHER", "BM_"))}
+        env.update(HOME=home, CLAUDE_CONFIG_DIR=os.path.join(tmp, "config"))
+        done = subprocess.run([_sys.executable, "-B", os.path.join(HERE, "check_accept_route.py"), "--row",
+                               "accept"], env=env, cwd=ROOT, capture_output=True, text=True, timeout=300)
+        records = os.path.join(home, "journey-deliveries")
+        self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertEqual([], os.listdir(records) if os.path.isdir(records) else [],
+                         "the accept tool was handed a run the installed engine never made")
+
+
+class StrangerEnvStripsTheMaintainerFamilies(unittest.TestCase):
+    """STRIP1.a: stranger_env is the one place every walk (run_journey's install and checks, sim_trial's
+    two legs) gets its environment. A maintainer's BM_, BROTHERMODE_ and BROTHER_ settings must not reach
+    a stranger walk; what the walker sets on purpose, and the client's own CLAUDE_ variables, must."""
+
+    def test_no_maintainer_variable_survives_and_the_overrides_do(self):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("run_journey_strip1a", WALKER)
+        rj = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rj)
+        # one name per stripped family, two for BM_ so a narrowed prefix (BM_FENCE_) cannot pass
+        planted = {"BM_FENCE_MODE": "enforced", "BM_VAULT_ROOT": "/maintainer/vault",
+                   "BROTHERMODE_VAULT": "/maintainer/vault", "BROTHERSBE_VAULT": "/maintainer/sbe",
+                   "BROTHERDS_HOME": "/maintainer/ds", "BROTHER_X": "1",
+                   "BROTHERME_CONFIG": "/maintainer/consent.json", "SBE_PROFILE": "/maintainer/profile",
+                   "FIND_OUT_VAULT": "/maintainer/vault"}
+        with mock.patch.dict(os.environ, dict(planted, CLAUDE_STRIP1A_SIGNIN="kept")):
+            env, removed = rj.stranger_env(HOME="/stranger/home", BROTHER_JOURNEY_LAUNCHER="/launcher",
+                                           BM_FENCE_MODE="advisory")
+        # booleans, never assertNotIn over env: a failure must not print this machine's environment
+        self.assertFalse("BROTHERMODE_VAULT" in env, "BROTHERMODE_VAULT reached a stranger walk")
+        self.assertFalse("BROTHER_X" in env, "BROTHER_X reached a stranger walk")
+        self.assertEqual(env.get("BM_FENCE_MODE"), "advisory",
+                         "an override in a stripped family must survive, and only the override")
+        self.assertTrue({"BROTHERMODE_VAULT", "BROTHER_X"} <= set(removed), "not reported as removed")
+        self.assertNotIn("BM_FENCE_MODE", removed, "an overridden name is set, not removed")
+        self.assertEqual(env.get("HOME"), "/stranger/home")
+        self.assertEqual(env.get("BROTHER_JOURNEY_LAUNCHER"), "/launcher")
+        self.assertEqual(env.get("CLAUDE_STRIP1A_SIGNIN"), "kept")
+        with mock.patch.dict(os.environ, planted):
+            env, removed = rj.stranger_env(HOME="/stranger/home")
+        for name in planted:
+            self.assertFalse(name in env, "%s from this machine reached a stranger walk" % name)
+            self.assertTrue(name in removed, "%s not reported as removed" % name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

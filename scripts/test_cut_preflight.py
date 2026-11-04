@@ -14,6 +14,9 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# 1.2.0: an operator's disk floor override (BROTHER_DISK_FLOOR_GIB, read once when perturb_pool is imported) must not
+# change what these tests assert about the 15 GiB default; a test that needs another floor passes its own env dict.
+os.environ.pop("BROTHER_DISK_FLOOR_GIB", None)
 import cut_preflight as P  # noqa: E402
 import perturb_pool as PP  # noqa: E402
 
@@ -66,6 +69,7 @@ class TheClocksAreReadAtTheHorizon(unittest.TestCase):
         self.assertEqual(P.check_pack_clock(".", 6, r)[0], P.OK)
         cmd = r.calls[0][1]
         self.assertEqual(cmd[cmd.index("--max-age-hours") + 1], "18")
+        self.assertIn("--require-current", cmd)  # HO1: the cut still needs a close that describes HEAD
 
     def test_a_pack_that_lapses_mid_cut_refuses(self):
         r = Runner({"close_ceremony_check.py": (1, "FAIL: pack is 19.0 hours old\n")})
@@ -1378,7 +1382,11 @@ class _Scratch(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.top, True)
         self.root = os.path.join(self.top, "scratch")
         os.makedirs(self.root)
-        patch = mock.patch.dict(os.environ, {"BROTHER_SCRATCH": self.root})
+        # The resource lease ledger defaults to <scratch root>/cut-resource-leases.json (perturb_pool.lease_path), so a
+        # run through the pool wrote two entries into the root this fixture promises stays caller owned. Aim it at the
+        # test's own folder, beside the root and removed with it.
+        patch = mock.patch.dict(os.environ, {"BROTHER_SCRATCH": self.root,
+                                             PP.LEASE_ENV: os.path.join(self.top, "cut-resource-leases.json")})
         patch.start()
         self.addCleanup(patch.stop)
 

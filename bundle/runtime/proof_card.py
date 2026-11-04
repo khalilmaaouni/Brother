@@ -71,10 +71,10 @@ Python 3, standard library only. No network.
 """
 import argparse
 import datetime
-import glob
 import json
 import math
 import os
+import re
 import sys
 import time
 
@@ -109,32 +109,41 @@ TITLE = "BROTHER VERIFIED AUTOPILOT"
 # NO-DATA, never a crash; a malformed file is treated as absent rather than
 # raising through to the caller.
 
-def _find_work_doc(run_dir):
-    """The one W-*.json in `run_dir`, same rule as
-    journal_projection._run_record_path (glob, sorted, first)."""
-    paths = sorted(glob.glob(os.path.join(run_dir, "W-*.json")))
-    return paths[0] if paths else None
+def read_record_why(run_dir):
+    """(Work document dict, "") or (None, why). THE lookup is the engine's
+    own (brother_run._find_work_doc_why and _read_regular_json), loaded at
+    call time because brother_run imports this module: it honours
+    target.json's work_document pointer, refuses an ambiguous folder and
+    never reads through a link, so this card and --continue/--unfinished
+    cannot disagree about which file is the run's record."""
+    try:
+        import brother_run
+    except ImportError as exc:
+        return None, "the engine could not be loaded (%s)" % exc
+    path, why = brother_run._find_work_doc_why(run_dir)
+    if not path:
+        return None, why
+    doc, why = brother_run._read_regular_json(path)
+    if why:
+        return None, "%s %s" % (os.path.basename(path), why)
+    if not isinstance(doc, dict):
+        return None, "%s is not a JSON object" % os.path.basename(path)
+    return doc, ""
 
 
 def read_record(run_dir):
     """The Work document dict, or None when there is none or it will not
-    parse as one."""
-    path = _find_work_doc(run_dir)
-    if not path:
-        return None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, ValueError):
-        return None
-    return doc if isinstance(doc, dict) else None
+    parse as one (read_record_why has the reason)."""
+    return read_record_why(run_dir)[0]
 
 
 def read_receipt(run_dir):
     """The receipt body at <run_dir>/receipt/receipt.json, or None when
-    there is none or it will not parse as a dict."""
+    there is none, it is a link or it will not parse as a dict."""
     path = os.path.join(run_dir, RECEIPT_RELPATH)
-    if not os.path.isfile(path):
+    # A link is never followed: a receipt is a file this run wrote itself, so
+    # one that points elsewhere is somebody else's verdict, not this run's.
+    if os.path.islink(path) or not os.path.isfile(path):
         return None
     try:
         with open(path, encoding="utf-8") as fh:
@@ -1057,6 +1066,303 @@ def render_short(fields, parked=None, stamps=None, reviews=None, since=None,
 
 
 # ---------------------------------------------------------------------------
+# The consumer card (UI1.a): where a run stands and what happens next, in
+# plain words, for a person who never reads a log.
+
+#: Each line of the consumer card is clipped to this, so its eleven lines
+#: stay inside 1200 characters however long a record's text is.
+WORKFLOW_LINE_BYTES = 105
+#: The run states stage_log.current_run writes, in plain words.
+WORKFLOW_STATES = {"RUNNING": "Working", "WAITING": "Waiting",
+                   "NEEDS_INPUT": "Waiting for you",
+                   "FAILED": "Stopped on a problem", "DONE": "Finished"}
+#: stage_log.current_run's next_action words, in plain words. wake_on:<phase>
+#: is handled beside this table.
+WORKFLOW_NEXT = {"none": "Nothing more runs on its own",
+                 "wait_lease": "Keep working; nothing is needed from you",
+                 "renew_monitor": "Check that the run is still alive",
+                 "escalate": "The run went quiet; a person should look at it",
+                 "ask_owner": "Answer the question waiting for you"}
+#: What a verdict (outcome_status's words) lets the card say about proof.
+#: Anything else is NO-DATA.
+WORKFLOW_PROOF = {"PASS": "checked and proven",
+                  "UNIT-COMPLETE": "each piece finished, the whole result not verified yet",
+                  "FAIL": "a check failed"}
+_RECIPE_MARKS = ("scripts/", "python3", ".py", ".sh", "`", "&&", "$(", "~/")
+WITHHELD = "a technical detail, shown only when you ask for details"
+
+
+def _plain(value):
+    """`value` as one line when it is plain text a person can read, else
+    None: not text, empty, or a terminal recipe (a flag, a script path, a
+    command). A recipe is withheld rather than echoed, so the default card
+    never tells a person to type something."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    line = _one_line(value)
+    low = line.lower()
+    if any(m in low for m in _RECIPE_MARKS) or any(
+            w.startswith("-") and w.lstrip("-")[:1].isalpha() for w in line.split()):
+        return None
+    return line
+
+
+def _said(value, missing):
+    """The card's words for a record value: the plain text, WITHHELD for a
+    recipe, `missing` when there is nothing."""
+    plain = _plain(value)
+    if plain:
+        return plain
+    return WITHHELD if isinstance(value, str) and value.strip() else missing
+
+
+def workflow_card(state):
+    """The consumer card for one run, from canonical consumer facts: outcome,
+    state and phase (stage_log.current_run's), summary, next_action,
+    owner_action ({action, scope, reason} or None), verdict (outcome_status's
+    PASS, UNIT-COMPLETE, FAIL or NO-DATA), and optional completed (a list),
+    error and cost. Only those keys are read, so a debug field, an internal
+    command or a credential elsewhere in `state` is never echoed; a recipe
+    inside a read field is withheld. A run is called proven only on PASS;
+    any other verdict says not verified yet, whatever the state, and
+    acceptance stays the person's decision. A missing fact prints NO-DATA.
+    At most eleven lines of WORKFLOW_LINE_BYTES each. Pure."""
+    s = state if isinstance(state, dict) else {}
+    phase = _plain(s.get("phase"))
+    now = WORKFLOW_STATES.get(s.get("state"), "Unknown (NO-DATA)")
+    if phase:
+        now += ", at the %s step" % phase
+    summary = _said(s.get("summary"), None)
+    lines = ["Outcome: %s" % _said(s.get("outcome"), "NO-DATA (not recorded)"),
+             "Now: %s%s" % (now, ". " + summary if summary else "")]
+    completed = s.get("completed")
+    if isinstance(completed, (list, tuple)):
+        done = [p for p in (_said(c, None) for c in completed) if p]
+        if done:
+            lines.append("Done so far: %s" % "; ".join(done))
+    for key, label in (("error", "Problem"), ("cost", "Cost")):
+        if s.get(key) is not None:
+            lines.append("%s: %s" % (label, _said(s.get(key), NODATA)))
+    proof = WORKFLOW_PROOF.get(s.get("verdict"))
+    lines.append("Proof: %s" % (proof or "not verified yet (NO-DATA)"))
+    if s.get("verdict") == "PASS" and s.get("state") == "DONE":
+        lines.append("Accepting it is your decision.")
+    action = s.get("next_action")
+    if isinstance(action, str) and action.startswith("wake_on:"):
+        word = _plain(action[len("wake_on:"):].replace("_", " "))
+        nxt = "Continue once the %s wait clears" % word if word else WITHHELD
+    else:
+        nxt = WORKFLOW_NEXT.get(action) or _said(action, "NO-DATA (not known yet)")
+    lines.append("Next: %s" % nxt)
+    owner = s.get("owner_action")
+    if owner is not None:
+        owner = owner if isinstance(owner, dict) else {"action": owner}
+        lines.append("Needs you: %s, for %s" % (
+            _said(owner.get("action"), "NO-DATA (the action is not recorded)"),
+            _said(owner.get("scope"), "NO-DATA (scope not recorded)")))
+        lines.append("Why: %s" % _said(owner.get("reason"), "NO-DATA (no reason recorded)"))
+    lines.append("Ask for details to see each check and the receipt.")
+    return "\n".join(_clip(line, WORKFLOW_LINE_BYTES) for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# The current run (KEY1.c). ONE resolver for "what is the run the status card
+# should describe": every caller of workflow_card that has no state in hand
+# routes here, so a door delivery (which writes no stage_log row) is found
+# the same way as a loop run.
+
+DOOR_RUNS_RELPATH = os.path.join("docs", "plan", "runs")
+#: A door run folder is named <%Y%m%dT%H%M%S>-<slug> (brother_run's run
+#: directory), so its name's stamp is its age. THE ORDER RULE: newest stamp
+#: first, ties by the rest of the name; a folder with no stamp ranks below
+#: every stamped one, so a folder named "zzz" can never outrank a real run.
+_RUN_STAMP = re.compile(r"^\d{8}T\d{6}-")
+#: The door run's next step in plain words, for workflow_card's Next line.
+DOOR_UNFINISHED_NEXT = "Pick the unfinished run back up when you ask"
+
+
+def _no_run(why):
+    """A state workflow_card prints as unknown, with the reason as summary."""
+    return {"source": None, "state": None, "summary": "%s: %s" % (NODATA, why)}
+
+
+def _loop_state(run, loop_log, now):
+    """stage_log.current_run's state for `run`, or None when there is no
+    usable row for it (no name, absent or unreadable log, malformed rows).
+    stage_log is imported at call time: the loop folder is not on the import
+    path of a plain status read."""
+    if not isinstance(run, str) or not run:
+        return None
+    loop_dir = os.path.join(HERE, "loop")
+    if loop_dir not in sys.path:
+        sys.path.append(loop_dir)
+    try:
+        import stage_log
+        rows, _bad = stage_log.load_run(loop_log)
+        cur = stage_log.current_run(stage_log._run_snapshot(rows, run), rows,
+                                    time.time() if now is None else now)
+    except (ImportError, OSError, ValueError, TypeError, AttributeError, KeyError):
+        return None
+    if cur.get("state") is None:   # current_run answers no_data with state None, only
+        return None
+    return {"source": "loop", "state": cur["state"], "phase": cur["phase"],
+            "next_action": cur["next_action"]}
+
+
+def _age_key(name):
+    """Sort key of a run folder name by the order rule above."""
+    return (bool(_RUN_STAMP.match(name)), name)
+
+
+def _newest_first(names):
+    """Run folder names, newest first, by the order rule above."""
+    return sorted(names, reverse=True, key=_age_key)
+
+
+def _read_only_runs_root(requested):
+    """The runs root a STATUS READ looks in, resolved without running the
+    engine's run-start resolver (brother_run._resolve_runs_root), which
+    creates folders to probe them, prints lines about "this run's records"
+    and runs git: none of that belongs in a read. An explicit root is taken
+    as given. Otherwise the engine's own order: its default root
+    (default_runs_root, pure), then the user-config fallback it moves to when
+    the default cannot be written (FALLBACK_RUNS_DIR under config_dir); the
+    first that already holds docs/plan/runs, else the default. Creates
+    nothing, prints nothing, spawns nothing.
+    ponytail: a root that is writable now but never held a run reads as
+    absent here, where the engine would create it, so runs left in the
+    fallback show on the card while `--unfinished` creates the default and
+    lists none; fix by probing, which is what this function exists to avoid."""
+    import brother_run
+    if requested:
+        return os.path.abspath(requested)
+    default = os.path.abspath(brother_run.default_runs_root()[0])
+    fallback = os.path.join(brother_run.brother_paths.config_dir(),
+                            brother_run.FALLBACK_RUNS_DIR)
+    for root in (default, fallback):
+        if os.path.isdir(os.path.join(root, DOOR_RUNS_RELPATH)):
+            return root
+    return default
+
+
+def _door_state(runs_root, cwd):
+    """The current door run for `cwd` as a workflow_card state, or None when
+    there is none. THE NEWEST run recorded for this folder answers, whatever
+    its state, so a failure of today is never hidden behind an older
+    unfinished run. Whether a run is unfinished is the engine's own call
+    (brother_run.find_unfinished_runs, called rather than copied, so the card
+    and --unfinished cannot disagree); older runs the engine still lists as
+    unfinished are counted in the summary in plain words. A newest run that
+    is finished is read every file the engine's way (marker, Work document
+    lookup, JSON reader), and an unreadable newest run is NO-DATA, never an
+    older run in its place. A run folder whose target.json is damaged is
+    skipped the way the engine skips it (it may belong to any repository
+    sharing the runs root), but when it is NEWER than the run shown the
+    summary says so, since which run is the latest is then not certain.
+    ponytail: lists the whole runs folder, fine into the thousands."""
+    try:
+        import brother_run
+    except ImportError as exc:
+        return _no_run("the engine could not be loaded (%s)" % exc)
+    runs_dir = os.path.join(os.path.abspath(runs_root), DOOR_RUNS_RELPATH)
+    target = os.path.abspath(cwd)
+    try:
+        unfinished = brother_run.find_unfinished_runs(runs_root, target)
+        names = _newest_first(os.listdir(runs_dir)) if os.path.isdir(runs_dir) else []
+    except OSError as exc:
+        return _no_run("the run folder could not be read (%s)" % exc)
+    unread_newer = False
+    for name in names:
+        run_dir = os.path.join(runs_dir, name)
+        if not os.path.isdir(run_dir):
+            continue
+        run_cwd = brother_run._read_run_target(run_dir)
+        if run_cwd is None:
+            unread_newer = unread_newer or bool(brother_run._read_marker(run_dir)[1])
+            continue
+        if os.path.abspath(run_cwd) != target:
+            continue
+        state = _run_state(brother_run, run_dir, unfinished)
+        if state.get("state") is not None:
+            notes = [state.get("summary")]
+            older = sum(1 for u in unfinished if u[0] != run_dir)
+            if older:
+                notes.append("%d earlier run%s still unfinished"
+                             % (older, " is" if older == 1 else "s are"))
+            if unread_newer:
+                notes.append("a newer run could not be read, so this may not "
+                             "be the latest run")
+            state["summary"] = ". ".join(n for n in notes if n)
+        return state
+    return None
+
+
+def _run_state(brother_run, run_dir, unfinished):
+    """workflow_card state of one run folder known to be for this folder."""
+    for _dir, outcome, record in unfinished:
+        if _dir == run_dir:
+            rows = record.get("rows") or record.get("units")
+            done = sum(1 for r in rows if r.get("status") == "DONE")
+            return {"source": "door", "outcome": outcome, "state": "WAITING",
+                    "next_action": DOOR_UNFINISHED_NEXT,
+                    "summary": "%d of %d pieces of work done" % (done, len(rows))}
+    record, why = read_record_why(run_dir)
+    rows = (record.get("rows") or record.get("units") or []) if record else None
+    if (not isinstance(rows, list) or not rows
+            or not all(isinstance(r, dict) for r in rows)):
+        return _no_run("the newest run's work record could not be read (%s)"
+                       % (why or "its rows are missing or malformed"))
+    if any(r.get("status") != "DONE" for r in rows):
+        # unreachable while the engine's listing is the test of "unfinished";
+        # if the two ever disagree, say so, never Finished.
+        return _no_run("the engine lists no unfinished run here, yet the "
+                       "newest run has pieces not done")
+    base = {"source": "door", "outcome": record.get("outcome")}
+    receipt_path = os.path.join(run_dir, RECEIPT_RELPATH)
+    if not os.path.lexists(receipt_path):
+        return _no_run("every piece is done but no receipt was written")
+    if read_receipt(run_dir) is None:
+        return _no_run("the newest run's receipt could not be read")
+    claims_path = os.path.join(run_dir, CLAIMS_FILENAME)
+    if os.path.lexists(claims_path):
+        claims, why = brother_run._read_regular_json(claims_path)
+        if why or not isinstance(claims, dict):
+            return _no_run("the newest run's claim record could not be read")
+    verdict = build_card(run_dir)["outcome"]["value"]
+    verdict = verdict if verdict in WORKFLOW_PROOF else NODATA
+    base.update(state="FAILED" if verdict == "FAIL" else "DONE",
+                verdict=verdict, next_action="none")
+    return base
+
+
+def current_run_state(run="", loop_log=None, runs_root="", cwd="", now=None):
+    """The state workflow_card describes for the current run. A loop run
+    named by `run` that has a usable row in the loop log reads
+    stage_log.current_run (it is the live engine state, so it wins when both
+    exist). Otherwise the door run for `cwd` (default: the current folder)
+    under `runs_root` (default: the engine's runs root) is read from the
+    engine's own files (see _door_state for which one wins). Otherwise
+    NO-DATA with the reason in summary. An unreadable record is NO-DATA,
+    never a run and never a guessed state. `source` says which one answered
+    ("loop", "door", or None)."""
+    loop = _loop_state(run, loop_log, now)
+    if loop:
+        return loop
+    # The engine's own defaults, as `brother_run.py --unfinished` applies
+    # them but without its run-start side effects: no runs root named means
+    # the engine's runs root (see _read_only_runs_root), no cwd named means
+    # the current folder.
+    try:
+        runs_root = _read_only_runs_root(runs_root)
+    except ImportError as exc:
+        return _no_run("the engine could not be loaded (%s)" % exc)
+    except (SystemExit, OSError) as exc:
+        return _no_run("the engine's run folder could not be resolved (%s)" % exc)
+    door = _door_state(runs_root, cwd)
+    return door or _no_run("no loop run and no door run is recorded for this folder")
+
+
+# ---------------------------------------------------------------------------
 # The run index (PC1H.b). One JSON row per finished run in
 # ~/.brother/runs-index.jsonl, so status, the controller and session start
 # answer "what did the last run say" from ONE small file instead of loading
@@ -1177,15 +1483,39 @@ def read_index(home=""):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("run_dir", help="a run directory")
+    ap.add_argument("run_dir", nargs="?", default="", help="a run directory")
+    ap.add_argument("--status", action="store_true",
+                    help="print the consumer status card for the current run "
+                         "(a named --run from the loop log, else the newest "
+                         "door run for --cwd) instead of a run's proof card. "
+                         "Exit 0 when a state is known and it is not a "
+                         "failure (running, waiting, finished), 1 when the "
+                         "run FAILED, 2 for NO-DATA")
+    ap.add_argument("--run", default="", help="--status: the loop run's name")
+    ap.add_argument("--loop-log", default=None, help="--status: the loop run log")
+    ap.add_argument("--runs-root", default="",
+                    help="--status: the runs root (default: the engine's own, "
+                         "the one brother_run.py --unfinished reads)")
+    ap.add_argument("--cwd", default=".",
+                    help="--status: the repository (default: the current "
+                         "folder, as brother_run.py --unfinished)")
     ap.add_argument("--json", action="store_true",
                     help="print the card as {field: {value, source}} JSON "
                          "instead of the plain-text card")
     ap.add_argument("--out", action="store_true",
                     help="also write proof_card.txt and proof_card.json "
-                         "under the run directory")
+                         "under the run directory's proof_card folder")
     args = ap.parse_args(argv)
 
+    if args.status:
+        state = current_run_state(run=args.run, loop_log=args.loop_log,
+                                  runs_root=args.runs_root, cwd=args.cwd)
+        print(workflow_card(state))
+        if not state.get("state"):
+            return 2
+        return 1 if state["state"] == "FAILED" else 0
+    if not args.run_dir:
+        ap.error("a run directory is required unless --status is given")
     if not os.path.isdir(args.run_dir):
         print("%s: %s is not a directory" % (NODATA, args.run_dir))
         return 2
@@ -1197,10 +1527,15 @@ def main(argv=None):
     else:
         print(text)
     if args.out:
-        with open(os.path.join(args.run_dir, "proof_card.txt"), "w",
+        # A DIRECTORY, never run_dir's own level: a second .json there makes
+        # the engine's Work document lookup ambiguous (brother_run.py
+        # PROOF_CARD_DIRNAME, measured 2026-09-28).
+        out_dir = os.path.join(args.run_dir, "proof_card")
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "proof_card.txt"), "w",
                   encoding="utf-8") as fh:
             fh.write(text + "\n")
-        with open(os.path.join(args.run_dir, "proof_card.json"), "w",
+        with open(os.path.join(out_dir, "proof_card.json"), "w",
                   encoding="utf-8") as fh:
             json.dump(fields, fh, indent=1, sort_keys=True)
     return 0

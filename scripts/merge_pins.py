@@ -56,7 +56,7 @@ DEFAULT_MOVING = ("loop/run-*",)
 PIN_PREFIX = "merge-pin/"
 HEADS = "refs/heads/"
 USAGE = ("usage: merge_pins.py moving <ref> | check [--gh P] <clone> <remote> <pr> <sha> <head_ref> [pin=<branch>] "
-         "[frozen=<pr>] | freeze <clone> <remote> <pr> <sha> | open [--gh P] <repo> <pr> <sha> <branch> | "
+         "[frozen=<pr>] | freeze <clone> <remote> <pr> <sha> | open [--gh P] <repo> <pr> <sha> <branch> [base] | "
          "note <list> <pr> [pin=<branch>] [frozen=<pr>] | protected [--gh P] <repo> [branch] | confirm <count>")
 
 MergeGateError = merge_gate.MergeGateError
@@ -276,6 +276,7 @@ def open_frozen_pr(repo, pr, sha, branch, base=BRANCH, runner=None):
     pr = _pr_number(pr)
     sha = _sha(sha)
     branch = _ref_name(branch, "branch")
+    merge_gate.base_ref(base)   # MERGE2.a: a frozen pull request targets a named merge base, as typed, or nothing
     base = _ref_name(base, "base")
     runner = _runner(runner)
     code, out, err = _call(runner, ["gh", "pr", "list", "-R", repo, "--head", branch, "--state", "open",
@@ -561,10 +562,11 @@ def main(argv=None, runner=None):
             sys.stdout.write(freeze_pin(rest[0], rest[2], rest[3], remote=rest[1], runner=runner) + "\n")
             return 0
         if command == "open":
-            if len(rest) != 4:
+            if len(rest) not in (4, 5):
                 sys.stderr.write(USAGE + "\n")
                 return 2
-            sys.stdout.write(open_frozen_pr(rest[0], rest[1], rest[2], rest[3], runner=runner) + "\n")
+            base = rest[4] if len(rest) == 5 else BRANCH
+            sys.stdout.write(open_frozen_pr(rest[0], rest[1], rest[2], rest[3], base=base, runner=runner) + "\n")
             return 0
         if command == "note":
             if len(rest) < 3 or len(rest) > 4:

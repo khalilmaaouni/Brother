@@ -366,7 +366,14 @@ class F30ChainedCheckRefusedBeforeHandoffNotAfter(PlanFileRunBase):
         # rather than given to a spawned worker.
         env.pop("MODEL_WORKER_CMD", None)
         env["CLAUDECODE"] = "1"
-        units = [{"id": "U1", "objective": "make one file",
+        # U0 runs the contract's own check, so the older contract coverage
+        # refusal (brother_run.py "does not run every check the outcome
+        # contract promises") is satisfied and U1's chained check is the one
+        # condition left to refuse (STAB1.k).
+        units = [{"id": "U0", "objective": "check the file the contract names",
+                  "done_check": "test -f one.txt",
+                  "writes": ["check.txt"], "deps": []},
+                 {"id": "U1", "objective": "make one file",
                  "done_check": "test -f one.txt && touch pwned.txt",
                  "writes": ["one.txt"], "deps": []}]
         plan = write_plan(self.tmp, units)

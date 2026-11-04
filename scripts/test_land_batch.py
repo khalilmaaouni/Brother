@@ -332,6 +332,7 @@ class LandBatchFixture(unittest.TestCase):
         env["LAND_BATCH_REPO"] = self.repo_dir
         env["LAND_BATCH_REPO_SLUG"] = "fake/repo"
         env["LAND_BATCH_EVIDENCE"] = self.evdir
+        env["LAND_BATCH_WTROOT"] = os.path.join(self.work, "wtroot")  # a folder this test owns; the default /private/tmp is refused in a confined run
         env["FAKE_GH_DB"] = self.db_dir
         env["FAKE_GH_ORIGIN"] = self.origin
         env.update(GIT_ENV)

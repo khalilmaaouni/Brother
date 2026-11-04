@@ -183,6 +183,8 @@ class Activated(unittest.TestCase):
     """S9.a. The deliverable case is the first one; every other case is a guard's own fixture."""
 
     # REQ-S9A-01, the case that closes S9: the real record, the real git, nothing synthetic.
+    # docs/plan is not shipped in the public export, so there the record is absent, not the behaviour broken.
+    @unittest.skipUnless(os.path.isfile(RECORD), "docs/plan is not shipped in the public export; the record is the premise")
     def test_the_first_landing_regenerated_its_manifest(self):
         verdict, reason = judge(load_record(RECORD), ROOT, manifest_products(ROOT))
         self.assertEqual(PASS, verdict, reason)

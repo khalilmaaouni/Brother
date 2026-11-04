@@ -401,7 +401,11 @@ class ActualCheckout(unittest.TestCase):
     @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, MARKETPLACE_REL)),
                          "this tree carries no umbrella marketplace manifest")
     def test_actual_checkout_carriers_agree(self):
-        self.assertEqual([], release_source_errors(ROOT, "1.1.0"))
+        # The version is read from the tree's own canonical source, never a literal: a literal here went red on
+        # every tree after 1.1.0 (the 1.2.0 export check found it). A tree with no readable source is NO-DATA.
+        source, _ = version_source.read_source(pathlib.Path(ROOT))
+        self.assertIsNotNone(source, "the canonical version source is unreadable in this tree")
+        self.assertEqual([], release_source_errors(ROOT, source))
 
 
 if __name__ == "__main__":

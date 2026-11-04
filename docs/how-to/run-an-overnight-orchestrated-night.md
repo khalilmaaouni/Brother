@@ -43,6 +43,8 @@ Finally, supply closeout with the actual revisions, unit states, throughput, evi
 
 ## 4. Reading the morning
 
+<!-- doc-assurance: allow-missing MORNING-HANDOFF.md written into the configured output directory by the night run, not a repository file -->
+
 Open `MORNING-HANDOFF.md` and `orchestration/final-state.json` in the configured output directory. Check that their run identities agree with the night you intended to inspect.
 
 Read ANOMALY first. A non-terminal unit means the drain did not complete cleanly; the document explicitly warns against trusting its counts as final.

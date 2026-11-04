@@ -85,7 +85,7 @@ def build_name(sub, variant=0):
     gate however good it was (finding B8, 2026-09-27); a writer names a build here instead of spelling the pattern."""
     return "%s-r%d-build.json" % (sub, variant)
 
-def landing_records(lines, seen=None, owns=(), owner=LOOP_UNIT):
+def landing_records(lines, seen=None, owns=(), owner=LOOP_UNIT, events=None, base=None):
     """{unit id: [evidence line, ...]} to plan_store records: each a callable that appends this landing's lines, in
     order, to the unit plan_store re-reads under its lock, so evidence another writer added since this landing read
     the plan survives. A stale copy of the unit would erase it, which plan_store refuses with ValueError.
@@ -94,8 +94,14 @@ def landing_records(lines, seen=None, owns=(), owner=LOOP_UNIT):
     owns: the new loop components this landing created (loop_components). Each one the owner unit does not name yet is
     appended to its owns in the same locked write, and seen[owner] carries them as a third item so a refusal takes them
     back too (FLOW-1.1.0 queue item 5, 2026-09-30: four landings in one night left a new scripts/loop file unowned and
-    scripts/test_bl_owns_complete.py red on the run line). An owns that is not a list is left alone; the check reports it."""
-    def append(uid, add, new):
+    scripts/test_bl_owns_complete.py red on the run line). An owns that is not a list is left alone; the check reports it.
+    events: {unit id: [(sub unit id, its evidence line), ...]}, base: the 40 hex commit this landing was built on (LOOP1.d,
+    P1). Each pair becomes one plan_store.landing_event appended to the unit's landing_events in the same locked write,
+    numbered after the highest sequence already there, and seen[uid] carries them as a fourth item so a refusal takes them
+    back too. A landing_events that is not a list is left alone: that unit's facts then read malformed and it cannot close."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import plan_store   # THIS directory's copy
+
+    def append(uid, add, new, facts):
         def record(fresh):
             before = fresh.get("evidence")
             ev = before or ""
@@ -105,13 +111,20 @@ def landing_records(lines, seen=None, owns=(), owner=LOOP_UNIT):
             have = fresh.get("owns")
             added = [p for p in dict.fromkeys(new) if p not in have] if isinstance(have, list) else []
             if added: out["owns"] = have + added
-            if seen is not None and (add or added):
-                seen[uid] = (before, ev if add else before) + ((added,) if added else ())
+            had = fresh.get("landing_events", [])
+            made = []
+            if facts and isinstance(had, list):
+                top = max([e["sequence"] for e in had if isinstance(e, dict) and type(e.get("sequence")) is int] or [0])
+                made = [plan_store.landing_event(uid, sub, base, line, top + i + 1) for i, (sub, line) in enumerate(facts)]
+                out["landing_events"] = had + made
+            if seen is not None and (add or added or made):
+                seen[uid] = (before, ev if add else before) + ((added, made) if made else (added,) if added else ())
             return out
         return record
+    events = events or {}
     ids = {uid: list(add) for uid, add in lines.items()}
     if owns: ids.setdefault(owner, [])
-    return {uid: append(uid, add, list(owns) if uid == owner else []) for uid, add in ids.items()}
+    return {uid: append(uid, add, list(owns) if uid == owner else [], events.get(uid, [])) for uid, add in ids.items()}
 
 def owner_plan(plan, run_plan=PLAN, fallback=LOOP_OWNS_PLAN, owner=LOOP_UNIT):
     """(path, why): the plan file that holds unit `owner`, the run's plan first (`plan` is its parsed copy), else the
@@ -2648,6 +2661,9 @@ def _selftest_body():
     print("selftest: %d cases, %s" % (len(cases), "OK" if not bad else "FAILED: " + ", ".join(bad))); return 1 if bad else 0
 
 NOT_CLOSED_RE = re.compile(r"^(\S+)\s+NOT CLOSED: (.*)$")
+#: STAB1.f. close_unit's question to the owner: a done check that exited 0 with skipped tests ("<unit> NEEDS_INPUT: PARTIAL: ..."),
+#: or a NEEDFACT sub unit the diagnostician saw ("<unit> NEEDS_INPUT: <sub> needs a fact ..."). Neither is a red closure.
+NEEDS_INPUT_RE = re.compile(r"^(\S+)\s+NEEDS_INPUT: (.*)$")
 
 
 #: The failure ledger record_close_red appends to (failure_ledger.LEDGER, the estate ledger the next brief's lessons read).
@@ -2690,6 +2706,9 @@ def record_close_red(uid, why, log, frozen=None, ledger=None):
 #: them changes; a check that timed out CLOSE_TIMEOUT_CAP times on the same check text waits for a person whatever the tree.
 CLOSE_ATTEMPTS = os.path.expanduser("~/.claude/evidence/close-attempts.jsonl")
 CLOSE_TIMEOUT_CAP = 2
+#: queue waits (a timeout before the check started) on one check and tree before the unit waits for a person: a closer that
+#: never prints its running line (one older than the flush) would otherwise read every real timeout as a queue wait, for ever
+QUEUE_WAIT_CAP = 3
 RUNNING_RE = re.compile(r"^(\S+)\s+running its done_check: ")
 CHECK_RAN_RE = re.compile(r"^the done_check exited \d+: ?(.*)$", re.S)
 #: close_unit's own answers when its done check never started (close_unit.run_done_check): matched by prefix, since the
@@ -2702,10 +2721,42 @@ def check_ran(rc, why):
     close_unit's 'the done_check exited N' unless its answer is one of close_unit's own nothing-ran answers. A check's own
     NO-DATA (ACC2's "a run printed no summary line", after both gate runs) did run and is recorded. A screen refusal, a
     missing copy or sandbox, an interpreter that could not start, or a traceback ran no check and records nothing.
-    ponytail: a timeout counts toward the cap even if the closer hung before the check began; its "running" line is in a
-    buffer the SIGKILL discards, so the output cannot tell the two apart."""
+    A timeout is recorded either way; whether its check had STARTED is check_started's answer, not this one's."""
     m = CHECK_RAN_RE.match(why)
-    return rc == 124 or bool(m and not m.group(1).startswith(NOTHING_RAN) and not re.match(r"\S+ could not run: ", m.group(1)))
+    # a skip question (STAB1.f) comes from a done check that ran to the end and exited 0, so it is a recorded attempt too
+    return rc == 124 or why.startswith("NEEDS_INPUT: PARTIAL:") or bool(m and not m.group(1).startswith(NOTHING_RAN) and not re.match(r"\S+ could not run: ", m.group(1)))
+
+
+def check_started(uid, rc, said):
+    """False only for a timeout whose closer never printed uid's "running its done_check" line (LOOP1.e, RC08): the closer
+    timed out in the queue, before the check began, so no test result exists. close_unit.py flushes that line before the
+    check starts, and run_group's output is a file read after the kill, so a started check's line survives the timeout."""
+    return rc != 124 or any(m and m.group(1) == uid for m in map(RUNNING_RE.match, said))
+
+
+def closure_retry(previous, current):
+    """LOOP1.e recovery contract: may a closure that did not close run again? {"action": RUN|WAIT|NEEDS_INPUT, "reason"}.
+    current: code, check, environment (identities), attempts, limit. previous: the same identities, kind (assertion,
+    infrastructure, queue) and check_started. An unknown identity, an unknown kind or a spent limit never reads as RUN;
+    the limit is read, never raised."""
+    def needs(why): return {"action": "NEEDS_INPUT", "reason": why}
+    missing = [k for k in ("code", "check", "environment") if not current.get(k)]
+    if missing: return needs("The current %s is unknown, so nothing can authorize a retry." % " and ".join(missing))
+    kind = previous.get("kind")
+    if kind not in ("assertion", "infrastructure", "queue"): return needs("The previous attempt's kind %r is unknown." % (kind,))
+    try:
+        spent = int(current["attempts"]) >= int(current["limit"])
+    except (KeyError, TypeError, ValueError):
+        return needs("The attempt count or its limit is unknown.")
+    if spent: return needs("%s attempts reached the limit of %s; a person decides." % (current["attempts"], current["limit"]))
+    if kind == "queue" or previous.get("check_started") is False:
+        return {"action": "RUN", "reason": "The previous attempt never started its check, so no test result exists."}
+    keys = ("code", "check") if kind == "assertion" else ("environment",)
+    if any(not previous.get(k) for k in keys):
+        return needs("The previous %s is unknown, so a change cannot be shown." % " and ".join(keys))
+    changed = [k for k in keys if previous[k] != current[k]]
+    if changed: return {"action": "RUN", "reason": "The %s changed since the previous attempt." % " and ".join(changed)}
+    return {"action": "WAIT", "reason": "The %s did not change since the previous %s failure." % (" and ".join(keys), kind)}
 
 
 def close_identity(uid, plan_path):
@@ -2737,7 +2788,15 @@ def prior_attempt(uid, ident, path=None):
     except OSError as exc:   # unreadable is not absent: the check still runs (the safe direction), and the guard's absence is said
         print("CLOSE-ATTEMPTS NO-DATA: %s unreadable (%s); the one attempt guard is off for %s this pass" % (path or CLOSE_ATTEMPTS, exc, uid))
         return None
-    mine = [r for r in rows if isinstance(r, dict) and r.get("unit") == uid and r.get("check") == ident[0]]
+    # a queue row (a timeout before the check started) is never a same-tree hold or a timeout toward CLOSE_TIMEOUT_CAP; it
+    # counts only toward its own bound, QUEUE_WAIT_CAP, per check and tree (LOOP1.e)
+    ours = [r for r in rows if isinstance(r, dict) and r.get("unit") == uid and r.get("check") == ident[0]]
+    mine = [r for r in ours if r.get("kind") != "queue"]
+    queued = [r for r in ours if r.get("kind") == "queue" and r.get("tree") == ident[1]]
+    if len(queued) >= QUEUE_WAIT_CAP:
+        return ("its closer timed out in the queue %d times on this tree and check (cap %d) and waits for a person: with the loop stopped, "
+                "run python3 scripts/close_unit.py %s then ~/.claude/bin/land_batch.py --push, or delete its rows from %s"
+                % (len(queued), QUEUE_WAIT_CAP, uid, path or CLOSE_ATTEMPTS))
     same = [r for r in mine if r.get("tree") == ident[1]]
     if same:
         r = same[-1]
@@ -2750,14 +2809,96 @@ def prior_attempt(uid, ident, path=None):
     return None
 
 
-def record_attempt(uid, ident, rc, why, path=None):
-    """One row per closure that did not close. No identity records nothing (the next pass runs the check again)."""
+def record_attempt(uid, ident, rc, why, path=None, kind=None):
+    """One row per closure that did not close. No identity records nothing (the next pass runs the check again).
+    kind: "queue" for a timeout before the check started (prior_attempt passes over it); None writes no kind."""
     if not ident: return False
     try:
         path = path or CLOSE_ATTEMPTS
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        row = {"at": time.time(), "unit": uid, "check": ident[0], "tree": ident[1], "rc": rc, "why": why[:160]}
+        if kind: row["kind"] = kind
         with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"at": time.time(), "unit": uid, "check": ident[0], "tree": ident[1], "rc": rc, "why": why[:160]}) + "\n")
+            fh.write(json.dumps(row) + "\n")
+        return True
+    except OSError:   # sbe: allow-silent the refusal is already printed as CLOSE-RED; a lost row costs one rerun, never a closure
+        return False
+
+
+#: INFRASTRUCTURE WAITS ARE THEIR OWN LEDGER (LOOP1.e slice 2, RC08 and RC13, class 1 decision 2026-10-31 night). A closure
+#: close_unit refused because nothing could run (NOTHING_RAN: no sandbox, no disposable copy) still records NOTHING in
+#: CLOSE_ATTEMPTS (owner rule 2026-10-03), so it used to rerun every pass on an unchanged host, for ever. It appends one row
+#: here instead, with the host facts it failed under; the next pass asks closure_retry, which RUNs only when those facts
+#: moved and stops at CLOSE_TIMEOUT_CAP (read, never raised) for a person.
+CLOSE_WAITS = os.path.expanduser("~/.claude/evidence/close-waits.jsonl")
+_CLOSE_WAITS_DEFAULT = CLOSE_WAITS
+
+
+def waits_path():
+    """CLOSE_WAITS, or, while it is the default, the same file name beside CLOSE_ATTEMPTS: a run or a harness that repoints
+    the attempts record (OneClosureAttempt's own fixture does) never writes waits for its fake units into the live loop's
+    ledger, where a real unit of the same name and check text would then wait on them. In a plain run both are the same."""
+    if CLOSE_WAITS != _CLOSE_WAITS_DEFAULT: return CLOSE_WAITS
+    return os.path.join(os.path.dirname(CLOSE_ATTEMPTS), os.path.basename(CLOSE_WAITS))
+
+
+def environment_identity():
+    """A short digest of the host facts close_unit's nothing ran answers depend on: sandbox-exec present (no sandbox, no
+    confined done check) and the disposable copy's volume (TMPDIR, where make_copy puts it) above the loop's own disk floor,
+    BROTHER_DISK_FLOOR_KB, default 2 GB, the knob loop_until.sh's disk_hold reads. A boolean, never the byte count, so an
+    unchanged host keeps one identity. '' when a fact cannot be read: an unknown environment never reads as recovered."""
+    try:
+        floor = int(os.environ.get("BROTHER_DISK_FLOOR_KB") or "2097152") * 1024
+        facts = {"sandbox": bool(shutil.which("sandbox-exec")), "disk": shutil.disk_usage(tempfile.gettempdir()).free >= floor}
+    except (OSError, ValueError, TypeError):   # sbe: allow-silent '' is the answer: closure_retry reads it as NEEDS_INPUT, never RUN
+        return ""
+    return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def infrastructure_refusal(why):
+    """True for close_unit's own nothing ran answers (NOTHING_RAN), matched by prefix the way check_ran matches them. A
+    traceback, a spec refusal or a check's own failure is not one and writes no wait."""
+    m = CHECK_RAN_RE.match(why)
+    return bool(m and m.group(1).startswith(NOTHING_RAN))
+
+
+def prior_wait(uid, ident, path=None):
+    """Why an infrastructure refusal holds this unit's closer this pass, or None: closure_retry over this unit's wait rows
+    for this check (any tree, so a new commit on an unchanged host does not buy another try). No rows: today's behaviour."""
+    path = path or waits_path()
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for l in fh:
+                try: rows.append(json.loads(l))
+                except ValueError: continue
+    except FileNotFoundError:   # sbe: allow-silent no wait recorded: the closer runs as it did before this ledger existed
+        return None
+    except OSError as exc:   # unreadable is not absent: the check still runs (the safe direction), and the guard's absence is said
+        print("CLOSE-WAITS NO-DATA: %s unreadable (%s); the infrastructure wait is off for %s this pass" % (path, exc, uid))
+        return None
+    ours = [r for r in rows if isinstance(r, dict) and r.get("unit") == uid and r.get("check") == ident[0]]
+    if not ours: return None
+    last = ours[-1]
+    v = closure_retry({"kind": "infrastructure", "code": last.get("tree"), "check": last.get("check"), "environment": last.get("environment")},
+                      {"code": ident[1], "check": ident[0], "environment": environment_identity(), "attempts": len(ours), "limit": CLOSE_TIMEOUT_CAP})
+    if v["action"] == "RUN": return None
+    if v["action"] == "WAIT":
+        return "nothing could run its done check (%s); %s Not rerun until the host's environment changes" % (
+            (last.get("why") or "no reason recorded")[:80], v["reason"])
+    return ("nothing could run its done check %d time(s): %s It waits for a person: with the loop stopped, run python3 "
+            "scripts/close_unit.py %s then ~/.claude/bin/land_batch.py --push, or delete its rows from %s" % (len(ours), v["reason"], uid, path))
+
+
+def record_wait(uid, ident, why, path=None):
+    """One row per infrastructure refusal, with the environment it failed under. No identity records nothing."""
+    if not ident: return False
+    try:
+        path = path or waits_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        row = {"at": time.time(), "unit": uid, "check": ident[0], "tree": ident[1], "environment": environment_identity(), "why": why[:160]}
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
         return True
     except OSError:   # sbe: allow-silent the refusal is already printed as CLOSE-RED; a lost row costs one rerun, never a closure
         return False
@@ -2827,9 +2968,19 @@ def closing_pass(closed, sh_, log, remote, branch, plan_path=None, frozen=None, 
         out.append("CLOSE-SCOPE %d eligible unit(s) outside this run's scope %s, left to an unscoped closer: %s" % (len(left), src[:60], ", ".join(left[:12])))
     if d.returncode not in (0, 1) or not any(l.startswith("CLOSED ") or l.startswith("nothing to close") for l in dry):
         out.append("CLOSE-RED --all-eligible: the sweep could not list the eligible units (exit %d: %s)" % (d.returncode, (dry or ["no output"])[-1][:120]))
+    # NEEDFACT SWEEP (STAB1.f): this pass names only fully landed units and lists with --dry, neither of which can see a sub unit
+    # that is not landed, so the escalation of a diagnosed NEEDFACT sub unit runs here, once per run (close_unit keys it)
+    nf = sh_(closer_argv(code, ["--needfact"]), log, 600)
+    nf_lines = ((nf.stdout or "") + (nf.stderr or "")).strip().splitlines()
+    for l in nf_lines:
+        m = NEEDS_INPUT_RE.match(l)
+        if m: out.append("NEEDS-INPUT %s: %s" % (m.group(1), m.group(2)[:300]))
+        elif l.startswith("NO-DATA:"): out.append("NEEDS-INPUT " + l[:300])
+    if nf.returncode != 0:
+        out.append("NEEDS-INPUT NO-DATA: the NEEDFACT sweep did not run (exit %d: %s)" % (nf.returncode, (nf_lines or ["no output"])[-1][:120]))
     for u in queue:
         ident = close_identity(u, plan_path)
-        held = prior_attempt(u, ident) if ident else None
+        held = (prior_attempt(u, ident) or prior_wait(u, ident)) if ident else None
         if held:
             out.append("CLOSE-SKIP %s: %s" % (u, held)); continue
         # the run's own routing never reaches the done check: close_unit.done_check_env drops it for every closer (2026-10-02)
@@ -2842,10 +2993,20 @@ def closing_pass(closed, sh_, log, remote, branch, plan_path=None, frozen=None, 
         # per unit and recorded in the failure ledger, where the next brief's lessons read it.
         reds = [(m.group(1), m.group(2)) for m in (NOT_CLOSED_RE.match(l) for l in said) if m]
         if r.returncode != 0:
+            # a skip question is not a red closure: printed as NEEDS-INPUT and recorded as an attempt, so the done check is not
+            # run again on an unchanged tree and the unit gets no failure ledger row (STAB1.f)
+            asked = next((m.group(2) for m in map(NEEDS_INPUT_RE.match, said) if m and m.group(1) == u and m.group(2).startswith("PARTIAL:")), None)
+            if asked is not None:
+                out.append("NEEDS-INPUT %s: %s" % (u, asked[:300]))
+                if check_ran(r.returncode, "NEEDS_INPUT: " + asked): record_attempt(u, ident, r.returncode, "NEEDS_INPUT: " + asked)
+                continue
             if not any(uid == u for uid, _ in reds): reds.append((u, next((l for l in reversed(said) if not l.startswith("CLOSED ")), said[-1])))
             for uid, why in reds: red(uid, why)
             why_u = next(why for uid, why in reds if uid == u)
-            if check_ran(r.returncode, why_u): record_attempt(u, ident, r.returncode, why_u)
+            if check_ran(r.returncode, why_u):
+                record_attempt(u, ident, r.returncode, why_u, kind=None if check_started(u, r.returncode, said) else "queue")
+            elif infrastructure_refusal(why_u):
+                record_wait(u, ident, why_u)
             continue
         last = said[-1][:160]
         sh_(["git", "add", plan_path], log)
@@ -3242,16 +3403,17 @@ def main():
                 held.append((name, word))
         if gate_base is not None:
             drop_base_tree(gate_base)
-    date = datetime.datetime.now().strftime("%Y-%m-%d"); closed = []; lines = {}
+    date = datetime.datetime.now().strftime("%Y-%m-%d"); closed = []; lines = {}; landing_facts_by_unit = {}
     for sub in landed:
         u = unit_of(sub, plan); line = evidence_line(sub, date, facts[sub][0], facts[sub][1], head)
         u["evidence"] = (u.get("evidence") or "").rstrip() + line; lines.setdefault(u["id"], []).append(line)
+        landing_facts_by_unit.setdefault(u["id"], []).append((sub, line))
         if unit_closed(u): closed.append(u["id"])
     # BY UNIT, UNDER A LOCK (review 2026-09-22): the plan copy in `plan` was read minutes ago; only the units this
     # landing touched are written, and each line is appended to the unit RE-READ under the lock, so evidence a closer
     # or another landing wrote meanwhile is kept (plan_store refuses a record that would erase it).
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import plan_store
-    appended = Appended()   # {unit id: (evidence re-read, evidence written[, owns added])}: what a refusal takes back, and nothing else
+    appended = Appended()   # {unit id: (evidence re-read, evidence written[, owns added[, events]])}: what a refusal takes back, and nothing else
     # EVERY NEW LOOP FILE IS OWNED IN THE SAME WRITE (queue item 5): a file this landing created in brother.loop's shape
     # goes into unit BL's owns under the same lock as the evidence, and leaves with it on any refusal below.
     owned = [p for p in loop_components(sorted(attributed & changed_paths()))
@@ -3266,10 +3428,16 @@ def main():
         appended.homes[own_path] = {}
         plan_store.update_units(own_path, landing_records({}, appended.homes[own_path], owns=owned), fields=("owns",)); attributed.add(own_path)
         owned = []
-    plan_store.update_units(PLAN, landing_records(lines, appended, owns=owned), fields=("evidence", "owns")); attributed.add(PLAN)
+    # THE LANDING FACTS (LOOP1.d, P1): one landing event per sub unit in the same locked write as its evidence line, naming
+    # the commit this landing was built on (HEAD, still the base here: the landing commit carries the plan and cannot name
+    # itself). A base git could not read is written as read: plan_store.landing_facts then names that event malformed, and
+    # its unit can never close on it.
+    base = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    plan_store.update_units(PLAN, landing_records(lines, appended, owns=owned, events=landing_facts_by_unit, base=base),
+                            fields=("evidence", "owns", "landing_events")); attributed.add(PLAN)
     for path, seen in appended.homes.items():
         if seen: print("OWNS    unit %s in %s now names %s" % (LOOP_UNIT, path, ", ".join(seen[LOOP_UNIT][2])))
-    if len(appended.get(LOOP_UNIT, ())) > 2:
+    if len(appended.get(LOOP_UNIT, ())) > 2 and appended[LOOP_UNIT][2]:
         print("OWNS    unit %s now names %s" % (LOOP_UNIT, ", ".join(appended[LOOP_UNIT][2])))
     stray = unattributed(changed_paths(), attributed)
     print("GATES   %s | new suites registered %d | stray paths %d %s" % (gates_text(red, [h[0] for h in held]), len(new_tests), len(stray), stray[:3] if stray else ""))

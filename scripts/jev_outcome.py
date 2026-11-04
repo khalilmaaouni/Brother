@@ -64,9 +64,22 @@ def terminal_rows(path: str, attempt_ids: Set[str]) -> Dict[str, dict]:
     return {aid: rows[0] for aid, rows in found.items() if len(rows) == 1}
 
 
+#: JEV1.a: a choice question is graded only where its options map one to one
+#: onto the rule's pass/fail bool. J064 (gate log line): "pass" is the rule's
+#: PASS, "fail-real" its FAIL; every other option (infra-flake, skip,
+#: needs-human, unknown) says nothing the rule can agree or disagree with.
+_CHOICE_SAYS = {"J064": {"pass": True, "fail-real": False}}
+
+
 def jev_says(row: Optional[dict]) -> Optional[bool]:
-    """Jev's confident yes or no on an answered noul row, else None."""
-    if not isinstance(row, dict) or row.get("phase") != "answered" or row.get("qtype") != "noul":
+    """Jev's confident yes or no on an answered noul row, or its pass/fail
+    choice on an answered J064 choice row, else None."""
+    if not isinstance(row, dict) or row.get("phase") != "answered":
+        return None
+    if row.get("qtype") == "choice":
+        answer = row.get("answer")
+        return _CHOICE_SAYS.get(row.get("family"), {}).get(answer) if isinstance(answer, str) else None
+    if row.get("qtype") != "noul":
         return None
     prob = row.get("prob")
     if isinstance(prob, bool) or not isinstance(prob, (int, float)) or not math.isfinite(prob):

@@ -72,8 +72,9 @@ the words the table gives it and the rest of the request.
 A name with one of those prefixes that the table does not list is unknown:
 say so and ask Step 2's question, never guess a verb. On a host without slash
 commands the pointer names the verb skill (`brother-<verb>`), never a slash
-command that host cannot run. Typed as it was, `/brother:<old name>` is a
-moved command that says the same line and routes the same way.
+command that host cannot run. The per-name commands 1.1.0 shipped are gone,
+so there is nothing to type with a colon: the old name goes after `/brother`
+as its argument.
 
 ## handover, board and cut
 

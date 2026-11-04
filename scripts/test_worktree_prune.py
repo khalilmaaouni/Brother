@@ -174,6 +174,9 @@ class Requirements(Base):
         os.makedirs(folder)
         record = {"state": "CLAIMED", "sub": "C1.a", "builder": "seat", "pid": os.getpid(), "branch": "build/C1.a",
                   "at": time.time()}
+        # a claim record carries its sealed deadline since the builder box (i22.a): a record without one is unreadable
+        record["deadline"] = record["at"] + 3600.0
+        record["deadline_seal"] = P.builder_claim._seal_deadline(record)
         with open(os.path.join(folder, "CLAIM"), "w") as fh:
             json.dump(record, fh)
         with open(os.path.join(folder, "PID"), "w") as fh:

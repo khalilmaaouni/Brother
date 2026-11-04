@@ -55,8 +55,8 @@ metric with no denominator declared is refused, not estimated.
 
 ## If they want more
 
-The full card, with real captured output, is
-`docs/cards/CARD-technical-ba-data-prep.md`.
+The full card, with real captured output, lives in the source repository
+rather than in this install, and is not required to do the work above.
 
 ## Invoking it on purpose
 

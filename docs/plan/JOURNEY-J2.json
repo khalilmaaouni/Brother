@@ -1,0 +1,14 @@
+{
+ "candidate_identity": "shipped",
+ "clean_home": true,
+ "host": "macos",
+ "identity": "shipped",
+ "journey": "J2",
+ "rows": {
+  "A.adopt-exits-0": "PASS",
+  "B.hook-cost-under-1.1.4": "PASS",
+  "C.no-pass-for-unrun-check": "PASS",
+  "C.vacuous-single-unit-not-pass": "PASS",
+  "D.end-card-six-lines": "PASS"
+ }
+}

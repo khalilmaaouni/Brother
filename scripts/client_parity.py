@@ -81,6 +81,7 @@ EXEMPT = {
     "scripts/test_codex_surface_effects.py": "tests the effect line the shared generator renders into bundle/skills, which Cursor reads directly (CX2.a)",
     "bundle/codex-skills/": "Codex needs a stripped skill copy; Cursor reads bundle/skills directly through its manifest",
     "scripts/codex_skills.py": "generator for bundle/codex-skills, which Cursor does not need",
+    "bundle/runtime/codex_skills.py": "bundled mirror of scripts/codex_skills.py (exempt above); ships because bundle_runtime.py, a routed host-health owner, imports it (SHIP1.a)",
     "bundle/runtime/codex_hooks_install.py": "bundled mirror of the Codex hook installer; Cursor plugins carry hooks in the manifest",
     "scripts/test_orchestrator_codex.py": "tests the ORCH-06 orchestrator adapter, where Codex is an outside model the orchestrator calls for its execution role, not a client install surface; Cursor has no counterpart role to be at parity with",
     "scripts/test_model_call_codex_admission.py": "tests the model_call Codex transport's proof admission, where Codex is an outside model the loop calls, not a client install surface; Cursor has no counterpart transport to be at parity with",

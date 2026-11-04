@@ -17,7 +17,15 @@ both products), seven rules:
 1. frontmatter-yaml. The file opens with a closed YAML frontmatter block that
    parses to a mapping. The Codex plugin validator refuses a plugin outright
    when any skill fails this, and an unquoted description carrying a colon is
-   exactly how it happens.
+   exactly how it happens. The block is read by a strict subset reader (one
+   `key: value` per line, a value plain, double quoted, single quoted or a
+   one line `[a, b]` list of plain values)
+   whose every accepted input means the same as it does to YAML, and which
+   REFUSES anything outside that subset as a finding. It needs no PyYAML.
+   Measured 2026-10-31: the PyYAML this suite reached lived in one user's
+   site packages under HOME, so under the pre-push gate's empty HOME the
+   suite read NO-DATA and every branch whose history touched it was refused
+   at push. A shipped skill outside the subset is quoted, never unread.
 2. frontmatter-name. `name` is a non-empty string, hyphen case, no leading,
    trailing or doubled hyphen, at most 64 characters.
 3. frontmatter-description. `description` is a non-empty string, at most 1024
@@ -49,24 +57,62 @@ is named in AGENTS.md rather than hidden by this checker.
 
 Exit 0 PASS, every shipped skill obeys all seven rules.
 Exit 1 FAIL, at least one does not; every violation is named with its file.
+Exit 1 also when the subset reader's own cases (READER_CASES) disagree with
+what they pin, so a reader that stopped refusing is a FAIL, never a pass.
 Exit 2 NO-DATA, no shipped skill was found at all, which is never a pass.
 No em or en dashes.
 """
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: Interpreters to hand this file to when the one running it cannot import
-#: PyYAML. The frontmatter rules are read from the Codex validators, which
-#: parse real YAML, so a hand rolled key scanner would disagree with them on
-#: exactly the case that matters (an unquoted description carrying a colon).
-#: /usr/bin/python3 is the interpreter AGENTS.md already names for this
-#: repository's unittest suite, and it ships PyYAML on macOS.
-FALLBACK_INTERPRETERS = ("/usr/bin/python3",)
+#: The subset reader. A key is a bare word at column 0. A plain value may not
+#: open with a YAML indicator, carry `: ` or ` #`, or end in `:`, since YAML
+#: reads each of those as structure or a comment rather than text. A plain
+#: value YAML would resolve to something other than a string (a number, a
+#: date, null, yes/no/on/off in any case) is refused unless it is exactly
+#: `true` or `false`; quote it instead.
+KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(?: +(.*))?$")
+PLAIN_INDICATORS = tuple("-?:,[]{}#&*!|>'\"%@`+.=~0123456789")
+NON_STRING_PLAIN = {
+    w for base in ("yes", "no", "on", "off", "y", "n", "null", "true", "false")
+    for w in (base, base.capitalize(), base.upper())
+} | {"<<"}
+
+#: (frontmatter, expected): the reader's contract, run before the skills on
+#: every call. Each refusal case trips exactly one refusal, so deleting that
+#: refusal changes this table's answer and the run FAILS. The values are what
+#: yaml.safe_load returns for the same text (checked against PyYAML 6.0.3 on
+#: 2026-10-31); an error case is pinned by the words of its refusal.
+READER_CASES = (
+    ('name: a-b\ndescription: "say \\"hi\\" \\\\ ok: #1"', {"name": "a-b", "description": 'say "hi" \\ ok: #1'}),
+    ("description: 'it''s: #1'", {"description": "it's: #1"}),
+    ("name: a\n\nuser-invocable: false\nx: true\nz: a:b c", {"name": "a", "user-invocable": False, "x": True, "z": "a:b c"}),
+    ("metadata:", {"metadata": None}),
+    ("", "error: frontmatter is not a mapping"),
+    ("name: a\n  b", "error: line 2 is indented"),
+    ("1a: b", "error: line 1 is not a `key: value` line"),
+    ("name: a\nname: b", "error: line 2 repeats the key name"),
+    ("name:\ta", "error: line 1 carries a tab"),
+    ('description: "a" b', "error: line 1 opens a double quote it never closes"),
+    ('description: "a\\nb"', "error: line 1 has an escape other than \\\" or \\\\"),
+    ("description: 'it's'", "error: line 1 opens a single quote it never closes"),
+    ("description: 'abc", "error: line 1 opens a single quote it never closes"),
+    ("description: {a}", "error: line 1 opens an unquoted value with a reserved character"),
+    ("argument-hint: [say what, true]\nh: <a b>\ne: []", {"argument-hint": ["say what", True], "h": "<a b>", "e": []}),
+    ("argument-hint: [a", "error: line 1 opens a flow sequence it never closes"),
+    ("argument-hint: [a, [b]]", "error: line 1 has a flow sequence item outside the subset"),
+    ("argument-hint: [a,]", "error: line 1 has a flow sequence item outside the subset"),
+    ("argument-hint: [Use when: ready]", "error: line 1 carries `: ` in an unquoted value"),
+    ("description: Use when: ready", "error: line 1 carries `: ` in an unquoted value"),
+    ("description: ends in a colon:", "error: line 1 ends an unquoted value in `:`"),
+    ("description: a #b", "error: line 1 carries ` #` in an unquoted value"),
+    ("name: Yes", "error: line 1 is a plain value YAML reads as a non string"),
+    ("description: <<", "error: line 1 is a plain value YAML reads as a non string"),
+    ("on: a", "error: line 1 has a key YAML reads as a non string"),
+)
 
 #: Where a shipped skill can live. Each glob's match has a plugin root two
 #: directories above it (bundle/, or products/<name>/), which is the tree an
@@ -132,24 +178,91 @@ def split_frontmatter(text):
     return text[4:end], text[end + 4:]
 
 
-def load_yaml(frontmatter_text):
-    """Parse the frontmatter, or return the parse error as a string.
+def _value(raw, n):
+    """(value, None) or (None, refusal) for one line's value text."""
+    if raw.startswith('"'):
+        out, i = [], 1
+        while i < len(raw) and raw[i] != '"':
+            if raw[i] == "\\":
+                if raw[i + 1:i + 2] not in ('"', "\\"):
+                    return None, f"line {n} has an escape other than \\\" or \\\\"
+                i += 1
+            out.append(raw[i])
+            i += 1
+        if i != len(raw) - 1:
+            return None, f"line {n} opens a double quote it never closes"
+        return "".join(out), None
+    if raw.startswith("'"):
+        inner = raw[1:-1] if len(raw) > 1 and raw.endswith("'") else None
+        if inner is None or "'" in inner.replace("''", ""):
+            return None, f"line {n} opens a single quote it never closes"
+        return inner.replace("''", "'"), None
+    if raw.startswith("["):
+        if not raw.endswith("]"):
+            return None, f"line {n} opens a flow sequence it never closes"
+        items = []
+        for item in raw[1:-1].split(",") if raw[1:-1].strip() else ():
+            item = item.strip()
+            if not item or any(c in item for c in "[]{}\"'"):
+                return None, f"line {n} has a flow sequence item outside the subset"
+            value, error = _value(item, n)
+            if error:
+                return None, error
+            items.append(value)
+        return items, None
+    if raw in ("true", "false"):
+        return raw == "true", None
+    if raw.startswith(PLAIN_INDICATORS):
+        return None, f"line {n} opens an unquoted value with a reserved character"
+    if ": " in raw:
+        return None, f"line {n} carries `: ` in an unquoted value"
+    if raw.endswith(":"):
+        return None, f"line {n} ends an unquoted value in `:`"
+    if " #" in raw:
+        return None, f"line {n} carries ` #` in an unquoted value"
+    if raw in NON_STRING_PLAIN:
+        return None, f"line {n} is a plain value YAML reads as a non string"
+    return raw, None
 
-    PyYAML is not guaranteed present on a bare interpreter here, so a missing
-    module is reported by name rather than crashing the run: the caller turns
-    that into NO-DATA, never into a pass.
-    """
-    try:
-        import yaml
-    except ImportError:  # sbe: allow-silent the module name IS the report: the caller turns ("no-yaml-module") into NO-DATA, never into a pass
-        return None, "no-yaml-module"
-    try:
-        data = yaml.safe_load(frontmatter_text)
-    except Exception as exc:                      # yaml raises several types
-        return None, f"invalid YAML in frontmatter ({exc.__class__.__name__})"
-    if not isinstance(data, dict):
+
+def load_yaml(frontmatter_text):
+    """Read the frontmatter with the strict subset reader (see rule 1), or
+    return why not as a string. Needs no module beyond the standard library,
+    so it answers the same under any HOME and any interpreter."""
+    data = {}
+    for n, line in enumerate(frontmatter_text.split("\n"), 1):
+        if not line.strip():
+            continue
+        if "\t" in line:
+            return None, f"line {n} carries a tab"
+        if line[0] == " ":
+            return None, f"line {n} is indented"
+        match = KEY_LINE_RE.match(line.rstrip())
+        if not match:
+            return None, f"line {n} is not a `key: value` line"
+        key, raw = match.group(1), match.group(2)
+        if key in NON_STRING_PLAIN:
+            return None, f"line {n} has a key YAML reads as a non string"
+        if key in data:
+            return None, f"line {n} repeats the key {key}"
+        value, error = _value(raw, n) if raw else (None, None)
+        if error:
+            return None, error
+        data[key] = value
+    if not data:
         return None, "frontmatter is not a mapping"
     return data, None
+
+
+def reader_disagreements():
+    """Every READER_CASES row the reader answers differently, as strings."""
+    out = []
+    for text, expected in READER_CASES:
+        data, error = load_yaml(text)
+        got = "error: " + error if error else data
+        if got != expected:
+            out.append(f"{text!r}: expected {expected!r}, got {got!r}")
+    return out
 
 
 def check_frontmatter(front, problems):
@@ -241,8 +354,6 @@ def check_one(path, plugin_root):
         problems.append("frontmatter-yaml: absent or never closed")
     else:
         front, error = load_yaml(frontmatter_text)
-        if error == "no-yaml-module":
-            raise RuntimeError("no-yaml-module")
         if front is None:
             problems.append(f"frontmatter-yaml: {error}")
         else:
@@ -268,41 +379,14 @@ def check_one(path, plugin_root):
     return problems
 
 
-def reexec_with_yaml():
-    """Run this file under an interpreter that has PyYAML, or return None.
-
-    Returns that run's own exit code, captured from the child and never from
-    a pipe. The child is told not to re-exec again, so a machine with no
-    PyYAML anywhere ends in one honest NO-DATA rather than a loop.
-    """
-    for interpreter in FALLBACK_INTERPRETERS:
-        if not os.path.exists(interpreter):
-            continue
-        try:
-            probe = subprocess.run([interpreter, "-c", "import yaml"],
-                                   capture_output=True)
-        except OSError:  # sbe: allow-silent an interpreter that will not launch is not a fallback; the loop tries the next and the caller reports NO-DATA when none answers
-            continue
-        if probe.returncode != 0:
-            continue
-        try:
-            run = subprocess.run([interpreter, str(Path(__file__).resolve()),
-                                  "--no-reexec"])
-        except OSError as exc:
-            print(f"NO-DATA: could not run {interpreter}: {exc.strerror}")
-            return 2
-        return run.returncode
-    return None
-
-
 def main():
-    if "--no-reexec" not in sys.argv:
-        try:
-            import yaml                                    # noqa: F401
-        except ImportError:
-            code = reexec_with_yaml()
-            if code is not None:
-                return code
+    disagree = reader_disagreements()
+    if disagree:
+        for line in disagree:
+            print(f"FAILED: frontmatter reader: {line}")
+        print(f"FAILED: the frontmatter reader disagrees with {len(disagree)} "
+              f"of its {len(READER_CASES)} pinned cases, so no skill was judged")
+        return 1
 
     skills = shipped_skills()
     if not skills:
@@ -311,15 +395,7 @@ def main():
               + "; this checker read nothing, which is not a pass")
         return 2
 
-    try:
-        findings = [(p, check_one(p, root)) for p, root in skills]
-    except RuntimeError as exc:
-        if str(exc) != "no-yaml-module":
-            raise
-        print("NO-DATA: PyYAML is not importable by this interpreter, so the "
-              "frontmatter rules could not run; install it or run this under "
-              "`uv run --with pyyaml python3`, and do not read this as a pass")
-        return 2
+    findings = [(p, check_one(p, root)) for p, root in skills]
 
     broken = [(p, problems) for p, problems in findings if problems]
     if broken:

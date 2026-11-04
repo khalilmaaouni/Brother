@@ -115,6 +115,9 @@ class NoDataIsNeverAPass(unittest.TestCase):
         self.assertIn(P.NODATA, P.bar(None))
 
 
+# docs/plan is not shipped in the public export, so the board this class reads is absent there (the premise,
+# not the behaviour, is missing).
+@unittest.skipUnless(os.path.isfile(P.SOURCE), "docs/plan is not shipped in the public export; the parity board is the premise")
 class TheShippedAssessmentIsHonest(unittest.TestCase):
     """These run against the real file, because the risk is not that the code is
     wrong but that somebody later writes a cheerful level into the data."""

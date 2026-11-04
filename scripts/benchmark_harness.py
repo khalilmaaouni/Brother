@@ -91,6 +91,7 @@ Runs on the 3.9 floor: standard library only, no match statements.
 import argparse
 import json
 import os
+import platform
 import secrets
 import shutil
 import signal
@@ -155,6 +156,12 @@ FAMILIES = {
         "consequence-assurance capability, kept as a separate comparison "
         "from family A so a framework without domain packs is not "
         "penalized on parity."
+    ),
+    "D": (
+        "Representative workflow tasks (BASE1.b) -- purpose: an "
+        "incremental app change and an analytics correction, each with a "
+        "superficial visible check and a separately controlled hidden "
+        "outcome check."
     ),
 }
 
@@ -227,6 +234,77 @@ _GOLDEN_MASTER_HIDDEN_TEST = (
     "    assert r == expected, (before, after, protected, r, expected)\n"
     "print('hidden test ok')\n"
 ) % (HERE,)
+
+REPO_ROOT = os.path.dirname(HERE)
+
+
+def _load_fixture(files):
+    """files maps a workspace path to a repo relative source path. Returns
+    (contents, missing): a source that cannot be read is listed in missing
+    and never replaced by an empty file, so run_task can fail closed
+    (NO-DATA naming the path) instead of grading a hollow fixture."""
+    contents, missing = {}, []
+    for dest, src in files.items():
+        try:
+            with open(os.path.join(REPO_ROOT, src), "r", encoding="utf-8") as handle:
+                contents[dest] = handle.read()
+        except OSError:
+            missing.append(src)
+    return contents, missing
+
+
+_APP_FIXTURE, _APP_MISSING = _load_fixture({
+    "pricing.py": "benchmarks/competitive/fixture/pricing.py",
+    "order_total.py": "benchmarks/competitive/fixture/order_total.py",
+    "invoice.py": "benchmarks/competitive/fixture/invoice.py",
+    "visible_test.py": "benchmarks/competitive/fixture/test_order_total.py",
+})
+
+_ANALYTICS_FIXTURE, _ANALYTICS_MISSING = _load_fixture({
+    "analytics.py": "benchmarks/competitive/analytics/analytics.py",
+    "events.csv": "benchmarks/competitive/analytics/events.csv",
+    "visible_test.py": "benchmarks/competitive/analytics/visible_test.py",
+})
+
+# Hidden checks use plain asserts, never unittest.main(): that calls
+# sys.exit and would skip the sentinel line run_task appends.
+_APP_HIDDEN_TEST = (
+    "import invoice\n"
+    "import order_total\n"
+    "import pricing\n"
+    "assert order_total.compute_total(50, 20) == 40.0\n"
+    "assert invoice.compute_invoice_total(50, 20) == 40.0, 'second caller still broken'\n"
+    "assert invoice.compute_invoice_total(200, 25) == 150.0\n"
+    "assert pricing.apply_discount(80, 0) == 80.0\n"
+    "assert pricing.apply_discount(80, 100) == 0.0\n"
+    "for bad in (-1, 101):\n"
+    "    try:\n"
+    "        pricing.apply_discount(80, bad)\n"
+    "    except ValueError:\n"
+    "        pass\n"
+    "    else:\n"
+    "        raise AssertionError('pct %r was not rejected' % (bad,))\n"
+    "print('hidden test ok')\n"
+)
+
+# Held-out export: first-wins (115.0), sum-all (140.5) and a constant each differ
+# from last-wins (120.0); e1 is redelivered, e2 is corrected twice.
+_ANALYTICS_HIDDEN_EXPORT = (
+    "event_id,user,amount,ts\n"
+    "e1,ana,10.00,2026-10-02T08:00:00\n"
+    "e2,ben,4.00,2026-10-02T08:05:00\n"
+    "e1,ana,10.00,2026-10-02T08:00:00\n"
+    "e2,ben,6.50,2026-10-02T08:30:00\n"
+    "e3,cho,100.25,2026-10-02T09:00:00\n"
+    "e2,ben,9.00,2026-10-02T09:15:00\n"
+    "e4,dev,0.75,2026-10-02T10:00:00\n"
+)
+_ANALYTICS_HIDDEN_TEST = (
+    "open('events.csv', 'w').write(%r)\n"
+    "import analytics\n"
+    "r = analytics.answer()\n"
+    "assert abs(r - 120.0) < 0.005, (r, 'expected 10.00 + 9.00 + 100.25 + 0.75 = 120.0')\n"
+) % (_ANALYTICS_HIDDEN_EXPORT,)
 
 TASKS = [
     {
@@ -332,6 +410,52 @@ TASKS = [
         },
         "solution_files": ["solution.py"],
         "hidden_test": _GOLDEN_MASTER_HIDDEN_TEST,
+    },
+    {
+        "id": "app-incremental-change",
+        "family": "D",
+        "version": "1.2.0-1",
+        "baseline": "benchmarks/competitive/fixture (invoice.py, order_total.py, pricing.py; the app correction as committed)",
+        "variants": {
+            "interrupted-delivery": "the arm is stopped partway through and resumed on the half edited workspace; the same hidden check must still decide.",
+            "release": "the same change is delivered as a release candidate, so the hidden check also runs against the final tree rather than the arm's last draft.",
+        },
+        "prompt": (
+            "This repository has one failing test: visible_test.py. Make it "
+            "pass. The bug is in this repository somewhere; find it and fix "
+            "it. A discount percent below 0 or above 100 must raise "
+            "ValueError. Do not edit visible_test.py."
+        ),
+        "workspace": _APP_FIXTURE,
+        "missing_fixture": _APP_MISSING,
+        "solution_file": "pricing.py",
+        "solution_files": ["pricing.py", "order_total.py", "invoice.py"],
+        "visible_test": _APP_FIXTURE.get("visible_test.py", ""),
+        "hidden_test": _APP_HIDDEN_TEST,
+    },
+    {
+        "id": "analytics-duplicate-keys",
+        "family": "D",
+        "version": "1.2.0-1",
+        "baseline": "benchmarks/competitive/analytics (analytics.py starter, events.csv with a redelivered and a corrected event)",
+        "variants": {
+            "interrupted-delivery": "the export ends in a half written row; the hidden check must still count only complete rows once per event_id.",
+            "release": "the same correction is shipped as a release candidate and the hidden export is a fresh day, so a hardcoded total cannot pass.",
+        },
+        "prompt": (
+            "Implement answer() in analytics.py. It reads events.csv from "
+            "the current working directory (columns event_id,user,amount,ts) "
+            "and returns the total revenue, the sum of amount, as a float. "
+            "The export is delivered at least once, so an event_id can "
+            "appear on more than one row: when it does, only the last row "
+            "for that event_id counts."
+        ),
+        "workspace": _ANALYTICS_FIXTURE,
+        "missing_fixture": _ANALYTICS_MISSING,
+        "solution_file": "analytics.py",
+        "solution_files": ["analytics.py"],
+        "visible_test": _ANALYTICS_FIXTURE.get("visible_test.py", ""),
+        "hidden_test": _ANALYTICS_HIDDEN_TEST,
     },
 ]
 
@@ -598,7 +722,33 @@ def score_verdict(arm_result, hidden_pass, solution_produced):
     return "FAIL", "held-out test failed (verdict is driven by the hidden test, not the arm's own exit code or claims)"
 
 
-def run_task(task, arm_name, arm_command, timeout=DEFAULT_TIMEOUT_S):
+_NO_COMMAND_GIVEN = object()
+
+
+def run_task(task, arm_name, arm_command=_NO_COMMAND_GIVEN, timeout=DEFAULT_TIMEOUT_S, label=None):
+    # Two call shapes exist on purpose (BASE1 frozen harness, HARN1): the
+    # original run_task(task, arm_name, arm_command, ...) used by
+    # oracle_stability.py and test_benchmark_harness.py, and the frozen
+    # run_task(task, arm_command, timeout=..., label=...) of
+    # test_benchmark_arms.py. An explicit None is still "no command".
+    if arm_command is _NO_COMMAND_GIVEN:
+        arm_name, arm_command = (label or "unnamed-arm"), arm_name
+    missing = task.get("missing_fixture")
+    if missing:
+        # Fail closed: a fixture with missing files is never graded.
+        return {
+            "task_id": task["id"],
+            "arm_name": arm_name,
+            "exit_code": None,
+            "launch_error": "fixture file missing: %s" % ", ".join(missing),
+            "wall_clock_seconds": None,
+            "timed_out": False,
+            "visible_pass": None,
+            "hidden_pass": None,
+            "usage": "NO-DATA: fixture missing, arm not run",
+            "verdict": "NO-DATA",
+            "verdict_reason": "fixture file missing: %s" % ", ".join(missing),
+        }
     workspace_dir = tempfile.mkdtemp(prefix="bench-ws-")
     eval_dir = None
     try:
@@ -652,6 +802,8 @@ def run_task(task, arm_name, arm_command, timeout=DEFAULT_TIMEOUT_S):
         return {
             "task_id": task["id"],
             "arm_name": arm_name,
+            "task_version": task.get("version"),
+            "environment": "python %s on %s" % (platform.python_version(), platform.system()),
             "exit_code": arm_result.get("exit_code"),
             "launch_error": arm_result.get("launch_error"),
             "wall_clock_seconds": arm_result.get("wall_clock_seconds"),

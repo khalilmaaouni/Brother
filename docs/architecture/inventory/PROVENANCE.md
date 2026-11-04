@@ -40,6 +40,10 @@ the tree and confirmed real (see the commands below); the rest are recorded as
 Muse's claims, not independently reverified, and should not be treated as more
 solid than that until someone checks them:
 
+<!-- doc-assurance: allow-missing bundle/hooks/union.json the retired hooks file as it stood when this inventory was taken; removed since -->
+
+<!-- doc-assurance: allow-missing products/brotherds/VERSION the sentence records that this file does not exist; its absence is the finding -->
+
 1. **CONFIRMED, version drift**: `bundle/.claude-plugin/plugin.json` declares
    `"version": "1.0.20"`, while `products/brothermode/VERSION` says `3.4.5` and
    `products/brothersbe/VERSION` says `3.7.4`. `products/brotherds/VERSION` does

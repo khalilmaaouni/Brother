@@ -62,7 +62,8 @@ import re
 import subprocess
 import sys
 
-DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pattern_note  # noqa: E402  KEY1.f: the vault default is the one resolver's answer
 SKIP_DIRS = {".git", ".trash", ".obsidian"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -114,12 +115,7 @@ def _load_sibling(name):
 
 
 def _vault_root(cli_vault):
-    if cli_vault:
-        return cli_vault
-    env = os.environ.get("BM_VAULT_ROOT")
-    if env:
-        return env
-    return DEFAULT_VAULT
+    return pattern_note.require_vault_root(cli_vault, "bm_vault_lint")
 
 
 def _walk_md(vault):

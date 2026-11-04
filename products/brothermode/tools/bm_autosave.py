@@ -88,6 +88,15 @@ import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+# STAB1.i: the print choke point (bm_learning.say flattens the whole line), with the
+# degrade bm_vault.py already uses: an older bm_learning.py without say() prints an
+# escaped line, never a traceback and never a raw one.
+try:
+    from bm_learning import say  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a partial deployment
+    def say(line, file=None):
+        print(ascii("%s" % (line,)), file=file)
 
 # ---------------------------------------------------------------------------
 # Configuration and constants.
@@ -1524,9 +1533,9 @@ def _snapshot_locked(toplevel, worktree_id, session_id, reason, event):
 # ~/.brotherme/config.json present at all -- the one write-capable entry
 # point under tools/*.py that had no consent gate, while
 # tools/bm_sessionstart.sh and tools/bm_telemetry.py already refused to
-# write a single byte before the founder had run scripts/setup.py.
+# write a single byte before the founder had run setup.py.
 #
-# scripts/setup.py is the ONE place that schema is read or written (its own
+# setup.py is the ONE place that schema is read or written (its own
 # docstring says so); this loads it by path, the SAME technique
 # tools/bm_telemetry.py's own _load_bm_setup/_get_bm_setup/_consented use
 # (see tools/bm_telemetry.py:592), so this module can never carry a second,
@@ -1539,7 +1548,7 @@ def _snapshot_locked(toplevel, worktree_id, session_id, reason, event):
 # path, and this file's own documented subprocess use stays git-only).
 # ---------------------------------------------------------------------------
 def _load_bm_setup():
-    """Load scripts/setup.py by path. Never raises: an unloadable setup
+    """Load setup.py by path. Never raises: an unloadable setup
     module is a fail-CLOSED condition for _consented(), not a crash."""
     try:
         import importlib.util
@@ -1565,12 +1574,12 @@ def _get_bm_setup():
 
 
 def _consented():
-    """True only when scripts/setup.py's own is_consented() says so. Fails
+    """True only when setup.py's own is_consented() says so. Fails
     CLOSED (not consented) on any load error, missing config, or a corrupt
     one, matching tools/bm_telemetry.py's own _consented exactly (same
     schema, same reader, same failure direction), so the write-capable entry
     points in this file and in bm_telemetry.py can never disagree about
-    whether the founder has said yes. config_path() (inside scripts/setup.py)
+    whether the founder has said yes. config_path() (inside setup.py)
     honors BROTHERME_CONFIG, so a test can point this at a throwaway file the
     same way it already does for bm_telemetry.py."""
     mod = _get_bm_setup()
@@ -1584,7 +1593,7 @@ def _consented():
 
 
 _CONSENT_REQUIRED_LINE = (
-    "bm_autosave: setup is not complete yet; run: python3 scripts/setup.py")
+    "bm_autosave: setup is not complete yet; run: python3 " + os.path.join(os.path.dirname(HERE), "scripts", "setup.py"))
 
 
 # ---------------------------------------------------------------------------
@@ -1602,7 +1611,7 @@ _CONSENT_REQUIRED_LINE = (
 #                   every qualifying tool call once BROTHERMODE_AUTOSAVE is
 #                   set. Also fires automatically (a PostToolUse hook, where
 #                   wired), and setting an opt-in shell variable is not the
-#                   same act as running scripts/setup.py. GATED on
+#                   same act as running setup.py. GATED on
 #                   _consented(), checked BEFORE the opt-in check itself, so
 #                   even the tick counter file never gets created
 #                   pre-consent.
@@ -1644,12 +1653,12 @@ def cmd_precompact():
     ignores the return value.
 
     I1: pre-consent this prints one plain sentence naming
-    python3 scripts/setup.py and returns immediately, before
+    python3 setup.py and returns immediately, before
     _read_hook_payload, before resolve_toplevel, before any git call:
     nothing is written, not a ref, not a commit object, not the event
     file."""
     if not _consented():
-        print(_CONSENT_REQUIRED_LINE)
+        say(_CONSENT_REQUIRED_LINE)
         return None
     payload = _read_hook_payload()
     cwd = payload.get("cwd") or os.getcwd()
@@ -1671,10 +1680,10 @@ def cmd_tick():
 
     I1: gated on consent FIRST, before even the BROTHERMODE_AUTOSAVE opt-in
     check, so setting that shell variable without ever running
-    scripts/setup.py cannot write the tick counter file either (see
+    setup.py cannot write the tick counter file either (see
     cmd_precompact's docstring above for the full finding)."""
     if not _consented():
-        print(_CONSENT_REQUIRED_LINE)
+        say(_CONSENT_REQUIRED_LINE)
         return
     if not os.environ.get("BROTHERMODE_AUTOSAVE"):
         return

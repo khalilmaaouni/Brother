@@ -239,6 +239,8 @@ id, title, objective, worker, checker, depends_on, wave, owns, done_check
 
 Every unit below preserves those keys and their order. Difficulty and release scope therefore appear inside `objective`; the named mutation appears in `checker`.
 
+<!-- doc-assurance: allow-missing docs/architecture/DREAM-LEARNING.md named as NEW in the same sentence: a page this analysis proposes, not yet written -->
+
 All `dream_*` and `test_dream_*` files below, `scripts/test_mutation_probe.py`, and `docs/architecture/DREAM-LEARNING.md` are **NEW**. Existing paths were checked. `bundle/runtime` is an existing generated ownership scope; receipts must enumerate its actual changed files. Generated files are regenerated, never hand-edited.
 
 Wave numbers and unit identifiers are proposed plan ordinals. Difficulties are estimates. Done checks become runnable when their named NEW test files land; no future check is represented as already passing.

@@ -60,7 +60,9 @@ def load(path=None):
     """Every readable row, oldest first. A corrupt line is skipped, never guessed at."""
     out, skipped = [], 0
     try:
-        with open(path or LOG, encoding="utf-8") as fh:
+        # errors="replace": a ledger line holding non UTF-8 bytes (a torn write) is one unreadable line, counted below,
+        # not a UnicodeDecodeError that ends the read and loses every row after it (LOOP1.g self review, 2026-11-02).
+        with open(path or LOG, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -160,6 +162,373 @@ def funnel(rows):
             elif r.get("ok") is False:
                 e[2] += 1
     return {s: (a, b, c, (b / (b + c)) if (b + c) else None) for s, (a, b, c) in out.items()}
+
+
+# THE DELIVERY TRACE (LOOP1.g, closing LOOP1.c's gap, 2026-11-02). The pack counted LOOP1.c landed while no reader could
+# say "this sub unit went through the loop". delivery_trace is that reader. It joins the loop's OWN two records and
+# writes nothing: the stage ledger (brother-stages.jsonl: unit_runner's model and grade rows, one per transition) and the
+# plan's structured landing_events (land_batch's landing, close_unit's closure). It invents no row. Named stages:
+#   admitted  the last `model` enter that precedes the build that was graded (work arrived at the model stage)
+#   built     the last `model` leave with ok True before that grade
+#   graded    the last `grade` leave with ok True (a failed or verdictless grade is never a graded row)
+#   landed    the plan's current landing event for the sub (plan_store.landing_facts: a revert or a torn record removes it)
+#   closed    the sub's `closed` event, and only while it is landed
+# THE TREE. A stage row carries `tree`: the 40 hex commit the landing event names, which plan_store defines as the BASE
+# the sub unit was built and graded on (P1, 2026-10-31). The ledger rows themselves carry no commit, so admitted, built
+# and graded take that base only once a landing exists; before it they say None, never a guess.
+# ORDER. Rows come back in STAGE ORDER. Admitted, built and graded are ordered by their ledger stamps; the plan events
+# carry no stamp, so landed and closed follow them by construction, not by a clock. FAIL DIRECTION: a missing, corrupt
+# or unselectable record yields FEWER rows (a missing stage reads as not delivered), never a filled one, and never raises.
+DELIVERY_STAGES = ("admitted", "built", "graded", "landed", "closed")
+
+
+def _plan_units(plan_file):
+    """The plan's unit list, or None with the reason on stderr. plan_file None is the selected plan (BROTHER_WBS, else the
+    default), looked for under the launch directory first, then under the repository this module sits in."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        if plan_file is None:
+            if here not in sys.path:
+                sys.path.insert(0, here)
+            import plan_path
+            rel = plan_path.selected()
+            if not str(os.environ.get(plan_path.ENV, "")).strip():
+                print("stage_log: %s is unset, so the default plan %s is read for landings" % (plan_path.ENV, rel), file=sys.stderr)
+            plan_file = next((c for c in (os.path.join(os.getcwd(), rel), os.path.join(os.path.dirname(os.path.dirname(here)), rel))
+                              if os.path.exists(c)), rel)
+        with open(plan_file, encoding="utf-8") as fh:
+            units = json.load(fh).get("units")
+        if isinstance(units, list):
+            return units
+        print("stage_log: plan %s has no unit list; no landing is read from it" % plan_file, file=sys.stderr)
+    except (OSError, ValueError, AttributeError) as exc:
+        print("stage_log: plan unreadable (%s); no landing is read from it" % exc, file=sys.stderr)
+    return None
+
+
+def delivery_trace(unit, sub, stages_path=None, plan_file=None):
+    """The stage rows of one sub unit's delivery through the loop, in stage order. Each row is
+    {"stage", "unit", "sub", "at", "tree"}: `at` is the ledger stamp (None for a plan event), `tree` the landing's base
+    commit or None before a landing exists. Pure reads of two records; see the block comment above for what each stage means."""
+    if not all(isinstance(x, str) and x for x in (unit, sub)):
+        return []   # a None would match every ledger row that carries no unit or sub
+    mine = [r for r in load(stages_path) if r.get("unit") == unit and r.get("sub") == sub]
+
+    def last(stage, event, before=None, ok=None):
+        hit = [r for r in mine if r["stage"] == stage and r.get("event") == event and (before is None or r["at"] <= before)
+               and (ok is None or r.get("ok") is ok)]
+        return hit[-1] if hit else None
+
+    graded = last("grade", "leave", ok=True)
+    built = last("model", "leave", before=graded["at"], ok=True) if graded else None
+    admitted = last("model", "enter", before=built["at"]) if built else None
+    landed = closed = None
+    units = _plan_units(plan_file)
+    events = next((u.get("landing_events") for u in (units or []) if isinstance(u, dict) and u.get("id") == unit), None)
+    if events is not None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import plan_store
+        landed = plan_store.landing_facts(events, unit, sub)
+        landed = landed if landed["landed"] else None
+        if landed:   # landing_facts passed, so every event is well formed: the highest closed one is the closure
+            shut = [e for e in events if e["type"] == "closed" and e["unit"] == unit and e["sub"] == sub]
+            closed = max(shut, key=lambda e: e["sequence"]) if shut else None
+    tree = landed["commit"] if landed else None
+    picked = (("admitted", admitted), ("built", built), ("graded", graded))
+    out = [{"stage": s, "unit": unit, "sub": sub, "at": r["at"], "tree": tree} for s, r in picked if r]
+    if landed:
+        out.append({"stage": "landed", "unit": unit, "sub": sub, "at": None, "tree": landed["commit"]})
+    if closed:
+        out.append({"stage": "closed", "unit": unit, "sub": sub, "at": None, "tree": closed["commit"]})
+    return out
+
+
+# ONE CURRENT RUN STATE (LOOP1.f, cause RC11 of the 1.1.9 cut): a monitor read a replayed disk checkpoint as the
+# current state, and its watchers expired while the job went on. Both came from ordering by wall clock and from
+# reading age as an answer. A run event carries the run it belongs to and a SEQUENCE the writer assigns under a lock,
+# so the highest sequence of THIS run is the current state, whatever its `at`, whatever the file order, and whatever
+# a snapshot taken earlier said. An expired lease renews the monitor, then escalates once; it never ends the run.
+RUN_LOG = os.path.expanduser("~/.claude/evidence/brother-run-state.jsonl")
+RUN_STATES = ("RUNNING", "WAITING", "DONE", "FAILED", "NEEDS_INPUT")
+RUN_FINAL = ("DONE", "FAILED")
+RUN_LEASE_S = 1800      # how long the coordinator may stay quiet before its monitor is renewed (then escalated)
+MONITOR_MARKS = ("renewed", "escalated")
+# STAB1.h: a mark that is a REPORT, not a watch step. It says "no driver is alive and admission would start a unit",
+# once per run. It keeps the state and the lease it copied and never touches renewed or escalated (current_run).
+IDLE_MARK = "idle_with_work"
+LOCK_WAIT_S = 30        # a writer that cannot take the lock in this long fails (the pass blocks) rather than hangs
+
+
+def _num(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x and x not in (float("inf"), float("-inf"))
+
+
+def _word(x):
+    return isinstance(x, str) and bool(x) and not any(c.isspace() for c in x)
+
+
+def _sha(x):
+    """A full commit id, 40 or 64 hex characters. `HEAD` (an unborn branch's echo) or an empty read is not one."""
+    return isinstance(x, str) and len(x) in (40, 64) and all(c in "0123456789abcdef" for c in x)
+
+
+def run_row_ok(r):
+    """True for a run event this module can trust: schema 1, a named run, a whole sequence, a known state, a candidate,
+    a phase and a numeric lease. Anything else is skipped and COUNTED by the reader, never read as a state."""
+    return (isinstance(r, dict) and r.get("schema") == 1 and _word(r.get("run"))
+            and isinstance(r.get("sequence"), int) and not isinstance(r.get("sequence"), bool) and r["sequence"] >= 0
+            and r.get("state") in RUN_STATES and _word(r.get("candidate")) and _word(r.get("phase"))
+            and _num(r.get("lease_until")) and r.get("monitor", None) in (None,) + MONITOR_MARKS + (IDLE_MARK,))
+
+
+def run_event(run, sequence, candidate, state, phase, lease_until, path=None, monitor=None):
+    """Append one schema 1 run event and fsync it. Returns True only when the row is on disk.
+
+    Never raises, like write(), BUT unlike a timing row a lost run event is not harmless: loop_pass.sh launches a stage
+    only after this returned True (through the run-event verb), so progress is persisted BEFORE the stage starts."""
+    row = {"schema": 1, "run": run, "sequence": sequence, "candidate": candidate, "state": state, "phase": phase,
+           "lease_until": lease_until, "at": time.time()}
+    if monitor is not None:
+        row["monitor"] = monitor
+    if not run_row_ok(row):
+        print("stage_log: refused a malformed run event %r; nothing was written" % (row,), file=sys.stderr)
+        return False
+    try:
+        os.makedirs(os.path.dirname(path or RUN_LOG), exist_ok=True)
+        with open(path or RUN_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, sort_keys=True) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError as exc:
+        print("stage_log: could not persist the run event to %s (%s)" % (path or RUN_LOG, exc), file=sys.stderr)
+        return False
+    return True
+
+
+def load_run(path=None):
+    """(rows, unreadable): every JSON object in the run log, file order. Validation is current_run's, so a row that is
+    JSON but malformed is counted there; a line that is not JSON at all is counted here."""
+    rows, bad = [], 0
+    try:
+        with open(path or RUN_LOG, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    bad += 1
+    except OSError:
+        return [], 0
+    return rows, bad
+
+
+def current_run(snapshot, events, now):
+    """The current state of snapshot['run'] from a snapshot and that run's events. Pure: reads nothing, writes nothing.
+
+    Keys: run, sequence, candidate, state, phase, lease_until, next_action, skipped, renewed, escalated.
+    The highest sequence wins. A replayed, equal or lower sequence is ignored, so a stale event cannot roll a newer
+    snapshot back and an old checkpoint cannot outrank newer progress. An event of another run is ignored. A
+    malformed event is skipped and counted in `skipped`. The state comes ONLY from a row: age and expiry change
+    next_action (renew_monitor, then escalate), never the state, so no checkpoint age or watcher exit reads as DONE."""
+    snap = snapshot if isinstance(snapshot, dict) else {}
+    base = dict((k, snap.get(k)) for k in ("schema", "run", "sequence", "candidate", "state", "phase", "lease_until"))
+    base["schema"] = 1
+    if not run_row_ok(base):
+        return {"run": snap.get("run"), "sequence": None, "candidate": None, "state": None, "phase": None,
+                "lease_until": None, "next_action": "no_data", "skipped": 0, "renewed": False, "escalated": False}
+    cur = dict(base)
+    renewed = snap.get("renewed") is True or snap.get("monitor") in MONITOR_MARKS
+    escalated = snap.get("escalated") is True or snap.get("monitor") == "escalated"
+    for e in sorted((e for e in events if run_row_ok(e)), key=lambda e: e["sequence"]):
+        if e["run"] != cur["run"] or e["sequence"] <= cur["sequence"]:
+            continue
+        cur = dict((k, e[k]) for k in base)
+        if e.get("monitor") is None:      # progress resets the watch; a monitor mark keeps the state it copied
+            renewed = escalated = False
+        elif e["monitor"] != IDLE_MARK:   # an idle report is neither a renewal nor an escalation
+            renewed = True
+            escalated = escalated or e["monitor"] == "escalated"
+    skipped = sum(1 for e in events if not run_row_ok(e))
+    state = cur["state"]
+    if state in RUN_FINAL:
+        action = "none"
+    elif _num(now) and now > cur["lease_until"]:
+        action = "escalate" if renewed else "renew_monitor"
+    elif state == "WAITING":
+        action = "wake_on:" + cur["phase"]
+    elif state == "NEEDS_INPUT":
+        action = "ask_owner"
+    else:
+        action = "wait_lease"
+    del cur["schema"]
+    cur.update(next_action=action, skipped=skipped, renewed=renewed, escalated=escalated)
+    return cur
+
+
+def _run_snapshot(rows, run):
+    """The lowest sequence row of `run` stands as the snapshot for a reader holding only the log; None when absent."""
+    mine = [r for r in rows if run_row_ok(r) and r["run"] == run]
+    return min(mine, key=lambda r: r["sequence"]) if mine else None
+
+
+def _locked(path, fn):
+    """Run fn() holding an exclusive lock on the run log, so two writers can never hand out one sequence twice.
+    A lock still held after LOCK_WAIT_S raises OSError: a stalled holder fails this writer, never hangs it."""
+    import fcntl
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as lk:
+        give_up = time.time() + LOCK_WAIT_S
+        while True:
+            try:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() >= give_up:
+                    raise OSError("the run log lock is still held after %d s" % LOCK_WAIT_S)
+                time.sleep(0.05)
+        try:
+            return fn()
+        finally:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+
+
+def record_progress(run, candidate, state, phase, now=None, lease_s=None, path=None):
+    """The next event of `run`: sequence one above the highest on disk, under the log lock. (ok, sequence)."""
+    p = path or RUN_LOG
+    now = time.time() if now is None else now
+    lease_s = RUN_LEASE_S if lease_s is None else lease_s
+
+    def step():
+        rows, _ = load_run(p)
+        seqs = [r["sequence"] for r in rows if run_row_ok(r) and r["run"] == run]
+        seq = (max(seqs) + 1) if seqs else 1
+        return run_event(run, seq, candidate, state, phase, now + lease_s, p), seq
+    try:
+        return _locked(p, step)
+    except OSError as exc:
+        print("stage_log: could not lock the run log %s (%s)" % (p, exc), file=sys.stderr)
+        return False, None
+
+
+def driver_alive(pid_file):
+    """True (a live pid), False (no file: no driver, or a pid that names no process) or None (the file holds no pid:
+    UNKNOWN, never read as "no driver")."""
+    try:
+        with open(pid_file, encoding="utf-8") as fh:
+            text = fh.read().strip()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None  # sbe: allow-silent an unreadable pid file is UNKNOWN, and the caller reports nothing on None
+    if not (text.isascii() and text.isdigit()) or int(text) < 1:
+        return None
+    try:
+        os.kill(int(text), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True      # the process exists, it is only not ours
+    except (OSError, OverflowError):
+        return None  # sbe: allow-silent a pid the kernel cannot judge is UNKNOWN, and the caller reports nothing on None
+    return True
+
+
+def monitor_step(run, now=None, lease_s=None, path=None, driver_pid_file=None, admissible=None):
+    """One watcher look at `run`. On a first expiry it renews the lease with a `renewed` mark; on a second it appends
+    ONE `escalated` mark; after that it appends nothing however often it looks. It never writes DONE and never starts
+    anything. STAB1.h: given both a driver pid file and a count of admissible units, a look that finds no driver alive
+    and a count above zero appends ONE `idle_with_work` report per run (a look that wrote an expiry mark waits for the
+    next one). Returns (current, appended): appended is the mark written this look, or None."""
+    p = path or RUN_LOG
+    now = time.time() if now is None else now
+    lease_s = RUN_LEASE_S if lease_s is None else lease_s
+
+    def step():
+        rows, _ = load_run(p)
+        snap = _run_snapshot(rows, run)
+        cur = current_run(snap, rows, now)
+        mark = None
+        if cur["next_action"] == "renew_monitor":
+            mark = "renewed"
+        elif cur["next_action"] == "escalate" and not cur["escalated"]:
+            mark = "escalated"
+        elif (admissible and driver_pid_file is not None and cur["sequence"] is not None
+              and cur["state"] not in RUN_FINAL and driver_alive(driver_pid_file) is False
+              and not any(run_row_ok(r) and r["run"] == run and r.get("monitor") == IDLE_MARK for r in rows)):
+            mark = IDLE_MARK
+        if mark and not run_event(run, cur["sequence"] + 1, cur["candidate"], cur["state"], cur["phase"],
+                                  cur["lease_until"] if mark == IDLE_MARK else now + lease_s, p, monitor=mark):
+            return cur, None
+        return cur, mark
+    try:
+        return _locked(p, step)
+    except OSError as exc:
+        print("stage_log: could not lock the run log %s (%s)" % (p, exc), file=sys.stderr)
+        return current_run(None, [], now), None
+
+
+RUN_FLAGS = {"run-event": ("--run", "--candidate", "--state", "--phase", "--lease-s", "--path"),
+             "current": ("--run", "--path"),
+             "monitor": ("--run", "--path", "--driver-pid-file", "--admissible")}
+
+
+def _flags(verb, args):
+    """{flag: value} read strictly by position, or None: every argument is a known flag followed by one value that is
+    not itself a flag, each flag once. A run named "--phase" or a `--path` with no value can never shift the others."""
+    if len(args) % 2:
+        return None
+    out = {}
+    for name, value in zip(args[0::2], args[1::2]):
+        if name not in RUN_FLAGS[verb] or name in out or value.startswith("--"):
+            return None
+        out[name] = value
+    return out
+
+
+def run_main(args):
+    """run-event --run R --candidate C --state S --phase P [--lease-s N] [--path F]: exit 0 and one RUNSTATE persisted
+    line only when the row is on disk; exit 1 when it is not; exit 2 on a malformed call. current --run R and
+    monitor --run R [--driver-pid-file F --admissible N] print the current state as JSON (exit 0, or 2 when the run has no event)."""
+    verb = args[0]
+    opts = _flags(verb, args[1:])
+    if opts is None:
+        print("RUNSTATE NOT persisted: malformed call, %s takes only %s, each once with one value" % (verb, " ".join(RUN_FLAGS[verb])))
+        return 2
+    p, run = opts.get("--path"), opts.get("--run")
+    if verb == "run-event":
+        cand, state, phase = opts.get("--candidate"), opts.get("--state"), opts.get("--phase")
+        try:
+            lease = float(opts.get("--lease-s", RUN_LEASE_S))
+        except ValueError:
+            lease = None
+        if not (_word(run) and _sha(cand) and state in RUN_STATES and _word(phase) and _num(lease) and lease > 0):
+            print("RUNSTATE NOT persisted: malformed call (run %r, candidate %r, state %r, phase %r)" % (run, cand, state, phase))
+            return 2
+        ok, seq = record_progress(run, cand, state, phase, lease_s=lease, path=p)
+        if not ok:
+            print("RUNSTATE NOT persisted: the run log %s could not take the row" % (p or RUN_LOG))
+            return 1
+        print("RUNSTATE persisted run=%s sequence=%d state=%s phase=%s" % (run, seq, state, phase))
+        return 0
+    if not _word(run):
+        print("NO-DATA: %s needs --run <name>" % verb)
+        return 2
+    if verb == "monitor":
+        pid_file, n = opts.get("--driver-pid-file"), opts.get("--admissible")
+        if (pid_file is None) != (n is None) or (n is not None and not (n.isascii() and n.isdigit())):
+            print("NO-DATA: monitor takes --driver-pid-file with --admissible (a whole number), or neither")
+            return 2
+        cur, mark = monitor_step(run, path=p, driver_pid_file=pid_file, admissible=int(n) if n else None)
+        cur["appended"] = mark
+    else:
+        rows, _ = load_run(p)
+        cur = current_run(_run_snapshot(rows, run), rows, time.time())
+    print(json.dumps(cur, sort_keys=True))
+    return 2 if cur["next_action"] == "no_data" else 0
 
 
 def _write_side_case():
@@ -278,6 +647,27 @@ def selftest():
         return 1
 
 
+def _idle_case():
+    """STAB1.h: an idle report is not a renewal (so the escalation sequence is intact), and a run that is DONE is
+    never reported idle. Two mutations survived the frozen harness until this case: the mark renewing the run, and
+    the final state check."""
+    import shutil
+    import tempfile
+    sha = "a" * 40
+    snap = {"schema": 1, "run": "r", "sequence": 1, "candidate": sha, "state": "RUNNING", "phase": "p", "lease_until": 100}
+    idle = dict(snap, sequence=2, monitor=IDLE_MARK)
+    cur = current_run(snap, [snap, idle], 50)
+    d = tempfile.mkdtemp(prefix="stage-log-idle-")
+    try:
+        log, pid = os.path.join(d, "log.jsonl"), os.path.join(d, "none.pid")
+        ok = record_progress("r", sha, "DONE", "p", path=log)[0]
+        _cur, mark = monitor_step("r", path=log, driver_pid_file=pid, admissible=3)
+        return (ok and cur["renewed"] is False and cur["state"] == "RUNNING" and cur["skipped"] == 0
+                and current_run(snap, [snap, idle], 150)["next_action"] == "renew_monitor" and mark is None)
+    finally:
+        shutil.rmtree(d, True)
+
+
 def _selftest_body():
     R = [{"at": 100.0, "stage": "model", "event": "enter", "sub": "A.1"},
          {"at": 160.0, "stage": "model", "event": "leave", "sub": "A.1", "ok": True},
@@ -381,6 +771,7 @@ def _selftest_body():
                       {"at": 0.0, "stage": "model", "event": "enter", "sub": "B"},
                       {"at": 100.0, "stage": "model", "event": "leave", "sub": "A", "ok": True},
                       {"at": 100.0, "stage": "model", "event": "leave", "sub": "B", "ok": True}])["model"][3] == 2.0),
+        ("an idle report neither renews the run nor reaches a finished one", _idle_case()),
         ("enter() writes the `at` stamp every duration is derived from", _write_side_case()),
         ("leave() writes the ok verdict the funnel is built from", _verdict_case()),
         ("leave() caps an unbounded note at 200 characters", _note_cap_case()),
@@ -410,6 +801,8 @@ def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     if "--selftest" in args:
         return selftest()
+    if args[:1] and args[0] in ("run-event", "current", "monitor"):
+        return run_main(args)
     since = float(args[args.index("--since-hours") + 1]) * 3600 if "--since-hours" in args else None
     rows = load()
     if since:

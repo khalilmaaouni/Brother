@@ -36,6 +36,7 @@ repository this module coordinates writes into).
 """
 import os
 import subprocess
+import urllib.parse
 
 import claim_store
 
@@ -47,6 +48,18 @@ NODATA = "NO-DATA"
 #: that a property of the key, not an assumption about paths).
 ROOT_PREFIX = "root:"
 COMMON_PREFIX = "common:"
+
+
+def root_key(path):
+    """The lease key for a root's absolute path. The path is percent-encoded: claim_store refuses any unit id that names a
+    path (a slash or backslash in it, since D1.8), and an absolute path is nothing but slashes, so the raw
+    ROOT_PREFIX + path form could never be acquired at all."""
+    return ROOT_PREFIX + urllib.parse.quote(path, safe="")
+
+
+def common_key(path):
+    """The lease key for a shared git directory's absolute path, encoded as root_key does."""
+    return COMMON_PREFIX + urllib.parse.quote(path, safe="")
 
 #: Where the shared lease store lives by default when a root sits inside a
 #: git worktree: inside the COMMON git directory, so every worktree of the
@@ -121,10 +134,10 @@ def targets(root, runner=None):
     deadlocking against each other, since claim_store's own per-unit lock
     only ever guards one key at a time."""
     root_abs = os.path.realpath(root)
-    keys = {ROOT_PREFIX + root_abs}
+    keys = {root_key(root_abs)}
     common = common_git_dir(root_abs, runner=runner)
     if common is not None:
-        keys.add(COMMON_PREFIX + common)
+        keys.add(common_key(common))
     return sorted(keys)
 
 

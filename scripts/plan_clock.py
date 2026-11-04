@@ -34,10 +34,11 @@ LANDED_RE = re.compile(r"^LANDED \S+ at (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\b")
 
 
 def close_time(handover_root: str) -> Optional[float]:
-    """The newest close pack's time (close_ceremony_check.newest_pack, its directory mtime), None when no pack."""
+    """The newest close's time (close_ceremony_check.newest_close: a handover record or a legacy pack, its mtime),
+    None when there is none."""
     try:
         import close_ceremony_check
-        pack = close_ceremony_check.newest_pack(handover_root)
+        pack, _kind = close_ceremony_check.newest_close(handover_root)
         return os.path.getmtime(pack) if pack else None
     except (OSError, ValueError, ImportError):
         return None

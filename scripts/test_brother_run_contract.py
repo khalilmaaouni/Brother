@@ -212,13 +212,16 @@ class ThePlanMustRunEveryCheckTheContractPromises(PlanFileRunBase):
         self.assertEqual(self.spawned(), [], out)
 
     def test_a_done_check_that_starts_with_the_promised_command_counts(self):
-        """Covered means the command IS a done_check or STARTS one, so a unit
-        may add its own arguments or chain a second command after it. This is
-        the boundary the rule above is drawn at, driven from the other side."""
+        """Covered means the command IS a done_check, or the unit DECLARES in
+        its own `covers` list that its longer done_check runs the promised
+        command (brother_run.covers: never a prefix, since a prefix match let a
+        narrowed pytest selection satisfy a whole-file contract). This is the
+        boundary the rule above is drawn at, driven from the other side."""
         contract = contract_at(self.tmp, "two files exist",
                                commands=("test -f one.txt",))
         units = two_units()
         units[0]["done_check"] = "test -f one.txt && echo covered"
+        units[0]["covers"] = ["test -f one.txt"]
         plan = write_plan(self.tmp, units)
         proc = sh([sys.executable, BROTHER_RUN, "two files exist",
                    "--cwd", self.repo, "--runs-root", self.tmp,

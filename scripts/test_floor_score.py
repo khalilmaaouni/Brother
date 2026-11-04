@@ -208,6 +208,9 @@ class EvidenceMustResolve(unittest.TestCase):
         self.assertNotIn("NO-DATA: A", out)
         self.assertIn("MUST MATCH     1.00", out)
 
+    # The record this case names lives in docs/plan, which the public export does not ship: premise absent there.
+    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "docs", "plan", "PARITY-2026-08-29.json")),
+                         "this tree carries no parity record")
     def test_a_bare_filename_resolves_from_the_directories_evidence_lives_in(
             self):
         """The live file names PARITY-2026-08-29.json without its directory."""
@@ -322,6 +325,11 @@ class Malformed(unittest.TestCase):
         self.assertIn("Release/CI", err)
 
 
+# docs/plan is not shipped in the public export, so there the live floor file, the roadmap board and the parity record
+# do not exist: the premise is absent, not the behaviour broken. A tree that carries them still runs every case.
+@unittest.skipUnless(all(os.path.isfile(os.path.join(ROOT, "docs", "plan", name)) for name in (
+    "FLOOR-2026-09-05.json", "FLOOR-2026-09-09.json", "READINESS-ROADMAP-2026-08-29.json")),
+    "this tree carries no live floor file")
 class TheLiveFile(unittest.TestCase):
     def setUp(self):
         with open(LIVE, encoding="utf-8") as fh:

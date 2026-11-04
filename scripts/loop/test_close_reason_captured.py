@@ -27,6 +27,8 @@ class FakeSh:
     def __call__(self, cmd, log, timeout=None):
         self.calls.append(cmd)
         if any(str(c).endswith("close_unit.py") for c in cmd):
+            if "--needfact" in cmd:   # STAB1.f: the sweep close_unit answers with exit 0 and nothing when no sub unit needs a fact
+                return subprocess.CompletedProcess(cmd, 0, "", "")
             return subprocess.CompletedProcess(cmd, self.rc, self.out, "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 

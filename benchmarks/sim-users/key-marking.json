@@ -1,0 +1,232 @@
+{
+  "schema": "key-marking.1",
+  "status": "FROZEN 2026-11-01 after one independent review round; a marking change now needs a new reason that does not cite a failing run (HUMAN-TRIAL-GATE.md rule 3)",
+  "ruling": "HUMAN-TRIAL-GATE.md, owner 2026-11-01",
+  "north_star": "accepted external verified deliveries per week",
+  "test": "A group, or the named operations of it, is key when an external user's delivery cannot be made, verified or accepted on a core journey without it; when the product's own stated promise (checked work, a rerunnable receipt, useful local memory, a human acceptance decision; AGENTS.md) fails without it; or when exposing it broken is a safety failure. Core journeys are BASE1.b's: app correction, analytics correction, interrupted delivery, release variant.",
+  "groups": [
+    {
+      "id": "vault-recall",
+      "marking": "key",
+      "operations": [
+        "search",
+        "contextual recall"
+      ],
+      "reason": "Read side of the memory promise, served through the SessionStart refresh and the per-edit recall hook (hooks.json 16 and 97). Not on the delivery chain itself; key under the product-promise clause of the test."
+    },
+    {
+      "id": "vault-lifecycle",
+      "marking": "key",
+      "operations": [
+        "intake"
+      ],
+      "reason": "Write side of the memory promise. Review finding: the only on-path callers are failure capture (brother_run.py 3670, when a vault is set) and the acceptance note gate (accept_delivery.py 308 to pattern_note.py). No door path calls promote, curate or lifecycle, so those stay not key."
+    },
+    {
+      "id": "vault-entities",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Entity questions over notes; useful, not needed for a delivery or for recall with source."
+    },
+    {
+      "id": "vault-conflicts",
+      "marking": "key",
+      "operations": [
+        "contradiction triage"
+      ],
+      "reason": "Review finding, the draft's own flip met: the recall hook calls bm_vault_contradiction.evidence_tier on every lesson it serves (vault_recall_hook.py 596), the code that stops conflicting notes being served as current."
+    },
+    {
+      "id": "vault-maintenance",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Maintainer health and portability verbs."
+    },
+    {
+      "id": "claims-proof",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "BrotherDS is experimental; the analytics core journey is a code fix decided by a hidden check (benchmarks/competitive/analytics), not a claims receipt. Flip: if a core journey routes a number through it."
+    },
+    {
+      "id": "claims-packs",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Experimental analytical packs; no core journey uses them."
+    },
+    {
+      "id": "mdm-identity",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Domain feature (record matching); not on the delivery chain."
+    },
+    {
+      "id": "mdm-quality",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Domain feature (match quality); not on the delivery chain."
+    },
+    {
+      "id": "data-connectors",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Adapters to user data stores; remote connectivity unproved and no core journey needs one."
+    },
+    {
+      "id": "mobile-plan",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Mobile domain feature; no core journey is mobile."
+    },
+    {
+      "id": "mobile-run",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Mobile domain feature; no core journey is mobile."
+    },
+    {
+      "id": "mobile-evidence",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Mobile domain feature; no core journey is mobile."
+    },
+    {
+      "id": "jev-observe",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Second opinions are internal and shadow only; every decision stands on the deterministic verdict without them."
+    },
+    {
+      "id": "jev-review",
+      "marking": "key",
+      "operations": [
+        "delivery-note verification"
+      ],
+      "reason": "Review finding: the deliver verb runs jev_door.py deliver on every delivery with a done note (brother-deliver SKILL.md line 10), shadow mode, up to 20 seconds, and can send the note off the machine when a bridge is configured. Flip: not key if the deliver verb stops calling it."
+    },
+    {
+      "id": "jev-promotion",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Internal control, explicitly not a consumer switch."
+    },
+    {
+      "id": "learning-lessons",
+      "marking": "key",
+      "operations": [
+        "capture lesson",
+        "recurrence"
+      ],
+      "reason": "Review finding: this is the memory a core-journey run actually writes, every run (brother_run.py 2831, 3508 to 3626). Known defect: it prints 'Vault saved:' for a lesson file kept in the run directory, a false claim on every failed unit."
+    },
+    {
+      "id": "learning-replay",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Maintainer inspection of past decisions; no core journey needs it."
+    },
+    {
+      "id": "learning-governance",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Hidden while learning is hidden; a forget claim is not exposed until propagation is repaired."
+    },
+    {
+      "id": "execution-outcome",
+      "marking": "key",
+      "operations": "all, explicitly including resume, continue and unfinished (brother_run.py 6384 to 6398) and stop (bm_controller.py stop)",
+      "reason": "The delivery itself: intake to receipt to accept. Review finding: the interrupted-delivery journey resumes and stops here, not in the loop."
+    },
+    {
+      "id": "loop-close",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Unattended building is a throughput multiplier; external deliveries complete interactively through execution-outcome. Stays hidden under OUT1.n until it earns 8/10. Flip: if unattended delivery becomes part of the consumer promise."
+    },
+    {
+      "id": "loop-control",
+      "marking": "key",
+      "operations": [
+        "probe",
+        "safety floor",
+        "claim write scope before worker",
+        "adopt"
+      ],
+      "reason": "Review finding: managed_safety runs on every fresh or resumed door delivery (brother_run.py 6552 to 6557) and claims the write scope before any worker starts (loop_bridge.py 2541, 2260). Interruption, recovery and loop status serve only the maintainer loop and are not key; door resume and stop belong to execution-outcome."
+    },
+    {
+      "id": "assurance-review",
+      "marking": "key",
+      "operations": "all",
+      "reason": "'Verified' in the north star: the hard gates (numbers, migration, approval, ran, proof) are what make a delivery verified rather than claimed."
+    },
+    {
+      "id": "assurance-control",
+      "marking": "key",
+      "operations": "all",
+      "reason": "Scope, fences and approvals keep a delivery inside what the user agreed; a change escaping its scope in a user's repository is a correctness and safety failure the gate already names."
+    },
+    {
+      "id": "assurance-handover",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Handing work to another person is not on the single-user delivery chain; acceptance is status-acceptance."
+    },
+    {
+      "id": "host-health",
+      "marking": "key",
+      "operations": "all",
+      "reason": "An external user must install, update and recover the plugin unaided; a stranger who cannot reach a working install delivers nothing."
+    },
+    {
+      "id": "authority-budget",
+      "marking": "key",
+      "operations": "all",
+      "reason": "Corrected reason: none of its files is on the door's delivery path today; it is key because the door can still reach paid and unattended routes until OUT1.n hides them, and an unenforced cap there is a safety failure. The only spend cap on the door path is model_worker.budget_ceiling, unset by default, now owned under execution-outcome. Flip: not key once OUT1.n hides every route that spends beyond the worker's own cap."
+    },
+    {
+      "id": "release-cut",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "The BASE1.b release variant runs through execution-outcome's integrate and accept. Decision recorded 2026-11-01: the gate's core journeys exclude publishing Brother itself (maintainer work). Condition: the door's publish route (SKILL.md 235 to 241, to scripts/cut_driver.py, not shipped) must be hidden from consumers under OUT1.n; if a consumer can reach it, it becomes a key reachability defect. Flip: if BASE1.e's 'publication flows' is read as a consumer journey."
+    },
+    {
+      "id": "status-acceptance",
+      "marking": "key",
+      "operations": "all",
+      "reason": "'Accepted' in the north star is this group's accept/reject; a user who cannot see state or decide acceptance produces no accepted delivery."
+    },
+    {
+      "id": "authored-content",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Authored-content analysis pipeline lives outside the active bundle; not on the delivery chain."
+    },
+    {
+      "id": "composition",
+      "marking": "not key",
+      "operations": "all",
+      "reason": "Execution-outcome already issues one receipt per outcome; cross-domain composition is a multiplier, its registry starts empty, and no core journey needs it."
+    }
+  ],
+  "path_rule": "A module on a core journey's code path is key whatever catalog group owns it, or if none does. Named by the review and assigned: loop_bridge, model_worker (including budget_ceiling), receipt_door, continuity, handover_record, bm_controller to execution-outcome; bm_fence_hook, sbe_authority_hook, sbe_fence_hook, sbe_bash_write_guard to assurance-control; vault_recall_hook to vault-recall; bm_vault_contradiction to vault-conflicts. Unshipped operations inside a key group are reachability defects, not exemptions.",
+  "defects_found": [
+    "learning-lessons: 'Vault saved:' printed for a lesson kept in the run directory (brother_run.py 3626).",
+    "vault-lifecycle accept path: pattern_note.py line 50 defaults the vault to an owner-specific folder; the bundle/runtime copy has no environment override.",
+    "status-acceptance: the door's status read (stage_log.current_run, SKILL.md 137 to 138) is written only by loop code, so a door delivery has no run to find.",
+    "release-cut: the door routes 'publish' to scripts/cut_driver.py, which is not shipped in the bundle.",
+    "handover_record is missing from the deep inventory."
+  ],
+  "no_data": [
+    "loop-close reachability on a stranger's install (OUT1.n not merged at the reviewed revision)",
+    "whether bm_vault.py check uses cite, as-of or identity on recall",
+    "whether staleness and temporal code runs on the recall path"
+  ],
+  "review": {
+    "by": "independent adversarial review, briefed to disprove",
+    "revision": "brother-hub 0e6b8e87d",
+    "verdict": "FAIL, six markings changed and two reasons corrected, all folded",
+    "report": "KEY-MARKING-REVIEW.md (copy of the evidence report)",
+    "spot_checked": "brother_run.py 3626 and 6552, brother-deliver SKILL.md 10, vault_recall_hook.py 596, pattern_note.py 50, model_worker.py 438"
+  }
+}
