@@ -58,10 +58,10 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import handover_ceremony as HC  # noqa: E402
 import handover_pack_scan as HPS  # noqa: E402
+import pattern_note  # noqa: E402  the one vault resolver
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HANDOVER_ROOT = os.path.expanduser("~/Documents/BrotherModeUp-handovers")
-VAULT_ROOT = os.path.expanduser("~/Documents/Kay Vault")
 FRESH_DAYS = 3
 
 
@@ -406,7 +406,7 @@ def build(repos, version, out_dir, today=None, extra_docs=None):
     # Indexes.
     idx = pack
     counts = {}
-    vault_text, vault_n, vault_dropped = index_vault(VAULT_ROOT)
+    vault_text, vault_n, vault_dropped = index_vault(pattern_note.vault_root()[0] or "")  # KEY1.f: unresolved indexes nothing, NO-DATA
     for label, (text, n) in {
         "packs": index_packs(HANDOVER_ROOT),
         "plans": index_plans(plan_dir, repo=repos[0]),

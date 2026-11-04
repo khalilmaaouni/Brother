@@ -151,6 +151,8 @@ class ExitCodes(unittest.TestCase):
         finally:
             fx.REGISTRY = saved
 
+    # The live claim registry (.sbe/tasks.json) is not shipped in the public export: there the premise is absent.
+    @unittest.skipUnless(os.path.isfile(str(fx.REGISTRY)), "this tree carries no live claim registry")
     def test_the_real_registry_has_no_claim_that_can_never_retire(self):
         """Guards the live estate. Red here means a fence was opened that will
         hold its paths until a human notices, which is what happened twice."""

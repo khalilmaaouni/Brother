@@ -208,6 +208,22 @@ def next_phase(state):
     return None
 
 
+def automatic_mode(candidate, previous):
+    """CUT2.a: {mode, reason}, the cold, resume or follow choice the owner never types. `previous` is the validated
+    state of an earlier run ({candidate, lock_held}) or None; lock_held is the live lock readback. A matching run
+    whose lock is held is FOLLOWED, a matching one whose lock is free is RESUMED, anything else starts COLD. A lock
+    readback that is neither True nor False is treated as held (the _lock_alive rule): nothing is started."""
+    if not isinstance(previous, dict):
+        return {"mode": "COLD", "reason": "no earlier run for this candidate"}
+    before = previous.get("candidate")
+    if not isinstance(candidate, str) or not SHA_RE.fullmatch(candidate) or before != candidate:
+        return {"mode": "COLD", "reason": "the earlier run is for candidate %r, not %r; its proof is not reused"
+                % (before, candidate)}
+    if previous.get("lock_held") is False:
+        return {"mode": "RESUME", "reason": "the earlier run for this candidate stopped; it is picked up"}
+    return {"mode": "FOLLOW", "reason": "a run for this candidate is already going; it is followed, not repeated"}
+
+
 def _take_lock(path):
     """O_EXCL lock file holding our pid (the cut_rehearsal._take_lock pattern); '' or the refusal."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -289,11 +305,122 @@ def freeze_phase(root, version, runner=None, candidate="", release_branch="", hu
         return "NO-DATA", "%s has no readable %s (git ls-remote exit %d)" % (hub_remote, release_branch, rc)
     if remote != head:
         return "FAIL", "HEAD %s is not %s/%s %s" % (head[:12], hub_remote, release_branch, remote[:12])
-    rc, text = runner([sys.executable, "-B", "scripts/close_ceremony_check.py"], root)
+    rc, text = runner([sys.executable, "-B", "scripts/close_ceremony_check.py", "--require-current"], root)
     log = _save_log(version, "freeze", text)
     if rc == 0:
         return "PASS", "clean at %s, ceremony log %s" % (head[:12], log)
     return ("FAIL" if rc == 1 else "NO-DATA"), "close_ceremony_check exit %d: %s (log %s)" % (rc, _last_line(text), log)
+
+
+#: CUT2.c: the generators whose output the candidate carries, each run bare to write and with --check to prove.
+GENERATORS = ("scripts/bundle_runtime.py", "scripts/system_doc.py")
+
+
+def _step(name, answer):
+    """(verdict, reason) from a preparation operation's answer, a verdict or (verdict, reason)."""
+    reason = ""
+    if isinstance(answer, (tuple, list)) and len(answer) == 2 and isinstance(answer[1], str):
+        answer, reason = answer
+    if answer not in ("PASS", "FAIL", "NO-DATA"):
+        return "NO-DATA", "%s answered %r, not PASS, FAIL or NO-DATA" % (name, answer)
+    return answer, "%s: %s" % (name, reason or answer)
+
+
+def prepare_release(operations):
+    """CUT2.c: {verdict, identity?, reason?}. Runs operations generate, validate and freeze in that order, each at
+    most once: a generate or validate that is not PASS stops before the freeze and its verdict is the answer. An
+    operation that raises, a missing or uncallable one, and a freeze answering anything but a 40 hex identity are
+    NO-DATA with the reason, never PASS. PASS carries identity, exactly what the freeze returned. Never raises."""
+    try:
+        ops = [(name, operations[name]) for name in ("generate", "validate", "freeze")]
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a malformed table is answered NO-DATA below
+        ops = []
+    if not ops or not all(callable(op) for _name, op in ops):
+        return {"verdict": "NO-DATA", "reason": "preparation needs callable generate, validate and freeze; "
+                                                "nothing ran"}
+    for name, op in ops:
+        try:
+            answer = op()
+        except Exception as exc:  # noqa: BLE001  # sbe: allow-silent an operation that raises is NO-DATA, named
+            return {"verdict": "NO-DATA", "reason": "%s raised %s: %s" % (name, type(exc).__name__, exc)}
+        if name == "freeze":
+            if isinstance(answer, str) and SHA_RE.fullmatch(answer):
+                return {"verdict": "PASS", "identity": answer}
+            return {"verdict": "NO-DATA", "reason": "freeze named no 40 hex identity: %r" % (answer,)}
+        verdict, reason = _step(name, answer)
+        if verdict != "PASS":
+            return {"verdict": verdict, "reason": reason}
+    return {"verdict": "NO-DATA", "reason": "the freeze never ran"}
+
+
+def prepared_freeze(root, version, runner=None, candidate="", release_branch="", hub_remote="hub", directory="",
+                    now=None):
+    """CUT2.c: (verdict, detail), the freeze phase through prepare_release. generate, on a clean tree only, runs
+    each of GENERATORS with --check (cheap freshness) and regenerates through the bare generator only the stale ones,
+    so a fresh tree is never rewritten (bundle_runtime rewrites a provisional -dirty stamp on every bare run).
+    validate refuses, naming them, any paths the generators changed (they need committing and proving first: the
+    candidate is never frozen with a tree other than the proven one), then runs each --check again. freeze is
+    freeze_phase, whose own verdict and detail are the answer when it is not PASS."""
+    runner = runner or real_runner
+    seen = {}
+    texts = []
+
+    def porcelain():
+        rc, text = runner(["git", "status", "--porcelain"], root)
+        if rc != 0:
+            return None, "git status exited %d" % rc
+        return [ln for ln in text.splitlines() if ln.strip()], ""
+
+    def run(script, extra):
+        rc, text = runner([sys.executable, "-B", script] + extra, root)
+        texts.append(text)
+        return rc, "%s exit %d: %s" % (" ".join([script] + extra), rc, _last_line(text))
+
+    def generate():
+        paths, why = porcelain()
+        if paths is None:
+            return "NO-DATA", why
+        if paths:
+            return "FAIL", "the tree is not clean (%d paths); nothing was generated" % len(paths)
+        for script in GENERATORS:
+            if run(script, ["--check"])[0] != 0:   # stale or unreadable: the normal generator writes it
+                rc, why = run(script, [])
+                if rc != 0:
+                    return "FAIL", why
+        return "PASS", ""
+
+    def validate():
+        paths, why = porcelain()
+        if paths is None:
+            return "NO-DATA", why
+        if paths:
+            return "FAIL", ("the generators changed %d paths (%s); commit them and prove that tree before the cut"
+                            % (len(paths), ", ".join(p[3:] for p in paths[:10])))
+        for script in GENERATORS:
+            rc, why = run(script, ["--check"])
+            if rc != 0:
+                return "FAIL", why
+        return "PASS", ""
+
+    def freeze():
+        seen["freeze"] = freeze_phase(root, version, runner, candidate, release_branch, hub_remote, directory, now)
+        if seen["freeze"][0] != "PASS":
+            return ""
+        head = _git(root, ["rev-parse", "HEAD"], runner)[0]
+        if candidate and SHA_RE.fullmatch(head) and head != candidate:   # HEAD moved after freeze_phase checked it
+            seen["freeze"] = ("FAIL", "the frozen HEAD %s is not the candidate %s; nothing is frozen"
+                              % (head[:12], candidate[:12]))
+            return ""
+        return head
+
+    got = prepare_release({"generate": generate, "validate": validate, "freeze": freeze})
+    log = _save_log(version, "prepare", "\n".join(texts)) if texts else ""
+    if "freeze" in seen and seen["freeze"][0] != "PASS":
+        return seen["freeze"]
+    if got["verdict"] == "PASS":
+        return "PASS", "%s; prepared %s, frozen %s (log %s)" % (
+            seen["freeze"][1], " and ".join(GENERATORS), got["identity"][:12], log)
+    return got["verdict"], "preparation %s (log %s)" % (got["reason"], log)
 
 
 def _write_preflight_record(root, version, runner, verdict, log, seconds):
@@ -940,12 +1067,20 @@ def sleep_note(name, start, end, sleeps=None):
 def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeout_s, directory="", now=None,
                approval=""):
     """(verdict, detail, extra fields for the state entry)."""
+    # CUT2.a: the cut publishes `body`, so a missing or empty one stops every phase before it, the rehearsal
+    # included; the cut and after phases leave it to cut.py and the verifier, which refuse it themselves.
+    try:
+        body_ok = name in ("cut", "after") or bool(body) and os.path.isfile(body) and os.path.getsize(body) > 0
+    except OSError:
+        body_ok = False
+    if not body_ok:
+        return "NO-DATA", "the release notes file %r is missing or empty; nothing ran" % (body,), {}
     if name == "ready":
         v, d = ready_phase(root, version, runner, directory, now)
         return v, d, {}
     if name == "freeze":
-        v, d = freeze_phase(root, version, runner, state["candidate_sha"], state["release_branch"], hub_remote,
-                            directory, now)
+        v, d = prepared_freeze(root, version, runner, state["candidate_sha"], state["release_branch"], hub_remote,
+                               directory, now)
         return v, d, {}
     if name == "preflight":
         v, d = preflight_phase(root, version, runner)
@@ -978,10 +1113,14 @@ def _run_phase(name, state, root, version, body, runner, tty, hub_remote, timeou
 evidence_key = CR.evidence_key
 
 
-def reuse_miss(entry, inputs, fallback=None):
+def reuse_miss(entry, inputs, fallback=None, now=None):
     """'' when a kept phase entry may be REUSED for `inputs`, else why not (CUT1.a, CUT1.b). Only a PASS or REUSED
     entry whose recorded inputs give exactly this evidence key is reused; an entry from before CUT1 carries none and
-    is judged by `fallback`, the identity its state was started under. Unknown inputs on either side never hit."""
+    is judged by `fallback`, the identity its state was started under. Unknown inputs on either side never hit.
+    CUT2.h: the last word is shared_evidence_usable, the one rule readiness, rehearsal and cut share, over the entry
+    read as its shared shape (a PASS made when the phase ended, good for MAX_STATE_AGE_HOURS, its identity and key
+    verified): a window that does not hold or a key that does not match its inputs is a miss, never a reuse. `now`
+    is epoch seconds or a clock to read (only when a window is judged); default the wall clock."""
     if not isinstance(entry, dict):
         return "no earlier attempt"
     if entry.get("verdict") not in PASSING:
@@ -994,7 +1133,186 @@ def reuse_miss(entry, inputs, fallback=None):
         return "the earlier attempt recorded no input identity"
     if evidence_key(recorded) != key:
         return "changed: %s" % ", ".join(CR.input_changes(recorded, inputs))
+    started, seconds = entry.get("started"), entry.get("seconds")
+    made = started + seconds if CR._is_num(started) and CR._is_num(seconds) else None
+    shared = {"schema": 1, "verdict": "PASS", "inputs": recorded, "created_at": made,
+              "valid_until": made + MAX_STATE_AGE_HOURS * 3600 if made is not None else None,
+              "evidence_id": entry.get("key", key)}
+    clock = now() if callable(now) else (time.time() if now is None else now)
+    if not shared_evidence_usable(shared, dict(inputs), clock, lambda r: evidence_key(r["inputs"]) == r["evidence_id"]):
+        return "the earlier attempt is not usable shared evidence (its window or its key did not verify)"
     return ""
+
+
+def shared_evidence_usable(record, expected, now, verify):
+    """CUT2.b: True only when `record` is one authenticated, fresh PASS made under exactly the `expected` identity,
+    so readiness, rehearsal and cut may all stand on it instead of running the check again. `record` is the shared
+    shape {schema: 1, verdict, inputs, created_at, valid_until, evidence_id}; `expected` maps every identity name
+    (code, checker, policy, interpreter, host, home, export, ...) to an opaque digest; `verify` is the caller's own
+    trusted provenance check (it re-hashes the bytes behind evidence_id), never a flag read from the record. Every
+    key on either side must be present on the other with the same non empty text, so a new identity field an old
+    record lacks is a miss. The window is created_at <= now < valid_until. Anything malformed, and a verify that
+    raises or answers anything but True, is False: a doubt runs the full check, it never reuses. Never raises."""
+    try:
+        if not isinstance(record, dict) or not isinstance(expected, dict) or not expected:
+            return False
+        if type(record.get("schema")) is not int or record["schema"] != 1 or record.get("verdict") != "PASS":
+            return False
+        inputs = record.get("inputs")
+        if not isinstance(inputs, dict) or set(inputs) != set(expected):
+            return False
+        if not all(CR._is_str(v) and v and inputs[k] == v for k, v in expected.items()):
+            return False
+        made, until = record.get("created_at"), record.get("valid_until")
+        if not (CR._is_num(made) and CR._is_num(until) and CR._is_num(now)) or not made <= now < until:
+            return False
+        return verify(record) is True
+    except Exception:  # noqa: BLE001  # sbe: allow-silent a proof that cannot be judged is not reused
+        return False
+
+
+#: CUT2.f: the three things one approval binds, and the publication steps publication_next answers.
+PUBLICATION_FIELDS = ("candidate", "export", "body")
+FINAL_STEP = "DONE"
+
+
+def _publication_identity(value):
+    """The (candidate, export, body) tuple when each is non empty text and the candidate is 40 lowercase hex, else
+    None, so a malformed identity never equals a good one."""
+    if not isinstance(value, dict):
+        return None
+    got = tuple(value.get(k) for k in PUBLICATION_FIELDS)
+    if not all(CR._is_str(v) and v for v in got) or not SHA_RE.fullmatch(got[0]):
+        return None
+    return got
+
+
+def _publication_step(state, now):
+    def say(action, reason):
+        return {"action": action, "reason": reason}
+    if not isinstance(state, dict):
+        return say("REFUSE", "the publication state is not a record; nothing is published")
+    ready = state.get("ready")
+    if ready is not True:
+        if ready is None or ready is False:
+            return say("PREPARE", "the candidate, export and body are not prepared and checked yet; nothing is "
+                                  "asked before they are")
+        return say("REFUSE", "ready reads %r, not true or false" % (ready,))
+    identity = _publication_identity(state.get("identity"))
+    if identity is None:
+        return say("REFUSE", "the prepared identity is not a 40 hex candidate with an export and a body")
+    if not CR._is_num(now):
+        return say("REFUSE", "the clock reading %r is not a number" % (now,))
+    remote = state.get("remote_commit")
+    if remote is not None:
+        if not CR._is_str(remote) or not SHA_RE.fullmatch(remote):
+            return say("REFUSE", "the remote read answered %r, not nothing or a 40 lowercase hex commit" % (remote,))
+        if remote != identity[0]:
+            return say("REFUSE", "the remote tag is foreign: it points at %s, not the candidate %s; it is never "
+                                 "moved or adopted" % (remote[:12], identity[0][:12]))
+        # the tag is already there at the candidate: an authorized effect that happened is never approved or
+        # pushed again, whatever the approval now reads
+        if state.get("artifacts_verified") is not True:
+            return say("VERIFY", "the tag is on the remote at the candidate: verify the public artifacts, no second "
+                                 "push and no new approval")
+        if state.get("receipt_written") is not True:
+            return say("WRITE_RECEIPT", "the tag and its artifacts read back: write the durable publication receipt")
+        return say(FINAL_STEP, "the tag, its read back artifacts and a durable receipt are all in place")
+    if state.get("artifacts_verified") is True or state.get("receipt_written") is True:
+        return say("REFUSE", "read back artifacts or a receipt are claimed while the remote shows no tag; the state "
+                             "contradicts itself, nothing is pushed")
+    approval = state.get("approval")
+    if approval is None:
+        return say("ASK_APPROVAL", "prepared; the owner's one approval for this candidate, export and body")
+    if not isinstance(approval, dict):
+        return say("REFUSE", "the approval is not a record")
+    if _publication_identity(approval.get("identity")) != identity:
+        return say("ASK_APPROVAL", "the approval names another candidate, export or body; a new one for this "
+                                   "identity, the old one never pushes")
+    used, expires = approval.get("used"), approval.get("expires")
+    if used is not False:
+        # a spent one use approval with no tag on the remote is a replay, or a push whose effect is not
+        # reconciled: a fresh approval would authorize a second push over it, so this stops instead of asking
+        return say("REFUSE", "the approval is %s: a one use approval is never replayed, and with no tag on the "
+                             "remote its effect is unreconciled" % ("already used" if used is True
+                                                                    else "of unknown use (%r)" % (used,)))
+    if not CR._is_num(expires):
+        return say("REFUSE", "the approval's expiry %r is not a number" % (expires,))
+    if now >= expires:
+        return say("ASK_APPROVAL", "the approval expired; a new one for this identity")
+    return say("PUSH", "one unused, unexpired approval of exactly this candidate, export and body, and no tag on "
+                       "the remote")
+
+
+def publication_next(state, now):
+    """CUT2.f: {action, reason}, the one next publication step from trusted controller read back. `state` carries
+    ready, identity {candidate, export, body}, approval {identity, expires, used} or None, remote_commit (the
+    candidate the remote tag is attributable to, a foreign commit, or None), artifacts_verified and
+    receipt_written; `now` is epoch seconds. Not ready PREPAREs before anything is asked; a remote tag at the
+    candidate VERIFYs, then WRITE_RECEIPT, then the final step, with no second push and no new approval; any other
+    remote tag is REFUSEd. With no tag, PUSH needs an approval of exactly this identity, unused, with now < expires:
+    none, a changed identity or an expired one ASK_APPROVAL anew; a used one REFUSEs. Anything malformed REFUSEs or
+    PREPAREs, never PUSH or the final step. Never raises: an error is REFUSE. Approval is only consulted here;
+    cut.py makes, checks and spends it."""
+    try:
+        return _publication_step(state, now)
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a state that cannot be judged publishes nothing
+        return {"action": "REFUSE", "reason": "the publication state could not be judged (%s)" % type(exc).__name__}
+
+
+def affected_checks(graph, changed_paths, known_base=True):
+    """CUT2.b: the ids of the checks a change can reach. `graph` maps id -> {inputs: [paths], deps: [ids], always:
+    bool}. Selected: every check whose inputs name a changed path, every check downstream of one (transitively), the
+    prerequisites of all of those (transitively), and every always check. A changed path no check names, a changed
+    list that is not a list of paths, or known_base=False selects the whole graph. A malformed node, a dep naming no
+    check, or a cycle raises ValueError.
+    SELECTION ONLY: nothing calls this to skip or narrow a real check. Narrowing waits for the shadow full suite
+    comparison and the seeded consumer faults that prove the selector equivalent (a later CUT2.b slice)."""
+    if not isinstance(graph, dict):
+        raise ValueError("the check graph is not a mapping")
+    for cid, node in graph.items():
+        if not isinstance(node, dict) or not isinstance(node.get("always"), bool):
+            raise ValueError("check %r is not a node with a boolean always" % (cid,))
+        for field in ("inputs", "deps"):
+            if not isinstance(node.get(field), (list, tuple)) or not all(CR._is_str(x) for x in node[field]):
+                raise ValueError("check %r has no %s list" % (cid, field))
+        missing = [d for d in node["deps"] if d not in graph]
+        if missing:
+            raise ValueError("check %r depends on unknown %s" % (cid, ", ".join(missing)))
+    state = {}
+
+    def visit(cid, trail):
+        if state.get(cid) == "done":
+            return
+        if state.get(cid) == "open":
+            raise ValueError("the check graph has a cycle through %s" % " -> ".join(trail + [cid]))
+        state[cid] = "open"
+        for dep in graph[cid]["deps"]:
+            visit(dep, trail + [cid])
+        state[cid] = "done"
+    for cid in graph:
+        visit(cid, [])
+    everything = set(graph)
+    if not known_base or not isinstance(changed_paths, (list, tuple, set, frozenset)) \
+            or not all(CR._is_str(p) for p in changed_paths):
+        return everything
+    named = set(p for node in graph.values() for p in node["inputs"])
+    if any(p not in named for p in changed_paths):
+        return everything
+    changed = set(changed_paths)
+    picked = set(cid for cid, node in graph.items() if changed.intersection(node["inputs"]))
+    grew = True
+    while grew:   # downstream: a consumer of a picked check is picked
+        more = set(cid for cid, node in graph.items() if picked.intersection(node["deps"])) - picked
+        picked |= more
+        grew = bool(more)
+    todo = list(picked)
+    while todo:   # prerequisites of everything picked
+        for dep in graph[todo.pop()]["deps"]:
+            if dep not in picked:
+                picked.add(dep)
+                todo.append(dep)
+    return picked | set(cid for cid, node in graph.items() if node["always"])
 
 
 def _shape(got):
@@ -1021,7 +1339,7 @@ def _walk(state, path, table, inputs, resume, clock, say=None, before=None, afte
     results = []
     for name, runner in table.items():
         entry = state["phases"].get(name)
-        miss = reuse_miss(entry, inputs, state.get("inputs")) if resume else "a fresh run reuses nothing"
+        miss = reuse_miss(entry, inputs, state.get("inputs"), clock) if resume else "a fresh run reuses nothing"
         if not miss:
             results.append((name, ("REUSED", "kept: %s" % entry.get("detail", ""))))
             continue
@@ -1134,6 +1452,15 @@ def drive(root, version, candidate, body, release_branch, runner=None, clock=Non
         return 2
     path = state_path(version, sha, directory)
     lock = path[:-len(".json")] + ".lock"
+    # CUT2.a: a held lock is keyed by this candidate, so a second ask follows that run; it reads, never writes.
+    held, holder = CR._lock_alive(lock) if os.path.exists(lock) else (False, "")
+    mode = automatic_mode(sha, {"candidate": sha, "lock_held": held} if held else None)
+    if mode["mode"] == "FOLLOW":
+        seen = _read_json(path)[0] if os.path.exists(path) else None
+        at = next_phase(seen) if seen and seen.get("candidate_sha") == sha else None
+        say("FOLLOW: another driver holds %s (%s) for %s %s, at the %s phase; this request starts nothing and its "
+            "answer comes from that run" % (lock, holder, version, sha[:12], at or "first"))
+        return 2
     why = _take_lock(lock)
     if why:
         say("NO-DATA: " + why)
@@ -1142,6 +1469,9 @@ def drive(root, version, candidate, body, release_branch, runner=None, clock=Non
         inputs = CR.inputs_identity(ROOT, sha, version)
         existed = os.path.exists(path)
         state, why = load_state(path, sha, tree, clock())
+        mode = automatic_mode(sha, {"candidate": state["candidate_sha"], "lock_held": False} if state else None)
+        if mode["mode"] != "RESUME":
+            why, state = (mode["reason"] if state else why), None
         if state is None:
             if require_state:
                 say("NO-DATA: nothing to resume: " + why)
@@ -1154,7 +1484,8 @@ def drive(root, version, candidate, body, release_branch, runner=None, clock=Non
                     say("NO-DATA: no release branch named and HEAD is on none")
                     return 2
             state = new_state(version, sha, tree, release_branch, clock(), inputs)
-        if not [n for n in PHASES if reuse_miss(state["phases"].get(n), inputs, state.get("inputs"))]:
+        state["mode"] = mode["mode"]
+        if not [n for n in PHASES if reuse_miss(state["phases"].get(n), inputs, state.get("inputs"), clock)]:
             say("already complete: all %d phases PASS or REUSED for %s %s" % (len(PHASES), version, sha[:12]))
             return 0
 

@@ -89,7 +89,7 @@ over ~25 sibling CLIs plus a `doctor` verb.
   This is the retrieval-tooling side of the gap that Kay Vault's constitution
   never claims to solve; it explicitly says "Memory only: no task manager"
   (section 1).
-- **Community-plugin risk is named, not closed.** `docs/VAULT-PLUGIN-POLICY.md`
+- **Community-plugin risk is named, not closed.** `products/brothermode/docs/VAULT-PLUGIN-POLICY.md`
   and `bm_vault_plugins.py` audit which Obsidian plugins are *enabled*
   against a policy file, but per `VAULT-TRUST-BOUNDARY.md` any enabled
   plugin runs in-process with full filesystem reach and is invisible to

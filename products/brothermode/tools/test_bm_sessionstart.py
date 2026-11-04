@@ -120,7 +120,7 @@ class FirstRunVaultNudge(unittest.TestCase):
                      "w", encoding="utf-8") as fh:
             fh.write("# plan\n")
         out = self._stdout()
-        self.assertNotIn("BrotherMode: new project", out)
+        self.assertNotIn("Brother: new project", out)
         self.assertNotIn(NUDGE, out)
 
 

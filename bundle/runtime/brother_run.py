@@ -3454,15 +3454,42 @@ def _inside_git_repo(path):
         cur = parent
 
 
+def _inside_vault(note_path):
+    """True only when a vault resolves (pattern_note.vault_root, the one
+    resolver: BROTHERMODE_VAULT_ROOT, its aliases, then the installer config;
+    KEY1.f) and the note's real path sits inside the vault's real path. Real paths and a
+    commonpath check, never a string prefix: a sibling folder named like
+    the vault plus a suffix is outside it. Unset, or paths that cannot be
+    compared, read as outside: the notice must not claim a Vault save it
+    cannot prove (KEY1.a)."""
+    import pattern_note
+    vault = pattern_note.vault_root()[0]
+    if not vault:
+        return False
+    try:
+        root = os.path.realpath(vault)
+        note = os.path.realpath(note_path)
+        return os.path.commonpath([root, note]) == root
+    except ValueError:  # sbe: allow-silent paths that cannot share a root are outside the vault; the notice then says kept in this run
+        return False
+
+
 def _print_vault_saved(title, note_path, rel_note):
-    """VN2, the write notice: one 'Vault saved: <title> -> <path>' line,
-    printed ONLY after the file is confirmed on disk (exists, non-empty).
-    This writer never commits what it drafts, so a destination inside a
-    git working tree always gets the "(unstaged)" suffix."""
+    """VN2, the write notice, printed ONLY after the file is confirmed on
+    disk (exists, non-empty). A note inside the configured vault prints one
+    'Vault saved: <title> -> <path>' line; a note anywhere else (the run
+    directory, or no vault configured) prints that it is kept in this run
+    and is not in the Vault. This writer never commits what it drafts, so
+    a destination inside a git working tree always gets the "(unstaged)"
+    suffix."""
     if not (os.path.exists(note_path) and os.path.getsize(note_path) > 0):
         return
     suffix = " (unstaged)" if _inside_git_repo(note_path) else ""
-    print("Vault saved: %s -> %s%s" % (title, rel_note, suffix))
+    if _inside_vault(note_path):
+        print("Vault saved: %s -> %s%s" % (title, rel_note, suffix))
+    else:
+        print("Kept in this run, not in the Vault: %s -> %s%s"
+              % (title, rel_note, suffix))
 
 
 def _lesson_note_text(uid, receipt, run_id):
@@ -3686,7 +3713,10 @@ def _load_bm_vault_intake():
 def _vault_root():
     """The vault this run may draft a failure case into, or None when this
     run named none. Read fresh at every call, never cached: a test binds
-    and unbinds this env var around single calls."""
+    and unbinds this env var around single calls. This is a WRITE binding,
+    so it stays the canonical name alone: an alias or the config inherited
+    from the machine never makes a run write here (KEY1.f keeps the notice
+    on the resolver, _inside_vault, and this one narrower on purpose)."""
     root = (os.environ.get(VAULT_ROOT_ENV_VAR) or "").strip()
     return root or None
 

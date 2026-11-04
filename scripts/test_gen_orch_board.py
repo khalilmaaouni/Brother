@@ -306,6 +306,13 @@ class SpendLineNeverReadsAsFree(unittest.TestCase):
         self.assertIn('lane not recorded', G.spend_line({}))
 
 
+# docs/plan is not shipped in the public export, so there the committed board and the plan it renders from do not
+# exist: the premise is absent, not the behaviour broken. A tree that carries them still runs every case below.
+HAS_THE_COMMITTED_BOARD = all(os.path.isfile(path) for path in (G.OUTPUT, G.BACKLOG, G.WBS, G.STATUS))
+NEEDS_THE_COMMITTED_BOARD = unittest.skipUnless(HAS_THE_COMMITTED_BOARD, "this tree carries no committed orchestration board")
+
+
+@NEEDS_THE_COMMITTED_BOARD
 class CliFlagHandling(unittest.TestCase):
     """--help must not fall through to the default write path (it used to:
     the old flag() lookup never recognized --help, so it silently rendered
@@ -375,6 +382,7 @@ class CliFlagHandling(unittest.TestCase):
         self.assertEqual(self._mtime_and_hash(G.OUTPUT), before_out)
 
 
+@NEEDS_THE_COMMITTED_BOARD
 class TrailingValueFlagWritesNothing(unittest.TestCase):
     """A value flag with nothing after it (argv ends right there) must exit 2
     and write nothing. Before the fix, the validation loop advanced i += 2
@@ -460,6 +468,7 @@ class AllAcceptedFlagsStayAccepted(unittest.TestCase):
             self.assertTrue(os.path.exists(backlog_path))
 
 
+@NEEDS_THE_COMMITTED_BOARD
 class NormalCallMatchesCommittedBoard(unittest.TestCase):
     """The normal (no-flag) call must still render byte-identical to the
     board already committed on hub main, proving --wbs/--status/--out/

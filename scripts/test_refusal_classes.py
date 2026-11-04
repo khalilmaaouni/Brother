@@ -69,6 +69,15 @@ ALLOW = {  # repository relative path:class name -> reason it may stay on a plai
     "products/brothersbe/src/brothersbe/policy.py:PolicyUnreadable": _OWN,
     "products/brothersbe/src/brothersbe/book.py:SourceUnreadable": _OWN,
     "products/brothersbe/src/brothersbe/evidence.py:ReceiptUnreadable": _OWN,
+    # 1.2.0 (found red by the export check; each audited 2026-11-04 by grepping every use outside its file and the
+    # generated bundle mirror: six are raised and caught inside their own module, one crosses modules)
+    "scripts/door_overhead.py:_NoData": _OWN,
+    "scripts/flow_report.py:TiersUnreadable": _OWN,
+    "scripts/loop/ev_gate.py:CostUnreadable": _OWN,
+    "scripts/loop/or_ask.py:RegistryUnreadable": _OWN,
+    "scripts/session_relay.py:InputUnreadable": _OWN,
+    "scripts/session_relay.py:LedgerUnreadable": _OWN,
+    "scripts/loop/land_batch.py:TreeUnreadable": "crosses modules (caught by scripts/close_unit.py:589 and scripts/loop/land_apply.py:376,403); converting needs each caller audited, out of 1.2.0",
 }
 
 

@@ -80,7 +80,7 @@ class Rig(unittest.TestCase):
         log = os.path.join(self.tmp, "rehearsal.log")
         with open(log, "w", encoding="utf-8") as fh:
             fh.write("READY for %s\n" % VERSION)
-        path = CR.record_rehearsal(VERSION, RESUME, "c" * 40, 0, "READY", log, 1.0, "e" * 64,
+        path = CR.record_rehearsal(VERSION, RESUME, "c" * 40, 0, "READY", log, 1.0, CR.running_cut_py_sha256(),
                                    directory=self.tmp, now=time.time() - age_h * 3600, script_trees=TREES,
                                    rows=rows)
         rec, why = CR.load_record(path)

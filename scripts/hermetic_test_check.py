@@ -19,7 +19,10 @@ failed. Exit 2 when one could not be run (NO-DATA), a timeout included.
 A test that fails there is run ONCE more, in a disposable detached worktree
 of the checkout's HEAD under a fresh empty HOME (never in the checkout
 itself: review 14, 2026-10-02), and only to choose the refusal's words: red
-there too is not a hermeticity defect. The verdict is REFUSED either way.
+there too clears the export tree, never the home folder, because that rerun
+had an empty HOME as well (2026-10-31: a test that reached PyYAML only through
+user site packages under the real HOME read "not a hermeticity defect"). The
+verdict is REFUSED either way.
 
 BOTH RUNS ARE CONFINED (decision D12, 2026-10-02). A touched test imports the
 build's own modules, and the landing pushes after every landing, so until
@@ -30,7 +33,7 @@ network, the tree's own .git shut) with the landing suite environment
 (loop_switches.suite_env: HOME and TMPDIR under that home, no run knobs, no
 GIT_ variables). The export run and the checkout rerun share one wrap, so a
 red the sandbox causes reads the same on both sides and is named "red in the
-checkout too", never a hermeticity defect. A host that cannot confine the run
+checkout too", never a defect of the export tree. A host that cannot confine the run
 reads NO-DATA and runs nothing bare; the pre-push hook stops on NO-DATA.
 
 The hermetic gate covers scripts/ only. --reach is a separate, read-only
@@ -39,9 +42,11 @@ it prints impacted test paths and selftest commands without running them.
 """
 import argparse
 import ast
+import concurrent.futures
 import contextlib
 import importlib.util
 import os
+import queue
 import re
 import shlex
 import shutil
@@ -603,7 +608,12 @@ def _declared_red_in_checkout(root, test, runner, timeout):
     if problem or again is None or again.returncode in (0, 124, 127):
         return ""
     return ("RED BY DESIGN as declared in scripts/test_battery_registration.py EXEMPT (%s), and red in the checkout "
-            "too, so not a hermeticity defect" % reason[:160])
+            "too, %s" % (reason[:160], RERUN_CLEARS_TREE_ONLY))
+
+# What a red checkout rerun proves, said once for every message that reports one: _checkout_rerun runs under a fresh
+# empty HOME in the same sandbox, so only the tree differs and a red there clears the export tree, never the home.
+RERUN_CLEARS_TREE_ONLY = ("so the export tree is not the cause; the rerun also had an empty HOME, so a dependency on "
+                          "something only your real HOME holds (user site packages, a config file) is not excluded")
 
 def _refusal(root, test, proc, runner, timeout):
     """The refusal's words, chosen by a rerun in the checkout. Measured
@@ -619,15 +629,108 @@ def _refusal(root, test, proc, runner, timeout):
         why = ("; the rerun in the checkout could not run (%s), so whether it "
                "is red there too is unknown" % problem)
     elif again.returncode != 0:
-        why = ("; red in the checkout too: not a hermeticity defect, fix the "
-               "code or the test")
+        why = ("; red in the checkout too, %s: run it once under your own HOME, "
+               "and if it passes there give it what it reached for, else fix "
+               "the code or the test" % RERUN_CLEARS_TREE_ONLY)
     else:
-        why = (". It depends on something only this checkout or this home "
-               "folder has; give the test its own fixture")
+        why = (". It depends on something only this checkout has (both runs "
+               "had an empty HOME); give the test its own fixture")
     return "%s%s  [full: %s]" % (head, why, _keep(test, proc))
 
 
-def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S):
+#: How many tests may run side by side (1.2.0: 168 reached tests ran strictly one after another and the export check
+#: outgrew every budget it was given). WORKERS_ENV names the count; unset means DEFAULT_WORKERS_CAP or half the cores,
+#: whichever is smaller; an unreadable value means 1, the original one at a time run.
+WORKERS_ENV = "BROTHER_HERMETIC_WORKERS"
+DEFAULT_WORKERS_CAP = 4
+
+
+def _worker_count(workers, runner, n_tests):
+    """How many workers check() uses. An injected `runner` (a stub standing in for the sandbox) always means 1: stubs are
+    not safe to share. A caller's `workers` must be a positive int (ValueError otherwise, hostile input is refused); the
+    environment's value, when unreadable, falls back to 1 so a bad setting can only make the run slower, never different."""
+    if runner is not None:
+        return 1
+    if workers is None:
+        raw = os.environ.get(WORKERS_ENV, "").strip()
+        if not raw:
+            workers = min(DEFAULT_WORKERS_CAP, max(1, (os.cpu_count() or 2) // 2))
+        else:
+            try:
+                workers = int(raw)
+            except ValueError:
+                return 1
+            if workers < 1:
+                return 1
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ValueError("check: workers must be a positive integer")
+    return max(1, min(workers, n_tests))
+
+
+def _clone_tree(src, dst):
+    """Copy the export tree `src` into the empty folder `dst`. A copy on write clone where the volume has one (the copy
+    is then nearly free), a plain copy otherwise. Raises OSError when neither works."""
+    try:
+        done = subprocess.run(["cp", "-cR", src + os.sep + ".", dst], capture_output=True, text=True, timeout=300)
+        if done.returncode == 0:
+            return
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
+
+
+def _parallel_pass(tests, trees, run_fn):
+    """A first pass over `tests` with len(trees) workers, one tree each, never two workers in one tree. Returns a list in
+    test order: run_fn(tree, test)'s result, or None for a test it declined or crashed on. This pass can only ever say
+    OK (check() hands every None to the original one at a time judgment), so a crash, a timeout, a missing result or a
+    worker that never ran a test cannot turn into a pass."""
+    free = queue.Queue()
+    for tree in trees:
+        free.put(tree)
+
+    def task(test):
+        tree = free.get()
+        try:
+            return run_fn(tree, test)
+        except Exception:  # sbe: allow-silent a crashed worker leaves None, which the serial judgment below re-runs
+            return None
+        finally:
+            free.put(tree)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(trees)) as pool:
+        return list(pool.map(task, tests))
+
+
+def _judge_one(root, tree, home, test, runner, timeout):
+    """(verdict, test, detail) for one test, run in `tree` under its own empty HOME. The whole judgment: a pass, NO-DATA,
+    a declared NO-DATA, a declared red, or a refusal. check() runs it one test at a time for every test the parallel pass
+    did not clear."""
+    if not os.path.isfile(os.path.join(tree, test)):
+        return (OK, test, "not shipped in the export tree, so the public runner never runs it")
+    # ONE HOME PER TEST (2026-09-28): a test may leave files under its HOME (the straggler harness leaves
+    # .claude/brother-scratch, the grader suite .claude/evidence), and one shared HOME cleaned with rmdir then
+    # refused the NEXT test, so the whole pre-push gate crashed on a tree with no finding in it.
+    test_home = tempfile.mkdtemp(prefix="t-", dir=home)
+    try:
+        cmd, env = _confined([sys.executable, os.path.join(tree, test)], tree, test_home)
+    except G.SandboxRefused as exc:
+        return (NODATA, test, "could not be run: %s" % exc)
+    proc = P._run(cmd, tree, runner, env=env,
+                  timeout=declared_budget(os.path.join(tree, test), timeout))
+    if proc.returncode == 0:
+        return (OK, test, "passes on the export tree with an empty HOME: %s" % P._last(proc))
+    if proc.returncode in (124, 127):
+        return (NODATA, test, "could not be run: %s" % P._last(proc))
+    inputs, _why = declared_no_data(tree, test, proc)
+    declared = "" if inputs else _declared_red_in_checkout(root, test, runner, timeout)
+    if inputs:
+        return (OK, test, "NO-DATA on the export tree as declared (%s absent)" % ", ".join(inputs))
+    if declared:
+        return (OK, test, declared)
+    return (REFUSED, test, _refusal(root, test, proc, runner, timeout))
+
+
+def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S, workers=None):
     """[(verdict, test, detail)] for each test, run in one export tree.
 
     Hostile input is REFUSED with ValueError, never a raw interpreter
@@ -663,39 +766,51 @@ def check(root, tests, runner=None, build=None, timeout=TIMEOUT_S):
         except Exception as exc:  # sbe: allow-silent reported as NO-DATA below, never swallowed
             return [(NODATA, "hermetic-tests",
                      "the export tree could not be built: %s" % exc)]
-        results = []
-        for test in tests:
-            if not os.path.isfile(os.path.join(tree, test)):
-                results.append((OK, test, "not shipped in the export tree, so "
-                                          "the public runner never runs it"))
-                continue
-            # ONE HOME PER TEST (2026-09-28): a test may leave files under its HOME (the straggler harness leaves
-            # .claude/brother-scratch, the grader suite .claude/evidence), and one shared HOME cleaned with rmdir then
-            # refused the NEXT test, so the whole pre-push gate crashed on a tree with no finding in it.
-            test_home = tempfile.mkdtemp(prefix="t-", dir=home)
-            try:
-                cmd, env = _confined([sys.executable, os.path.join(tree, test)], tree, test_home)
-            except G.SandboxRefused as exc:
-                results.append((NODATA, test, "could not be run: %s" % exc))
-                continue
-            proc = P._run(cmd, tree, runner, env=env,
-                          timeout=declared_budget(os.path.join(tree, test), timeout))
-            if proc.returncode == 0:
-                results.append((OK, test, "passes on the export tree with an "
-                                          "empty HOME: %s" % P._last(proc)))
-            elif proc.returncode in (124, 127):
-                results.append((NODATA, test, "could not be run: %s" % P._last(proc)))
-            else:
-                inputs, _why = declared_no_data(tree, test, proc)
-                declared = "" if inputs else _declared_red_in_checkout(root, test, runner, timeout)
-                if inputs:
-                    results.append((OK, test, "NO-DATA on the export tree as declared (%s absent)"
-                                    % ", ".join(inputs)))
-                elif declared:
-                    results.append((OK, test, declared))
-                else:
-                    results.append((REFUSED, test,
-                                    _refusal(root, test, proc, runner, timeout)))
+        # PARALLEL FIRST PASS (1.2.0). With more than one worker, a first pass runs the tests side by side, each worker in
+        # its own clone of the export tree (a test may write inside its tree). It only ever clears a test as OK, on exit
+        # 0; every other outcome, and every test it did not run, goes through _judge_one below exactly as before, one at
+        # a time in the original tree. So a refusal, a NO-DATA and every detail line are the original judgment's, and the
+        # worker count changes how long the run takes, never what it says.
+        cleared = [None] * len(tests)
+        clones = []
+        try:
+            n_workers = _worker_count(workers, runner, len(tests))
+            if n_workers > 1:
+                for _ in range(n_workers - 1):
+                    try:
+                        clone = E.scratch_dir("hermetic-clone-")
+                    except OSError:
+                        break
+                    clones.append(clone)
+                    try:
+                        _clone_tree(tree, clone)
+                    except (OSError, shutil.Error):
+                        clones.pop()
+                        shutil.rmtree(clone, ignore_errors=True)
+                        break
+                trees = [tree] + clones
+
+                def first_pass(worker_tree, test):
+                    if not os.path.isfile(os.path.join(worker_tree, test)):
+                        return None
+                    test_home = tempfile.mkdtemp(prefix="t-", dir=home)
+                    try:
+                        cmd, env = _confined([sys.executable, os.path.join(worker_tree, test)], worker_tree, test_home)
+                    except G.SandboxRefused:
+                        return None
+                    proc = P._run(cmd, worker_tree, None, env=env,
+                                  timeout=declared_budget(os.path.join(worker_tree, test), timeout))
+                    if proc.returncode == 0:
+                        return (OK, test, "passes on the export tree with an empty HOME: %s" % P._last(proc))
+                    return None
+
+                if len(trees) > 1:
+                    cleared = _parallel_pass(tests, trees, first_pass)
+            results = [cleared[i] or _judge_one(root, tree, home, test, runner, timeout)
+                       for i, test in enumerate(tests)]
+        finally:
+            for clone in clones:
+                shutil.rmtree(clone, ignore_errors=True)
         return results
     finally:
         shutil.rmtree(tree, ignore_errors=True)

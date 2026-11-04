@@ -19,6 +19,12 @@ import v3_night_receipts as N  # noqa: E402
 import v3_judge as J  # noqa: E402
 
 
+# The recorded night's diffs live under docs/plan/runs, which the public export does not ship: the premise is absent
+# there, not the behaviour broken.
+NEEDS_THE_RECORDED_DIFFS = unittest.skipUnless(N.DIFFS.is_dir(), "this tree carries no recorded v3 night diffs")
+
+
+@NEEDS_THE_RECORDED_DIFFS
 class EveryUnitIsReal(unittest.TestCase):
     def test_every_unit_has_its_diff_on_disk(self):
         for unit in N.UNITS:
@@ -40,6 +46,7 @@ class EveryUnitIsReal(unittest.TestCase):
         self.assertNotEqual(N.JUDGE, N.WORKER)
 
 
+@NEEDS_THE_RECORDED_DIFFS
 class TheVerdictsComeFromTheJudge(unittest.TestCase):
     def test_applied_and_declined_match_a_fresh_judging_of_the_diff(self):
         for unit in N.UNITS:
@@ -62,6 +69,7 @@ class TheVerdictsComeFromTheJudge(unittest.TestCase):
                 self.assertTrue(record['reason'].strip(), unit['unit_id'])
 
 
+@NEEDS_THE_RECORDED_DIFFS
 class TheDenominatorIsFive(unittest.TestCase):
     def setUp(self):
         fd, self.db = tempfile.mkstemp(suffix='.sqlite3')

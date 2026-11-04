@@ -61,10 +61,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-#: A subject gets this long to answer. 45 s because the slowest honest selftest measured in this tree
-#: finished well inside a second and the one that blew past it never finished at all: the bar exists to
-#: separate "slow" from "never", not to rank speed. A subject that overruns is UNMEASURED, not a pass.
-SUBJECT_TIMEOUT_S = 45
+#: A subject gets this long to answer. The bar exists to separate "slow" from "never", not to rank speed. It was
+#: 45 s on the belief that the slowest honest selftest finished well inside a second; measured 2026-11-03 on the
+#: 1.2.0 export check, test_selftests_report_rather_than_crash.py takes 48 s and test_cut_gates_119.py 5 s alone but
+#: both overran 45 s under the six wide gate, so three honest subjects read UNMEASURED and refused the export. 180 s
+#: is still far below "never" (a hang), and a subject that overruns is UNMEASURED, not a pass.
+SUBJECT_TIMEOUT_S = 180
 
 #: The verdict vocabulary this estate actually prints. "0 finding" is here because several gates report
 #: a clean sweep as a count rather than a word.

@@ -699,6 +699,8 @@ announce STARTED "running passes until ${STOP_HHMM}, gap ${GAP}s"
 echo "NOTE STARTED: running until ${STOP_HHMM}" | tee -a "$LOG"
 echo "RUN START ${RUN_START_ISO}" | tee -a "$LOG"   # dated, so loop_report.py --run can bound this run (a log name holds HHMM only)
 echo "RUN PID $$" >> "$LOG"   # the summary (X50) reads a run with no RUN END and this pid dead as ABORTED, never RUNNING
+# STAB1.j: the run monitor each pass calls (loop_pass.sh) asks this file whether the driver is alive; a pass run by hand finds none.
+printf '%s\n' "$$" > "$BROTHER_RUN_DIR/driver.pid" 2>/dev/null || echo "NOTE the driver pid file could not be written; the pass's idle report will read this driver as not alive" | tee -a "$LOG"
 while :; do
   # THE RUN'S BUDGET AND DEADLINE MAY CHANGE MID RUN, only through the intake (owner 2026-09-22). Re-read both every pass,
   # with `status --running`: the START rules (a pair record's remaining coverage, a plain record's age) never gate this

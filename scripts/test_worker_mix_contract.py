@@ -42,12 +42,14 @@ class SelectionContract(unittest.TestCase):
             self.assertEqual(len(selected), seats)
             self.assertLessEqual(set(selected), self.known)
             if seats >= 3:
-                self.assertEqual(set(selected), {"deepseek", "muse", "sonnet"})
+                # The registry default mix is deepseek:5,sonnet:1 since muse was retired (2026-10-05); the retired
+                # arm is never seated even though the caller still lists it as known.
+                self.assertEqual(set(selected), {"deepseek", "sonnet"})
 
     def test_partial_history_keeps_unmeasured_arms_bounded(self):
         selected = mix.picks(3, [], self.known, env={},
                              stats={"deepseek": [100, 0]}, rng=random.Random(0))
-        self.assertEqual(selected.count("muse"), 1)
+        self.assertEqual(selected.count("muse"), 0)   # retired 2026-10-05: the registry default no longer seats it
         self.assertEqual(selected.count("sonnet"), 1)
         self.assertEqual(len(selected), 3)
 

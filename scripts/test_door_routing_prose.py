@@ -486,7 +486,14 @@ class RetiredNamesRoute(unittest.TestCase):
     bundle/commands/brother.md plus the table it looks a name up in; one case
     per 1.1.0 name proves the row exists, routes to one of the six verbs, and
     that verb's skill ships. Deleting any one routing entry fails exactly that
-    name's case."""
+    name's case.
+
+    DOOR1 (owner decision AC4, 2026-10-23; landed 97170b2c3, 2026-10-29): the
+    48 per-name moved commands, typed 0 times in 60 days, no longer ship. An
+    old name routes only as an ARGUMENT to the door (`/brother <old name>`),
+    looked up in the table. Each case therefore also asserts that no moved
+    command is back, and the door's prose promises none; a stub reappearing
+    fails exactly that name's case."""
 
     def test_the_door_carries_the_lookup_rule_and_the_pointer_line(self):
         door = _read(COMMAND_PATH)
@@ -494,6 +501,9 @@ class RetiredNamesRoute(unittest.TestCase):
         self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/using-brother/references/retired-names.md", door)
         self.assertIn("is now /brother <verb>", door)
         self.assertIn("never guess a verb", door)
+        # DOOR1: the door offers only the argument form; a "moved command" is a promise nothing ships to keep.
+        self.assertNotIn("moved command", re.sub(r"\s+", " ", door),
+                         "the door still promises a moved command, and none ships (DOOR1)")
         # Review note 10: on Codex the door skill names the skill, with the Claude Code form beside it.
         # The skill wraps its prose at 72 columns, so the phrase is compared with its whitespace folded.
         skill = re.sub(r"\s+", " ", _authoritative_section_text(_read(SKILL_PATH)))
@@ -554,13 +564,10 @@ def _routing_case(name):
         target = os.path.join(BUNDLE_DIR, "skills", "brother-%s" % expected_verb, "SKILL.md")
         self.assertTrue(os.path.isfile(target), "%s routes to %s, which does not ship" % (name, target))
         self.assertIn("`%s`" % name, _read(target), "%s is not named by its verb skill" % name)
-        # Option B (2026-10-11): the 1.1.0 invocation itself, /brother:<name>, is a moved command
-        # that prints the same pointer and follows the same verb skill from the plugin root.
+        # Option B (2026-10-11) shipped /brother:<name> as a moved command; DOOR1 (AC4, 2026-10-23) retired
+        # all 48. The name now routes only as an argument, through the table row asserted above.
         stub = os.path.join(BUNDLE_DIR, "commands", "%s.md" % name)
-        self.assertTrue(os.path.isfile(stub), "/brother:%s has no moved command at %s" % (name, stub))
-        stub_text = _read(stub)
-        self.assertIn("`%s is now /brother %s`" % (name, expected_route), stub_text)
-        self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/brother-%s/SKILL.md" % expected_verb, stub_text)
+        self.assertFalse(os.path.isfile(stub), "/brother:%s ships a moved command at %s, which DOOR1 retired" % (name, stub))
     case.__doc__ = "%s routes through the door to its verb" % name
     return case
 

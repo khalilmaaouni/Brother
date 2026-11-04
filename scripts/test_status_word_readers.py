@@ -58,6 +58,17 @@ def write_status(home, sub, text):
     return d
 
 
+def _process_table_readable():
+    """True when `ps` can run here. The board reads the process table at import time; a confined run (the hermetic
+    check's sandbox) cannot run it, so the premise of the board tests is absent, not the behaviour broken."""
+    try:
+        subprocess.run(["ps", "-eo", "command"], capture_output=True, text=True, timeout=30)
+    except OSError:
+        return False
+    return True
+
+
+@unittest.skipUnless(_process_table_readable(), "the process table cannot be read in this confined run")
 class BoardReadyTile(unittest.TestCase):
     """gen_subunit_gantt.py: the "ready to land" tile counts exactly READY."""
 

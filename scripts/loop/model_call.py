@@ -319,8 +319,13 @@ def _log_bridge(name, reg, kind, prompt, err, ok, secs):
     if (reg.get(name) or {}).get("transport") != "bridge": return
     m = USAGE_RE.search(err or "")
     tok = lambda s: int(s) if s and s.isdigit() else None
+    path = os.path.expanduser(os.environ.get("BROTHER_BRIDGE_CALLS_LEDGER") or "~/.claude/evidence/bridge-calls.jsonl")
+    # A FAKE MODEL ID NEVER REACHES THE REAL LEDGER (STAB1.b): the registry's test models are "x/..." and the money meter
+    # reads this file, so a test that forgot to name a scratch ledger is refused here, at the one writer every caller uses.
+    if str(reg[name].get("id") or "").startswith("x/") and \
+            os.path.realpath(path) == os.path.realpath(os.path.expanduser("~/.claude/evidence/bridge-calls.jsonl")): return
     try:
-        with open(os.path.expanduser(os.environ.get("BROTHER_BRIDGE_CALLS_LEDGER") or "~/.claude/evidence/bridge-calls.jsonl"), "a", encoding="utf-8") as _f:
+        with open(path, "a", encoding="utf-8") as _f:
             _f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "model": name, "answered_by": m.group(3) if m else None,
                                  "prompt_tokens": tok(m.group(1)) if m else None, "completion_tokens": tok(m.group(2)) if m else None,
                                  "kind": kind, "caller": os.path.basename(sys.argv[0] or "?"), "prompt_chars": len(prompt or ""),

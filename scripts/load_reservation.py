@@ -71,6 +71,16 @@ reader looks before trusting this module:
   it never reads as plenty of room. This applies to the persist path too:
   a budget cannot be checked against a free-space number nobody could read.
 
+NESTED LEASES (CUT2.e, 2026-11-02). Nested cut jobs are not admitted from a load
+reading: that shows a worker only after it ramps up, which is how seven pool
+workers ran at load 14.6 and a clean baseline missed its deadline. fit_leases()
+below answers "how many workers of this stated demand fit": the capacity of each
+resource (cores, memory, disk on the scratch filesystem) less what the live leases
+in machine_reservation's ledger have already promised. It is pure; the ledger is
+machine_reservation's (lease/end_lease/leased), and the disk BANDS above stay
+admit()'s. A resource with no readable capacity, or an unreadable ledger, fits ZERO
+workers and says NO-DATA: unknown never reads as roomy.
+
 Python 3, standard library only, plus this repo's own machine_reservation
 and resource_gate modules (reused for their bands and their liveness rule,
 never re-derived).
@@ -242,6 +252,34 @@ def _admit_persist(work, disk_free_gib, res_detail):
                      ["byte budget %.0f (plus %.0f already committed) fits "
                       "in %.0f bytes left" % (budget, concurrent, free_bytes)],
                      disk_free_gib, res_detail)
+
+
+def fit_leases(requested, demand, capacity, used):
+    """({"workers": n, "limit": resource or None, "problem": text}). The largest n up to `requested` such that n
+    copies of `demand` fit in `capacity` less `used` (machine_reservation.leased()'s answer, or None when the ledger
+    could not be read). "limit" names the resource that bound n (None when `requested` did). A demand of zero for a
+    resource never binds it. Never raises: a bad number or a missing reading is workers 0 with the reason."""
+    def refuse(why):
+        return {"workers": 0, "limit": None, "problem": "%s: %s" % (NODATA, why)}
+    if used is None:
+        return refuse("the lease ledger could not be read")
+    if isinstance(requested, bool) or not isinstance(requested, int) or requested < 0:
+        return refuse("requested workers must be a whole number of at least 0, got %r" % (requested,))
+    if not isinstance(demand, dict) or not demand or not isinstance(capacity, dict):
+        return refuse("demand and capacity must be mappings of resource to amount")
+    best, limit = requested, None
+    for key in sorted(demand):
+        need, room = demand[key], capacity.get(key)
+        for value in (need, room):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value < 0 \
+                    or value == float("inf"):
+                return refuse("%s is not a finite number of at least 0 (%r)" % (key, value))
+        if need == 0:
+            continue
+        fits = int(max(0.0, room - float(used.get(key, 0.0)) + 1e-9) // need)
+        if fits < best:
+            best, limit = fits, key
+    return {"workers": best, "limit": limit, "problem": ""}
 
 
 def record_refusal(result, work, log_path=None):

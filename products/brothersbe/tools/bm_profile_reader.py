@@ -31,6 +31,7 @@ Usage:
     python3 tools/bm_profile_reader.py promoted --project <slug> --key <key>
 """
 import argparse
+import importlib.util
 import os
 import re
 import sys
@@ -38,10 +39,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sbe_checks import say  # noqa: E402  (path setup has to come first)
 
-# Same default as bm_profile.py's own DEFAULT_VAULT: both products read one
-# shared file, so the resolved path must agree without either importing the
-# other.
-DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
 PROMOTE_AFTER = 3
 CORRECT_PREFIX = "correct: "
 
@@ -146,6 +143,23 @@ def read(path):
 # CLI, read-only: no record subcommand. Recording stays BrotherMode's job.
 # ---------------------------------------------------------------------------
 
+def _default_vault():
+    """(root, None) or (None, reason): BrotherMode's pattern_note.vault_root,
+    the one resolver (KEY1.f), loaded by path from the sibling product, so both
+    products read the shared profile from the same folder. Never a guessed
+    folder: an absent or broken sibling is a named reason."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                        "brothermode", "tools", "pattern_note.py")
+    try:
+        spec = importlib.util.spec_from_file_location("pattern_note", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.vault_root()
+    except Exception as exc:  # sbe: allow-silent a sibling that cannot load is returned as a named reason; main() prints it as NO-DATA and exits 2
+        return None, "pattern_note.py could not be loaded (%s: %s); pass --vault" % (
+            type(exc).__name__, exc)
+
+
 def _resolve_path(args):
     if args.profile:
         return args.profile
@@ -191,7 +205,7 @@ def _build_parser():
 
     def add_common(sp):
         sp.add_argument("--profile", default=None, help="direct path to Profile.md")
-        sp.add_argument("--vault", default=None, help="vault root, default the Kay Vault")
+        sp.add_argument("--vault", default=None, help="vault root, default the configured vault (BROTHERMODE_VAULT_ROOT)")
         sp.add_argument("--project", default=None, help="project slug under 10-Projects/")
 
     pr = sub.add_parser("read", help="print the current effective profile")
@@ -206,8 +220,11 @@ def _build_parser():
 
 def main(argv=None):
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    if not args.vault:
-        args.vault = DEFAULT_VAULT
+    if args.project and not args.profile and not args.vault:
+        args.vault, why = _default_vault()
+        if args.vault is None:
+            say("bm_profile_reader: NO-DATA: %s" % why)
+            return 2
     return {"read": cmd_read, "promoted": cmd_promoted}[args.cmd](args)
 
 

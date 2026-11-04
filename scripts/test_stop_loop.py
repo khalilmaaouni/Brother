@@ -118,8 +118,20 @@ def _stuck_body():
     return "#!/bin/bash\ntrap '' TERM\nwhile :; do sleep 1; done\n"
 
 
+def _process_table_readable():
+    """True when the process table can be read here. A confined run (the hermetic check's sandbox) cannot, and the stop
+    then says so and signals nothing, by contract: the premise of this selftest is absent there, not the behaviour broken."""
+    sys.path.insert(0, os.path.join(HERE, "loop"))
+    import loop_procs
+    return loop_procs.snapshot("replace") is not None
+
+
 def main():
     global RUN_ROOT
+    if not _process_table_readable():
+        print("selftest: SKIPPED (NO-DATA), the process table cannot be read in this confined run; the premise is "
+              "absent here, it runs wherever the process table is readable")
+        return 0
     RUN_ROOT = tempfile.mkdtemp(prefix="stop-loop-run-")
     cases, spawned = [], []
     try:

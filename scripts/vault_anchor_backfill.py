@@ -29,7 +29,9 @@ import re
 import sys
 import tempfile
 
-VAULT = os.path.expanduser("~/Documents/Kay Vault")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pattern_note  # noqa: E402  the one vault resolver (KEY1.f)
+
 INDEX_NAME = "Failures-Index.md"
 #: Repo-relative path shape: segments of word, dot or dash characters joined by
 #: "/", ending in a file extension. The look-behind refuses a token that
@@ -137,12 +139,13 @@ def apply_one(path, anchors):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--vault", default=VAULT)
+    ap.add_argument("--vault", default=None)
     ap.add_argument("--tree", default=os.getcwd(),
                     help="the repository the paths must resolve in")
     ap.add_argument("--apply", action="store_true",
                     help="write the proposed applies_to lines (default: dry run)")
     args = ap.parse_args(argv)
+    args.vault = pattern_note.require_vault_root(args.vault, "vault_anchor_backfill")
     if not os.path.isdir(args.tree):
         print("NO-DATA: tree not found at %s" % args.tree)
         return 2

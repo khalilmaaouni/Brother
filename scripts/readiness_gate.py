@@ -101,17 +101,32 @@ ITEMS = [
      # state is carried honestly until the next crossing. Only a VALID
      # (declared, unexpired) entry converts the FAIL, it prints as EXCEPTED
      # rather than PASS, and critical items never take an exception.
-     "exception_key": "release-invariant"},
+     "exception_key": "release-invariant",
+     # Owner ruling 2026-10-31 ("C3, narrowed to bump"): the declared
+     # exception covers ONLY the pending version bump, and only when it is
+     # the invariant's sole broken link. Version sites that disagree, a
+     # missing Release or any second broken link stay FAIL with the entry
+     # present. A reworded link stops matching, which keeps it FAIL.
+     "exception_covers": "PENDING_BUMP_LINK"},
 ]
 
+#: The one release_invariant.py link a declared release-invariant exception
+#: may cover: runtime changed since the tag while the version still names it,
+#: the drift every line carries until its cut bumps the version.
+PENDING_BUMP_LINK = "FAIL: shipped runtime content has changed since tag "
 
-def _check_suite(root, relpath):
-    """(verdict, evidence). Runs the script read-only; its exit code is the evidence."""
+
+def _check_suite(root, relpath, output=None):
+    """(verdict, evidence). Runs the script read-only; its exit code is the evidence.
+    `output`, when a list, receives the script's printed lines, which a narrowed
+    exception (see apply_valid_exceptions) reads."""
     path = os.path.join(root, relpath)
     if not os.path.isfile(path):
         return NODATA, "%s does not exist" % relpath
     proc = subprocess.run([sys.executable, path],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if isinstance(output, list):
+        output.extend((proc.stdout or b"").decode("utf-8", "replace").splitlines())
     if proc.returncode == 0:
         return PASS, "%s exit 0" % relpath
     # Exit 2 is this estate's own NO-DATA convention (see check_all.sh's
@@ -293,8 +308,9 @@ def evaluate(root=ROOT, today=None):
     """List of row dicts, one per gate item, each verdict backed by named evidence."""
     rows = []
     for spec in ITEMS:
+        output = []
         if spec["kind"] == "suite":
-            verdict, evidence = _check_suite(root, spec["path"])
+            verdict, evidence = _check_suite(root, spec["path"], output)
         else:
             verdict, evidence = _check_record(root, spec["path"], today=today,
                                               max_age_days=spec.get("max_age_days"))
@@ -302,7 +318,8 @@ def evaluate(root=ROOT, today=None):
             evidence = "%s -- %s" % (evidence, spec["blocker"])
         rows.append({"id": spec["id"], "title": spec["title"],
                      "critical": spec["critical"], "verdict": verdict,
-                     "evidence": evidence})
+                     "evidence": evidence,
+                     "fail_lines": [l for l in output if l.startswith("FAIL: ")]})
     return rows
 
 
@@ -333,6 +350,8 @@ def apply_valid_exceptions(rows, root=ROOT, today=None):
     critical item never takes an exception."""
     keyed = {spec["id"]: spec.get("exception_key")
              for spec in ITEMS if spec.get("exception_key")}
+    covers = {spec["id"]: globals()[spec["exception_covers"]]
+              for spec in ITEMS if spec.get("exception_covers")}
     if not keyed:
         return rows
     path = os.path.join(root, "docs", "plan", "BATTERY-EXPECTATIONS.json")
@@ -349,12 +368,22 @@ def apply_valid_exceptions(rows, root=ROOT, today=None):
     for r in rows:
         key = keyed.get(r["id"])
         if (key and not r["critical"] and r["verdict"] == FAIL
-                and key in checks and not BV._expired(checks[key], today)):
+                and key in checks and not BV._expired(checks[key], today)
+                and _covered(r, covers.get(r["id"]))):
             r["verdict"] = "EXCEPTED"
             r["evidence"] += (" -- declared exception %r stands until %s: %s"
                               % (key, checks[key].get("review_by", "?"),
                                  (checks[key].get("reason") or "")[:160]))
     return rows
+
+
+def _covered(row, link):
+    """True when the row's exception may convert it: no narrowing declared,
+    or its SOLE FAIL line is the declared link."""
+    if link is None:
+        return True
+    lines = row.get("fail_lines") or []
+    return len(lines) == 1 and lines[0].startswith(link)
 
 
 def expired_exceptions(root=ROOT, today=None):

@@ -241,7 +241,62 @@ def _hooks_json_names_the_fence(directory):
             text = fh.read()
     except OSError:  # sbe: allow-silent no hooks.json means this copy wires nothing, not a problem
         return False
-    return FENCE_BASENAME in text
+    return FENCE_BASENAME in text or _dispatched_fence(directory) is not None
+
+
+#: The 1.1.x bundle's one hook command: hooks.json names only this file, and
+#: the guards it runs are rows of the dispatch table in the manifest beside it.
+DISPATCHER_BASENAME = "brother_hook.py"
+DISPATCH_MANIFEST = "HOOKS-MANIFEST.json"
+
+
+def _dispatched_fence(directory):
+    """(command, fence path) when `directory`/hooks/hooks.json runs the bundle
+    dispatcher on PreToolUse AND the dispatcher's table holds the fence as a
+    DENY row; otherwise None. Found 2026-10-31 on the 1.1.9 plugin cache:
+    since the dispatcher landed, the fence's file name appears only in that
+    table, never in hooks.json, so check 1 said NO FENCE HOOK IS WIRED over
+    a fence that refused a foreign write. An advisory row is not a fence: it
+    cannot refuse. `command` is the loader's own command with
+    CLAUDE_PLUGIN_ROOT set the way the loader sets it, so liveness is proven
+    through the real chain, every other deny guard in the table included.
+    Best effort: anything unreadable is simply not a match."""
+    hooks = os.path.join(directory, "hooks", "hooks.json")
+    try:
+        with io.open(hooks, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):  # sbe: allow-silent unreadable hooks.json wires nothing, not a match
+        return None
+    for group in ((data.get("hooks") or {}).get("PreToolUse") or []
+                  if isinstance(data, dict) else []):
+        for hook in (group.get("hooks") or [] if isinstance(group, dict) else []):
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if not isinstance(command, str) or DISPATCHER_BASENAME not in command:
+                continue
+            try:
+                words = shlex.split(command.replace("${CLAUDE_PLUGIN_ROOT}", directory))
+            except ValueError:  # sbe: allow-silent an unparseable command is not a match
+                continue
+            dispatcher = next((w for w in words
+                               if os.path.basename(w) == DISPATCHER_BASENAME), None)
+            if dispatcher is None:
+                continue
+            base = os.path.dirname(dispatcher)
+            try:
+                with io.open(os.path.join(base, DISPATCH_MANIFEST), encoding="utf-8") as fh:
+                    rows = (json.load(fh).get("dispatch") or {}).get("PreToolUse") or []
+            except (OSError, ValueError, AttributeError):  # sbe: allow-silent no readable table means no dispatched fence
+                continue
+            for row in rows if isinstance(rows, list) else []:
+                tool = row.get("tool") if isinstance(row, dict) else None
+                if (isinstance(tool, str) and row.get("class") == "deny"
+                        and os.path.basename(tool) == FENCE_BASENAME):
+                    # Exported first: a `VAR=x cmd` prefix does not apply to
+                    # the expansion of ${VAR} inside cmd itself.
+                    return ("CLAUDE_PLUGIN_ROOT=%s; export CLAUDE_PLUGIN_ROOT; %s"
+                            % (shlex.quote(directory), command),
+                            os.path.join(base, tool))
+    return None
 
 
 def _loader_fence_path(directory):
@@ -273,7 +328,8 @@ def _loader_fence_path(directory):
             path = fence_path_in(words)
             if path:
                 return path
-    return default
+    dispatched = _dispatched_fence(directory)
+    return dispatched[1] if dispatched else default
 
 
 def _loader_recorded_plugin_paths():
@@ -347,16 +403,9 @@ def loader_managed_fence_copies():
         except OSError:  # sbe: allow-silent unreadable base dir is simply not a match, per docstring above
             continue
         for name in names:
-            hooks = os.path.join(base, name, "hooks", "hooks.json")
-            try:
-                with io.open(hooks, encoding="utf-8") as fh:
-                    text = fh.read()
-            except OSError:  # sbe: allow-silent missing/unreadable hooks.json means this plugin has none, not a match
-                continue
-            if FENCE_BASENAME in text:
-                candidate = os.path.join(base, name)
-                if candidate not in out:
-                    out.append(candidate)
+            candidate = os.path.join(base, name)
+            if _hooks_json_names_the_fence(candidate) and candidate not in out:
+                out.append(candidate)
     return out
 
 
@@ -791,6 +840,12 @@ def doctor(settings_path):
                     % (_mask_home(copy), os.path.relpath(fence, copy))], notes)
             words = ["python3", fence]
             loader_command = "python3 %s" % shlex.quote(fence)
+            dispatched = _dispatched_fence(copy)
+            if dispatched and dispatched[1] == fence:
+                # Prove the chain the loader actually runs, not the fence
+                # alone: another deny guard in the same table refusing the
+                # owner is a dead fence for that owner (2026-10-31).
+                loader_command = dispatched[0]
             loader_tools_dir = os.path.dirname(fence)
             problems.extend(blocked_write_simulation(
                 loader_command, words, loader_tools_dir))
@@ -1845,7 +1900,7 @@ def run_all_checks(settings_path):
     settings, settings_err = read_settings(settings_path)
     settings_for_scan = settings if isinstance(settings, dict) else {}
 
-    return [
+    return [remediation(c, root) for c in [
         _run_check("fence", check_fence, settings_path),
         _run_check("version", check_version_identity, root),
         _run_check("runtime", check_runtime),
@@ -1864,7 +1919,23 @@ def run_all_checks(settings_path):
         _run_check("install_identity", check_install_identity, root),
         _run_check("stranded_install", check_stranded_install, root),
         _run_check("data_locations", check_data_locations),
-    ]
+    ]]
+
+
+#: FRUN1: remedies are written relative to this product's root ("python3 scripts/setup.py"), which resolves only
+#: from a source checkout. The person runs them from their own project folder, so every message leaves here naming
+#: the file where this doctor actually is. Only a file that exists under root is rewritten: a remedy naming
+#: something else is left exactly as written rather than pointed at a path that is not there.
+_RELATIVE_REMEDY = re.compile(r"\bpython3 (scripts/[A-Za-z0-9_]+\.py)\b")
+
+
+def remediation(check, root):
+    def whole(match):
+        path = os.path.join(root, match.group(1))
+        return "python3 " + path if os.path.isfile(path) else match.group(0)
+    if not isinstance(check.message, str):
+        return check
+    return check._replace(message=_RELATIVE_REMEDY.sub(whole, check.message))
 
 
 # ---------------------------------------------------------------------------

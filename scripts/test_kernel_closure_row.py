@@ -293,6 +293,9 @@ class TestKernelClosureRow(unittest.TestCase):
                 self.assertFalse(os.path.exists(os.path.join(d, "root", "scripts", "kernel_closure.txt")), "the other generation's list is removed")
         mod = load()
         mod.ROOT, mod.ROOTS = os.path.join(d, "root"), ("scripts/r.py",)
+        # The public export does not ship docs/plan/specs, and there --check reads SKIP (exit 0) before it looks for
+        # the list. The premise of this case is a hub tree, so say so; the missing list is what is under test.
+        mod.specs_present = lambda: True
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(mod.main(["--check"]), 2)

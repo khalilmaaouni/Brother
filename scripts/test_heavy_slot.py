@@ -104,6 +104,30 @@ class Base(unittest.TestCase):
         return proc.returncode, proc.stderr, time.time() - started
 
 
+class ChildSlotCount(Base):
+    """BROTHER_HEAVY_SLOT_CHILD_SLOTS: the count the child sees, when the count heavy_slot queued on is not it."""
+    def child_count(self, **extra):
+        p = subprocess.run([sys.executable, SLOT, sys.executable, "-c",
+                            "import os; print(os.environ.get('LOCAL_SLOTS'), "
+                            "os.environ.get('BROTHER_HEAVY_SLOT_CHILD_SLOTS'))"],
+                           env=self.env(n=1, **extra), capture_output=True, text=True, timeout=20)
+        self.assertEqual(0, p.returncode, p.stderr)
+        return p.stdout.split()
+
+    def test_absent_leaves_the_count_alone(self):
+        self.assertEqual(["1", "None"], self.child_count())
+
+    def test_a_value_is_the_childs_count(self):
+        self.assertEqual(["4", "None"], self.child_count(BROTHER_HEAVY_SLOT_CHILD_SLOTS="4"))
+
+    def test_empty_means_the_caller_had_none(self):
+        self.assertEqual(["None", "None"], self.child_count(BROTHER_HEAVY_SLOT_CHILD_SLOTS=""))
+
+    def test_a_nested_run_restores_it_too(self):
+        self.assertEqual(["4", "None"], self.child_count(BROTHER_HEAVY_SLOT_CHILD_SLOTS="4",
+                                                         BROTHER_HEAVY_SLOT_HELD="0"))
+
+
 class TheQueue(Base):
     def test_a_second_holder_waits_until_the_first_has_finished(self):
         env = self.env(n=1)
@@ -416,6 +440,253 @@ class TheWeight(Base):
         self.assertIn("not a positive integer", err)
 
 
+class TheHolderAndTheDeadline(Base):
+    """GATE1, 2026-11-01: the child knows its holder's pid, and a holder past its deadline is stale: its whole
+    group ends, its run reads NO-DATA (2), the event names pid and age, and its slot is free again."""
+
+    def test_the_child_is_told_its_holders_pid(self):
+        probe = "import os; print(os.environ.get('BROTHER_HEAVY_SLOT_HOLDER'), os.getppid())"
+        proc = subprocess.run([sys.executable, SLOT, sys.executable, "-c", probe], env=self.env(),
+                              capture_output=True, text=True, timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        holder, parent = proc.stdout.split()
+        self.assertEqual(holder, parent)
+
+    def test_the_queue_settings_do_not_reach_the_child(self):
+        probe = ("import os; print(os.environ.get('BROTHER_HEAVY_SLOT_WAIT'), "
+                 "os.environ.get('BROTHER_HEAVY_SLOT_DEADLINE'), os.environ.get('BROTHER_HEAVY_SLOT_EXCLUSIVE'))")
+        proc = subprocess.run([sys.executable, SLOT, sys.executable, "-c", probe],
+                              env=self.env(BROTHER_HEAVY_SLOT_WAIT="inf", BROTHER_HEAVY_SLOT_DEADLINE=600,
+                                           BROTHER_HEAVY_SLOT_EXCLUSIVE=1),
+                              capture_output=True, text=True, timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.split(), ["None", "None", "None"])
+
+    def test_a_stale_holder_ends_its_whole_group_reads_no_data_and_frees_its_slot(self):
+        pidfile = os.path.join(self.tmp, "grandchild.pid")
+        started = time.time()
+        code, err, _ = self.run_slot(["sh", "-c", 'sleep 60 & echo $! > "$1"; wait', "sh", pidfile],
+                                     self.env(BROTHER_HEAVY_SLOT_DEADLINE=5), timeout=60)
+        self.assertEqual(code, 2, err)
+        self.assertLess(time.time() - started, 45)
+        self.assertIn("STALE holder: pid", err)
+        with open(pidfile) as fh:
+            grandchild = int(fh.read())
+        time.sleep(0.5)
+        with self.assertRaises(OSError, msg="the stale holder's grandchild is still running"):
+            os.kill(grandchild, 0)
+        with open(os.path.join(self.slots, "waits.jsonl")) as fh:
+            stale = [json.loads(line) for line in fh if '"stale"' in line]
+        self.assertEqual(len(stale), 1, stale)
+        self.assertGreater(stale[0]["pid"], 0)
+        self.assertGreaterEqual(stale[0]["age_s"], 5.0)
+        sys.path.insert(0, HERE)
+        import heavy_slot
+        held = heavy_slot.try_acquire(self.slots, 1, label=False)
+        self.assertTrue(held, "the stale holder's slot is still taken")
+        for _, handle in held:
+            handle.close()
+
+    def test_a_run_inside_its_deadline_keeps_its_own_code(self):
+        code, err, _ = self.run_slot([sys.executable, "-c", "import sys; sys.exit(3)"],
+                                     self.env(BROTHER_HEAVY_SLOT_DEADLINE=30))
+        self.assertEqual(code, 3, err)
+        self.assertNotIn("STALE", err)
+
+
+class TheExclusiveRun(Base):
+    """GATE1, 2026-11-01: a caller with LOCAL_SLOTS=4 took slot 1 while a whole gate held slot 0. An exclusive run
+    (the whole gate) holds the machine lock exclusively, every other admission holds it shared, and a waiting
+    exclusive run holds new admissions back."""
+
+    def started(self, path, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if os.path.exists(path):
+                return True
+            time.sleep(0.1)
+        return False
+
+    def test_a_four_slot_waiter_does_not_start_beside_an_exclusive_run(self):
+        gate = subprocess.Popen([sys.executable, SLOT, sys.executable, "-c", "import time; time.sleep(6)"],
+                                env=self.env(1, BROTHER_HEAVY_SLOT_EXCLUSIVE=1), start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.holders.append(gate)
+        self.assertTrue(self.started(os.path.join(self.slots, "slot-0"), 10))
+        time.sleep(1)
+        mark = os.path.join(self.tmp, "ran")
+        waiter = subprocess.Popen([sys.executable, SLOT, "touch", mark], env=self.env(4, BROTHER_HEAVY_SLOT_WAIT=60),
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        self.assertFalse(self.started(mark, 3), "a LOCAL_SLOTS=4 run started beside the exclusive run")
+        _, err = waiter.communicate(timeout=60)
+        self.assertEqual(waiter.returncode, 0, err)
+        self.assertIsNotNone(gate.poll(), "the waiter ran before the exclusive run ended")
+        self.assertIn("waiting for the machine", err)
+
+    def test_an_exclusive_run_waits_for_a_run_on_another_slot(self):
+        sys.path.insert(0, HERE)
+        import heavy_slot
+        zero = heavy_slot.try_acquire(self.slots, 1, label=False)   # so the holder below lands on slot 1
+        self.assertTrue(zero)
+        holder = subprocess.Popen(
+            [sys.executable, SLOT, sys.executable, "-c", "import time; time.sleep(5)"],
+            env=self.env(4), start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.holders.append(holder)
+        label = os.path.join(self.slots, "slot-1")
+        deadline = time.time() + 10
+        while time.time() < deadline and not (os.path.exists(label) and "pid %d" % holder.pid in open(label).read()):
+            time.sleep(0.05)
+        for _, handle in zero:
+            handle.close()
+        mark = os.path.join(self.tmp, "ran")
+        started = time.time()
+        code, err, _ = self.run_slot(["touch", mark], self.env(1, BROTHER_HEAVY_SLOT_EXCLUSIVE=1,
+                                                             BROTHER_HEAVY_SLOT_WAIT=60), timeout=60)
+        self.assertEqual(code, 0, err)
+        self.assertGreaterEqual(time.time() - started, 2.5, "the exclusive run started beside a running holder")
+        self.assertIn("runs alone", err)
+
+    def test_a_waiting_exclusive_run_holds_new_runs_back(self):
+        sys.path.insert(0, HERE)
+        import heavy_slot
+        os.makedirs(os.path.join(self.slots, "exclusive-wait"))
+        open(os.path.join(self.slots, "exclusive-wait", str(os.getpid())), "w").close()
+        code, err, _ = self.run_slot(["true"], self.env(4, BROTHER_HEAVY_SLOT_WAIT=1.5))
+        self.assertIn("waiting for the machine", err)
+        self.assertIn("UNQUEUED", err)
+        os.unlink(os.path.join(self.slots, "exclusive-wait", str(os.getpid())))
+        self.assertEqual(heavy_slot.exclusive_waiters(self.slots), [])
+
+
+class TheKeeper(Base):
+    """GATE1 review MEDIUM 2, 2026-11-02: killing the wrapper's process group left the run alive in its own
+    session, released the locks and let a second exclusive gate in beside it. A run with a deadline now starts
+    under a keeper in its session that holds the lock descriptors for exactly as long as the run lives."""
+
+    def exclusive(self, **extra):
+        return self.env(1, BROTHER_HEAVY_SLOT_EXCLUSIVE=1, **extra)
+
+    def wait_for(self, path, timeout=20):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if os.path.exists(path) and os.path.getsize(path):
+                return True
+            time.sleep(0.1)
+        return False
+
+    def test_a_killed_wrapper_group_leaves_the_locks_with_the_run(self):
+        pidfile = os.path.join(self.tmp, "run.pid")
+        wrapper = subprocess.Popen([sys.executable, SLOT, "sh", "-c", 'echo $$ > "$1"; sleep 30', "sh", pidfile],
+                                   env=self.exclusive(BROTHER_HEAVY_SLOT_DEADLINE=120), start_new_session=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.holders.append(wrapper)
+        self.assertTrue(self.wait_for(pidfile), "the run never started")
+        with open(pidfile) as fh:
+            run = int(fh.read())
+        os.killpg(wrapper.pid, signal.SIGKILL)
+        wrapper.wait()
+        try:
+            os.kill(run, 0)
+            code, err, _ = self.run_slot(["true"], self.exclusive(BROTHER_HEAVY_SLOT_WAIT=3))
+            self.assertIn("UNQUEUED", err, "a second exclusive run was admitted beside a live run")
+        finally:
+            try:
+                os.killpg(os.getpgid(run), signal.SIGKILL)
+            except OSError:
+                pass  # sbe: allow-silent the run's group already ended
+        time.sleep(0.5)
+        code, err, _ = self.run_slot(["true"], self.exclusive(BROTHER_HEAVY_SLOT_WAIT=10))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("UNQUEUED", err, "the locks outlived the run")
+
+    def test_a_killed_wrapper_group_still_ends_a_hung_run_at_its_deadline(self):
+        """GATE1 review round 2 M1: only the keeper can pass this. The wrapper's group dies at once, so the deadline
+        must be enforced from inside the run's session: the run ends, a stale line is written, the locks free."""
+        pidfile = os.path.join(self.tmp, "hung.pid")
+        wrapper = subprocess.Popen([sys.executable, SLOT, "sh", "-c", 'echo $$ > "$1"; sleep 60', "sh", pidfile],
+                                   env=self.exclusive(BROTHER_HEAVY_SLOT_DEADLINE=4), start_new_session=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.holders.append(wrapper)
+        self.assertTrue(self.wait_for(pidfile), "the run never started")
+        with open(pidfile) as fh:
+            run = int(fh.read())
+        os.killpg(wrapper.pid, signal.SIGKILL)
+        wrapper.wait()
+        ended = False
+        deadline = time.time() + 40
+        try:
+            while time.time() < deadline:
+                try:
+                    os.kill(run, 0)
+                except OSError:
+                    ended = True
+                    break
+                time.sleep(0.2)
+            self.assertTrue(ended, "a hung run outlived its deadline once its wrapper's group was killed")
+        finally:
+            try:
+                os.killpg(os.getpgid(run), signal.SIGKILL)
+            except OSError:
+                pass  # sbe: allow-silent the run's group already ended
+        with open(os.path.join(self.slots, "waits.jsonl")) as fh:
+            self.assertEqual(sum('"stale"' in line for line in fh), 1)
+        time.sleep(0.5)
+        code, err, _ = self.run_slot(["true"], self.exclusive(BROTHER_HEAVY_SLOT_WAIT=10))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("UNQUEUED", err, "the locks outlived the stale run")
+
+    def test_a_term_to_the_wrapper_reaches_the_run_through_the_keeper(self):
+        """A plain stop (SIGTERM to the wrapper's pid) must still end a deadline run long before its deadline."""
+        pidfile = os.path.join(self.tmp, "term.pid")
+        wrapper = subprocess.Popen([sys.executable, SLOT, "sh", "-c", 'echo $$ > "$1"; sleep 60', "sh", pidfile],
+                                   env=self.exclusive(BROTHER_HEAVY_SLOT_DEADLINE=120), start_new_session=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.holders.append(wrapper)
+        self.assertTrue(self.wait_for(pidfile), "the run never started")
+        with open(pidfile) as fh:
+            run = int(fh.read())
+        time.sleep(0.5)
+        wrapper.send_signal(signal.SIGTERM)
+        try:
+            wrapper.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            self.fail("SIGTERM to the wrapper did not end the run through its keeper")
+        finally:
+            try:
+                os.killpg(os.getpgid(run), signal.SIGKILL)
+            except OSError:
+                pass  # sbe: allow-silent the run's group already ended
+        with self.assertRaises(OSError, msg="the run outlived a SIGTERM to its wrapper"):
+            os.kill(run, 0)
+
+    def test_a_leaked_grandchild_does_not_pin_the_lock(self):
+        pidfile = os.path.join(self.tmp, "leak.pid")
+        code, err, _ = self.run_slot(["sh", "-c", 'sleep 30 >/dev/null 2>&1 & echo $! > "$1"; exit 0', "sh", pidfile],
+                                     self.exclusive(BROTHER_HEAVY_SLOT_DEADLINE=120))
+        self.assertEqual(code, 0, err)
+        with open(pidfile) as fh:
+            leaked = int(fh.read())
+        try:
+            os.kill(leaked, 0)
+            code, err, _ = self.run_slot(["true"], self.exclusive(BROTHER_HEAVY_SLOT_WAIT=5))
+            self.assertEqual(code, 0, err)
+            self.assertNotIn("UNQUEUED", err, "a leaked grandchild kept the machine lock")
+        finally:
+            try:
+                os.kill(leaked, signal.SIGKILL)
+            except OSError:
+                pass  # sbe: allow-silent the leaked sleep already ended
+
+    def test_the_run_is_told_its_keepers_pid(self):
+        probe = "import os; print(os.environ.get('BROTHER_HEAVY_SLOT_HOLDER'), os.getppid())"
+        proc = subprocess.run([sys.executable, SLOT, sys.executable, "-c", probe],
+                              env=self.env(BROTHER_HEAVY_SLOT_DEADLINE=60), capture_output=True, text=True,
+                              timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        holder, parent = proc.stdout.split()
+        self.assertEqual(holder, parent)
+
+
 class TheGatesEnterThroughIt(Base):
     """The control lives at the gates' entry points, so it is tested there: the
     fixture runs the gates' OWN opening lines, cut from the real files."""
@@ -448,16 +719,29 @@ class TheGatesEnterThroughIt(Base):
                 self.assertIn("held=0", out)
 
     def test_a_busy_machine_makes_the_gate_wait_in_line(self):
-        self.hold()
-        out, err = self.gate(self.fixture("required_fast.sh"),
-                             self.env(BROTHER_HEAVY_SLOT_WAIT=0.5))
-        self.assertIn("waiting for 1 of 1 slots", err)
-        self.assertIn("held=unqueued", out)
+        """GATE1, 2026-11-01: the whole gate waits with no bound, whatever bound its caller names, and runs
+        holding the slot once the holder leaves; it never runs unqueued."""
+        holder = self.hold()
+        proc = subprocess.Popen(["sh", self.fixture("required_fast.sh")], env=self.env(BROTHER_HEAVY_SLOT_WAIT=0.5),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(3)
+        self.assertIsNone(proc.poll(), "the gate stopped waiting after its caller's 0.5 s bound")
+        holder.terminate()
+        out, err = proc.communicate(timeout=20)
+        self.assertIn("waiting for", err)
+        self.assertNotIn("UNQUEUED", err)
+        self.assertIn("held=0", out)
 
-    def test_the_fast_gate_reserves_one_slot_per_check_it_runs_at_once(self):
-        out, _ = self.gate(self.fixture("required_fast.sh"),
-                           self.env(n=4, REQUIRED_FAST_JOBS=3))
-        self.assertIn("held=0,1,2", out)
+    def test_the_fast_gate_queues_on_one_slot_whatever_its_caller_counts(self):
+        """GATE1, 2026-11-01: a caller with LOCAL_SLOTS=4 saw four slots and ran a whole gate beside another;
+        the gate now takes one slot at weight 1 and runs alone through the machine lock."""
+        env = self.env(n=4, REQUIRED_FAST_JOBS=3)
+        # the gate forces one at a time on these (required_fast.sh), and the landing suite env sets BROTHER_JEV_STATE_DIR
+        for k in ("BROTHER_JEV_STATE_DIR", "BROTHER_CONFIG_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+                  "BROTHER_MACHINE_RESERVATION_PATH", "BROTHER_LOAD_REFUSALS_LOG", "REQUIRED_FAST_ORDER_PIN"):
+            env.pop(k, None)
+        out, _ = self.gate(self.fixture("required_fast.sh"), env)
+        self.assertEqual(out.strip(), "held=0")
 
     def test_a_fixture_copy_without_the_queue_runs_straight_through(self):
         out, _ = self.gate(self.fixture("required_fast.sh", with_slot=False), self.env())

@@ -1,0 +1,93 @@
+{
+  "shape": {
+    "question": "What architecture shape fits this system?",
+    "options": [
+      "modular monolith",
+      "services",
+      "event-driven",
+      "monolith"
+    ],
+    "criteria": [
+      {
+        "name": "deploying_teams",
+        "kind": "number",
+        "scores": {
+          "modular monolith": [
+            1,
+            3
+          ],
+          "services": [
+            4,
+            999
+          ],
+          "event-driven": [
+            3,
+            999
+          ],
+          "monolith": [
+            1,
+            2
+          ]
+        },
+        "note": "Independently deploying teams. Services below four teams usually cost more than they return."
+      },
+      {
+        "name": "consistency",
+        "kind": "choice",
+        "scores": {
+          "strong": [
+            "monolith",
+            "modular monolith"
+          ],
+          "eventual": [
+            "services",
+            "event-driven"
+          ]
+        },
+        "note": "Strong consistency across a service boundary is expensive and often accidental."
+      },
+      {
+        "name": "ops_maturity",
+        "kind": "choice",
+        "scores": {
+          "low": [
+            "monolith",
+            "modular monolith"
+          ],
+          "medium": [
+            "modular monolith",
+            "services"
+          ],
+          "high": [
+            "services",
+            "event-driven"
+          ]
+        },
+        "note": "On-call, tracing, and CI maturity. Without them a distributed estate is undebuggable."
+      },
+      {
+        "name": "failure_isolation",
+        "kind": "choice",
+        "scores": {
+          "low": [
+            "monolith",
+            "modular monolith"
+          ],
+          "high": [
+            "services",
+            "event-driven"
+          ]
+        },
+        "note": "Does one component failing have to leave the others running?"
+      }
+    ],
+    "flip": "Cross four independently deploying teams, or need one component to fail without the others, and revisit this decision.",
+    "flips": {
+      "monolith": "Cross three independently deploying teams, or need one component to fail without the others, and revisit this decision.",
+      "modular monolith": "Cross four independently deploying teams, or need one module to fail without the others while ops maturity is high, and revisit this decision.",
+      "services": "Drop below four independently deploying teams, or find you need strong consistency across a service boundary, or lose the on-call and tracing maturity a distributed estate needs, and revisit this decision.",
+      "event-driven": "Find the ordering or replay guarantees are costing more than the decoupling returns, or drop below the ops maturity an event log needs to debug, and revisit this decision."
+    },
+    "flip_note": "`flips` is per recommendation and `flip` is the fallback for a recommendation with no entry. One string served the whole table, so the run that recommended `services` already had nine teams and high failure isolation and was handed a flip condition naming two conditions that were already true, which can never fire. A flip condition that is already satisfied is decoration."
+  }
+}

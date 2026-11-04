@@ -215,12 +215,12 @@ def discover_credential():
     if token:
         return ("Bearer %s" % token, token, "BITBUCKET_TOKEN",
                 "the BITBUCKET_TOKEN environment variable is set")
-    app_password = os.environ.get("BITBUCKET_APP_PASSWORD")
+    app_secret = os.environ.get("BITBUCKET_APP_PASSWORD")
     username = os.environ.get("BITBUCKET_USERNAME")
-    if app_password and username:
-        basic = base64.b64encode(("%s:%s" % (username, app_password))
+    if app_secret and username:
+        basic = base64.b64encode(("%s:%s" % (username, app_secret))
                                  .encode("utf-8")).decode("ascii")
-        return ("Basic %s" % basic, app_password,
+        return ("Basic %s" % basic, app_secret,
                 "BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD",
                 "the BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment "
                 "variables are set")

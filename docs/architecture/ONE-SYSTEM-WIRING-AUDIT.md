@@ -549,6 +549,8 @@ A stale audit is NO-DATA: it blocks, and it is never rendered as WIRED or ORPHAN
 
 ## Out of scope
 
+<!-- doc-assurance: allow-missing scripts/audit_one_system_wiring.sh the line below says NEW and not built here -->
+
 - U6: packaging unit, no rewiring here.
 - U7: registration unit, no rewiring here.
 - U8: marketplace retirement unit, no rewiring here.

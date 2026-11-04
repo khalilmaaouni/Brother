@@ -206,6 +206,8 @@ class BoardStatusIntegration(unittest.TestCase):
         finally:
             shutil.rmtree(d)
 
+    # The readiness roadmap is not shipped in the public export, so the premise is absent, not the behaviour broken.
+    @unittest.skipUnless(os.path.isfile(BS.SOURCE), "this tree carries no readiness roadmap")
     def test_the_real_board_status_run_prints_a_rulings_line(self):
         """Against the real repository state, not a fixture: just proves the
         line is wired into main()'s output at all."""

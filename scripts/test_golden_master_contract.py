@@ -55,6 +55,9 @@ class GoldenMasterContractTests(unittest.TestCase):
     def test_a_valid_master_layered_on_a_valid_outcome_passes(self):
         self.assertEqual(GMC.check(self.master(), self.schema), [])
 
+    # docs/decisions is not shipped in the public export, so there the real baseline record does not exist: the premise
+    # is absent, not the behaviour broken.
+    @unittest.skipUnless(os.path.isfile(REAL_OUTCOME_PATH), "this tree carries no baseline outcome record")
     def test_a_valid_master_layered_on_the_real_baseline_outcome_record_passes(self):
         # The synthetic fixture above proves the shape; this proves it
         # against a real outcome-contract-v1 record already living on this

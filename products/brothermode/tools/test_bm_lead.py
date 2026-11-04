@@ -625,7 +625,7 @@ class TestConsentIsTheOnlyDoor(unittest.TestCase):
                         "it wrote %r to stderr" % r.stderr)
                 else:
                     self.assertIn(
-                        "python3 scripts/setup.py", r.stdout + r.stderr,
+                        "/scripts/setup.py", r.stdout + r.stderr,
                         "%s must tell a human what to run; it printed %r"
                         % (label, r.stdout + r.stderr))
         finally:

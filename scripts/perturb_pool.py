@@ -17,10 +17,17 @@ RULES (docs/plan/specs/C0.md W1 to W6, each from a measurement):
   W3 the baseline wall is given by the caller from a quiet run, never the
      300 second default: four clean baselines timed out at load 36.
   W4 the worker count is capped by measured load, not by core count.
+  W4c (CUT2.e) and by what the workers will DEMAND: each worker runs a suite that itself fans out, so cores, memory
+     and scratch disk are LEASED from the one machine ledger (machine_reservation) before a worker starts, and a
+     wave is sized by what fits (load_reservation.fit_leases), not by a load reading taken before they ramp up.
+     Measured in the 1.1.9 rehearsal: seven workers at load 14.6, and a clean baseline missed its 495 s deadline.
   W5 a copy is removed by its exact path, and only if this module made it.
   W6 no copy is made under the disk floor.
 A copy that cannot be made, or a baseline that is not green, is NO-DATA (None)
-for every row of that worker: never a skip, never a pass (H2).
+for every row of that worker: never a skip, never a pass (H2). A baseline stop is NAMED (classify_stop): an
+assertion failure is evidence about the code; a deadline met on a scarce machine is CAPACITY, one met by a suite
+still burning CPU is SLOW, one met by a suite doing nothing is STUCK. CAPACITY and SLOW are retried once at double
+the wall, the rest never; all of them stay NO-DATA, so no check is skipped and none is narrowed.
 
 The verdict function is release_note_perturb.covers, unchanged, with
 root=<copy>. This module adds no verdict logic.
@@ -28,6 +35,7 @@ root=<copy>. This module adds no verdict logic.
 import json
 import math
 import os
+import resource
 import shutil
 import subprocess
 import sys
@@ -178,6 +186,20 @@ def remove_copy(path):
     os.remove(marker)
 
 
+def reclaim_scratch(path, base, made):
+    """CUT2.e. Removes one worker's scratch folder, and only that: a path THIS run made (`made`, the exact paths
+    run_rows created), directly inside `base`, a real folder and not a link. The caller names it only once its
+    worker has ended, so nothing running loses its TMPDIR. Anything else raises CopyFailed and is left alone: a
+    scratch folder this run did not make is not this run's to reclaim."""
+    if path not in made:
+        raise CopyFailed("%r is not a scratch folder this run made" % (path,))
+    if os.path.islink(path) or not os.path.isdir(path):
+        raise CopyFailed("%r is not a real folder" % (path,))
+    if os.path.dirname(os.path.realpath(path)) != os.path.realpath(base):
+        raise CopyFailed("%r is not directly inside %r" % (path, base))
+    shutil.rmtree(path)
+
+
 def capped_workers(requested, load1=None, ncpu=None):
     """W4. Below one runnable process per core the request stands (up to the
     core count); at or above it, one worker. The one comparison is machine_busy's,
@@ -211,7 +233,114 @@ def default_workers(ncpu=None):
 LOAD_WAIT_S = 120
 
 
-def settled_workers(requested, wait_s=LOAD_WAIT_S, cap=None, sleep=None, clock=None):
+#: Per worker, what the nested suite demands. cores: 14.6 load over 7 workers in the 1.1.9 step 2b record is 2.1,
+#: so 2. disk_gib: a work copy measured 0.18 GiB of tree on 2026-11-02, rounded up to cover its scratch. mem_gib is an
+#: UNMEASURED estimate (stdlib cannot read free memory on macOS); it is a calibration knob, not a finding.
+WORKER_DEMAND = {"cores": 2.0, "mem_gib": 1.0, "disk_gib": 0.25}
+MEM_RESERVE_GIB = 6.0
+LEASE_TTL_S = 7200
+LEASE_ENV = "BROTHER_RESOURCE_LEASES"
+
+
+def lease_path():
+    """The one ledger file: BROTHER_RESOURCE_LEASES, else <the scratch root>/cut-resource-leases.json, so it sits on
+    the filesystem whose space it leases."""
+    return os.environ.get(LEASE_ENV) or os.path.join(pool_scratch_root(), "cut-resource-leases.json")
+
+
+def _total_mem_gib():
+    return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / float(1024 ** 3)
+
+
+class Leases(object):
+    """The pool's seat in the machine ledger. Sizes a wave (fit), takes one lease per worker (take) and ends it
+    (end). Every reading is injectable: `ncpu`, `mem_gib` and `free` (the free GiB under the scratch root), so a
+    fixture never reads the real machine and never touches the real ledger."""
+
+    def __init__(self, path=None, demand=None, root=None, floor_gib=None, ncpu=None, mem_gib=None, free=None,
+                 clock=None):
+        self.path, self.demand = path, dict(demand or WORKER_DEMAND)
+        self.root, self.clock = root, clock
+        self.floor = DISK_FLOOR_GIB if floor_gib is None else floor_gib
+        self.ncpu, self.mem_gib, self.free = ncpu, mem_gib, free or free_gib
+
+    def _ledger(self):
+        return self.path or lease_path()
+
+    def capacity(self):
+        """(capacity, problem). Cores: every core but resource_gate.CORE_RESERVE (heavy_slot's own ceiling). Memory:
+        physical less MEM_RESERVE_GIB. Disk: what is free on the scratch root's filesystem less the pool floor. A
+        reading that cannot be had is (None, NO-DATA ...)."""
+        import resource_gate
+        try:
+            root = self.root or pool_scratch_root()
+            cores = max(1, (self.ncpu or os.cpu_count() or 1) - resource_gate.CORE_RESERVE)
+            mem = (self.mem_gib if self.mem_gib is not None else _total_mem_gib()) - MEM_RESERVE_GIB
+            have = self.free(root)
+        except (CopyFailed, OSError, ValueError, TypeError, AttributeError) as exc:
+            return None, "NO-DATA: a capacity reading failed: %s" % exc
+        if not valid_reading(have):
+            return None, "NO-DATA: free space reading is invalid (%r) under %s" % (have, root)
+        return {"cores": float(cores), "mem_gib": max(0.0, mem), "disk_gib": max(0.0, have - self.floor)}, ""
+
+    def fit(self, requested):
+        """(fits now, fits on an idle machine, problem). The second ignores every live lease: it is the count a wait
+        for other jobs can at best reach. problem is non empty only when the ledger or a reading cannot be trusted."""
+        import load_reservation
+        import machine_reservation
+        room, problem = self.capacity()
+        if room is None:
+            return 0, 0, problem
+        used, problem = machine_reservation.leased(self._ledger(), clock=self.clock)
+        now = load_reservation.fit_leases(int(requested), self.demand, room, used)
+        idle = load_reservation.fit_leases(int(requested), self.demand, room, {})
+        return now["workers"], idle["workers"], now["problem"] or problem
+
+    def take(self, name):
+        """(record, problem) for one worker's demand, leased to `name` against the current capacity."""
+        import machine_reservation
+        room, problem = self.capacity()
+        if room is None:
+            return None, problem
+        return machine_reservation.lease(self._ledger(), name, self.demand, room, LEASE_TTL_S, clock=self.clock)
+
+    def end(self, name):
+        import machine_reservation
+        return machine_reservation.end_lease(self._ledger(), name, clock=self.clock)
+
+
+def default_leases():
+    """The real seat, or None when the scratch root cannot be used (make_copy then refuses every copy by itself)."""
+    try:
+        return Leases(path=lease_path())
+    except (CopyFailed, OSError):
+        return None
+
+
+ADMISSION_ENV = "BROTHER_PERTURB_ADMISSION"
+ADMISSION_MODES = ("lease", "load")
+
+
+class AdmissionRefused(ValueError):
+    """The admission switch holds a value that is not one of ADMISSION_MODES. Its text starts with NO-DATA."""
+
+
+def admission_mode(env=None):
+    """"lease" (unset or empty: the default) or "load" (the admission of 007b30574: the worker count settled from the
+    load snapshot alone). Anything else, a case variant or padding included, raises AdmissionRefused naming the
+    accepted values: an unknown switch never silently picks a mode."""
+    raw = (os.environ if env is None else env).get(ADMISSION_ENV) or ""
+    if raw == "":
+        return "lease"
+    if raw in ADMISSION_MODES:
+        return raw
+    raise AdmissionRefused("NO-DATA: %s=%r is not an admission mode; accepted values: %s (unset means lease)"
+                           % (ADMISSION_ENV, raw, ", ".join(ADMISSION_MODES)))
+
+
+def settled_by_load(requested, wait_s=LOAD_WAIT_S, cap=None, sleep=None, clock=None):
+    """The count as settled on 007b30574, kept as the switch's other side: the load cap alone, re-read for up to
+    `wait_s` seconds. No lease is consulted."""
     import time
     cap = cap or capped_workers
     sleep = sleep or time.sleep
@@ -225,6 +354,98 @@ def settled_workers(requested, wait_s=LOAD_WAIT_S, cap=None, sleep=None, clock=N
     return n
 
 
+def settled_workers(requested, wait_s=LOAD_WAIT_S, cap=None, sleep=None, clock=None, lease=None, env=None):
+    """The first wave's size: what the load cap allows AND what the leases admit. `lease` is a Leases (or anything
+    with fit()); None means the real ledger, unless the caller supplies its own `cap`, which then owns the count
+    (the seam the load tests use); False means no leases. The wait is bounded by `wait_s` and ends early only when
+    the count has reached what an idle machine would give. A ledger that cannot be trusted waits for nothing (waiting
+    does not repair it) and gives one worker, said. The floor of one is liveness, as before: the count is never 0.
+
+    BROTHER_PERTURB_ADMISSION is read here, once: unset or "lease" is the above; "load" is settled_by_load, the old
+    count, whatever `lease` was passed; any other value raises AdmissionRefused before anything is measured."""
+    if admission_mode(env) == "load":
+        return settled_by_load(requested, wait_s=wait_s, cap=cap, sleep=sleep, clock=clock)
+    import time
+    cap = cap or capped_workers
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    if lease is None and cap is capped_workers:
+        lease = default_leases()
+    lease = lease or None
+    want = cap(requested, load1=0.0)
+    n = cap(requested)
+    if lease is not None:
+        now_n, idle_n, problem = lease.fit(requested)
+        want, n = min(want, idle_n), min(n, now_n)
+        if problem:
+            _say("workers: %s; one worker, no wait" % problem)
+            return 1
+    end = clock() + wait_s
+    while n < want and clock() < end:
+        sleep(5)
+        n = cap(requested)
+        if lease is not None:
+            now_n, _idle, problem = lease.fit(requested)
+            n = min(n, now_n)
+            if problem:
+                _say("workers: %s; one worker, no wait" % problem)
+                return 1
+    return max(1, n)
+
+
+#: A deadline met by a suite whose process tree used at least this share of one core over the wall was still
+#: working (SLOW); below it, it was waiting on nothing (STUCK). A busy loop reads as slow: the ceiling of a
+#: CPU only signal, and the upgrade is the process group's ticks.
+PROGRESS_CPU_SHARE = 0.05
+GREEN, ASSERTION, CAPACITY, SLOW, STUCK, UNREACHABLE = "green", "assertion", "capacity", "slow", "stuck", "unreachable"
+#: Retried once, at double the wall. An assertion is the code speaking, a stuck suite will not improve, an
+#: unreachable one never ran: none of those is made better by a second go.
+RETRYABLE = (CAPACITY, SLOW)
+DEADLINE_PREFIX = "baseline in the copy hit its deadline"
+
+
+def children_cpu_s():
+    """CPU seconds this process's waited-for children have used so far (user + system)."""
+    ru = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return ru.ru_utime + ru.ru_stime
+
+
+def classify_stop(rc, tail, wall, cpu_s, reading=None):
+    """(kind, reason) for one finished suite run, apart: GREEN (exit 0); ASSERTION (a real non zero exit: evidence
+    about the code whatever the machine was doing); for a run that ended without an exit code, whether it met its
+    wall (release_note_perturb.run_suite words it "did not finish within"): CAPACITY when resource_gate.classify
+    says the machine was scarce (the estate's one timeout rule), else SLOW when the tree still used CPU
+    (PROGRESS_CPU_SHARE of one core over the wall), else STUCK; anything else that gave no exit code is
+    UNREACHABLE (could not run, could not be killed). Unknown input never reads as GREEN."""
+    if isinstance(rc, int) and not isinstance(rc, bool):
+        return (GREEN, "the suite passed") if rc == 0 else (ASSERTION, "the suite exited %d" % rc)
+    text = str(tail)
+    if "did not finish within" not in text or "could not be killed" in text or "did not die" in text:
+        return UNREACHABLE, "the suite gave no exit code and did not simply meet its wall: %s" % text[-120:]
+    import resource_gate
+    verdict, why = resource_gate.classify("timeout", reading=reading)
+    if verdict == resource_gate.INVALID:
+        return CAPACITY, why
+    if isinstance(cpu_s, (int, float)) and not isinstance(cpu_s, bool) and wall > 0 and cpu_s >= PROGRESS_CPU_SHARE * wall:
+        return SLOW, "met the wall of %.0f s while still using CPU (%.1f s of it)" % (wall, cpu_s)
+    return STUCK, "met the wall of %.0f s and used %s s of CPU" % (wall, cpu_s)
+
+
+def run_baseline(P, suite_rel, copy, wall, classify=None):
+    """(rc, tail, kind, reason, waited_wall). One baseline, classified; a CAPACITY or SLOW stop gets exactly one
+    more run at double the wall, never the same wall again."""
+    classify = classify or classify_stop
+    spent = wall
+    for attempt in (0, 1):
+        spent = wall * (2 if attempt else 1)
+        before = children_cpu_s()
+        rc, tail = P.run_suite(suite_rel, root=copy, timeout=spent)
+        kind, reason = classify(rc, tail, spent, children_cpu_s() - before)
+        if kind not in RETRYABLE:
+            break
+    return rc, tail, kind, reason, spent
+
+
 def run_worker(copy, rows, baseline_wall, out_path):
     """Inside the copy: one baseline per suite, then covers() per row."""
     sys.path.insert(0, os.path.join(copy, "scripts"))
@@ -232,14 +453,16 @@ def run_worker(copy, rows, baseline_wall, out_path):
     baselines, results = {}, []
     for file_rel, suite_rel in rows:
         if suite_rel not in baselines:
-            baselines[suite_rel] = P.run_suite(suite_rel, root=copy, timeout=baseline_wall)
-        rc, tail = baselines[suite_rel]
-        if rc != 0:
-            results.append([file_rel, suite_rel, None,
-                            "baseline in the copy is not green (%s): %s" % (rc, tail)])
-        else:
+            baselines[suite_rel] = run_baseline(P, suite_rel, copy, baseline_wall)
+        rc, tail, kind, reason, spent = baselines[suite_rel]
+        if kind == GREEN:
             verdict, detail = P.covers(suite_rel, file_rel, root=copy, baseline=rc)
             results.append([file_rel, suite_rel, verdict, detail])
+        elif kind in (CAPACITY, SLOW, STUCK):
+            results.append([file_rel, suite_rel, None, "%s (%s) after %.0f s: %s" % (DEADLINE_PREFIX, kind, spent, reason)])
+        else:
+            results.append([file_rel, suite_rel, None,
+                            "baseline in the copy is not green (%s): %s" % (rc, tail)])
         with open(out_path, "w", encoding="utf-8") as fh:
             json.dump(results, fh)
 
@@ -291,7 +514,7 @@ def _load_text():
 
 
 def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
-             spawn=None, copier=make_copy, cap=None, say=None):
+             spawn=None, copier=make_copy, cap=None, say=None, leases=None):
     """[(file_rel, suite_rel, verdict, detail)] in the order of `rows`.
     verdict is covers()'s own True / False / None.
 
@@ -303,6 +526,7 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
     rows = [tuple(r) for r in rows]
     if not rows:
         return []
+    mode = admission_mode()   # an unknown switch value refuses here, before a folder is made or a worker started
     say = say or _say
     cap = cap or capped_workers
     requested = max(1, int(workers))
@@ -319,7 +543,9 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
     elif FORBIDDEN_PATH_TEXT in base or not _under(base, root):
         raise ValueError("the base %r must not contain %r and must lie under the one scratch root %s"
                          % (base, FORBIDDEN_PATH_TEXT, root))
-    first = max(1, min(int(settled_workers(workers)), slots))
+    # a bare call when no seat was injected: the default seat, and the shape tests that patch settled_workers expect
+    settled = settled_workers(workers) if leases is None or mode == "load" else settled_workers(workers, lease=leases)
+    first = max(1, min(int(settled), slots))
     watched, stop = [], threading.Event()
     watcher = threading.Thread(target=_watch_rows, daemon=True,
                                args=(watched, len(rows), say, stop))
@@ -331,7 +557,13 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
     spawn = spawn or (lambda argv, env: subprocess.Popen(argv, env=env,
                                                          stdout=subprocess.DEVNULL,
                                                          stderr=subprocess.PIPE))
-    answers, running, made = {}, [], [0]
+    if mode == "load":   # the old admission: no lease is taken for any worker
+        leases = None
+    elif leases is None:
+        leases = default_leases()
+    leases = leases or None
+    answers, running, made, owned = {}, [], [0], set()
+    held, scratch_of = {}, {}   # copy path -> its lease name / its scratch folder, both given back when it ends
 
     def admit(limit):
         """Start waiting slices until `limit` workers run; a slice whose copy
@@ -343,10 +575,28 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
             made[0] += 1
             copy = os.path.join(base, "copy%d" % i)
             scratch = os.path.join(base, "scratch%d" % i)
+            name = None
+            if leases is not None:
+                got, why = leases.take("perturb:%s:%d" % (os.path.basename(base), i))
+                if got is not None:
+                    name = got["holder"]
+                elif running:   # CAPACITY, or a ledger that cannot be trusted: a running worker's end frees it
+                    waiting.insert(0, mine)
+                    made[0] = i
+                    say("workers: a worker waits for capacity (%s)" % why)
+                    break
+                else:
+                    say("workers: no lease (%s); this slice runs unleased, a busy machine is not a verdict" % why)
             try:
                 copier(source_root, copy)
                 os.makedirs(scratch)
+                owned.add(scratch)
+                scratch_of[copy] = scratch
+                if name:
+                    held[copy] = name   # before the spawn, so a spawn that raises still gives it back
             except (CopyFailed, OSError) as exc:
+                if name:
+                    leases.end(name)
                 # the disk floor (W6) while a worker runs: its copy is removed when it ends, so the slice waits for that
                 # and the floor never moves (1.1.8 rehearsal, 2026-10-24: 30 rows NO-DATA at 15.0 GiB with five copies
                 # held). With nothing running, no space comes back, so it is NO-DATA as before.
@@ -385,6 +635,12 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
                 remove_copy(copy)
             except (CopyFailed, OSError) as exc:
                 sys.stderr.write("perturb_pool: left behind %s: %s\n" % (copy, exc))
+            try:
+                reclaim_scratch(scratch_of.get(copy, ""), base, owned)
+            except (CopyFailed, OSError) as exc:
+                sys.stderr.write("perturb_pool: scratch left behind for %s: %s\n" % (copy, exc))
+            if copy in held:
+                leases.end(held.pop(copy))
             if not waiting:
                 continue
             free = max(1, min(int(cap(workers)), slots)) - len(running)
@@ -402,6 +658,8 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
         stop.set()
         if watcher is not None:
             watcher.join(2.0)
+        for name in list(held.values()):   # a run that raised still gives every share back
+            leases.end(name)
         if own_base:
             leftovers = [e for e in os.listdir(base)
                          if e.startswith("copy") and not e.endswith(MARKER_SUFFIX)]
@@ -413,7 +671,7 @@ def run_rows(rows, source_root, baseline_wall, workers=2, base=None,
 #: measured for an infrastructure reason (no copy, a dead worker, a copy whose
 #: baseline is red). A None with any other detail is the suite's own answer.
 INFRA_PREFIXES = ("no work copy", "the worker ended before this row",
-                  "baseline in the copy is not green")
+                  "baseline in the copy is not green", DEADLINE_PREFIX)
 SOURCE_ROOT = os.path.dirname(HERE)
 USAGE = ("usage: perturb_pool.py --worker <copy> <rows.json> <baseline wall s> <out.json>\n"
          "       perturb_pool.py --measure <note.md> --workers <n> --baseline-wall <s> [--out <path>]")

@@ -103,6 +103,9 @@ class LandedPiecesStopBilling(unittest.TestCase):
         self.assertFalse(rows[0]["landed"])
 
 
+# docs/plan is not shipped in the public export, so there the parity record this forecast reads does not exist: the
+# premise is absent, not the behaviour broken. A tree that carries the record still runs every case below.
+@unittest.skipUnless(os.path.isfile(F.PG.SOURCE), "this tree carries no parity record")
 class ItRunsAgainstTheRealBoard(unittest.TestCase):
     def test_it_produces_a_forecast_and_exits_zero(self):
         self.assertEqual(F.main(["--hours-per-day", "6"]), 0)

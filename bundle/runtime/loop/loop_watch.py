@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The orchestrator's watch: one health verdict from the newest driver log, mechanical, every poll.
 usage: loop_watch.py [--log <loop-until log>] [--lanes N]        loop_watch.py --selftest
+       loop_watch.py --idle [--run-dir D] [--heartbeat F] [--pool P] [--stage-log S]     (STAB1.l: the look from OUTSIDE the driver)
 Prints ONE line: HEALTHY <summary> (exit 0) | ACT <class>: <reason> (exit 1) | NO-DATA <why> (exit 3).
 Owner 2026-09-22 21:3x ("find a way to be more proactive ... with a proper SOP and workflow"): a stall was found two hours
 late because detection waited for a wake. The wait now polls this verdict every 20 s and breaks on ACT; the SOP names the
@@ -132,10 +133,95 @@ def verdict(text, lanes=6, seen_kinds=(), driver_alive=True, no_landing_limit_h=
     return "HEALTHY", "", "pass %d | %.1f h | landed %d | running %d | parked %d of %d" % (p, hours, landed, running, parked, touched)
 
 
+def newest_run_dir(root):
+    """The newest run-* directory under the runs root (loop_until.sh make_run_dir names them run-<date>-<time>-<pid>, so the
+    name sorts by start), or None. Reads only: it creates nothing."""
+    try:
+        names = sorted(n for n in os.listdir(root) if re.fullmatch(r"run-\d{8}-\d{6}-\d+", n) and os.path.isdir(os.path.join(root, n)))
+    except OSError:   # sbe: allow-silent an unreadable runs root is None and idle_look prints NO-DATA naming it
+        return None
+    return os.path.join(root, names[-1]) if names else None
+
+
+def _pool_count(pool):
+    """(n, why): the pool's DRY look, `started N`, the same look loop_pass.sh takes (STAB1.j). n is None with the reason when
+    the look fails, times out or prints no count: NO-DATA, never zero."""
+    import subprocess
+    try:
+        r = subprocess.run([sys.executable, "-B", pool, "--dry"], capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, "the pool's dry look did not run (%s)" % type(exc).__name__
+    m = re.findall(r"^started (\d+) \|", r.stdout, re.M)
+    if r.returncode != 0 or not m:
+        return None, "the pool's dry look gave no count (exit %d)" % r.returncode
+    return int(m[-1]), ""
+
+
+def idle_look(run_dir, heartbeat, pool, stage_log=None):
+    """THE IDLE-WITH-WORK LOOK FROM OUTSIDE THE DRIVER (STAB1.l). Inside the pass it cannot be seen: run_pass waits on the
+    pass, so at the pass's monitor look the driver is always alive, and a driver that dies between passes starts no pass at
+    all. This reader runs in its own process and asks loop_heartbeat's own rule (read, classify, TERMINAL; never a second
+    staleness rule) whether the driver is alive. Not alive AND the pool would start a unit: stage_log's monitor verb (the one
+    writer) appends the run's idle_with_work row, and the answer is ACT (exit 1). The production caller is brother_night_tick.py (scheduled, armed by BROTHER_STALL_PLAN), which turns
+    that answer into an IDLE-WITH-WORK finding for the alert file and the notification; no session wait polls --idle. Alive:
+    only the lease look, no dry look. A PAUSED heartbeat is the owner's pause, not idleness. Returns (word, line): HEALTHY,
+    ACT or NO-DATA. A heartbeat that cannot be read counts as not alive (classify says ALARM); a pool look or a monitor that
+    cannot answer is NO-DATA, never HEALTHY."""
+    import json, subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    stage_log = stage_log or os.path.join(here, "stage_log.py")
+    if here not in sys.path: sys.path.insert(0, here)
+    import loop_heartbeat as lh
+    if not run_dir:
+        return "NO-DATA", "no run directory was named and none exists under the runs root"
+    run, logf, pidf = os.path.basename(os.path.normpath(run_dir)), os.path.join(run_dir, "run-state.jsonl"), os.path.join(run_dir, "driver.pid")
+    if not os.path.isfile(logf):   # the monitor verb would create it empty; a look creates nothing
+        return "NO-DATA", "run %s kept no state (%s does not exist), so there is no run to report idle" % (run, logf)
+    rec = lh.read(heartbeat)
+    try:
+        hb_state, why = lh.classify(rec)
+    except (TypeError, ValueError):   # a field of the wrong type (a list for the state) is a broken pulse, which is not alive
+        hb_state, why = "ALARM", "the heartbeat has a field of the wrong type, so it cannot be judged"
+    state = (rec or {}).get("state")
+    dead = (hb_state == "ALARM" or state in lh.TERMINAL) and state != "PAUSED"
+    cmd = [sys.executable, "-B", stage_log, "monitor", "--run", run, "--path", logf]
+    n = None
+    if dead:
+        n, nwhy = _pool_count(pool)
+        if n is None:
+            return "NO-DATA", "the driver heartbeat says it is not alive (%s) but %s, so whether work is waiting is unknown" % (why[:100], nwhy)
+        # The heartbeat is the authority here, so the monitor is handed a pid file known to be absent (driver_alive: False)
+        # rather than driver.pid, which names a process the heartbeat has just called dead (wedged, or a reused pid).
+        cmd += ["--driver-pid-file", pidf + ".absent", "--admissible", str(n)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+    try:
+        cur = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        cur = None
+    if r.returncode not in (0, 2) or not isinstance(cur, dict):
+        return "NO-DATA", "the run monitor gave no answer (exit %d): %s" % (r.returncode, (r.stdout + r.stderr).strip()[-120:])
+    if cur.get("sequence") is None:
+        return "NO-DATA", "run %s has no state row in %s, so there is no run to report idle" % (run, logf)
+    if dead and n and cur.get("state") not in ("DONE", "FAILED"):
+        wrote = cur.get("appended") == "idle_with_work"
+        return "ACT", "idle: run %s, the driver is not alive (%s) and %d unit(s) are admissible; %s" % (
+            run, why[:100], n, "idle_with_work row written" if wrote else "the run state already holds its report or a lease mark")
+    return "HEALTHY", "run %s, driver %s, state %s" % (run, "not alive, no unit admissible or the run is over" if dead else "alive", cur.get("state"))
+
+
 def main():
     if "--selftest" in sys.argv: return selftest()
     a = sys.argv[1:]
     opt = lambda n, d: a[a.index(n) + 1] if n in a and a.index(n) + 1 < len(a) else d
+    if "--idle" in a:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path: sys.path.insert(0, here)
+        import loop_heartbeat as _lh   # the one heartbeat reader; its HB path is the default pulse
+        rd = opt("--run-dir", None) or newest_run_dir(os.environ.get("BROTHER_RUNS_ROOT") or os.path.expanduser("~/.claude/evidence/loop-runs"))
+        w, line = idle_look(rd, opt("--heartbeat", _lh.HB), opt("--pool", os.path.expanduser("~/.claude/bin/runner_pool.py")), opt("--stage-log", None))
+        # ONE line: a heartbeat reason, a run name or a tool's output with a line break (U+2028, U+0085, \n) must not start
+        # a second line that a reader would take for another verdict
+        print("%s %s" % (w, " ".join(line.split()))); return {"HEALTHY": 0, "ACT": 1}.get(w, 3)
     log = opt("--log", None)
     if not log:
         log = newest_driver_log(os.path.expanduser("~/.claude/evidence"))

@@ -226,12 +226,24 @@ def _write_login_state(path, data):
     os.replace(tmp, path)
 
 
+def refresh_verdict(holder_answered, provider_accepted):
+    """AUTH1.b, the one verify: RENEWED only when the holder answered AND the provider explicitly accepted (both exactly
+    True); the holder's bytes alone prove neither a renewal nor that the provider takes them. An explicit refusal by the
+    provider is EXPIRED (refresh_once parks it and asks once); anything else, a silent holder or an acceptance nobody
+    saw, is NO-DATA, never a renewal."""
+    if holder_answered is True and provider_accepted is True:
+        return "RENEWED"
+    if holder_answered is True and provider_accepted is False:
+        return "EXPIRED"
+    return "NO-DATA"
+
+
 def refresh_once(scope, refresher, state_dir, attempts=2, notify=None):
     """(verdict, detail): RENEWED, PARKED, or the refresher's own failure. One file lock per scope under state_dir, so
     any number of concurrent consumers cause one refresher call: a renewal younger than RENEW_REUSE_S answers every
     later consumer without a second one. refresher() answers (verdict, detail): RENEWED, EXPIRED (cannot be renewed
-    here), or anything else for a failure worth trying again, up to `attempts` calls. EXPIRED writes one park record
-    (its class, never a token or a code) and calls notify(prompt) ONCE, naming brother-login; a parked scope still
+    here), or anything else for a failure worth trying again, up to `attempts` calls. EXPIRED, or NO-DATA (a missing login, returned as NO-DATA), writes one
+    park record (its class, never a token or a code) and calls notify(prompt) ONCE, naming brother-login; a parked scope still
     asks the refresher on every call, reads PARKED without a new prompt while it stays EXPIRED, and a RENEWED answer
     clears the park. A refresher that raises is a failure, never a renewal."""
     if not isinstance(scope, str) or not SCOPE_RE.fullmatch(scope) or not callable(refresher) \
@@ -267,13 +279,13 @@ def refresh_once(scope, refresher, state_dir, attempts=2, notify=None):
             if verdict == "RENEWED":
                 _write_login_state(path, {"state": "renewed", "at": now})
                 return "RENEWED", detail
-            if verdict == "EXPIRED":
+            if verdict in ("EXPIRED", "NO-DATA"):   # STAB1.g: a missing login (holder silent) parks once, like a refusal
                 if rec.get("state") != "parked":
                     cls = auth_class(detail)
                     _write_login_state(path, {"state": "parked", "at": now, "class": cls, "detail": detail})
                     if notify is not None:
                         notify(PARK_PROMPT % (scope, cls))
-                return "PARKED", detail
+                return ("PARKED" if verdict == "EXPIRED" else verdict), detail   # a missing login still reads NO-DATA
         except OSError as exc:
             return "FAIL", "%s, and the login record could not be written (%s)" % (detail, type(exc).__name__)
         return verdict, detail

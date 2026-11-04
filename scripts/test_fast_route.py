@@ -55,7 +55,12 @@ CLEAN_TMP_ROOT = "/tmp"
 
 
 def _clean_tmp(prefix):
-    return tempfile.mkdtemp(prefix=prefix, dir=CLEAN_TMP_ROOT)
+    # A confined run (the hermetic check's sandbox) may not write /tmp; the system temp folder it is given has no
+    # space in its path either, which is all this root exists to guarantee.
+    try:
+        return tempfile.mkdtemp(prefix=prefix, dir=CLEAN_TMP_ROOT)
+    except OSError:
+        return tempfile.mkdtemp(prefix=prefix)
 
 
 #: TEST HARDENING (night run 2026-09-09): THE FINDING. Under machine load

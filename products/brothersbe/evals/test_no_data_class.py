@@ -688,6 +688,11 @@ NOT_A_VERDICT = {
                                                      "running bm_profile_reader.py in a "
                                                      "subprocess, process output and never a "
                                                      "verdict",
+    ("bm_profile_reader.py", "_default_vault"): "a reader returning (vault root, reason) from "
+                                                "BrotherMode's one vault resolver "
+                                                "(pattern_note.vault_root, KEY1.f): a folder path "
+                                                "or None and the setting to fix, never a verdict; "
+                                                "main() prints the reason as NO-DATA and exits 2",
     ("test_sbe_design_fingerprint.py", "run_check"): "this suite's own fixture helper; returns "
                                                      "(exit code, stdout plus stderr) from "
                                                      "running sbe_design behaviour-check in a "

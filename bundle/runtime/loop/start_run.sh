@@ -205,10 +205,28 @@ AHEAD=$(git rev-list --count "$UP..HEAD"); BEHIND=$(git rev-list --count "HEAD..
 echo "OK   tree   $BRANCH clean and equal to $UP"
 tmark tree 2>/dev/null || true
 
+# 1a STALE DEPLOY (STAB1.a): the installed loop tools must contain the line's newest scripts/loop commit. 2026-11-01: the
+# installed stamp was 356 commits behind with 34 of them under scripts/loop and the launcher started anyway. The stamp is
+# $BROTHER_DEPLOY_TARGET/.deploy-stamp.json (default $HOME/.claude/bin, as deploy_stamped.py writes it); its revision must be a
+# full 40 hex sha (a ref name such as HEAD is not a recorded revision) and the line's newest loop commit must be that
+# revision or its ancestor. A missing, unreadable or malformed stamp, or a revision this repository does not hold, refuses.
+# A line with no scripts/loop commit has nothing to be stale against and goes on with a NOTE.
+LOOPC=$(git log -1 --format=%H HEAD -- scripts/loop 2>/dev/null) || refuse stale-deploy "cannot read the line's history under scripts/loop"
+if [ -z "$LOOPC" ]; then
+  echo "NOTE deploy: no scripts/loop commit on this line; the install was not compared"
+else
+  DSTAMP="${BROTHER_DEPLOY_TARGET:-$HOME/.claude/bin}/.deploy-stamp.json"
+  DREV=$(python3 -B -c 'import json,sys; print(json.load(open(sys.argv[1]))["revision"])' "$DSTAMP" 2>/dev/null) || DREV=""
+  printf '%s\n' "$DREV" | grep -Eq '^[0-9a-f]{40}$' || refuse stale-deploy "the deploy stamp $DSTAMP is missing, unreadable or names no full revision; redeploy the loop tools with scripts/loop/deploy_stamped.py"
+  git merge-base --is-ancestor "$LOOPC" "$DREV" 2>/dev/null || refuse stale-deploy "the installed loop tools (stamp ${DREV%"${DREV#???????????}"}) do not contain the line's newest scripts/loop commit ${LOOPC%"${LOOPC#???????????}"}; redeploy with scripts/loop/deploy_stamped.py"
+  echo "OK   deploy  the install contains ${LOOPC%"${LOOPC#???????????}"}"
+fi
+
 # 1b CLOCK (1.1.7 LR1.b): a record the whole gate reads against the clock must still be fresh when the run ENDS, not
 # only when it starts. 2026-10-21: three standing exceptions expired at midnight and every tree's gate went red for a
 # reason no build caused. The close ceremony pack and the restore drill record are asked, from this launcher's own
-# checkout, for their expiry before the deadline (close_ceremony_check.expiry_errors, acc6_restore_evidence.expiry_errors);
+# checkout, for their expiry before the deadline (close_ceremony_check.expiry_errors, which reads the newest close: a
+# handover record never expires by the clock, a legacy pack does; acc6_restore_evidence.expiry_errors);
 # an expiry, a drill record that is missing or unreadable, or a helper that crashes refuses [clock] with the first line
 # and nothing starts. THE CLOCK RULE IS THE HUB'S ESTATE LAW, so it is NOT a refusal where it cannot apply: a route whose
 # folder holds no such helpers (the plugin's bundle/runtime/loop) and a handover root that does not exist (another
@@ -238,7 +256,7 @@ try:
     root = hroot or cc.ROOT
     lines = []
     if os.path.isdir(root):
-        lines += cc.expiry_errors(root, deadline)
+        lines += cc.expiry_errors(root, deadline, repo=repo)
     else:
         print("NOTE clock: no handover root at %s (another user's machine), the close pack was not checked" % root)
     lines += ar.expiry_errors(repo, deadline)

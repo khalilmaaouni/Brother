@@ -119,10 +119,23 @@ def run(explain=False):
             return 2, "NO-DATA: could not build a work_record plan: %s" % problems
 
         claims = os.path.join(tmp, "claims.json")
+        # THIS RUN'S OWN RESERVATION, as acceptance_4 and acceptance_11 hold
+        # theirs: without it LaneWorker's disk admission refuses the worker on
+        # any machine under the 15 GiB cleanup band, and this test measures
+        # free disk instead of the spine. The store is this run's own, in tmp.
+        try:
+            import machine_reservation
+        except ImportError as exc:
+            return 2, "NO-DATA: could not import the machine reservation: %s" % exc
+        res_store, holder = os.path.join(tmp, "MACHINE-RESERVATION.json"), "acceptance-1-%d" % os.getpid()
+        _held, problem = machine_reservation.acquire(res_store, holder, 600)
+        if _held is None:
+            return 2, "NO-DATA: this run could not hold its own machine reservation: %s" % problem
         start = time.monotonic()
         proc = sh([sys.executable, LOOP_BRIDGE,
                    "--plan", record["path"], "--claims", claims,
                    "--owner", "acceptance-1", "--cwd", repo,
+                   "--reservation-path", res_store, "--reservation-holder", holder,
                    # harness pins slots so the test does not measure free disk
                    "--slots", "2",
                    "--worker-cmd", "sh", worker],

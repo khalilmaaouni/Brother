@@ -26,7 +26,7 @@
     },
     "closing-ceremony-real": {
       "obligation": "REQUIRED_FOR_RELEASE",
-      "reason": "reads the machine's own handover root (~/Documents/BrotherModeUp-handovers), which CI does not have; the local lander and the release closeout run it for real, the fixture suite alone is not this gate."
+      "reason": "reads the machine's own handover root (~/Documents/BrotherModeUp-handovers, or BROTHER_HANDOVER_ROOT) and judges its declared handover records (HO1) and the whole root's private terms, which CI does not have; the local lander and the release closeout run it for real, the fixture suite alone is not this gate."
     },
     "one-plugin-readiness-static": {
       "obligation": "REQUIRED_FOR_RELEASE",

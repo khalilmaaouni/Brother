@@ -96,6 +96,7 @@ def write_receipt(run_dir, named=None, drop=None):
                            "command": "python3 -m pytest test_mathlib.py -q",
                            "exit_code": 0}],
                 unproven=[],
+                intent={"outcome": OUTCOME, "units": []},   # OUT1.b: what receipt_record carries
                 host_capability={"receipt_path": named or path})
     if drop:
         del body[drop]
@@ -497,6 +498,42 @@ class ListingShowsTheReview(Base):
         self.assertIn("reviewed: 0, skipped: 0, no-data: 2", text)
         self.assertEqual([open(p, "rb").read() for p in (path, corrupt)],
                          before)
+
+
+
+class OutcomeDrift(Base):
+    """OUT1.b: the receipt must carry the outcome the run's intake recorded; acceptance refuses one that does not,
+    and refuses before anything is written."""
+
+    def rewrite(self, **fields):
+        path = receipt_path(self.run)
+        with open(path, encoding="utf-8") as fh:
+            body = json.load(fh)
+        body.update(fields)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(body, fh)
+
+    def test_a_replaced_outcome_is_refused_and_writes_nothing(self):
+        self.rewrite(outcome="something else entirely")
+        reason = self.refused("outcome-drift")
+        self.assertIn("something else entirely", reason)
+        code, out = self.accept()
+        self.assertNotEqual(0, code, out)
+        self.assertEqual([], self.listing())
+
+    def test_a_receipt_with_no_outcome_is_refused(self):
+        self.rewrite(intent={"units": []})
+        self.assertIn("carries no outcome", self.refused("outcome-drift"))
+
+    def test_a_run_whose_intake_recorded_no_outcome_is_refused(self):
+        run = make_run(os.path.join(self.runs, "run-20261012T0800"), self.project, outcome="")
+        self.assertIn("records no outcome", self.refused("outcome-drift", run=run))
+
+    def test_a_reworded_but_equal_outcome_still_binds(self):
+        """Control: the clean fixture, re-spaced and re-cased, is the same outcome, never a drift."""
+        self.rewrite(outcome="  Guard non-numeric   input ")
+        binding, reason = self.resolve()
+        self.assertIsNotNone(binding, reason)
 
 
 if __name__ == "__main__":

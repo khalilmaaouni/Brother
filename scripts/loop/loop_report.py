@@ -194,6 +194,68 @@ def held_cause_table(log_path, from_last_run: bool = False) -> List[Tuple[str, s
     return [r for r in (_held_cause(line.rstrip()) for line in lines) if r is not None]
 
 
+IDLE_MARK = "idle_with_work"   # stage_log.IDLE_MARK: the run-state row's monitor field
+
+
+def run_dir_of(log_path):
+    """(run directory, why): the run directory a driver log belongs to, found by its two dated lines, RUN START <iso> and
+    RUN PID <pid>, as <runs root>/run-<YYYYMMDD>-<HHMMSS>-<pid> (loop_until.sh make_run_dir; the runs root is
+    BROTHER_RUNS_ROOT, as the driver exports it, else ~/.claude/evidence/loop-runs). None with the reason when the log is
+    unreadable, names no start or pid, or the name matches no directory or more than one: the caller says NO-DATA."""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except (OSError, TypeError):
+        return None, "the driver log cannot be read"
+    day = next((l[len("RUN START "):len("RUN START ") + 10].replace("-", "") for l in lines if l.startswith("RUN START ")), "")
+    pid = next((l[len("RUN PID "):].strip() for l in lines if l.startswith("RUN PID ")), "")
+    if not (day.isdigit() and len(day) == 8 and pid.isdigit()):
+        return None, "the driver log names no RUN START date and RUN PID, so its run directory is unknown"
+    root = os.environ.get("BROTHER_RUNS_ROOT") or os.path.expanduser("~/.claude/evidence/loop-runs")
+    try:
+        found = [n for n in os.listdir(root) if re.fullmatch(r"run-%s-\d{6}-%s" % (day, pid), n)]
+    except OSError:
+        return None, "the runs root %s cannot be read" % root
+    if len(found) != 1:
+        return None, "%d run directories under %s match run-%s-*-%s" % (len(found), root, day, pid)
+    return os.path.join(root, found[0]), ""
+
+
+def idle_rows(run_dir):
+    """(rows, why): every `monitor: idle_with_work` row of <run dir>/run-state.jsonl, in file order, whoever wrote it (the
+    loop pass, the outside watch, or a hand run of stage_log monitor). STAB1.l: the report reads the run state, never the
+    driver log's echo of it, so a row no pass echoed is not missed. rows is None, with the reason, when the file is
+    missing, empty or unreadable, or holds any line that is not a JSON object (a truncated idle row included), because a
+    run that kept no readable state has not shown zero rows."""
+    p = os.path.join(run_dir, "run-state.jsonl")
+    try:
+        with open(p, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None, "%s cannot be read" % p
+    rows, bad, seen = [], 0, 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            bad += 1
+            continue
+        if not isinstance(r, dict):
+            bad += 1
+            continue
+        seen += 1
+        if r.get("monitor") == IDLE_MARK:
+            rows.append(r)
+    # L1 (STAB1.l review round 1): a count read from a file that may have lost its tail is not a count. A line that is not a
+    # JSON object (a truncated idle row included) or a file with no row at all is NO-DATA, never "0 rows".
+    if bad:
+        return None, "%s holds %d unreadable line(s), so a truncated idle row cannot be ruled out" % (p, bad)
+    if not seen:
+        return None, "%s holds no row" % p
+    return rows, ""
+
 def _cost(v):
     """A cost as a float, or None when it is UNKNOWN: null, missing, a bool, not a number, not finite or negative.
     FINDING 6, 2026-09-27: float(actual_cost or 0) turned a null or missing cost into a measured zero, uncounted and
@@ -750,6 +812,20 @@ def report(since_hours: int = 24, plan_path: str = PLAN, out=sys.stdout, window=
         for (line, cause), n in list(seen.items())[:20]:
             w("    %s%s\n      -> %s\n" % (line[:110], " (x%d)" % n if n > 1 else "", cause[:110]))
         w("    %d HELD line(s), %d UNEXPLAINED\n" % (len(held), unexplained))
+    w("\n  IDLE WITH WORK (source: the run's run-state.jsonl, found from the driver log named by --run)\n")
+    if not log_path:
+        w("    NO-DATA: no run is named (--run DRIVER_LOG), so no idle_with_work row was read. That is not zero rows.\n")
+    elif not os.path.isfile(log_path):
+        w("    NO-DATA: the driver log %s cannot be read, so no idle_with_work row was read. That is not zero rows.\n" % log_path)
+    else:
+        _rd, _why = run_dir_of(log_path)
+        _idle, _why = idle_rows(_rd) if _rd else (None, _why)
+        if _idle is None:
+            w("    NO-DATA: %s, so no idle_with_work row was read. That is not zero rows.\n" % _why)
+        else:
+            for _r in _idle[:5]:
+                w("    run %.60s, sequence %.12s, state %.20s, phase %.40s\n" % (_r.get("run"), _r.get("sequence"), _r.get("state"), _r.get("phase")))
+            w("    %d idle_with_work row(s)%s%s\n" % (len(_idle), ": work was admissible while no driver was alive, see the run state" if _idle else "", " (%s)" % _why if _why else ""))
     wip_lines, wip_code = wip_section(wip_record, now.timestamp())
     for _wl in wip_lines:
         w(_wl + "\n")

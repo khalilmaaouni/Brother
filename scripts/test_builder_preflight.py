@@ -293,7 +293,7 @@ class TheFiveLintsRefuseBeforeDone(Lane):
         here = os.getcwd()
         try:
             os.chdir(self.lane)
-            with mock.patch.dict(os.environ, self.env()), mock.patch.object(C, "PLAN", plan), \
+            with mock.patch.dict(os.environ, dict(self.env(), BROTHER_EVIDENCE=os.path.dirname(plan))), mock.patch.object(C, "PLAN", plan), \
                     mock.patch.object(C, "run_done_check", return_value=(0, "Ran 3 tests\nOK")), \
                     mock.patch.object(C.provenance, "journal", return_value=True), \
                     mock.patch("sys.stdout", new_callable=io.StringIO) as said:
@@ -346,7 +346,8 @@ class OneProofForDone(unittest.TestCase):
                                       "done_check": "python3 -B scripts/test_x.py -v"}]}, fh)
             with mock.patch.object(C, "PLAN", p), mock.patch.object(C, "run_done_check", return_value=(0, output)), \
                     mock.patch.object(C.provenance, "journal", return_value=True), \
-                    mock.patch("sys.stdout", new_callable=io.StringIO) as said:
+                    mock.patch.dict(os.environ, {"BROTHER_EVIDENCE": d}), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as said:   # STAB1.f: a skip writes a NEEDS_INPUT record, here
                 code = C.main(["A"])
             with open(p, encoding="utf-8") as fh:
                 return code, json.load(fh)["units"][0], said.getvalue()
@@ -356,7 +357,8 @@ class OneProofForDone(unittest.TestCase):
                                           "Ran 2 tests in 0.010s\n\nOK (skipped=1)\n")
         self.assertEqual(code, 1, said)
         self.assertEqual(unit["state"], "PARTIAL")
-        self.assertIn("A     NOT CLOSED: the done_check exited 0: PARTIAL: 1 test(s) skipped: test_x.T.test_b", said)
+        # STAB1.f: the skip is a question for the owner, asked once (was a NOT CLOSED line, red on every pass)
+        self.assertIn("A     NEEDS_INPUT: PARTIAL: 1 test(s) skipped: test_x.T.test_b (no network)", said)
 
     def test_the_same_run_without_the_skip_closes(self):
         code, unit, said = self.closed_by("test_a (test_x.T) ... ok\n\nRan 1 test in 0.010s\n\nOK\n")

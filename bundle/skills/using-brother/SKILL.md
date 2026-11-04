@@ -16,7 +16,12 @@ client with no slash commands, and for "continue" or "resume" alone.
 Other files carry its intent; a session finding a competing version follows
 this one and fixes the other. Evaluate in order, stop at the first match:
 
-1. **Bare, and unfinished work exists here.** Discovery decides, never a
+1. **Bare, and unfinished work exists here.** First, receive any handover
+   record: `python3 "$BROTHER_PLUGIN_ROOT/runtime/handover_record.py" receive
+   --repo <repo>` (from a checkout of the Brother repository, the copy in its scripts folder). Exit 0: relay
+   its STATE and first action, then continue below. Exit 2: no record, go on
+   as before. Exit 1: relay the one refusal line and its fix, and do not act
+   on the record. Then discovery decides, never a
    guess: `python3 "$BROTHER_PLUGIN_ROOT/runtime/brother_run.py" --continue
    --cwd <repo>` (`$CLAUDE_PLUGIN_ROOT` under Claude Code, `$PLUGIN_ROOT`
    under Cursor). One unfinished
@@ -29,7 +34,13 @@ this one and fixes the other. Evaluate in order, stop at the first match:
    outcome: the execution spine, never accidentally resuming old work. An
    assurance ask (verify, review, migration, a number): the review verb in
    assurance mode. "Show me what happened": the status verb, which reads the
-   run's receipt; no second run database.
+   run's receipt; no second run database. "Set up Brother", or session start
+   saying setup is not complete: print the privacy notice in full from
+   `python3 "$BROTHER_PLUGIN_ROOT/runtime/hooks/brothermode/scripts/setup.py"
+   --notice` (`$CLAUDE_PLUGIN_ROOT` under Claude Code), ask where their private
+   memory should live (default `~/BrotherModeVault`) and for a plain yes. Only
+   on that yes run the same file with `--accept-notice --mode plugin --vault
+   <that folder>`; any other answer writes nothing.
 4. **A 1.1.0 skill name opens the request** (`brotherme-`, `brothermode-` or
    `brothersbe-` and a verb): look it up in references/retired-names.md, say
    one line, `<old name> is now the brother-<verb> skill (in Claude Code:
@@ -40,6 +51,12 @@ this one and fixes the other. Evaluate in order, stop at the first match:
 Whatever the row, a normal task is asked at most one genuinely blocking
 question, and never to choose a product name, an autonomy code, a plan
 format, a run id or a test framework.
+
+Route a plain goal with `door.py --route "<goal>"`, run by you as `python3
+"$BROTHER_PLUGIN_ROOT/runtime/door.py" --route "<goal>"` (`$CLAUDE_PLUGIN_ROOT`
+under Claude Code). Exit 0: say its sentence and carry out that route. Exit 2
+(NO-DATA): never present the goal as delivered; use the rows above. The person
+never copies a command; show grouped examples only when asked what Brother can do.
 
 ## Any task that names Brother: run the engine, then read the receipt
 
@@ -114,6 +131,15 @@ before the first claim. Full detail: the Codex smoke runbook in the Brother repo
 A git worktree's `.git` write grant is what `git rev-parse
 --git-common-dir` prints, never `<repo>/.git`.
 
+## Saying where the work stands
+
+Asked how the work is going, or when a run waits, stops or finishes, say the
+lines `workflow_card` in `runtime/proof_card.py` prints for the run's state
+(`current_run` in `runtime/loop/stage_log.py`) and its proof verdict. Never
+call unproven work done: acceptance is the person's decision. No flags,
+commands, paths, run ids or product names unless details are asked for; never
+drop a problem, a cost limit or a security decision.
+
 ## First, do nothing
 
 Most work needs no trust machinery. Trivial, reversible, nobody would ask
@@ -137,10 +163,18 @@ reaching a decision. Absent evidence is NO-DATA, never a pass.
 ## Native mobile and creative work
 
 For an iPhone, iPad, SwiftUI or simulator outcome, such as "check my change
-on iPhone 16", load references/native-mobile.md. Its first section is the run:
-doctor, profile-init, reference-init, run, ending in one receipt that names
-the simulator runtime and the screenshot hash. It supplies reference, research, design, motion, build and handoff steps
-within the existing execution route and product verdicts.
+on iPhone 16", first ask the door which steps it offers:
+`python3 "$BROTHER_PLUGIN_ROOT/runtime/door.py" --available`. Load
+references/native-mobile.md and run its sequence only when the `capabilities` list
+includes the mobile steps (`mobile.*` or `mobile.run`). A route the door names for
+the same words, such as build-outcome or app-correction, does not unlock them: it
+starts an ordinary checked run, not the simulator workflow. The first section of the
+reference is the run: doctor, profile-init, reference-init, run, ending in one receipt
+that names the simulator runtime and the screenshot hash. It supplies reference,
+research, design, motion, build and handoff steps within the existing execution
+route and product verdicts. When the mobile steps are not listed, say plainly that
+Brother does not offer native mobile checks yet, and do not run the mobile commands
+by hand.
 
 ## Cursor-native agents
 
@@ -207,6 +241,35 @@ instructions to the person.
 Every number the loop reports is read from a ledger or a log. A run that ends with nothing landed says so, with the refusal classes that stopped it; it never rounds silence up to progress.
 
 ## The cut: the owner approves from the app
+
+Publishing is maintainer tooling and no install carries it: the cut driver
+and the cut exist only in a checkout of the Brother repository. Before any
+command in this section is named, ask the door where it runs:
+
+```bash
+python3 scripts/door.py --route "publish the release"
+```
+
+(from an installed plugin, `python3 "$BROTHER_PLUGIN_ROOT/runtime/door.py"
+--route "publish the release"`, `$CLAUDE_PLUGIN_ROOT` under Claude Code).
+Exit 0 with `route: cut-release` means a maintainer checkout: continue below.
+Any other answer is the whole reply: say it as printed (it names the
+limitation and the supported next step, closing with the evidence in hand and
+handing the result to a maintainer), and never name a cut command or a file
+this install does not contain.
+
+In a maintainer checkout, when a checked result is asked to be published, the
+cut is the end of the same workflow, through one command, the cut driver:
+
+```bash
+python3 scripts/cut_driver.py run --version 1.2.3 --body <release notes file>
+```
+
+It chooses for itself: a first run starts fresh, a stopped run for the same
+commit is picked up where it stopped, and a run already going for that commit
+is followed, never started twice. Never ask the person for a fresh or resume
+choice, a record path or a command to copy. A missing or empty notes file
+stops it before the long checks run; say so in plain words.
 
 Maintainer tooling, in a checkout of the Brother repository. A real cut waits
 for the owner, and the session never gives its answer. When the cut is ready

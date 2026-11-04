@@ -47,32 +47,82 @@ import os
 import re
 import sys
 
-VAULT = os.path.expanduser("~/Documents/Kay Vault")
 FOLDER = "50-Reference"
 INDEX = "Patterns-Index.md"
 NODATA = "NO-DATA"
+SETTING = "BROTHERMODE_VAULT"
+
+
+def _load_sibling(name):
+    """(module, None) or (None, reason): a BrotherMode tool loaded by path from
+    beside this file. The same file ships in three places, so the folder is
+    looked up, never assumed: next to this file (products/brothermode/tools/
+    and bundle/runtime/hooks/brothermode/tools/), the source checkout's tools
+    folder (scripts/), or the installed runtime's hooks copy (bundle/runtime/).
+    A missing or broken module is a reason the caller reports, never a guess."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (here, os.path.join(here, "..", "products", "brothermode", "tools"),
+              os.path.join(here, "hooks", "brothermode", "tools")):
+        path = os.path.join(d, name + ".py")
+        if not os.path.isfile(path):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod, None
+        except Exception as exc:  # sbe: allow-silent a module that cannot load is returned as a named reason; both callers turn it into a refusal or a NO-DATA line, never a fallback
+            return None, "%s could not be loaded (%s: %s)" % (name, type(exc).__name__, exc)
+    return None, "%s.py was not found beside %s" % (name, os.path.basename(__file__))
+
+
+def vault_root():
+    """(root, None) or (None, reason). The ONE answer to 'which vault?' is
+    bm_vault.resolve_vault_root: an environment name, then the installer
+    config's vault key, and no guessed folder of any kind. root None is a
+    NO-DATA the caller reports; the reason names the setting to fix."""
+    mod, why = _load_sibling("bm_vault")
+    if mod is None:
+        return None, "%s; set %s once it can" % (why, SETTING)
+    res = mod.resolve_vault_root(None, os.environ, mod._config())
+    if res["root"]:
+        return res["root"], None
+    if res["verdict"] == "NO-DATA":
+        return None, ("no vault configured: set %s to your vault folder, or "
+                      "bind one in bm_vault.json; no folder is guessed" % SETTING)
+    return None, res["detail"]
+
+
+def require_vault_root(explicit, tool):
+    """The vault a shipped tool runs on: explicit (a --vault flag) when given,
+    else vault_root()'s answer. Unresolved prints one '<tool>: NO-DATA: <reason>'
+    line on stderr, the reason naming the setting to fix, and exits 2 before
+    the caller reads or writes anything: no tool keeps a folder of its own to
+    fall back on (KEY1.f). The line goes through bm_learning.say, so a value in
+    the reason (an environment path) cannot open a second line."""
+    if explicit:
+        return explicit
+    root, why = vault_root()
+    if root:
+        return root
+    learning, _ = _load_sibling("bm_learning")
+    if learning is not None:
+        learning.say("%s: %s: %s" % (tool, NODATA, why), file=sys.stderr)
+    else:
+        print(NODATA + ": no vault root, and bm_learning.py could not be loaded "
+              "to say why; set " + SETTING, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _load_intake_gate():
-    """Load bm_vault_intake.py's hard_gate by path (products/brothermode/
-    tools/bm_vault_intake.py, a sibling tree this module never edits): the
-    SAME credential and deny-list gate `admit` and `capture` run before
-    writing, so a pattern note routes through the estate's one front door
-    for vault content rather than being written ungated. Returns None when
+    """Load bm_vault_intake.py's hard_gate by path (a sibling tree this module
+    never edits): the SAME credential and deny-list gate `admit` and `capture`
+    run before writing, so a pattern note routes through the estate's one front
+    door for vault content rather than being written ungated. Returns None when
     the module cannot be loaded, so the caller can fail closed rather than
     silently skip the gate."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "..", "products", "brothermode", "tools",
-                        "bm_vault_intake.py")
-    if not os.path.isfile(path):
-        return None
-    try:
-        spec = importlib.util.spec_from_file_location("bm_vault_intake", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod.hard_gate
-    except Exception:  # sbe: allow-silent optional gate module load failure, gate_text below turns this into a named refusal rather than an ungated write
-        return None
+    mod, _ = _load_sibling("bm_vault_intake")
+    return getattr(mod, "hard_gate", None)
 
 
 def gate_text(text, deny_list_path=None, loader=_load_intake_gate):
@@ -130,7 +180,7 @@ def note_body(name, solves, what, evidence, project, borrowed="", receipt=""):
     return "\n".join(lines)
 
 
-def write(name, solves, what, evidence, project="all", borrowed="", vault=VAULT,
+def write(name, solves, what, evidence, project="all", borrowed="", vault=None,
           receipt="", deny_list=None, gate=gate_text):
     """(path, written). Never overwrites: the vault constitution forbids editing
     an existing note, and a pattern that needs rewriting is a new pattern.
@@ -140,7 +190,13 @@ def write(name, solves, what, evidence, project="all", borrowed="", vault=VAULT,
     bm_vault_intake.py) so a pattern note can never carry a credential or a
     denied term into the vault. A gate refusal, same as a missing vault
     folder, writes nothing and reports (None, False); the refusal reason
-    goes to stderr, never invented and never silently dropped."""
+    goes to stderr, never invented and never silently dropped.
+
+    vault=None asks vault_root() (the one resolver); no configured vault is
+    (None, False) like a missing folder, never a guessed one."""
+    vault = vault or vault_root()[0]
+    if not vault:
+        return None, False
     folder = os.path.join(vault, FOLDER)
     if not os.path.isdir(folder):
         return None, False
@@ -178,11 +234,17 @@ def is_pattern(head):
     return bool(re.search(r"^solves:\s*\S", head, re.M))
 
 
-def find(query, vault=VAULT):
+def find(query, vault=None):
     """Patterns whose PROBLEM matches the words somebody actually typed.
 
     Searches `solves` and the description, deliberately not the title, because
-    matching titles is what makes a knowledge base feel empty to a newcomer."""
+    matching titles is what makes a knowledge base feel empty to a newcomer.
+
+    vault=None asks vault_root(); no configured vault is None (nothing was
+    searched), the same sentinel as a missing folder."""
+    vault = vault or vault_root()[0]
+    if not vault:
+        return None
     folder = os.path.join(vault, FOLDER)
     if not os.path.isdir(folder):
         return None
@@ -213,6 +275,12 @@ def find(query, vault=VAULT):
     return hits
 
 
+def _no_data(why):
+    """The one NO-DATA line main() prints on stderr; the exit code is 2."""
+    print("%s: %s" % (NODATA, why), file=sys.stderr)
+    return 2
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd")
@@ -230,26 +298,29 @@ def main(argv=None):
         ap.print_help()
         return 2
 
+    root, why = vault_root()
+    if root is None:
+        return _no_data(why)
+
     if args.cmd == "write":
         path, written = write(args.name, args.solves, args.what, args.evidence,
-                              args.project, args.borrowed)
+                              args.project, args.borrowed, vault=root)
         if path is None:
-            print("%s: the vault folder %s/%s is not present, so nothing was "
-                  "written" % (NODATA, VAULT, FOLDER), file=sys.stderr)
-            return 2
+            return _no_data("the vault folder %s/%s is not present, so nothing "
+                            "was written" % (root, FOLDER))
         if not written:
             print("already recorded, and nothing was changed: %s" % path)
             return 2
         print("wrote %s" % path)
         return 0
 
-    hits = find(" ".join(args.query) if args.cmd == "find" else "a")
+    hits = find(" ".join(args.query) if args.cmd == "find" else "a", root)
     if hits is None:
         print("%s: the vault could not be read" % NODATA, file=sys.stderr)
         return 2
     if args.cmd == "list":
-        hits = find("")
-        folder = os.path.join(VAULT, FOLDER)
+        hits = find("", root)
+        folder = os.path.join(root, FOLDER)
         names = []
         for fn in sorted(os.listdir(folder)):
             if not fn.endswith(".md"):

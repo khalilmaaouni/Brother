@@ -35,6 +35,9 @@ def write_queue(items):
     return fh.name
 
 
+# docs/plan is not shipped in the public export, so there the seed queue does not exist: the premise is absent, not
+# the behaviour broken. A tree that carries the seed still runs every case below.
+@unittest.skipUnless(os.path.isfile(SEED), "this tree carries no founder queue seed")
 class TheSeedFileRendersNCards(unittest.TestCase):
     def test_the_seed_file_has_five_open_items(self):
         items, err = BS.open_founder_queue_items(SEED)
@@ -70,6 +73,8 @@ class MissingFileIsNoDataInBothTools(unittest.TestCase):
         line = BS.founder_queue_status_line("/no/such/founder-queue.json")
         self.assertTrue(line.startswith("Founder queue: %s" % BS.NODATA))
 
+    # The board's own source (docs/plan roadmap) is not shipped in the public export: premise absent there.
+    @unittest.skipUnless(os.path.isfile(G.SOURCE), "this tree carries no readiness roadmap")
     def test_the_board_section_shows_no_data_not_a_crash(self):
         old = BS.FOUNDER_QUEUE_PATH
         try:

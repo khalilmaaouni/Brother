@@ -6,9 +6,16 @@ isolated units and real done checks, as the parent skill requires.
 
 ## Check a change on a simulator
 
-Say what to check ("check my change on iPhone 16") and follow this sequence. It
-runs the project's own tests, builds, installs and launches on the simulator
-you name, and ends in one receipt. Evidence goes outside the repository.
+Only when the door lists the mobile steps. Ask the door first
+(`python3 "$BROTHER_PLUGIN_ROOT/runtime/door.py" --available`) and look for
+`mobile.*` or `mobile.run` in `capabilities`. A route it names for your words
+(build-outcome, app-correction) is not that: those start an ordinary checked
+run. If the mobile steps are not listed, say plainly that Brother does not offer
+native mobile checks yet and stop: do not run the commands below by hand, they
+are the same steps the door has not admitted. When they are listed, say what to
+check ("check my change on iPhone 16") and follow this sequence. It runs the
+project's own tests, builds, installs and launches on the simulator you name,
+and ends in one receipt. Evidence goes outside the repository.
 
 ```sh
 python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" doctor --repo /path/to/app --out /path/to/evidence/doctor.json
@@ -38,6 +45,68 @@ device; a one command device matrix is planned work. The receipt names the
 simulator (`simulator.name`), its runtime (`simulator.runtime`), the screenshot
 hash (`screenshot.sha256`), and says human acceptance is NO-DATA
 (`observations.human_acceptance`) until a person looks.
+
+## Ask the door for any mobile step
+
+The sequence above is how a change is checked on a simulator once the door
+offers it. The door also carries a route for every step the mobile workflow has, but it offers
+a step to a consumer only after that step has passed its release checks on this
+install. Ask `python3 "$BROTHER_PLUGIN_ROOT/runtime/door.py" --available` (or ask
+Brother for help) for the list; a step that is not on it answers "Brother does
+not offer this yet" and starts nothing. The commands below are the maintainer
+path: they work for a step only when it is listed or the maintainer has admitted
+it, and they never write a second copy of the logic. The door checks first and
+starts nothing while something is missing: a file you named, a simulator, a
+reachable Appium server, or a permission. It then lists each missing item with
+how to supply it, so you can ask the same thing again.
+
+```sh
+python3 "$BROTHER_PLUGIN_ROOT/runtime/door.py" --capability mobile.journey --input record=/path/to/journey.json
+python3 "$BROTHER_PLUGIN_ROOT/runtime/door.py" --capability mobile.run --allow write --input repo=/path/to/app --input profile=/path/to/evidence/profile.json --input reference=/path/to/evidence/reference.json --input out=/path/to/evidence/run-1
+```
+
+What each route does, by the thing you want to do:
+
+- Describe the project: `mobile.profile_detect` reads the project and writes
+  nothing. `mobile.profile_init` writes the run profile (write permission).
+  `mobile.doctor` and `mobile.toolchain` say what this machine can build.
+- Turn an outcome into a journey: `mobile.journey` checks the journey record,
+  `mobile.canonical_action` checks one action, `mobile.plan` compiles the plan,
+  `mobile.ownership` says which file owns each unit.
+- Pin the working reference: `mobile.reference_init` records the clean
+  checkout, `mobile.reference_record` records an installed build,
+  `mobile.reference_check` checks ancestry, `mobile.reference_lock` locks an
+  installed build.
+- Choose a driver: `mobile.driver_contract` checks a driver, `mobile.driver_select`
+  picks one for an action from the drivers you describe.
+- Run it: `mobile.run` is the simulator run above. `mobile.native_ios` and
+  `mobile.appium` run one action through that driver. `mobile.canary` runs the
+  whole workflow against the real toolchain. `mobile.visual_only` grounds a
+  target in a screenshot.
+- Reset state: `mobile.state_fixture` checks a fixture, `mobile.state_apply`,
+  `mobile.state_uninstall`, `mobile.state_install`, `mobile.state_checkpoint` and
+  `mobile.state_hooks` act on the device. `mobile.test_route` checks a test route.
+- Look at the screen: `mobile.screen_observation` checks an observation record.
+- Native tests: `mobile.test_bundle_record` runs the tests and records the
+  result bundle (the command must start with xcodebuild, xcrun or swift),
+  `mobile.test_bundle_validate` checks the record, `mobile.test_bundle_v2`
+  wraps it.
+- Design and media: `mobile.design_search`, `mobile.design_brief`,
+  `mobile.design_media`, `mobile.design_evidence`, `mobile.design_staleness`.
+- Release, passport and claims: `mobile.release_state` keeps uploaded,
+  processing, available, installed and released as five separate states.
+  `mobile.passport` composes the journey passport. `mobile.claims_check`,
+  `mobile.claims_register` and `mobile.claims_gate` handle product claims.
+  `mobile.pack` and `mobile.verify_pack` bundle and check a run.
+
+Three rules the door keeps. A device that is not a listed simulator counts as a
+physical device and needs `--allow device`; `--allow write` never grants it. A
+screenshot only route says so in its answer: a screenshot shows where a target
+appears and proves no tap, no interaction and no human acceptance. Every answer
+says human acceptance is NO-DATA until a person looks. When this install does
+not carry a script (only the simulator workflow, the design helper and the
+profile detector ship in the installed bundle), the answer is NO-DATA naming
+that script, and the fix is to use a checkout of the Brother repository.
 
 ## Working order
 
@@ -87,7 +156,7 @@ hash (`screenshot.sha256`), and says human acceptance is NO-DATA
 In an installed bundle, resolve the plugin root from `${BROTHER_PLUGIN_ROOT}`
 or `${CLAUDE_PLUGIN_ROOT}` and use the scripts under `runtime/`. In a checkout,
 run the corresponding files under `scripts/` from the repository root.
-The run section above is the shipped way to check a change on a simulator; these two helpers are what it calls.
+When the door lists the mobile steps, the run section above is the way to check a change on a simulator; these two helpers are what it calls.
 
 ```sh
 python3 "$BROTHER_PLUGIN_ROOT/runtime/mobile_workflow.py" --help

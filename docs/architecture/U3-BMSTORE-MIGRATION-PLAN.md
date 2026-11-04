@@ -85,6 +85,8 @@ The module docstring names five. Each maps to a different mechanism, and the map
 
 ### F1, F2, F11: two sessions each believing they held a fence over the same files
 
+<!-- doc-assurance: allow-missing .claude/worktrees/x/ an example worktree path used to explain the spelling rule, not a file -->
+
 Mechanism: overlap detection, not expected_version.
 
 - `paths_overlap(a, b)` (721), the one rule, built from `_coverage_key` (704), `_prefix_contains` (694), `_to_posix` (570) and `_normcase` (646).
@@ -219,6 +221,8 @@ The bar for touching the original location: every group green, and every red cap
 - 0.5 One case flag: after a `Store` is constructed through the facade, a second facade caller sees the same `_FS_CASE_INSENSITIVE`. Mutation: load a second copy by path, watch a case differing claim stop conflicting.
 
 ### Group 1, identity and fencing (F1, F2, F11)
+
+<!-- doc-assurance: allow-missing .claude/worktrees/x/pyproject.toml an example worktree path used to explain the conflict, not a file -->
 
 - 1.1 Two claims on overlapping paths from two different session ids: the second refuses `OwnershipRefused` reason `overlap`, naming the other record. Mutation: make `paths_overlap` return False.
 - 1.2 Glob coverage: `api/*.py` then `api/pay.*` refuses `overlap`, though no single filename matches both.

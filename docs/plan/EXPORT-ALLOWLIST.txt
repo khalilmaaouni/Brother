@@ -137,6 +137,14 @@ docs/plan/one-plugin-trigger-corpus.json
 # README proof suite test_brother_run_continue.py imports it, and the 1.0.3
 # tag attempt was refused because the export did not carry it.
 docs/plan/CAPABILITY-AREAS.json
+# The route registry and capability inventory scripts/door.py --route and scripts/reach_check.py read (OUT1.a,
+# 2026-11-01): the door ships, so the file it routes from ships; the hermetic push check refused the export without it.
+docs/plan/ADMISSION.json
+# The fresh install walks a CORE group is admitted on (door._journey_gaps reads them beside the registry).
+docs/plan/JOURNEY-J1.json
+docs/plan/JOURNEY-J2.json
+docs/plan/JOURNEY-J4.json
+docs/plan/REACH.json
 # Added 2026-09-05, required-fast row: scripts/test_version_truth.py reads
 # this file as one of the places a shipped version string must repeat the
 # manifest's own number, and its own content says it IS the exported public
@@ -634,6 +642,7 @@ plugin/runtime/brother/core/dispatch_semaphore.py
 plugin/runtime/brother/core/dream_gate.py
 plugin/runtime/brother/core/dream_gate_policy.py
 plugin/runtime/brother/core/dream_record.py
+plugin/runtime/brother/core/dream_replay.py
 plugin/runtime/brother/core/dream_report.py
 plugin/runtime/brother/core/model_capability_profile.py
 plugin/runtime/brother/core/openrouter_dispatch.py
@@ -652,3 +661,6 @@ plugin/runtime/brother/core/product.py
 plugin/runtime/brother/core/receipt.py
 plugin/runtime/brother/core/run.py
 plugin/runtime/brother/core/state.py
+# Added 2026-11-02 with OUT1.m: the content door reads the pipeline at door.CONTENT_SOURCE in the export tree
+# (test_content_door_ops.py), and its shipped twin bundle/runtime/voice_pipeline.py is byte identical.
+plugin/runtime/brother/rtm/voice_pipeline.py

@@ -110,6 +110,8 @@ def write_fixture(root):
 class LivePlanInformational(unittest.TestCase):
     """Not a pass/fail gate: reports the live plan's real state."""
 
+    # docs/plan is not shipped in the public export, so there is no live plan to report on: premise absent.
+    @unittest.skipUnless(os.path.isfile(os.path.join(REPO_ROOT, 'docs', 'plan', 'UNIFIED-WBS.md')), 'this tree carries no live plan')
     def test_live_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             shutil.copytree(os.path.join(REPO_ROOT, 'docs'), os.path.join(tmp, 'docs'))

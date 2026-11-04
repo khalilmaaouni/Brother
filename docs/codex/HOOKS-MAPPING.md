@@ -51,6 +51,8 @@ The installer preserves these strings; it does not translate tool names or
 add missing matchers. Declared wiring alone cannot establish coverage of a
 host's tool calls.
 
+<!-- doc-assurance: allow-missing union.json the retired name of the hooks file; the sentence says it is retired -->
+
 [bm_hookchain.py](../../products/brothermode/tools/bm_hookchain.py) defines
 the commands behind BrotherMode's two chain entries. `stop` runs telemetry
 `stop-warn`, lead `watchdog --tick`, view `render --if-stale`, and view

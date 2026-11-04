@@ -91,6 +91,14 @@ class EntryPoints(unittest.TestCase):
         self.runs = os.path.join(self.home, ".claude", "evidence", "unit-runs")
         os.makedirs(os.path.join(self.d, "docs", "plan"))
         self.plan = os.path.join(self.d, "docs", "plan", "BROTHER-1.1.0-LAUNCH-WBS.json")
+        # the tools read the process table; this suite's own `ps` answers one row that is no loop tool, so the
+        # verdicts below never depend on what else runs on the machine, and the public runner's sandbox (which
+        # refuses /bin/ps) can run them
+        self.bin = os.path.join(self.d, "bin")
+        os.makedirs(self.bin)
+        with open(os.path.join(self.bin, "ps"), "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho '    1     0     1 /sbin/launchd'\n")
+        os.chmod(os.path.join(self.bin, "ps"), 0o755)
 
     def write_plan(self, subs, evidence):
         with open(self.plan, "w", encoding="utf-8") as fh:
@@ -98,7 +106,7 @@ class EntryPoints(unittest.TestCase):
 
     def run_tool(self, argv, **extra):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("BROTHER_", "SALVAGE_", "PYTHON"))}
-        env.update(HOME=self.home, **extra)
+        env.update(HOME=self.home, PATH=self.bin + os.pathsep + env.get("PATH", ""), **extra)
         return subprocess.run([sys.executable, "-B"] + argv, cwd=self.d, env=env, capture_output=True, text=True, timeout=120)
 
     # loop_done: a READY build of an unlanded sub unit keeps the loop WORKING; read as landed, it vanishes
@@ -211,6 +219,7 @@ class RunnerPoolEntryPoint(unittest.TestCase):
         os.makedirs(os.path.join(t.name, "docs", "plan"))
         plan = plan_of(subs, evidence)
         plan["units"][0]["spec"] = "spec.md"
+        plan["units"][0].update(lane="loop", loop_gradable=True)   # LOOP1.b: the pass admits only a loop lane, gradable unit
         if stage is not None:
             plan["units"][0]["execution_stage"] = stage
         with open(os.path.join(t.name, "docs", "plan", "BROTHER-1.1.0-LAUNCH-WBS.json"), "w", encoding="utf-8") as fh:

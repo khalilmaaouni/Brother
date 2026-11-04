@@ -121,6 +121,41 @@ class Refresh(Base):
         self.assertEqual(self.calls, [])
 
 
+class RenewalNeedsTheProvider(Base):
+    """AUTH1.b integrator cases: the two properties the frozen Expiry class reaches only through its own subprocess
+    probe. RENEWED is the one refresh word that exits 0 besides OK and SKIPPED (a seam's renewal), and a holder that
+    answers on the token lane is not a renewal: its bytes are not the provider's acceptance."""
+
+    def seam(self, name):
+        os.environ["BROTHER_LOGIN_SEAM"] = name
+        self.addCleanup(os.environ.pop, "BROTHER_LOGIN_SEAM", None)
+        with mock.patch.object(NW.MC, "_run", self.plain()):
+            return self.cli("refresh")
+
+    def test_a_renewable_seam_exits_zero(self):
+        rc, out = self.seam("renewable")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith("REFRESH RENEWED seam: renewable"), out)
+        self.assertEqual(self.calls, [], "a seam run makes no call")
+
+    def test_an_expired_seam_exits_nonzero(self):
+        """Control for the case above: without it, an exit 0 for every seam word would pass it."""
+        rc, out = self.seam("expired")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("REFRESH RENEWED", out)
+
+    def test_an_answering_holder_on_the_token_lane_is_not_a_renewal(self):
+        os.environ["BROTHER_LOOP_TOKEN"] = "on"
+        with mock.patch.object(NW.MC, "_run", self.plain()), \
+                mock.patch.object(NW.BL, "ask_holder", lambda *a, **k: "held-login-bytes"):
+            rc, out = self.cli("refresh")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith("REFRESH SKIPPED the loop token lane: the run's login holder answered"), out)
+        self.assertIn("not a renewal", out)
+        self.assertNotIn("held-login-bytes", out, "the holder's bytes are never printed")
+        self.assertEqual(self.calls, [])
+
+
 class SeatProbe(Base):
     def seat_runner(self, stdout=OK_DOC, rc=0):
         def run(argv, stdin, timeout, cwd, env=None):

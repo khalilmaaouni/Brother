@@ -388,6 +388,34 @@ def session_label(root, session_id):
     return label_for_token(ensure_token(root, session_id))
 
 
+def existing_label(root, session_id):
+    """The public label `session_id` already owns under `root`, or None.
+
+    READ ONLY: unlike session_label it never creates a token, because its
+    caller is the sibling BrotherSBE fence, which runs on every write and
+    must learn which bm1- label a harness session owns without handing every
+    session it judges a fresh identity on disk. Measured 2026-10-31: with no
+    such lookup that fence refused a claim's owner out of its own file,
+    because a derived label shares no prefix with the raw id behind it.
+
+    None for anything it cannot prove (no token, a corrupt one, a symlinked
+    one, an unusable argument); it never raises, and its caller treats None
+    as "no alias", which is exactly the behavior before this function."""
+    if not isinstance(root, str) or not root or not isinstance(session_id, str) \
+            or not session_id.strip():
+        return None
+    try:
+        p = token_path(root, session_id)
+        if os.path.islink(p) or os.path.islink(os.path.dirname(p)) \
+                or not os.path.isfile(p):
+            return None
+        with io.open(p, "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, ValueError):  # sbe: allow-silent unreadable token proves no ownership; caller keeps its pre-existing answer
+        return None
+    return label_for_token(text.strip()) if _valid_token_text(text) else None
+
+
 # ---------------------------------------------------------------------------
 # Path canonicalization.
 # ---------------------------------------------------------------------------
@@ -782,6 +810,66 @@ _FAIL_REASONS = {
         "the fence could not complete its check",
         "read the bm_fence_hook line on stderr for the reason"),
 }
+
+
+#: FENCE1.a (2026-11-02): the enforced refusal on a POSITIVELY fresh project
+#: (see _fresh_project). Measured origin: a first user's cost probe on the
+#: installed plugin, where the no-store reason above sent the agent to
+#: `bm_store.py init`, then the no-active-claims reason sent it to a hand
+#: claim, and the work finished outside Brother with no receipt. This names
+#: the Brother door instead, and says only what the door measurably does
+#: (FENCE1.a round 2): it opens a worktree lane per unit
+#: (worktree_lane.acquire, which needs a commit), and its spawned worker's
+#: lane gets its own store and claim (managed_safety.materialize on the
+#: lane, never on this project's root, so an edit here stays refused). Inside
+#: a coding session the door hands the lanes to the session without a claim,
+#: and this fence refuses the session's edits there too. Still a DENY and
+#: still a literal, same rule as _FAIL_REASONS: nothing from the payload,
+#: the root or the home directory.
+_FRESH_PROJECT_REASON = (
+    "BrotherMode is in enforced mode and refused this write because this "
+    "project is not set up for Brother: it has no BrotherMode store, so "
+    "there is no claim to check this edit against, and edits in this "
+    "project's own tree stay refused. The Brother door does the work in "
+    "worktree lanes of its own instead, which need at least one commit in "
+    "this repository. Run from a terminal outside a coding session (its "
+    "engine, brother_run.py, with the outcome in the person's own words), "
+    "the door runs its own worker in each lane under that lane's own store "
+    "and claim, and ends with a receipt. Inside a coding session the door "
+    "hands its lanes back to the session with no claim, and enforced mode "
+    "refuses those edits too. Do not set the store up or claim by hand. To "
+    "work in this session instead, the person sets BM_FENCE_MODE=advisory.")
+
+
+def _fresh_project(bs, root, source, raw_targets, cwd):
+    """True only when this project is POSITIVELY fresh: never set up, so the
+    door is the right thing to name. Every other answer is False, and False
+    keeps the old refusal word for word.
+
+    Positive means three facts, each established, never inferred:
+      1. the root came from a .git ancestor, not from BROTHERMODE_ROOT (a
+         store location somebody chose) and not from a marker;
+      2. lstat of the store folder raises FileNotFoundError and nothing
+         else. A symlink, dangling or not, is present; a folder holding a
+         corrupt or missing store is present; an lstat that fails any other
+         way is no answer, and no answer is not fresh;
+      3. no target is BrotherMode's own enforcement state (the store folder,
+         or '.', which overlaps it): a write there is never sent to the door.
+    Reads only: this function writes nothing and opens no store."""
+    if source != "git":
+        return False
+    try:
+        os.lstat(bs.store_dir(root))
+        return False
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    for raw in raw_targets:
+        rel = canonical_target(root, raw, cwd)
+        if rel is not None and bs.paths_overlap(rel, bs.STORE_DIRNAME):
+            return False
+    return True
 
 
 _GATE = None
@@ -1180,6 +1268,18 @@ def decide(payload):
                          "root %s, so the fence does not govern this write"
                          % root)
             return None, notes
+
+        # FENCE1.a: a fresh project's enforced refusal names the Brother
+        # door rather than the store's own CLI. Still a deny; advisory mode
+        # never reaches this and fails open below exactly as before.
+        if enforced_mode() and _fresh_project(bs, root, _source, raw_targets,
+                                              cwd):
+            notes.append(
+                "bm_fence_hook: DENY, %s has no BrotherMode store folder (a "
+                "fresh project), so the refusal names the Brother door and "
+                "what it does: its own lanes, a commit, no in-session worker"
+                % root)
+            return deny_payload(_FRESH_PROJECT_REASON), notes
 
         rows = active_claims(root)
         if not rows:

@@ -1,0 +1,931 @@
+#!/usr/bin/env python3
+"""Handover ceremony: collects a session's closing state and emits it as
+vault-ready notes plus a human handover doc. Founder order 2026-08-29: the
+handover ceremony becomes a FEATURE of /brother that automatically updates
+the estate's wisdom (vault notes, learnings, mistakes) and is parsable and
+searchable by the vault architecture.
+
+Five independent actions, any combination in one invocation:
+
+  --collect               print the measurable close state as JSON on
+                           stdout: git HEAD/clean state per --repo PATH
+                           (repeatable), open sbe tasks (id, owner, age),
+                           the day-plan ready set (reusing
+                           task_watchdog.py's own mirror of
+                           gen_command_center.ready_state, imported rather
+                           than re-derived), open pull requests (NO-DATA
+                           when gh is not available, never an empty list
+                           presented as none), and, when --limit-state
+                           FILE names a limit_watch.py JSON output, that
+                           file's classification under "limit_state"
+                           (R25.1; NO-DATA when the file cannot be read,
+                           simply absent when no path was passed).
+  --emit-patterns          V4: reads --green-close-file PATH (a JSON list
+                           of {name, problem, technique, receipt,
+                           exit_code}) and writes one pattern_note.py note
+                           per green close into --pattern-vault DIR, through
+                           pattern_note.write() (which itself routes through
+                           the same hard gate bm_vault_intake.py's `admit`
+                           and `capture` run, never an ungated write). A
+                           close missing a receipt or carrying a non-zero
+                           exit_code writes NOTHING and is named in the
+                           output, never silently dropped. Idempotent by
+                           name, same as pattern_note.py itself: a second
+                           run over the same green closes writes nothing.
+  --emit-vault DIR         write one vault note per lesson in
+                           --lesson-file PATH into DIR, each with valid
+                           frontmatter (type, project, created, status,
+                           tags, verified-by, and symptom for failures) in
+                           the schema the vault's own pre-commit gate
+                           (bm_vault_graph.py check) enforces. A lesson
+                           whose status or type falls outside the
+                           controlled vocabulary is REFUSED and never
+                           written; every other lesson in the batch still
+                           writes. No wikilinks are ever emitted in a
+                           note, so the broken-outgoing-link rule holds
+                           trivially. A failure lesson must carry
+                           applies_to (a list of repo paths, written into
+                           frontmatter) or exactly "none (process lesson)";
+                           without either it is REFUSED. Each written
+                           failure appends one line, "- [[slug]] DATE.
+                           AREA: ... SYMPTOM: ... FIX: ...", to
+                           DIR/Failures-Index.md under a dated section,
+                           append only (an existing line is never edited,
+                           a slug already listed is not repeated). No index
+                           in DIR is FLAGGED (exit 1), never created.
+                           A failure lesson whose name or symptom closely
+                           matches a note already in DIR (find_duplicate) is
+                           REFUSED, naming that note; every other lesson
+                           still writes. Notes in DIR that cannot be read
+                           refuse every failure lesson, never write one.
+  --emit-handover PATH     write the human START-HERE markdown: priority
+                           first (uncommitted work, open sbe tasks, the
+                           day-plan ready set, open pull requests), then
+                           the lessons captured this session.
+
+  --emit-seed PATH         PG1.a: write the next release's plan seed (schema
+                           brother-plan-seed/1, scripts/plan_seed.py) to PATH:
+                           the units the closing plan left DEFERRED, PARKED
+                           or OPEN, the open findings of its PLAN-DECISIONS
+                           file, the failure notes dated since the plan, and
+                           the WITHHELD, EXHAUSTED and FAIL loop and cut
+                           evidence, with the quoted lines of every reads
+                           entry. The plan comes from scripts/loop/
+                           plan_path.py (BROTHER_WBS) under --root DIR
+                           (default the current directory). Optional inputs:
+                           --failures-index FILE, --runs DIR and --cut DIR
+                           (defaults under ~/.claude/evidence), --grant FILE
+                           (a baseline record's owner lines). An absent
+                           input is NO-DATA inside the seed; an unreadable
+                           plan or named file is exit 2; a PATH holding
+                           another schema is refused, exit 1. Prints
+                           "SEED: <path> units <n> sources <present>/<total>".
+
+This tool only emits. It never pushes, never commits, never closes a task.
+Exit 0 on a clean run, 1 when something was refused or flagged, 2 on
+NO-DATA (a required input could not be read, never presented as a pass).
+No em or en dashes anywhere.
+
+PRODUCER: this module is the sole producer of its own outputs, with one
+delegation. emit_vault_notes() (line 298) writes each vault note through
+open(path, "w", encoding="utf-8") plus f.write(content) at line 313; main()
+(line 454) writes the --emit-handover markdown through
+open(emit_handover_path, "w", encoding="utf-8") plus f.write(markdown) at
+line 534. emit_pattern_notes() (line 330) writes NOTHING itself: it
+delegates every pattern note's actual write to pattern_note.write() (see
+scripts/pattern_note.py), the sole producer of that file, so the vault's
+one-writer-per-note-kind rule holds. append_failures_index() appends the
+Failures-Index lines through open(index_path, "a") and never rewrites the
+file.
+"""
+
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+# Importable both from scripts/ and as scripts.handover_ceremony from the
+# repository root, matching task_watchdog's own sys.path fix (its first
+# live run caught the root-form import failing).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from task_watchdog import (read_registry, age_hours, read_day_plan_rows,
+                           ready_set_summary)
+import pattern_note
+
+ALLOWED_STATUS = {"open", "closed", "standing"}
+ALLOWED_TYPE = {"failure", "finding", "decision", "session-log", "overview",
+                "index", "reference"}
+#: The one spelling that lets a failure lesson carry no file anchor: a process
+#: lesson about how work is run, not about a file. Anything else is refused.
+PROCESS_WAIVER = "none (process lesson)"
+INDEX_NAME = "Failures-Index.md"
+GH_FIELDS = "number,title,headRefName,url"
+DUP_MIN_SHARED = 4  # words two texts must share before they can match
+DUP_MIN_RATIO = 0.6  # shared words over all distinct words of both
+_STOPWORDS = frozenset((
+    "the", "and", "for", "with", "from", "that", "this", "was", "were",
+    "not", "but", "are", "its", "into", "then", "when", "than", "has",
+    "have", "had", "can", "will", "you", "your", "out"))
+
+
+# ---------------------------------------------------------------------------
+# Collection: each piece named NO-DATA on its own, never a false empty.
+# ---------------------------------------------------------------------------
+
+def _real_git_run(repo_path, args):
+    try:
+        out = subprocess.run(["git", "-C", repo_path] + args,
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout
+
+
+def repo_state(path, git_run=None):
+    """git HEAD and clean/dirty for one repo root. NO-DATA when either git
+    call fails (not a repo, git missing, or the call times out)."""
+    git_run = git_run or _real_git_run
+    head = git_run(path, ["rev-parse", "HEAD"])
+    if head is None:
+        return {"error": "NO-DATA: git rev-parse HEAD failed for %s" % path}
+    status = git_run(path, ["status", "--porcelain"])
+    if status is None:
+        return {"error": "NO-DATA: git status failed for %s" % path}
+    dirty = sorted(line[3:].strip() for line in status.splitlines()
+                   if len(line) > 3)
+    return {"head": head.strip(), "clean": len(dirty) == 0,
+            "dirty_count": len(dirty), "dirty_paths": dirty[:30]}
+
+
+def sbe_task_summary(now=None, registry_reader=None):
+    """Open sbe tasks with id, owner (the agent field) and age in whole
+    hours. NO-DATA when the registry cannot be read at all (distinct from
+    a registry that reads clean with zero tasks, which is a real empty)."""
+    registry_reader = registry_reader or read_registry
+    tasks = registry_reader()
+    if tasks is None:
+        return {"error": "NO-DATA: the sbe task registry could not be read"}
+    out = []
+    for t in tasks:
+        hours = age_hours(t.get("openedAt", ""), now)
+        out.append({"id": t.get("id", "?"), "owner": t.get("agent", "?"),
+                    "age_hours": int(hours) if hours is not None else None})
+    return {"count": len(out), "tasks": out}
+
+
+def day_plan_state(rows_reader=None):
+    """The day-plan ready set, via task_watchdog's own ready_set_summary:
+    the same rule gen_command_center.py implements, mirrored there and
+    reused here rather than re-derived a third time. NO-DATA when
+    LIVE-STATE.json or its day_plan.rows cannot be read."""
+    rows_reader = rows_reader or read_day_plan_rows
+    rows = rows_reader()
+    if rows is None:
+        return {"error": "NO-DATA: docs/plan/LIVE-STATE.json day_plan.rows "
+                         "could not be read"}
+    return ready_set_summary(rows)
+
+
+def _gh_available():
+    return shutil.which("gh") is not None
+
+
+def _real_gh_list():
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "list", "--json", GH_FIELDS, "--limit", "50"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        return json.loads(out.stdout)
+    except ValueError:  # sbe: allow-silent pr_state below turns None into an explicit NO-DATA
+        return None
+
+
+def pr_state(available=None, gh_list=None):
+    """Open pull requests via gh. NO-DATA when gh is not on PATH at all or
+    the call fails; a real zero-length list from a working gh call is a
+    genuine empty, never collapsed into the same NO-DATA case."""
+    available = available or _gh_available
+    if not available():
+        return {"error": "NO-DATA: gh is not available; open pull requests "
+                         "were not checked"}
+    gh_list = gh_list or _real_gh_list
+    result = gh_list()
+    if result is None:
+        return {"error": "NO-DATA: gh pr list failed"}
+    return {"count": len(result), "pull_requests": result}
+
+
+def _real_limit_state_reader(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def limit_state(path, reader=None):
+    """R25.1 wiring: the limit_watch.py classification JSON for the
+    session that is closing. Only ever called when --limit-state passed a
+    path; NO-DATA when that path could not be read or parsed, exactly
+    like this file's other NO-DATA-safe collectors (never a false empty:
+    a real limit_watch NORMAL/class dict is not this case)."""
+    reader = reader or _real_limit_state_reader
+    data = reader(path)
+    if data is None:
+        return {"error": "NO-DATA: limit state file %s could not be read" % path}
+    return data
+
+
+def collect_state(repos, git_run=None, registry_reader=None,
+                   day_plan_reader=None, gh_available=None, gh_list=None,
+                   now=None, limit_state_path=None, limit_state_reader=None):
+    """The whole collector, pure over its injected seams so the tests can
+    drive every NO-DATA path without a live subprocess. limit_state is
+    only present when limit_state_path was passed: it is fed
+    conditionally by design (R25.1), not a source this collector always
+    attempts, so its absence is not itself a NO-DATA condition."""
+    state = {
+        "repos": {r: repo_state(r, git_run=git_run) for r in repos},
+        "sbe_tasks": sbe_task_summary(now=now, registry_reader=registry_reader),
+        "day_plan": day_plan_state(rows_reader=day_plan_reader),
+        "pull_requests": pr_state(available=gh_available, gh_list=gh_list),
+    }
+    if limit_state_path:
+        state["limit_state"] = limit_state(limit_state_path, reader=limit_state_reader)
+    return state
+
+
+def state_has_error(state):
+    """True when any collected piece is NO-DATA, for the exit code."""
+    for r in state.get("repos", {}).values():
+        if isinstance(r, dict) and "error" in r:
+            return True
+    for key in ("sbe_tasks", "day_plan", "pull_requests", "limit_state"):
+        if isinstance(state.get(key), dict) and "error" in state[key]:
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Vault note emission.
+# ---------------------------------------------------------------------------
+
+def _slugify(name):
+    s = re.sub(r"[^a-z0-9]+", "-", name.strip().lower())
+    return s.strip("-")
+
+
+def _anchors(lesson, name, note_type):
+    """The lesson's applies_to: a list of anchor strings, the PROCESS_WAIVER
+    string, or [] when absent on a non-failure. Raises ValueError for a
+    failure with no anchor and no waiver, a non-list value, or an anchor the
+    one-line frontmatter list cannot hold (empty, a comma, a bracket, a
+    newline)."""
+    raw = lesson.get("applies_to")
+    if raw == PROCESS_WAIVER:
+        return PROCESS_WAIVER
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raise ValueError("lesson %r has applies_to %r: give a list of paths "
+                         "or exactly %r" % (name, raw, PROCESS_WAIVER))
+    out = []
+    for a in raw:
+        if not isinstance(a, str) or not a.strip() or re.search(r"[,\[\]\n]", a):
+            raise ValueError("lesson %r has an unusable applies_to anchor %r"
+                             % (name, a))
+        out.append(a.strip())
+    if note_type == "failure" and not out:
+        raise ValueError("failure lesson %r has no applies_to anchor; name the "
+                         "file(s) it applies to, or say applies_to: %r"
+                         % (name, PROCESS_WAIVER))
+    return out
+
+
+def _one_line(text):
+    return re.sub(r"\s+", " ", (text or "").strip()).rstrip(".")
+
+
+def failure_index_line(lesson, slug, created):
+    """The detailed Failures-Index line for one failure lesson:
+    - [[slug]] DATE. AREA: ... SYMPTOM: ... FIX: ...
+    AREA falls back to the anchors, FIX to how_to_apply; an empty part says
+    "unstated" rather than vanishing."""
+    anchors = lesson.get("applies_to")
+    anchor_text = ", ".join(anchors) if isinstance(anchors, list) else ""
+    area = _one_line(lesson.get("area")) or anchor_text or "unstated"
+    symptom = _one_line(lesson.get("symptom")) or "unstated"
+    fix = _one_line(lesson.get("fix") or lesson.get("how_to_apply")) or "unstated"
+    return "- [[%s]] %s. AREA: %s. SYMPTOM: %s. FIX: %s." % (
+        slug, created, area, symptom, fix)
+
+
+def _tokens(text):
+    """Lowercase ASCII words of 3 or more characters, stopwords dropped.
+
+    A value that is not a str has no words."""
+    if not isinstance(text, str):
+        return frozenset()
+    words = set()
+    run = []
+    for ch in text.lower() + " ":
+        if "a" <= ch <= "z" or "0" <= ch <= "9":
+            run.append(ch)
+            continue
+        word = "".join(run)
+        run = []
+        if len(word) >= 3 and word not in _STOPWORDS:
+            words.add(word)
+    return frozenset(words)
+
+
+def _similar(a, b):
+    """True when a and b share enough words, by count first, then by ratio."""
+    shared = len(a & b)
+    if shared < DUP_MIN_SHARED:
+        return False
+    return shared / len(a | b) >= DUP_MIN_RATIO
+
+
+def find_duplicate(name_slug, symptom, existing):
+    """The (slug, kind) of the existing note this lesson repeats, or None.
+
+    kind is "name" or "symptom"; the smallest matching slug wins. A note is
+    never its own duplicate. Anything not comparable matches nothing."""
+    if not isinstance(existing, dict):
+        return None
+    name_words = _tokens(name_slug)
+    symptom_words = _tokens(symptom)
+    slugs = [slug for slug in existing if isinstance(slug, str)]
+    for slug in sorted(slugs):
+        if slug == name_slug:
+            continue
+        if _similar(name_words, _tokens(slug)):
+            return (slug, "name")
+        texts = existing[slug]
+        if not isinstance(texts, (list, tuple)):
+            continue
+        for text in texts:
+            if _similar(symptom_words, _tokens(text)):
+                return (slug, "symptom")
+    return None
+
+
+NOTE_HEAD_LINES = 40  # a note's symptom is read from its first 40 lines only
+_INDEX_LINE = re.compile(r"^- \[\[([^\]\n]+)\]\]\s*(.*)$")
+
+
+def _note_symptom(path):
+    """The symptom: value of the note's opening front matter block, quotes
+    removed, or "" when there is none. Only the first 40 lines are read; an
+    unterminated block is read to that cap. OSError is not caught. A path
+    that is not a str is refused with ValueError (never a file descriptor)."""
+    if not isinstance(path, str):
+        raise ValueError("note path %r is not a str" % (path,))
+    with open(path, encoding="utf-8", errors="replace") as f:
+        head = []
+        for line in f:
+            head.append(line)
+            if len(head) >= NOTE_HEAD_LINES:
+                break
+    if not head or head[0].strip() != "---":
+        return ""
+    for line in head[1:]:
+        if line.strip() == "---":
+            break
+        if line.startswith("symptom:"):
+            value = line[len("symptom:"):].strip()
+            if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+                value = value[1:-1]
+            return value
+    return ""
+
+
+def _existing_failures(dir_path):
+    """slug -> texts describing that note: each DIR/*.md note (not the index)
+    with its front matter symptom, then each Failures-Index line's SYMPTOM
+    text (or its prose, for an older line). A note or index only slug with no
+    text still appears. OSError from the listing or any read propagates: the
+    caller decides. A dir_path that is not a str is refused with ValueError."""
+    if not isinstance(dir_path, str):
+        raise ValueError("vault directory %r is not a str" % (dir_path,))
+    existing = {}
+    for name in sorted(os.listdir(dir_path)):
+        if not name.endswith(".md") or name == INDEX_NAME:
+            continue
+        symptom = _note_symptom(os.path.join(dir_path, name))
+        existing[name[:-3]] = [symptom] if symptom else []
+    index_path = os.path.join(dir_path, INDEX_NAME)
+    if os.path.isfile(index_path):
+        with open(index_path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+        for line in lines:
+            m = _INDEX_LINE.match(line)
+            if not m:
+                continue
+            slug, rest = m.group(1), m.group(2)
+            texts = existing.setdefault(slug, [])
+            if "SYMPTOM:" in rest:
+                text = rest.split("SYMPTOM:", 1)[1].split(" FIX:", 1)[0]
+            else:
+                text = rest
+            text = text.strip()
+            if text:
+                texts.append(text)
+    return existing
+
+
+def append_failures_index(index_path, entries, today):
+    """Append-only: adds each (slug, line) whose [[slug]] is not already in
+    the index, under a "## Handover ceremony DATE" section (reused when it is
+    already the file's last section). Never rewrites an existing byte.
+    Returns the number of lines appended, or None when the index file does
+    not exist (NO-DATA: this tool never creates an index in a guessed place)."""
+    if not entries:
+        return 0
+    if not os.path.isfile(index_path):
+        return None
+    with open(index_path, encoding="utf-8") as f:
+        existing = f.read()
+    new = [line for slug, line in entries if "[[%s]]" % slug not in existing]
+    if not new:
+        return 0
+    header = "## Handover ceremony %s" % today
+    headings = [l for l in existing.splitlines() if l.startswith("## ")]
+    chunk = "" if existing.endswith("\n") or not existing else "\n"
+    if not headings or headings[-1] != header:
+        chunk += "\n%s\n" % header
+    chunk += "".join(line + "\n" for line in new)
+    with open(index_path, "a", encoding="utf-8") as f:
+        f.write(chunk)
+    return len(new)
+
+
+def build_vault_note(lesson, project="brother", today=None):
+    """One lesson to (filename, content). Raises ValueError, naming the
+    reason, for anything the vault gate would refuse: no usable name, or a
+    status/type outside the controlled vocabulary. Never emits a wikilink,
+    so the broken-outgoing-link rule holds by construction."""
+    name = (lesson.get("name") or "").strip()
+    if not name:
+        raise ValueError("lesson has no name")
+    slug = _slugify(name)
+    if not slug:
+        raise ValueError(
+            "lesson name %r has no usable characters for a filename" % name)
+
+    status = (lesson.get("status") or "open").strip()
+    if status not in ALLOWED_STATUS:
+        raise ValueError("lesson %r has status %r, not in %s"
+                         % (name, status, sorted(ALLOWED_STATUS)))
+
+    note_type = (lesson.get("type") or "failure").strip()
+    if note_type not in ALLOWED_TYPE:
+        raise ValueError("lesson %r has type %r, not in %s"
+                         % (name, note_type, sorted(ALLOWED_TYPE)))
+
+    proj = (lesson.get("project") or project).strip()
+    tags = lesson.get("tags") or ["handover", "ceremony"]
+    created = (lesson.get("created") or today
+              or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    verified_by = (lesson.get("verified_by")
+                  or lesson.get("what_happened") or "").strip()
+    symptom = (lesson.get("symptom") or "").strip()
+    anchors = _anchors(lesson, name, note_type)
+
+    front = [
+        "---",
+        "type: %s" % note_type,
+        "project: %s" % proj,
+        "created: %s" % created,
+        "status: %s" % status,
+        "tags: [%s]" % ", ".join(tags),
+        "verified-by: \"%s\"" % verified_by.replace('"', "'"),
+    ]
+    if note_type == "failure" and symptom:
+        front.append("symptom: \"%s\"" % symptom.replace('"', "'"))
+    if anchors == PROCESS_WAIVER:
+        # An empty list, never the waiver text: the recall hook would read
+        # "none (process lesson)" as a command anchor that fails to resolve.
+        front.append("applies_to: []")
+        front.append("anchor_waiver: \"%s\"" % PROCESS_WAIVER)
+    elif anchors:
+        front.append("applies_to: [%s]" % ", ".join(anchors))
+    front.append("---")
+
+    body = ["", "# %s" % name, ""]
+    description = (lesson.get("description") or "").strip()
+    if description:
+        body += [description, ""]
+    for header, key in (("What happened", "what_happened"),
+                        ("Why it matters", "why_it_matters"),
+                        ("How to apply", "how_to_apply")):
+        text = (lesson.get(key) or "").strip()
+        if text:
+            body += ["## %s" % header, "", text, ""]
+
+    content = "\n".join(front + body).rstrip("\n") + "\n"
+    return ("%s.md" % slug, content)
+
+
+def emit_vault_notes(dir_path, lessons, project="brother", today=None):
+    """Writes one file per lesson that passes build_vault_note; a refused
+    lesson is named in the return, never written. Each written failure also
+    appends one detailed line to DIR/Failures-Index.md (append_failures_index).
+    Returns (written_paths, refused_reasons, index_appended), index_appended
+    None when DIR holds no Failures-Index.md and a failure needed a line."""
+    os.makedirs(dir_path, exist_ok=True)
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    written, refused, index_entries = [], [], []
+    seen = set()
+    # unreadable notes block every failure lesson; never an empty "no match"
+    scan_error = None
+    try:
+        existing = _existing_failures(dir_path)
+    except OSError as exc:
+        existing, scan_error = None, str(exc)
+    for lesson in lessons:
+        try:
+            filename, content = build_vault_note(
+                lesson, project=project, today=today)
+        except ValueError as e:
+            refused.append(str(e))
+            continue
+        # duplicate slugs target one path; refuse the later one so counts match
+        if filename in seen:
+            refused.append("lesson %r produces duplicate note %s; already "
+                           "written this run" % (lesson.get("name"), filename))
+            continue
+        is_failure = (lesson.get("type") or "failure").strip() == "failure"
+        if is_failure:
+            if existing is None:
+                refused.append("lesson %r not written: the notes in %s could "
+                               "not be read (%s)" % (lesson.get("name"),
+                                                     dir_path, scan_error))
+                continue
+            match = find_duplicate(filename[:-3], lesson.get("symptom") or "",
+                                   existing)
+            if match is not None:
+                refused.append("lesson %r duplicates note %s.md (matched on "
+                               "%s); not written" % (lesson.get("name"),
+                                                     match[0], match[1]))
+                continue
+        seen.add(filename)
+        path = os.path.join(dir_path, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        written.append(path)
+        if is_failure:
+            existing[filename[:-3]] = [lesson.get("symptom") or ""]
+            index_entries.append((filename[:-3], failure_index_line(
+                lesson, filename[:-3], lesson.get("created") or today)))
+    appended = append_failures_index(
+        os.path.join(dir_path, INDEX_NAME), index_entries, today)
+    return written, refused, appended
+
+
+# ---------------------------------------------------------------------------
+# Pattern note emission (V4): capture what worked on a green close.
+# ---------------------------------------------------------------------------
+
+def _green_close_ok(gc):
+    """True when a green close's receipt evidences a real pass: a named
+    receipt (path or command) AND exit_code exactly 0. Either missing means
+    the close is not provably green, so no pattern note is written for it."""
+    receipt = (gc.get("receipt") or "").strip()
+    return bool(receipt) and gc.get("exit_code") == 0
+
+
+def emit_pattern_notes(vault_dir, green_closes, project="brother",
+                       pattern_write=pattern_note.write):
+    """One pattern note per green close, written through pattern_write
+    (pattern_note.write by default, which itself routes through the same
+    hard gate bm_vault_intake.py's `admit` and `capture` run, and never
+    overwrites an existing note by name). A close with no receipt, a
+    non-zero exit_code, or a missing name/problem/technique writes NOTHING
+    and is named in `skipped` with the reason, never silently dropped.
+    Returns (written_paths, skipped_reasons)."""
+    written, skipped = [], []
+    for gc in green_closes:
+        name = (gc.get("name") or "").strip()
+        problem = (gc.get("problem") or "").strip()
+        technique = (gc.get("technique") or "").strip()
+        label = name or "(unnamed green close)"
+        if not (name and problem and technique):
+            skipped.append("%s: needs name, problem and technique" % label)
+            continue
+        if not _green_close_ok(gc):
+            skipped.append(
+                "%s: no usable receipt (needs a receipt and exit_code 0), "
+                "got receipt=%r exit_code=%r"
+                % (label, gc.get("receipt"), gc.get("exit_code")))
+            continue
+        receipt_str = "%s (exit %s)" % (gc["receipt"], gc["exit_code"])
+        path, ok = pattern_write(
+            name, problem, technique, "green close: %s" % receipt_str,
+            project=project, receipt=receipt_str, vault=vault_dir)
+        if ok:
+            written.append(path)
+        elif path is None:
+            skipped.append("%s: refused by the vault gate or vault "
+                           "unavailable (see stderr)" % label)
+        # path is not None and not ok: already recorded by an earlier run,
+        # which is the idempotence contract, never a failure to report.
+    return written, skipped
+
+
+# ---------------------------------------------------------------------------
+# Human handover markdown.
+# ---------------------------------------------------------------------------
+
+def build_handover_markdown(state, lessons, project="brother"):
+    """Priority first: uncommitted work, then open sbe tasks, then the
+    day-plan ready set, then open pull requests, then the lessons captured
+    this session."""
+    lines = ["# START HERE", "",
+             "Handover ceremony output for %s. Priority first; read top to "
+             "bottom." % project, ""]
+
+    lines.append("## Uncommitted work")
+    dirty = [(p, r) for p, r in sorted(state.get("repos", {}).items())
+             if isinstance(r, dict) and "error" not in r
+             and not r.get("clean", True)]
+    if dirty:
+        for path, r in dirty:
+            lines.append("- %s: %d dirty path(s) at HEAD %s"
+                         % (path, r["dirty_count"], r["head"][:12]))
+    else:
+        lines.append("- none: every named repo is clean at HEAD")
+    lines.append("")
+
+    lines.append("## Open sbe tasks")
+    sbe = state.get("sbe_tasks", {})
+    if "error" in sbe:
+        lines.append("- %s" % sbe["error"])
+    elif sbe.get("count"):
+        for t in sbe["tasks"]:
+            age = ("%dh" % t["age_hours"]) if t["age_hours"] is not None \
+                else "unknown age"
+            lines.append("- %s (owner %s, open %s)" % (t["id"], t["owner"], age))
+    else:
+        lines.append("- none open")
+    lines.append("")
+
+    lines.append("## Day-plan ready set")
+    dp = state.get("day_plan", {})
+    if "error" in dp:
+        lines.append("- %s" % dp["error"])
+    else:
+        lines.append("- READY: %s" % (", ".join(dp.get("ready") or []) or "none"))
+        lines.append("- IN-FLIGHT: %s"
+                     % (", ".join(dp.get("in_flight") or []) or "none"))
+        ew = dp.get("event_wait") or []
+        lines.append("- EVENT-WAIT: %s"
+                     % (", ".join("%s (%s)" % (i, e) for i, e in ew) or "none"))
+    lines.append("")
+
+    lines.append("## Open pull requests")
+    prs = state.get("pull_requests", {})
+    if "error" in prs:
+        lines.append("- %s" % prs["error"])
+    elif prs.get("count"):
+        for pr in prs["pull_requests"]:
+            lines.append("- #%s %s (%s)"
+                         % (pr.get("number"), pr.get("title"), pr.get("url")))
+    else:
+        lines.append("- none open")
+    lines.append("")
+
+    lines.append("## Lessons captured this session")
+    if lessons:
+        for lesson in lessons:
+            lines.append("- %s: %s" % (lesson.get("name", "?"),
+                                       lesson.get("description", "")))
+    else:
+        lines.append("- none recorded")
+    lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# CLI, manual argv parsing matching task_watchdog.py's own house style.
+# ---------------------------------------------------------------------------
+
+def _load_lessons(path):
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("%s is not a JSON list" % path)
+    return data
+
+
+def _next_version(plan_file):
+    """N.N.(M+1) from a plan file name 'BROTHER-N.N.M-...', else None."""
+    m = re.search(r"BROTHER-(\d+)\.(\d+)\.(\d+)", os.path.basename(plan_file))
+    if not m:
+        return None, None
+    cur = "%s.%s.%s" % m.groups()
+    return cur, "%s.%s.%d" % (m.group(1), m.group(2), int(m.group(3)) + 1)
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def emit_seed(path, root=None, failures_index=None, runs=None, cut=None,
+              grant_file=None, now=None):
+    """The --emit-seed action; returns the exit code (0 written, 1 refused,
+    2 NO-DATA) after printing its one line. Every input named but unreadable
+    is exit 2; an input not named is NO-DATA inside the seed."""
+    import plan_seed
+    root = root or os.getcwd()
+    base = os.path.join(os.path.expanduser("~"), ".claude", "evidence")
+    runs = runs or os.path.join(base, "unit-runs")
+    cut = cut or os.path.join(base, "cut")
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop"))  # one line: the parity gate reads the pin
+        import plan_path
+        plan_rel = plan_path.selected()
+        plan = json.loads(_read_text(os.path.join(root, plan_rel)))
+        current, version = _next_version(plan_rel)
+        if version is None:
+            raise ValueError("plan file %s names no BROTHER-N.N.N version"
+                             % plan_rel)
+        decisions = None
+        found = sorted(glob.glob(os.path.join(
+            root, "docs", "plan", "specs", current, "**", "PLAN-DECISIONS.md"),
+            recursive=True), key=os.path.getmtime)
+        if found:
+            decisions = _read_text(found[-1])
+        index = _read_text(failures_index) if failures_index else None
+        grant = plan_seed.read_grant(grant_file) if grant_file else {}
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(plan.get("as_of", "")))
+        since = datetime(*[int(g) for g in m.groups()],
+                         tzinfo=timezone.utc).timestamp() if m else 0.0
+        evidence = plan_seed.evidence_findings(runs, cut, since)
+        seed = plan_seed.build_seed(
+            version, plan, decisions, index, evidence, grant,
+            now if now is not None else datetime.now(timezone.utc).timestamp(),
+            root=root)
+    except (OSError, ValueError, ImportError, AttributeError) as e:
+        print("handover-ceremony: NO-DATA: the seed could not be built: %s" % e)
+        return 2
+    try:
+        plan_seed.write_seed(path, seed)
+    except ValueError as e:
+        print("handover-ceremony: REFUSED: %s" % e)
+        return 1
+    except OSError as e:
+        print("handover-ceremony: NO-DATA: could not write %s: %s" % (path, e))
+        return 2
+    present = sum(1 for src in seed["sources"] if src["status"] == "PRESENT")
+    print("SEED: %s units %d sources %d/%d" % (
+        path, len(seed["units"]), present, len(seed["sources"])))
+    return 0
+
+
+def main(argv):
+    repos, lesson_file = [], None
+    emit_seed_path = failures_index = runs_dir = cut_dir = None
+    grant_file = root_dir = None
+    emit_vault_dir = emit_handover_path = None
+    limit_state_path = None
+    green_close_file = pattern_vault = None
+    project = "brother"
+    do_collect = do_emit_patterns = False
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--collect":
+            do_collect = True
+        elif arg == "--repo" and i + 1 < len(argv):
+            repos.append(argv[i + 1]); i += 1
+        elif arg == "--emit-vault" and i + 1 < len(argv):
+            emit_vault_dir = argv[i + 1]; i += 1
+        elif arg == "--emit-handover" and i + 1 < len(argv):
+            emit_handover_path = argv[i + 1]; i += 1
+        elif arg == "--lesson-file" and i + 1 < len(argv):
+            lesson_file = argv[i + 1]; i += 1
+        elif arg == "--project" and i + 1 < len(argv):
+            project = argv[i + 1]; i += 1
+        elif arg == "--limit-state" and i + 1 < len(argv):
+            limit_state_path = argv[i + 1]; i += 1
+        elif arg == "--emit-seed" and i + 1 < len(argv):
+            emit_seed_path = argv[i + 1]; i += 1
+        elif arg == "--failures-index" and i + 1 < len(argv):
+            failures_index = argv[i + 1]; i += 1
+        elif arg == "--runs" and i + 1 < len(argv):
+            runs_dir = argv[i + 1]; i += 1
+        elif arg == "--cut" and i + 1 < len(argv):
+            cut_dir = argv[i + 1]; i += 1
+        elif arg == "--grant" and i + 1 < len(argv):
+            grant_file = argv[i + 1]; i += 1
+        elif arg == "--root" and i + 1 < len(argv):
+            root_dir = argv[i + 1]; i += 1
+        elif arg == "--emit-patterns":
+            do_emit_patterns = True
+        elif arg == "--green-close-file" and i + 1 < len(argv):
+            green_close_file = argv[i + 1]; i += 1
+        elif arg == "--pattern-vault" and i + 1 < len(argv):
+            pattern_vault = argv[i + 1]; i += 1
+        i += 1
+
+    if not (do_collect or emit_vault_dir or emit_handover_path
+            or do_emit_patterns or emit_seed_path):
+        print("handover-ceremony: nothing to do; pass --collect, "
+              "--emit-vault DIR, --emit-handover PATH, or --emit-patterns")
+        return 2
+
+    lessons = []
+    if lesson_file:
+        try:
+            lessons = _load_lessons(lesson_file)
+        except (OSError, ValueError) as e:
+            print("handover-ceremony: NO-DATA: lesson file %s could not be "
+                 "read: %s" % (lesson_file, e))
+            return 2
+
+    green_closes = []
+    if green_close_file:
+        try:
+            green_closes = _load_lessons(green_close_file)
+        except (OSError, ValueError) as e:
+            print("handover-ceremony: NO-DATA: green-close file %s could "
+                 "not be read: %s" % (green_close_file, e))
+            return 2
+
+    codes = []
+
+    if do_collect:
+        state = collect_state(repos, limit_state_path=limit_state_path)
+        print(json.dumps(state, indent=2, sort_keys=True))
+        codes.append(2 if state_has_error(state) else 0)
+
+    if emit_vault_dir:
+        written, refused, appended = emit_vault_notes(
+            emit_vault_dir, lessons, project=project)
+        print("handover-ceremony: wrote %d vault note(s) to %s, %d refused"
+             % (len(written), emit_vault_dir, len(refused)))
+        for reason in refused:
+            print("handover-ceremony: REFUSED: %s" % reason)
+        if appended is None:
+            print("handover-ceremony: FLAGGED: no %s in %s; failure index "
+                  "line(s) not appended" % (INDEX_NAME, emit_vault_dir))
+        else:
+            print("handover-ceremony: appended %d line(s) to %s"
+                  % (appended, os.path.join(emit_vault_dir, INDEX_NAME)))
+        codes.append(1 if refused or appended is None else 0)
+
+    if emit_handover_path:
+        state = collect_state(repos, limit_state_path=limit_state_path)
+        markdown = build_handover_markdown(state, lessons, project=project)
+        parent = os.path.dirname(emit_handover_path)
+        try:
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(emit_handover_path, "w", encoding="utf-8") as f:
+                f.write(markdown)
+        except OSError as e:
+            print("handover-ceremony: could not write %s: %s"
+                 % (emit_handover_path, e))
+            return 2
+        print("handover-ceremony: wrote handover to %s" % emit_handover_path)
+        codes.append(0)
+
+    if do_emit_patterns:
+        if not pattern_vault:
+            print("handover-ceremony: NO-DATA: --emit-patterns needs "
+                 "--pattern-vault DIR")
+            codes.append(2)
+        else:
+            written, skipped = emit_pattern_notes(
+                pattern_vault, green_closes, project=project)
+            print("handover-ceremony: wrote %d pattern note(s) to %s, "
+                 "%d skipped" % (len(written), pattern_vault, len(skipped)))
+            for reason in skipped:
+                print("handover-ceremony: SKIPPED: %s" % reason)
+            codes.append(1 if skipped else 0)
+
+    if emit_seed_path:
+        codes.append(emit_seed(emit_seed_path, root=root_dir,
+                               failures_index=failures_index, runs=runs_dir,
+                               cut=cut_dir, grant_file=grant_file))
+
+    return max(codes) if codes else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

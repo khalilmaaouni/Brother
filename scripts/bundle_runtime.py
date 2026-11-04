@@ -153,10 +153,14 @@ ENTRY = "brother_run.py"
 #: route. Without it the tool exists only in a checkout, and a stranger who
 #: finishes a run has nothing to accept or refuse through, which is what the
 #: journey row A.accept-recorded measured.
+#: HO1: handover_record.py joins them so the door's row 1 can receive a handover
+#: record on an installed host, not only in a checkout. On a host with no private
+#: terms list its emit refuses (the record cannot be proven clean) and receive
+#: reads NO-DATA when no record exists, so the door falls through as before.
 SUPPORT_ENTRIES = ("accept_delivery.py",
                    "native_evidence.py", "mobile_workflow.py", "mobile_design.py",
                    "dream_bridge.py", "jev_status.py", "jev_door.py",
-                   "jev_start_refusal.py")
+                   "jev_start_refusal.py", "handover_record.py")
 MANIFEST_NAME = "RUNTIME-MANIFEST.json"
 LAUNCHER_NAME = "brother-run"
 VERIFIER_NAME = "verify_runtime.py"
@@ -255,14 +259,45 @@ DATA_FILES = {
     # installed runtime does not carry. It ships flat beside its bridge and
     # beside journal.py: the bridge's last candidate is <here>/dream_record.py
     # and the recorder's is <here>/journal.py.
-    "dream_bridge.py": ("plugin/runtime/brother/core/dream_record.py",
-                        "dream_record.py"),
+    # OUT1.i: the report and the offline replay ship beside the recorder too, so the door's learning route can read a
+    # run's decisions and replay an alternative on an install; dream_bridge._sibling finds them in the recorder's folder.
+    "dream_bridge.py": (("plugin/runtime/brother/core/dream_record.py", "dream_record.py"),
+                        ("plugin/runtime/brother/core/dream_replay.py", "dream_replay.py"),
+                        ("plugin/runtime/brother/core/dream_report.py", "dream_report.py")),
     # JWP.a: the Jev registry and seams config, under data/ inside the
     # runtime, where jev_seam._data_file looks when no checkout data/ exists.
     # A value is one (source, dest) pair or a tuple of pairs.
     "jev_seam.py": (("data/jev-registry.json", "data/jev-registry.json"),
                     ("data/jev-seams.json", "data/jev-seams.json")),
+    # OUT1.n: the door routes and admits from these two files; an installed door finds them under data/ beside it
+    # (door._default_registry), so what a consumer sees on an install is decided by the same data as a checkout's.
+    "door.py": (("docs/plan/REACH.json", "data/REACH.json"),
+                ("docs/plan/ADMISSION.json", "data/ADMISSION.json"),
+                # the walk records a CORE group is admitted on (door._journey_gaps reads them beside the registry)
+                ("docs/plan/JOURNEY-J1.json", "data/JOURNEY-J1.json"),
+                ("docs/plan/JOURNEY-J2.json", "data/JOURNEY-J2.json"),
+                ("docs/plan/JOURNEY-J4.json", "data/JOURNEY-J4.json"),
+                # OUT1.m: the authored-content pipeline the door runs (door.content_tool looks flat beside the door
+                # first); it lives in the plugin tree, which an installed runtime does not carry, like dream_record.py
+                ("plugin/runtime/brother/rtm/voice_pipeline.py", "voice_pipeline.py")),
 }
+
+#: THE DOOR'S ROUTE TABLE IS A ROOT OF THE SHIPPED SET (SHIP1.a, owner ruling 2026-11-01: "routed but not shipped"
+#: is unacceptable). door.py launches its targets by path (mobile scripts named without .py, bds.py and bin/sbe
+#: under products/), which the closure walk above never sees, so 11 routed capability groups answered NO-DATA on
+#: every install. route_targets() reads the route table from the door itself (imported, never re-typed) and from
+#: docs/plan/REACH.json (each capability's command, and every source owner of a group it marks routed). A target
+#: under scripts/ joins the closure; scripts/loop/ already ships whole; a target under products/ that the hook mirror
+#: does not already carry ships with its own closure under bundle/runtime/products/<product>/, in the product's own
+#: layout, so its relative paths (bin/sbe's ../src, _toolspath's ../../tools) still hold once installed. Those files
+#: are listed in RUNTIME-MANIFEST.json, so an installed verify_runtime.py checks them too.
+ROUTE_DOOR = "door.py"
+REACH_REL = ("docs", "plan", "REACH.json")
+ROUTED_PRODUCTS = "products"
+#: Folders a product puts on sys.path besides the importing file's own: bin/sbe inserts src/, and
+#: src/brothersbe/_toolspath.mount() inserts tools/.
+PRODUCT_IMPORT_DIRS = {"brothersbe": ("src", "tools")}
+ROUTE_SUFFIXES = (".py", ".sh")
 
 NODATA = "NO-DATA"
 #: The two manifest fields that name where the bytes came from rather than
@@ -440,14 +475,16 @@ def _script_files(scripts_dir):
     return {f for f in os.listdir(scripts_dir) if f.endswith(".py")}
 
 
-def _closure_from_entries(entries, files_dir):
+def _closure_from_entries(entries, files_dir, generated=()):
     """BFS from every name in `entries` over local imports and local
     script-path string literals, both read from the same AST walk of each
     file as it is visited. Returns a sorted list of files_dir basenames
     (with .py). Generalized out of compute_closure (portability A1,
     2026-09-06) so a hooks.json naming several independent tool files, none
     of which import each other, seeds the walk from all of them at once
-    rather than losing every entry but the first."""
+    rather than losing every entry but the first. A bare string naming one of
+    `generated` (a file this module writes itself) names that output, never a
+    sibling script, so it is not followed."""
     existing = _script_files(files_dir)
     seen = set()
     queue = list(entries)
@@ -493,7 +530,7 @@ def _closure_from_entries(entries, files_dir):
                 # never sees it. Matched against the real file list, not a
                 # suffix check, so a long docstring cannot be mistaken for a
                 # reference.
-                if node.value in existing:
+                if node.value in existing and node.value not in generated:
                     candidate = node.value
             if candidate and candidate in existing and candidate not in seen:
                 queue.append(candidate)
@@ -501,13 +538,26 @@ def _closure_from_entries(entries, files_dir):
 
 
 def compute_closure(entry=ENTRY, scripts_dir=SCRIPTS_DIR):
-    """BFS from the runner and shipped done_check support roots over local
+    """BFS from the runner, the shipped done_check support roots and every flat
+    scripts/ target the door routes to (route_targets, SHIP1.a) over local
     imports and local script-path string literals. Returns sorted script
     basenames (with .py)."""
     entries = [entry]
-    if entry == ENTRY:
-        entries += SUPPORT_ENTRIES
-    return _closure_from_entries(entries, scripts_dir)
+    if entry != ENTRY:
+        return _closure_from_entries(entries, scripts_dir)
+    routed = _route_scripts(scripts_dir)
+    shell = sorted(n for n in routed if not n.endswith(".py"))
+    if shell:  # the closure walk follows Python only, so a routed flat shell owner would be dropped, never shipped
+        raise ValueError("scripts/%s is a routed target this generator cannot ship (only scripts/loop/ ships shell "
+                         "scripts); move it under scripts/loop/ or route a Python entry instead" % shell[0])
+    entries += list(SUPPORT_ENTRIES) + routed
+    generated = (LAUNCHER_NAME, VERIFIER_NAME)
+    closure = _closure_from_entries(entries, scripts_dir, generated)
+    clash = sorted(set(closure) & set(generated))
+    if clash:  # two sources for one bundle path: refuse, never let one silently overwrite the other
+        raise ValueError("scripts/%s and the file this generator writes at bundle/runtime/%s both claim one path; "
+                         "rename the script or stop importing it" % (clash[0], clash[0]))
+    return closure
 
 
 def _load_hooks_json(product, products_dir=PRODUCTS_DIR):
@@ -1323,9 +1373,241 @@ def _data_pairs(reader, value):
                      "tuple of pairs, got %r" % (reader, value))
 
 
+def _load_door(scripts_dir):
+    """scripts_dir's door.py as a fresh module, or None when that tree carries no door (it then routes nothing).
+    Imported rather than parsed, so its own tables and tool finders are the route table. A door that is there but
+    will not import raises, which stops the generator: an unknown route table is never shipped as an empty one."""
+    path = os.path.join(scripts_dir, ROUTE_DOOR)
+    if not os.path.isfile(path):
+        return None
+    spec = importlib.util.spec_from_file_location("_bundle_runtime_door", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def route_targets(scripts_dir=SCRIPTS_DIR):
+    """Sorted repository relative POSIX paths of every code file the door routes to that exists in this tree: the
+    door's mobile scripts and its Vault, BrotherDS and BrotherSBE tools, each REACH.json capability command, and the
+    source owners of every inventory group REACH.json marks routed. An absent REACH.json contributes nothing (a temp
+    tree may carry none); one that is there but cannot be parsed raises."""
+    repo_root = os.path.dirname(os.path.abspath(scripts_dir))
+    found = set()
+    door = _load_door(scripts_dir)
+    maintainer_only = set(getattr(door, "MAINTAINER_ONLY_ROUTES", ()) or ())
+    if door is not None:
+        found.update("scripts/%s.py" % row["script"] for row in door.MOBILE_CAPABILITIES)
+        for finder in (door.vault_tool, door.data_tool, door.assurance_tool):
+            path = finder()
+            rel = os.path.relpath(path, repo_root) if path else os.pardir
+            if not rel.startswith(os.pardir):  # a kept plugin outside this tree is not this tree's to ship
+                found.add(rel.replace(os.sep, "/"))
+    reach = os.path.join(repo_root, *REACH_REL)
+    if os.path.isfile(reach):
+        with open(reach, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if not isinstance(doc, dict):
+            raise ValueError("%s: not a JSON object, so the routes it names are unknown" % reach)
+        for cap in doc.get("capabilities") or []:
+            # A maintainer-only route's command is never copied into the install (door.MAINTAINER_ONLY_ROUTES).
+            if isinstance(cap, dict) and cap.get("id") not in maintainer_only:
+                found.add(cap.get("command"))
+        for group in doc.get("inventory") or []:
+            if isinstance(group, dict) and group.get("routed") and group.get("routed") not in maintainer_only:
+                found.update(group.get("source_owners") or [])
+    return sorted(p for p in found if isinstance(p, str) and p.startswith(("scripts/", ROUTED_PRODUCTS + "/"))
+                  and (p.endswith(ROUTE_SUFFIXES) or "." not in p.rsplit("/", 1)[-1])
+                  and os.path.isfile(os.path.join(repo_root, *p.split("/"))))
+
+
+def _route_scripts(scripts_dir):
+    """The flat scripts/ route targets, as closure entries (scripts/loop/ ships whole through generate_loop)."""
+    return [p.split("/", 1)[1] for p in route_targets(scripts_dir) if p.count("/") == 1 and p.startswith("scripts/")]
+
+
+def _module_files(dirs, dotted):
+    """The files a Python import of `dotted` loads from the first of `dirs` holding its top name: every package
+    __init__.py on the way down and the module itself. [] for a module none of `dirs` carries (the standard
+    library, another product)."""
+    parts = dotted.split(".")
+    for d in dirs:
+        if not (os.path.isfile(os.path.join(d, parts[0] + ".py"))
+                or os.path.isfile(os.path.join(d, parts[0], "__init__.py"))):
+            continue
+        out = []
+        for i in range(1, len(parts) + 1):
+            base = os.path.join(d, *parts[:i])
+            out += [p for p in (base + ".py", os.path.join(base, "__init__.py")) if os.path.isfile(p)]
+        return out
+    return []
+
+
+def _join_tails(node):
+    """The constant tail of an os.path.join(...) call (all of it when every argument is a string constant), or None."""
+    func = node.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "join" and "path" in ast.dump(func.value)):
+        return None
+    consts = [isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args]
+    tail = node.args if all(consts) else node.args[1:]
+    if not tail or not all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in tail):
+        return None
+    return [a.value for a in tail]
+
+
+def product_closure(product_dir, entries, import_dirs=()):
+    """Sorted product relative POSIX paths of `entries` (product relative) and every file they reach inside
+    product_dir: Python imports resolved the way the product's own sys.path does (the importing file's folder, then
+    `import_dirs`), relative imports with their package __init__.py, a bare "name.py" constant beside the file, at
+    the product root or in an import folder (cli.py runs tools/sbe_decide.py by that name), every tool a shipped
+    hooks.json cites as ${CLAUDE_PLUGIN_ROOT}/tools/<name>, and the existing file an os.path.join with a constant tail names from the file's folder or the
+    product root (the data a target reads: tables/architecture.json, VERSION). Nothing outside product_dir is ever
+    followed, and nothing under a dot folder (.sbe, .github, .claude: the product repository's own configuration,
+    which a join toward the user's repository can name by the same relative path, never runtime data) except the
+    KNOWN_HOSTS manifest folders a product's own doctor reads (host_manifest_dirs only scans bundle/ itself, so a
+    nested one registers nothing). A file that is not Python (a shell launcher, a JSON table) ships as bytes and names nothing further.
+    ponytail: a join resolved against two roots can ship a small file the code never reads (a docs page sharing a
+    relative name with the user repository path it builds); an exact read model is a dataflow pass, add one if the
+    bundle grows by more than that noise."""
+    product_dir = os.path.abspath(product_dir)
+    search = [os.path.join(product_dir, d) for d in import_dirs]
+    seen = set()
+    queue = [os.path.join(product_dir, *e.split("/")) for e in entries]
+    while queue:
+        path = os.path.normpath(queue.pop(0))
+        if (path in seen or not os.path.isfile(path) or path.endswith(".pyc")
+                or os.path.commonpath([product_dir, path]) != product_dir
+                or any(seg == "__pycache__" or (seg.startswith(".") and seg not in KNOWN_HOSTS)
+                       for seg in os.path.relpath(path, product_dir).split(os.sep))):
+            continue
+        seen.add(path)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except UnicodeDecodeError:
+            continue
+        name = os.path.basename(path)
+        if not name.endswith(".py"):  # a hooks.json the product ships runs the tools it cites
+            queue += [os.path.join(product_dir, "tools", n) for n in _HOOK_TOOL_RE.findall(text)]
+            if "." in name:  # data; an extensionless file (bin/sbe) is a Python launcher, walked below
+                continue
+        try:
+            tree = ast.parse(text, filename=path)
+        except (SyntaxError, ValueError):
+            continue
+        here = os.path.dirname(path)
+        dirs = [here] + search
+        read_bare = not os.path.basename(path).startswith("test_")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    queue += _module_files(dirs, alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                mod_dirs, mod = dirs, node.module or ""
+                if node.level:
+                    base = here
+                    for _ in range(node.level - 1):
+                        base = os.path.dirname(base)
+                    mod_dirs = [base]
+                    queue.append(os.path.join(base, "__init__.py"))
+                if mod:
+                    queue += _module_files(mod_dirs, mod)
+                for alias in node.names:
+                    queue += _module_files(mod_dirs, (mod + "." if mod else "") + alias.name)
+            elif isinstance(node, ast.Call):
+                tail = _join_tails(node)
+                if tail:
+                    queue += [os.path.join(root, *tail) for root in (here, product_dir)]
+            elif (read_bare and isinstance(node, ast.Constant) and isinstance(node.value, str)
+                  and node.value.endswith(".py") and "\n" not in node.value):
+                queue += [os.path.join(root, *node.value.split("/")) for root in [here, product_dir] + search]
+    return sorted(os.path.relpath(p, product_dir).replace(os.sep, "/") for p in seen)
+
+
+def _hook_shipped(products_dir, runtime_dir):
+    """Repository relative paths of products/ files the hook mirror already carries under runtime/hooks/<product>/:
+    a route target among them (bm_vault.py, sbe_gate.py, doctor.py) is shipped there and is not copied twice."""
+    shipped = set()
+    for product in HOOK_PRODUCTS:
+        tools_dir, closure = compute_hook_closure(product, products_dir, runtime_dir)
+        shipped.update("%s/%s/tools/%s" % (ROUTED_PRODUCTS, product, n) for n in closure)
+        shipped.update("%s/%s/%s" % (ROUTED_PRODUCTS, product, t)
+                       for t in compute_hook_package_files(product, tools_dir, closure, products_dir))
+    return shipped
+
+
+def compute_route_files(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
+    """[(path inside bundle/runtime, absolute source path)] for every products/ route target the hook mirror does
+    not carry, with that target's product_closure, sorted. Each lands at products/<product>/<product relative path>,
+    so two products can never collide on one name."""
+    repo_root = os.path.dirname(os.path.abspath(scripts_dir))
+    products_dir = os.path.join(repo_root, ROUTED_PRODUCTS)
+    hooked = _hook_shipped(products_dir, runtime_dir)
+    seeds = {}
+    for rel in route_targets(scripts_dir):
+        parts = rel.split("/")
+        if parts[0] == ROUTED_PRODUCTS and len(parts) > 2 and rel not in hooked:
+            seeds.setdefault(parts[1], []).append("/".join(parts[2:]))
+    out = []
+    for product, entries in sorted(seeds.items()):
+        product_dir = os.path.join(products_dir, product)
+        for tail in product_closure(product_dir, entries, PRODUCT_IMPORT_DIRS.get(product, ())):
+            out.append(("%s/%s/%s" % (ROUTED_PRODUCTS, product, tail), os.path.join(product_dir, *tail.split("/"))))
+    return sorted(out)
+
+
+def _route_files_on_disk(runtime_dir):
+    """Paths inside bundle/runtime of every file currently under runtime/products/, so a target that stopped being
+    routed leaves the bundle (generate) or is named (check)."""
+    top = os.path.join(runtime_dir, ROUTED_PRODUCTS)
+    found = []
+    for dirpath, dirnames, filenames in os.walk(top):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in sorted(filenames):
+            if not name.endswith(".pyc"):
+                found.append(os.path.relpath(os.path.join(dirpath, name), runtime_dir).replace(os.sep, "/"))
+    return found
+
+
 def _read_bytes(path):
     with open(path, "rb") as fh:
         return fh.read()
+
+
+#: A journey walk record (docs/plan/JOURNEY-J*.json) carries machine internals the walker wrote down: the temp path of the
+#: install it walked, the seat that walked, the environment it cleared. The door reads six fields (door._journey_gaps);
+#: only those ship, in the bundle and in the public export. Anything else is dropped; a record that is not a JSON object
+#: stops the generator rather than shipping unread.
+JOURNEY_SHIPPED_KEYS = ("journey", "clean_home", "identity", "candidate_identity", "host", "rows")
+#: What both identity fields say in the SHIPPED copy. A walk record in docs/plan carries the candidate identity, the sha256
+#: of this bundle's manifest; the manifest lists the shipped copy's own sha256; so a shipped copy that carried the real
+#: identity would make the manifest depend on a value derived from the manifest, a hash cycle with no fixed point (three
+#: restamp rounds gave three different identities, 2026-11-03). The source record keeps the real identity, the release
+#: preflight binds it to the manifest, and the door only checks the two fields agree, so the shipped copy carries one
+#: fixed word in both and its bytes no longer depend on the tree they ship in.
+SHIPPED_IDENTITY = "shipped"
+
+
+def ship_journey_record(raw):
+    """The bytes of a walk record as they ship: only JOURNEY_SHIPPED_KEYS, sorted, one trailing newline, both identity
+    fields set to SHIPPED_IDENTITY. A source whose identity fields are not both present, non empty text and equal stops
+    the generator rather than shipping an unreadable claim. Idempotent."""
+    doc = json.loads(raw.decode("utf-8"))
+    if not isinstance(doc, dict):
+        raise ValueError("a journey walk record must be a JSON object")
+    kept = {k: doc[k] for k in JOURNEY_SHIPPED_KEYS if k in doc}
+    ids = [kept.get("identity"), kept.get("candidate_identity")]
+    if any(k in kept for k in ("identity", "candidate_identity")):
+        if not all(isinstance(i, str) and i for i in ids) or ids[0] != ids[1]:
+            raise ValueError("a journey walk record's identity and candidate_identity must both be non empty text and equal")
+        kept["identity"] = kept["candidate_identity"] = SHIPPED_IDENTITY
+    return (json.dumps(kept, indent=1, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _shipped_bytes(dest, src):
+    """What `src` becomes at `dest` inside bundle/runtime: its own bytes, except a walk record, which is reduced."""
+    data = _read_bytes(src)
+    name = os.path.basename(dest)
+    return ship_journey_record(data) if name.startswith("JOURNEY-") and name.endswith(".json") else data
 
 
 def _sha256(data):
@@ -1347,7 +1629,7 @@ def _git_line(args, cwd, nodata):
     return proc.stdout.strip() or nodata
 
 
-def build_manifest(closure, scripts_dir=SCRIPTS_DIR):
+def build_manifest(closure, scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
     files = [{"path": name, "sha256": _sha256(_read_bytes(os.path.join(scripts_dir, name)))}
              for name in closure]
     files.append({"path": LAUNCHER_NAME,
@@ -1358,7 +1640,9 @@ def build_manifest(closure, scripts_dir=SCRIPTS_DIR):
         src = os.path.join(scripts_dir, *rel.split("/"))
         files.append({"path": rel, "sha256": _sha256(_read_bytes(src))})
     for dest, src in compute_extra_files(closure, scripts_dir):
-        files.append({"path": dest, "sha256": _sha256(_read_bytes(src))})
+        files.append({"path": dest, "sha256": _sha256(_shipped_bytes(dest, src))})
+    for dest, src in compute_route_files(scripts_dir, runtime_dir):
+        files.append({"path": dest, "sha256": _sha256(_shipped_bytes(dest, src))})
     files.sort(key=lambda f: f["path"])
     return {"generated_by": "scripts/bundle_runtime.py", "entry": ENTRY,
             "files": files,
@@ -1393,13 +1677,14 @@ def _read_manifest(path):
     return doc if isinstance(doc, dict) else None
 
 
-def _manifest_bytes(closure, scripts_dir=SCRIPTS_DIR, keep_stamp_from=None):
+def _manifest_bytes(closure, scripts_dir=SCRIPTS_DIR, keep_stamp_from=None,
+                    runtime_dir=RUNTIME_DIR):
     """The manifest as it should be written. `keep_stamp_from` is an existing
     manifest path whose stamp is carried forward UNCHANGED when the byte
     content did not change, so running this generator again on a moved tip
     rewrites nothing; the stamp then names the revision the packaged bytes
     were last actually copied from, which is the true answer."""
-    manifest = build_manifest(closure, scripts_dir)
+    manifest = build_manifest(closure, scripts_dir, runtime_dir)
     previous = _read_manifest(keep_stamp_from) if keep_stamp_from else None
     provisional = str((previous or {}).get("source_describe", "")).endswith(
         "-dirty")
@@ -1515,8 +1800,17 @@ def generate(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
             changed.append(rel)
     for dest, src in compute_extra_files(closure, scripts_dir):
         if _write_if_changed(os.path.join(runtime_dir, dest),
-                             _read_bytes(src)):
+                             _shipped_bytes(dest, src)):
             changed.append(dest)
+    routed = compute_route_files(scripts_dir, runtime_dir)
+    for dest, src in routed:
+        if _write_if_changed(os.path.join(runtime_dir, *dest.split("/")), _shipped_bytes(dest, src)):
+            changed.append(dest)
+    keep = {dest for dest, _src in routed}
+    for dest in _route_files_on_disk(runtime_dir):  # a target no longer routed leaves the bundle, and is named
+        if dest not in keep:
+            os.remove(os.path.join(runtime_dir, *dest.split("/")))
+            changed.append(dest + " (removed)")
     changed += generate_loop(scripts_dir, runtime_dir)
     launcher_path = os.path.join(runtime_dir, LAUNCHER_NAME)
     if _write_if_changed(launcher_path, LAUNCHER_SOURCE.encode("utf-8")):
@@ -1529,7 +1823,8 @@ def generate(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
     manifest_path = os.path.join(runtime_dir, MANIFEST_NAME)
     if _write_if_changed(manifest_path,
                          _manifest_bytes(closure, scripts_dir,
-                                         keep_stamp_from=manifest_path)):
+                                         keep_stamp_from=manifest_path,
+                                         runtime_dir=runtime_dir)):
         changed.append(MANIFEST_NAME)
     return closure, changed
 
@@ -1556,15 +1851,33 @@ def check(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
             problems.append("%s: bundle/runtime copy does not match its "
                             "scripts/ source" % rel)
     problems += check_loop(scripts_dir, runtime_dir)
-    for dest, src in compute_extra_files(closure, scripts_dir):
+    extras = compute_extra_files(closure, scripts_dir)
+    for dest, src in extras:
         dst = os.path.join(runtime_dir, dest)
         if not os.path.isfile(dst):
             problems.append("%s: missing from bundle/runtime, so an "
                             "installed copy has no schema to check a record "
                             "against" % dest)
-        elif _read_bytes(src) != _read_bytes(dst):
+        elif _shipped_bytes(dest, src) != _read_bytes(dst):
             problems.append("%s: bundle/runtime copy does not match its "
                             "source outside scripts/" % dest)
+    routed = compute_route_files(scripts_dir, runtime_dir)
+    for dest, src in routed:
+        dst = os.path.join(runtime_dir, *dest.split("/"))
+        if not os.path.isfile(dst):
+            problems.append("%s: missing from bundle/runtime, so the door "
+                            "route it serves answers NO-DATA on an install" % dest)
+        elif _shipped_bytes(dest, src) != _read_bytes(dst):
+            problems.append("%s: bundle/runtime copy does not match its "
+                            "product source" % dest)
+    # A symlink reads byte identical through its target, so the comparisons above pass it; an install carries no link.
+    shipped = ([n for n in closure] + list(data_files) + [d for d, _s in extras] + [d for d, _s in routed])
+    problems += ["%s: a symlink in bundle/runtime, which an install does not carry" % rel for rel in shipped
+                 if os.path.islink(os.path.join(runtime_dir, *rel.split("/")))]
+    keep = {dest for dest, _src in routed}
+    problems += ["%s: in bundle/runtime, but no door route reaches it"
+                 % dest for dest in _route_files_on_disk(runtime_dir)
+                 if dest not in keep]
     launcher_path = os.path.join(runtime_dir, LAUNCHER_NAME)
     if not os.path.isfile(launcher_path):
         problems.append("%s: missing from bundle/runtime" % LAUNCHER_NAME)
@@ -1590,7 +1903,8 @@ def check(scripts_dir=SCRIPTS_DIR, runtime_dir=RUNTIME_DIR):
         problems.append("%s: carries no %s, so an installed copy cannot name "
                         "the engine it was built from; regenerate"
                         % (MANIFEST_NAME, " and no ".join(STAMP_FIELDS)))
-    elif _content(on_disk) != _content(build_manifest(closure, scripts_dir)):
+    elif _content(on_disk) != _content(build_manifest(closure, scripts_dir,
+                                                       runtime_dir)):
         problems.append("%s: stale, its file list or hashes do not match a "
                         "fresh generation" % MANIFEST_NAME)
     return (not problems), problems, closure

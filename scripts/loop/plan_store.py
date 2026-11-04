@@ -11,7 +11,7 @@ only the unit records the caller names, and renames a temp file into place. Two 
 both survive; two writers touching the same unit serialise, and the second one's record wins with the first one
 already on disk to be re-read. FAIL DIRECTION: an unreadable plan or a unit id the file does not contain raises,
 and nothing is written, because a write that cannot find its target is a write to the wrong file."""
-import contextlib, copy, fcntl, json, os, re, sys, tempfile
+import contextlib, copy, fcntl, hashlib, json, os, re, sys, tempfile
 
 # THE ONE LANDED TEST (finding 2, 2026-09-27). On e7e17784c, 19 call sites in 17 files under scripts/ each carried
 # their own copy of r"<sub>[^.]{0,80}?(landed|LANDED|DONE)" to read the plan, and that pattern matched A.1 inside "A.10 landed" and counted "A.1 not landed: gate refused" as a landing, so an
@@ -30,6 +30,84 @@ def sub_landed(sub, evidence):
         raise ValueError("sub_landed needs a sub unit id and evidence text, got %s and %s" % (type(sub).__name__, type(evidence).__name__))
     found = re.finditer(r"(?<![\w.-])" + re.escape(sub) + r"(?![\w-]|\.\w)([^.]{0,80}?)" + _LANDED_VERB, evidence)
     return any(not _NOT_LANDED.search(m.group(1)) for m in found)
+
+
+# THE STRUCTURED LANDING FACTS (LOOP1.d, RC07, 2026-10-31). sub_landed above reads prose, and prose cannot say "reverted":
+# a reverted landing still read landed and its unit could close. Each landing now also appends one event to its unit's
+# `landing_events`, under the same lock as its evidence line. P1 (ruled 2026-10-31): `commit` is the landing's BASE, the
+# commit it was built and graded on, because the landing commit carries the plan and cannot name itself; close_unit finds
+# the landing commit as the one that added `evidence_id` (the sha256 of the evidence line) and refuses it reverted.
+LANDING_TYPES = ("landed", "reverted", "closed")
+
+
+def landing_event(unit, sub, commit, line, sequence, kind="landed"):
+    """The one event shape (schema 1) every writer appends: land_batch's landing, and any revert or closure writer."""
+    return {"schema": 1, "sequence": sequence, "type": kind, "unit": unit, "sub": sub, "commit": commit,
+            "evidence_id": hashlib.sha256(line.encode("utf-8")).hexdigest()}
+
+
+def evidence_ids(sub, evidence):
+    """The evidence_ids `evidence` can back for `sub`, landing_event's inverse: the sha256 of each line naming it. A line
+    runs from the whitespace before a whole token mention of `sub` (or the text's start) to the first full stop after it
+    that ends the text or comes before whitespace, which is land_batch.evidence_line's own shape. So an event whose id
+    hashes no line of the prose names a landing the prose does not record (adversarial review, 2026-10-31)."""
+    out = set()
+    for m in re.finditer(r"(?<![\w.-])" + re.escape(sub) + r"(?![\w-]|\.\w)", evidence):
+        start = m.start() - 1 if m.start() and evidence[m.start() - 1].isspace() else m.start()
+        end = re.compile(r"\.(?=\s|$)").search(evidence, m.end())
+        if end:
+            out.add(hashlib.sha256(evidence[start:end.end()].encode("utf-8")).hexdigest())
+    return out
+
+
+def _event_flaw(e):
+    """'' when `e` is a well formed schema 1 event, else what is wrong with it."""
+    if not isinstance(e, dict):
+        return "an event is %s, not an object" % type(e).__name__
+    if e.get("schema") != 1 or isinstance(e.get("schema"), bool):
+        return "schema %r is not 1" % (e.get("schema"),)
+    seq = e.get("sequence")
+    if type(seq) is not int or seq < 1:
+        return "sequence %r is not a whole number from 1" % (seq,)
+    if e.get("type") not in LANDING_TYPES:
+        return "type %r is none of %s" % (e.get("type"), ", ".join(LANDING_TYPES))
+    if not all(isinstance(e.get(k), str) and e[k] for k in ("unit", "sub")):
+        return "unit or sub is not a non empty id"
+    if not isinstance(e.get("commit"), str) or not re.fullmatch(r"[0-9a-f]{40}", e["commit"]):
+        return "commit %r is not a 40 hex commit" % (e.get("commit"),)
+    if not isinstance(e.get("evidence_id"), str) or not re.fullmatch(r"[0-9a-f]{64}", e["evidence_id"]):
+        return "evidence_id is not a 64 hex digest"
+    return ""
+
+
+def landing_facts(events, unit, sub):
+    """{landed, commit, evidence_id, reason}: whether `sub` of `unit` is landed NOW per its events. Pure.
+    The highest sequence among its landed and reverted events decides: a revert removes the landing, a later landing
+    restores it, a replayed event is idempotent. FAIL DIRECTION (R07): a malformed event anywhere in the list, two
+    different events at one sequence, or a list that is not a list answers not landed WITH the reason, never dropped
+    silently, because a torn record must not erase negative evidence. Ancestry and reverts in git are the caller's."""
+    def no(why):
+        return {"landed": False, "commit": None, "evidence_id": None, "reason": why}
+    if not isinstance(events, list):
+        return no("landing events are %s, not a list" % type(events).__name__)
+    mine = {}
+    for i, e in enumerate(events):
+        flaw = _event_flaw(e)
+        if flaw:
+            return no("landing event %d is malformed (%s), and a torn record never counts as absent" % (i, flaw))
+        if e["unit"] != unit or e["sub"] != sub:
+            continue
+        if mine.get(e["sequence"], e) != e:
+            return no("two different events at sequence %d" % e["sequence"])
+        mine[e["sequence"]] = e
+    current = [mine[k] for k in sorted(mine) if mine[k]["type"] != "closed"]
+    if not current:
+        return no("no landing event for %s" % sub)
+    last = current[-1]
+    if last["type"] == "reverted":
+        return no("reverted at sequence %d" % last["sequence"])
+    return {"landed": True, "commit": last["commit"], "evidence_id": last["evidence_id"],
+            "reason": "landed at sequence %d" % last["sequence"]}
 
 
 # THE UNIT STATES THAT MEAN "NOT IN THIS RELEASE" (2026-09-29). The plan's state words are DONE, PARTIAL, SPECIFIED,
@@ -99,6 +177,18 @@ def _evidence_kept(k, old, new):
                          "pass a callable record so the change is applied to the unit re-read under the lock" % k)
 
 
+def _events_kept(k, old, new):
+    """Landing events are append only, like evidence: a write whose events do not extend the events on disk was built
+    from a stale read and would drop a newer landing or revert (LOOP1.d). Refuse it, nothing written."""
+    old = [] if old is None else old
+    new = [] if new is None else new
+    if not isinstance(old, list) or not isinstance(new, list):
+        raise ValueError("unit %s: landing_events is not a list on disk or in the record; nothing written" % k)
+    if new[:len(old)] != old:
+        raise ValueError("unit %s: these landing events were built from a stale read and would drop events committed "
+                         "since; pass a callable record so the change is applied to the unit re-read under the lock" % k)
+
+
 def update_units(path, records, lock_path=None, fields=None):
     """records: {unit_id: unit dict, or a callable}. A CALLABLE receives a copy of the unit RE-READ UNDER THE LOCK and
     returns the new record: the only safe way to derive a value from the current one, such as appending evidence
@@ -120,6 +210,7 @@ def update_units(path, records, lock_path=None, fields=None):
             old = plan["units"][by_id[k]]
             new = dict(old, **{f: rec[f] for f in fields if f in rec}) if fields else rec
             if new.get("evidence") != old.get("evidence"): _evidence_kept(k, old.get("evidence"), new.get("evidence"))
+            if new.get("landing_events") != old.get("landing_events"): _events_kept(k, old.get("landing_events"), new.get("landing_events"))
             plan["units"][by_id[k]] = new
         _replace(path, _body(plan))
     return sorted(records)
@@ -138,20 +229,39 @@ def undo_appended(path, appended, lock_path=None, committed=None):
     A third item, when present, lists the owns entries that writer added (landing_records, queue item 5 2026-09-30):
     each one still in the unit's owns is removed in this same pass, so the byte for byte restore above still holds; an
     owns entry another writer added is kept. A record whose evidence part is unchanged (after == before) added owns only,
-    and only its owns come back."""
-    if not isinstance(appended, dict): raise ValueError("appended must be a {id: (before, after[, owns added])} dict")
+    and only its owns come back. A fourth item lists the landing events that writer appended (LOOP1.d): each one still in
+    the unit's landing_events is removed in the same pass; an event another writer appended is kept."""
+    if not isinstance(appended, dict): raise ValueError("appended must be a {id: (before, after[, owns added[, events]])} dict")
     missed, changed = [], False
+    had_events = _units_with_events(committed)
+
+    def drop_events(k, unit, made):
+        """Remove this landing's own events from `unit`; True when anything was removed."""
+        events, dropped = unit.get("landing_events"), False
+        for e in made:
+            if isinstance(events, list) and e in events:
+                events.remove(e); dropped = True
+        if made and events == [] and k not in had_events:
+            del unit["landing_events"]   # this landing created the key: the committed plan never had it
+        return dropped
     with _locked(path, lock_path):
         plan = load(path)
         by_id = {u.get("id"): u for u in plan.get("units", []) if isinstance(u, dict)}
         for k, rec in sorted(appended.items()):
             before, after, *more = rec
             added = more[0] if more else ()
+            made = more[1] if len(more) > 1 else ()
             unit = by_id.get(k)
             if not (added and after == before and unit is not None):
                 cur = unit.get("evidence") if unit is not None else None
                 if not isinstance(after, str) or not isinstance(cur, str) or not cur.startswith(after):
-                    missed.append(k); continue
+                    missed.append(k)
+                    # THE EVENTS GO EVEN WHEN THE LINES CANNOT (adversarial review, 2026-10-31): a refused landing's
+                    # events left beside its prose would let the next commit of the plan become its landing commit.
+                    # Without them its prose reads DISAGREE, which keeps the unit open until a human looks.
+                    if unit is not None and drop_events(k, unit, made):
+                        changed = True
+                    continue
                 rest = cur[len(after):]
                 unit["evidence"] = (before or "") + rest if rest else before
                 changed = True
@@ -159,8 +269,24 @@ def undo_appended(path, appended, lock_path=None, committed=None):
             for p in added:
                 if isinstance(owns, list) and p in owns:
                     owns.remove(p); changed = True
+            if drop_events(k, unit, made):
+                changed = True
         if changed: _replace(path, committed if _holds(committed, plan) else _body(plan))
     return missed
+
+
+def _units_with_events(raw):
+    """The unit ids whose committed record carries a landing_events key. Unknown committed bytes answer "every unit",
+    so undo_appended keeps an emptied key rather than guessing it away."""
+    class Every:
+        def __contains__(self, k): return True
+    try:
+        units = json.loads(raw.decode("utf-8")).get("units") if isinstance(raw, bytes) else None
+    except (ValueError, AttributeError):   # sbe: allow-silent unreadable committed bytes: keep every emptied key
+        units = None
+    if not isinstance(units, list):
+        return Every()
+    return {u.get("id") for u in units if isinstance(u, dict) and "landing_events" in u}
 
 
 def _holds(raw, plan):

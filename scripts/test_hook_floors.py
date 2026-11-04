@@ -17,6 +17,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 TOOLS = os.path.join(REPO, "products", "brothermode", "tools")
+LIMITS_CURRENT = os.path.join(REPO, "products", "brothermode", "docs", "limits", "CURRENT.md")
 FLOOR_FILES = [os.path.join(TOOLS, n) for n in ("test_bm_consent.py", "test_bm_hookperf.py", "test_bm_hookbench.py")]
 
 
@@ -54,9 +55,15 @@ class CheckDoc(unittest.TestCase):
 
     def test_the_doc_is_retired(self):
         self.assertFalse(performance_doc_present(REPO), "products/brothermode/docs/PERFORMANCE.md still exists")
-        for rel in ("README.md", os.path.join("docs", "limits", "CURRENT.md")):
-            with open(os.path.join(REPO, "products", "brothermode", rel), encoding="utf-8") as fh:
-                self.assertNotIn("PERFORMANCE.md", fh.read(), rel)
+        with open(os.path.join(REPO, "products", "brothermode", "README.md"), encoding="utf-8") as fh:
+            self.assertNotIn("PERFORMANCE.md", fh.read(), "README.md")
+
+    # products/brothermode/docs/limits is not shipped in the public export, so there the page is absent, not
+    # the retirement broken; the hub, which has the page, still runs this.
+    @unittest.skipUnless(os.path.isfile(LIMITS_CURRENT), "docs/limits/CURRENT.md is not shipped in the public export")
+    def test_the_limits_page_does_not_link_the_retired_doc(self):
+        with open(LIMITS_CURRENT, encoding="utf-8") as fh:
+            self.assertNotIn("PERFORMANCE.md", fh.read(), "docs/limits/CURRENT.md")
 
 
 if __name__ == "__main__":

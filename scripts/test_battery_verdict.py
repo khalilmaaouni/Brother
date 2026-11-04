@@ -1159,5 +1159,302 @@ def tearDownModule():
     # hook exists (fixed in 3.10); without it the fixture roots leak per run.
     pass
 
+
+class J064OutcomeWritten(unittest.TestCase):
+    """JEV1.a, frozen failing first: every Jev family that decides gets
+    graded. A J064 shadow decision made inside battery_verdict.main() gets
+    one outcome row, written through jev_outcome.label_attempt (the writer
+    loop_bridge.flush_jev_labels already uses), joined to that decision's
+    attempt id and decision id, labelled from the line's own deterministic
+    verdict word. J030 gets the same writer from board_status.main(), the
+    entry point whose claim_supported_by_source() decides it.
+
+    Hermetic: the REAL jev_seam.consult runs (worker thread, attempt and
+    decision rows, budget) against a scripted bridge runner, a fresh temp
+    ledger, a temp budget file and a temp HOME; the registry entry and the
+    seams config are fixtures, so nothing reads data/ or calls a model. The
+    runner sleeps briefly before answering, the shape of every real call,
+    so a writer that labels before the shadow worker has landed its row
+    (no jev_seam.drain()) reads PENDING and writes nothing. The test itself
+    drains after main() returns, only so its preconditions read a settled
+    ledger.
+
+    J064 is a CHOICE question (pass, fail-real, infra-flake, skip,
+    needs-human, unknown). Fixtures use only the unambiguous pairs: Jev
+    "pass" on a PASS line agrees, Jev "pass" on a FAIL line disagrees.
+    "unknown" is the registry's abstain option and is never graded, the
+    same way a noul inside the abstain band is never graded."""
+
+    J064_ENTRY = {
+        "id": "J064", "role": "triage_or_rank", "risk": "high", "wave": "W1",
+        "privacy": "needs_content_gate",
+        "question": {
+            "type": "choice",
+            "instructions": "classify one gate/CI/PR log line",
+            "options": ["pass", "fail-real", "infra-flake", "skip",
+                        "needs-human", "unknown"],
+        },
+    }
+    J030_ENTRY = {
+        "id": "J030", "role": "second_opinion", "risk": "medium", "wave": "W1",
+        "privacy": "needs_content_gate",
+        "question": {
+            "type": "noul",
+            "instructions": "does the row's claim match its quoted source",
+        },
+    }
+    RUNNER_DELAY_S = 0.3
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, HERE)
+        import battery_verdict as BV
+        self.BV = BV
+        if BV.jev_checks is None or BV.jev_seam is None:
+            self.skipTest("jev_checks unavailable in this environment "
+                          "(fail-open by design)")
+        import jev_checks
+        import jev_seam
+        self.jev_checks = jev_checks
+        self.jev_seam = jev_seam
+        self.mock = mock
+        root = tempfile.mkdtemp(prefix="jev1a-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        self.root = root
+        self.ledger = os.path.join(root, "ledger")
+        home = os.path.join(root, "home")
+        # J064 and J030 are needs_content_gate: coe_outside_gate resolves its
+        # terms list from ~/.claude at import, so an empty HOME (the public
+        # runner) has none and the seam writes a no_data row. The class
+        # supplies its own fixture terms file, the one child_isolation
+        # FIXTURE_HOME_FILES names, and never reads the real one.
+        import coe_outside_gate
+        os.makedirs(os.path.join(home, ".claude"))
+        terms = os.path.join(home, ".claude", "coe-outside-gate-terms.json")
+        with open(terms, "w", encoding="utf-8") as fh:
+            json.dump({"vendor-fixture": ["ACMEWIDGET"]}, fh)
+        for patcher in (
+                mock.patch.object(coe_outside_gate, "DEFAULT_TERMS_PATH", terms),
+                mock.patch.object(jev_seam, "DEFAULT_LEDGER_DIR", self.ledger),
+                mock.patch.object(jev_checks, "DEFAULT_LEDGER_DIR", self.ledger),
+                mock.patch.object(jev_seam, "DEFAULT_BUDGET_PATH",
+                                  os.path.join(root, "jev-budget.json")),
+                mock.patch.dict(os.environ, {"HOME": home})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # no worker from this test may outlive it into the next one
+        self.addCleanup(jev_seam.drain, 10)
+        self.expectations_path = os.path.join(root, "expectations.json")
+        with open(self.expectations_path, "w", encoding="utf-8") as fh:
+            json.dump(EXPECTATIONS, fh)
+        self.check_all_path = os.path.join(root, "check_all_clean.sh")
+        with open(self.check_all_path, "w", encoding="utf-8") as fh:
+            fh.write(CHECK_ALL_CLEAN)
+
+    # ---- fixtures -------------------------------------------------------
+
+    def _choice_runner(self, choice, prob=0.95):
+        """A scripted bridge runner (the shape test_board_status.py's
+        _choice_runner uses): always answers `choice`, after a short
+        delay, never a network call or a subprocess."""
+        import time
+        delay = self.RUNNER_DELAY_S
+
+        def fn(argv, stdin_text):
+            time.sleep(delay)
+            payload = json.loads(stdin_text)
+            answers = {}
+            for qid, q in payload["questions"].items():
+                keys = list(q["criteria"].keys())
+                others = [k for k in keys if k != choice]
+                probs = {choice: prob}
+                for k in others:
+                    probs[k] = (1.0 - prob) / len(others)
+                answers[qid] = {"choice": choice, "probabilities": probs,
+                                "confidence": prob}
+            return 0, json.dumps({"model": "typesafe/jev-1.13-test",
+                                  "answers": answers,
+                                  "usage": {"cost": 0.001}}), ""
+        return fn
+
+    def _noul_runner(self, prob):
+        import time
+        delay = self.RUNNER_DELAY_S
+
+        def fn(argv, stdin_text):
+            time.sleep(delay)
+            payload = json.loads(stdin_text)
+            answers = {qid: {"noul": prob, "confidence": prob}
+                       for qid in payload["questions"]}
+            return 0, json.dumps({"model": "typesafe/jev-1.13-test",
+                                  "answers": answers,
+                                  "usage": {"cost": 0.001}}), ""
+        return fn
+
+    def _jsonl(self, name):
+        path = os.path.join(self.ledger, name)
+        if not os.path.isfile(path):
+            return []
+        with open(path, encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh if line.strip()]
+
+    def _answered(self, entry_id):
+        return [r for r in self._jsonl("attempts.jsonl")
+                if r.get("phase") == "answered" and r.get("entry_id") == entry_id]
+
+    def _run_battery(self, lines, mode="shadow", choice="pass", repeat_results=False):
+        """battery_verdict.main() on `lines`, with J064 in `mode` and the
+        real check_gate_log_lines handed the scripted runner (main() itself
+        passes none). `repeat_results` hands the caller the same results
+        list twice, the second actor case for idempotence."""
+        input_path = os.path.join(self.root, "check_all_output.txt")
+        with open(input_path, "w", encoding="utf-8") as fh:
+            fh.write("Brother: every shipped check, each reporting its own exit code\n\n")
+            fh.write("\n".join(lines) + "\n\n")
+            fh.write("pass 1   fail 0   no-data 0\n")
+        real = self.jev_checks.check_gate_log_lines
+        runner = self._choice_runner(choice)
+
+        def scripted(*a, **k):
+            k["runner"] = runner
+            results = real(*a, **k)
+            return list(results) + list(results) if repeat_results else results
+        argv = [input_path, "--expectations", self.expectations_path,
+                "--check-all", self.check_all_path, "--today", "2026-09-01"]
+        m = self.mock
+        with m.patch.object(self.jev_seam, "load_seams_config",
+                            return_value={"modes": {"J064": mode}}), \
+                m.patch.object(self.jev_seam, "load_registry",
+                               return_value=[dict(self.J064_ENTRY)]), \
+                m.patch.object(self.jev_checks, "check_gate_log_lines", scripted), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = self.BV.main(argv)
+        self.jev_seam.drain(timeout=10)
+        return code
+
+    def _assert_one_outcome_joined(self, entry_id, correct):
+        answered = self._answered(entry_id)
+        self.assertEqual(len(answered), 1,
+                         "precondition: exactly one answered %s attempt, got %r"
+                         % (entry_id, answered))
+        decision_id = answered[0].get("decision_id")
+        self.assertTrue(decision_id, "precondition: the %s shadow wrote a decision"
+                        % entry_id)
+        outcomes = self._jsonl("outcomes.jsonl")
+        self.assertEqual(len(outcomes), 1,
+                         "exactly one outcome row for the %s decision, got %r"
+                         % (entry_id, outcomes))
+        row = outcomes[0]
+        self.assertEqual(row.get("id"), decision_id)
+        self.assertEqual(row.get("attempt_id"), answered[0]["attempt_id"])
+        self.assertIs(row.get("correct"), correct)
+
+    # ---- cases ----------------------------------------------------------
+
+    def test_1_shadow_on_agreeing_answer_writes_one_outcome_joined_to_the_decision(self):
+        """Case 1, the named mutation's target: J064 in shadow, a PASS
+        line, Jev answers "pass". One outcome row, its id the decision id,
+        its attempt id the shadow's attempt, correct=True."""
+        self._run_battery([check_all_line("PASS", "0", "product-suite")])
+        self._assert_one_outcome_joined("J064", True)
+
+    def test_1b_disagreeing_answer_is_labelled_from_the_verdict_not_a_constant(self):
+        """Case 1b: a FAIL line, Jev answers "pass": the label reads the
+        line's own verdict, so correct=False."""
+        self._run_battery([check_all_line("FAIL", "1", "product-suite", "boom")])
+        self._assert_one_outcome_joined("J064", False)
+
+    def test_2_shadow_off_writes_no_outcome(self):
+        """Case 2: J064 off. No decision, so no outcome row: nothing is
+        graded that was never decided."""
+        self._run_battery([check_all_line("PASS", "0", "product-suite")], mode="off")
+        self.assertEqual(self._jsonl("decisions.jsonl"), [])
+        self.assertEqual(self._jsonl("outcomes.jsonl"), [])
+
+    def test_3_no_data_verdict_is_never_labelled(self):
+        """Case 3: the line's deterministic verdict is NO-DATA, which is no
+        rule answer at all (label_attempt refuses anything but a bool). The
+        decision exists; it stays ungraded."""
+        self._run_battery([check_all_line("NO-DATA", "2", "product-suite", "no data")])
+        answered = self._answered("J064")
+        self.assertEqual(len(answered), 1, "precondition: one answered J064 attempt")
+        self.assertTrue(answered[0].get("decision_id"),
+                        "precondition: the shadow wrote a decision")
+        self.assertEqual(self._jsonl("outcomes.jsonl"), [])
+
+    def test_3b_jev_abstaining_with_unknown_is_never_labelled(self):
+        """Case 3b: Jev answers the registry's abstain option "unknown" on
+        a PASS line. Not an agreement and not a disagreement: no row."""
+        self._run_battery([check_all_line("PASS", "0", "product-suite")], choice="unknown")
+        abstained = [r for r in self._jsonl("attempts.jsonl")
+                     if r.get("phase") == "abstain" and r.get("entry_id") == "J064"]
+        self.assertEqual(len(abstained), 1, "precondition: one abstain J064 attempt")
+        self.assertTrue(abstained[0].get("decision_id"),
+                        "precondition: the abstain still wrote a decision")
+        self.assertEqual(self._jsonl("outcomes.jsonl"), [])
+
+    def test_4_the_same_decision_handed_back_twice_is_graded_once(self):
+        """Case 4: the seam hands main() the same result twice (one attempt,
+        one decision id). The first label wins: still one outcome row."""
+        self._run_battery([check_all_line("PASS", "0", "product-suite")],
+                          repeat_results=True)
+        self._assert_one_outcome_joined("J064", True)
+
+    def test_5_j030_board_status_main_writes_one_outcome_from_its_own_verdict(self):
+        """Case 5: J030 in shadow, a DONE row carrying evidence (its caller's
+        deterministic verdict has_evidence() is True), Jev answers a
+        confident yes. board_status.main() leaves one outcome row joined to
+        the J030 decision, correct=True."""
+        self._run_board("Ran 3 tests OK")
+        self._assert_one_outcome_joined("J030", True)
+
+    def test_5b_j030_disagreeing_with_its_own_verdict_is_labelled_incorrect(self):
+        """Case 5b: a DONE row with no evidence (has_evidence() is False),
+        Jev answers a confident "supported". The label reads the caller's
+        own verdict, never a constant: correct=False."""
+        self._run_board("")
+        self._assert_one_outcome_joined("J030", False)
+
+    def test_6_jev_says_never_grades_an_unknown_choice(self):
+        """Case 6: jev_says on an answered J064 choice row whose answer is
+        the abstain option "unknown" is None, so a writer that skipped the
+        binder's own phase check still could not grade it."""
+        import jev_outcome
+        row = {"phase": "answered", "qtype": "choice", "family": "J064",
+               "entry_id": "J064", "answer": "unknown", "prob": 0.95,
+               "confidence": 0.95, "decision_id": "J064:0:0"}
+        self.assertIsNone(jev_outcome.jev_says(row))
+
+    def _run_board(self, evidence):
+        """board_status.main --json over one DONE row carrying `evidence`,
+        with J030 in shadow and Jev answering a confident yes."""
+        import board_status
+        import jev_g1_seam_cache
+        board = os.path.join(self.root, "board.json")
+        with open(board, "w", encoding="utf-8") as fh:
+            json.dump({"rows": [{"id": "R1", "status": "DONE",
+                                 "title": "the parser reads both headers",
+                                 "evidence": evidence}]}, fh)
+        real_consult = self.jev_seam.consult
+        runner = self._noul_runner(0.95)
+
+        def scripted(*a, **k):
+            k["runner"] = runner
+            return real_consult(*a, **k)
+        jev_g1_seam_cache.reset()
+        self.addCleanup(jev_g1_seam_cache.reset)
+        m = self.mock
+        with m.patch.object(self.jev_seam, "load_seams_config",
+                            return_value={"modes": {"J030": "shadow"}}), \
+                m.patch.object(self.jev_seam, "load_registry",
+                               return_value=[dict(self.J030_ENTRY)]), \
+                m.patch.object(self.jev_seam, "consult", scripted), \
+                contextlib.redirect_stdout(io.StringIO()):
+            board_status.main(["--source", board, "--json",
+                               "--trace", os.path.join(self.root, "no-trace.jsonl")])
+        self.jev_seam.drain(timeout=10)
+
+
 if __name__ == "__main__":
     unittest.main()

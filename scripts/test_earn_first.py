@@ -332,6 +332,10 @@ class TheLiveGuidesCiteRealCapabilities(unittest.TestCase):
     default gate tables fails here rather than silently reading NO-DATA
     forever."""
 
+    # docs/plan is not shipped in the public export, so the live floor file is absent there: premise absent, not the
+    # behaviour broken. A tree that carries it still checks every gate table.
+    @unittest.skipUnless(os.path.isfile(os.path.join(os.path.dirname(HERE), "docs", "plan", "FLOOR-2026-09-09.json")),
+                         "this tree carries no live floor file")
     def test_default_gate_tables_name_real_capabilities_and_competitors(self):
         sys.path.insert(0, HERE)
         import earn_first as ef  # noqa: E402

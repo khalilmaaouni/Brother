@@ -377,7 +377,8 @@ class Declarations(object):
                 if fh.paths_overlap(rel, claim, self.root):
                     return "open task %s ownedPaths %s" % (t.get("id") or "(unnamed)", claim)
         for fence in self.fences:
-            if not fh.same_session(fence.session, self.session_id):
+            if not fh.same_session(fence.session, self.session_id,
+                                   registry=fence.registry):
                 continue
             for claim in fence.files:
                 if fh.paths_overlap(rel, claim, self.root):

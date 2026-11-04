@@ -206,7 +206,8 @@ def collect_real_code_facts(hook_path=HOOK_PATH):
 
     handler_outputs = {
         "pre_tool": _call_handler(module, "handle_pre_tool",
-                                  {"toolCall": {"name": "run_command", "args": {}}, "stepIdx": 0}),
+                                  {"toolCall": {"name": "run_command", "args": {"CommandLine": "true"}},
+                                   "stepIdx": 0}),
         "post_tool": _call_handler(module, "handle_post_tool", {"stepIdx": 0, "error": ""}),
         "pre_invocation": _call_handler(module, "handle_pre_invocation", {"invocationNum": 1}),
         "post_invocation": _call_handler(module, "handle_post_invocation", {"invocationNum": 1}),

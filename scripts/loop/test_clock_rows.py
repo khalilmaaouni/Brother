@@ -88,7 +88,8 @@ class TestClockRows(Folder):
         self.assertEqual(CC.expiry_errors(root, T0 + 3600), [], "the newest pack decides, not the oldest")
         empty = os.path.join(self.tmp, "empty")
         os.makedirs(empty)
-        self.assertEqual(CC.expiry_errors(empty, T0), ["close ceremony: no pack under %s; %s" % (empty, CLOSE_FIX)])
+        self.assertEqual(CC.expiry_errors(empty, T0), ["close ceremony: no handover record and no pack under %s; %s"
+                                                       % (empty, CLOSE_FIX)])
 
     def test_close_ceremony_refuses_hostile_input_before_any_read(self):
         root = self.pack("p", T0)

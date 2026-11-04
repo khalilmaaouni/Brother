@@ -25,7 +25,11 @@ class PublicRelease(unittest.TestCase):
             shipped = sorted(str(p.relative_to(folder)) for p in research.rglob("*") if p.is_file())
             self.assertEqual(shipped, allowed)
             private = sorted(str(p.relative_to(root)) for p in (root/"products/brotherds/research").glob("*") if p.is_file())
-            self.assertTrue(set(private) - set(shipped), "the private notes this test protects are gone: rewrite it")
+            # The private notes are hub only: the public export tree carries none, so there the premise (a private
+            # note that must not ship) is absent, not the guard broken; the pinned shipped == allowed check above
+            # still holds. In the hub the original assertion stands.
+            if (root / ".brother-edition").is_file():
+                self.assertTrue(set(private) - set(shipped), "the private notes this test protects are gone: rewrite it")
 
 if __name__ == "__main__":
     unittest.main()

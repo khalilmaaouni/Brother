@@ -47,6 +47,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pattern_note  # noqa: E402  the one vault resolver (KEY1.f)
+
 # J029, wave-2 Jev seam: optional, fail-open, exactly like loop_bridge.py's
 # own wave-1/wave-3 seams. The regex first pass above stays primary and
 # stdlib-only; this only fires once a DRIFT has already been found, to
@@ -147,8 +150,7 @@ KNOWN_REPOS = (
     # private), and a checker blind to it reports a real, pushed commit as
     # drifted. If this path is absent on a machine, _commit_exists already
     # skips it (no .git found) rather than failing the check.
-    os.path.expanduser("~/Documents/Kay Vault"),
-)
+) + tuple(r for r in (pattern_note.vault_root()[0],) if r)  # KEY1.f: the configured vault, never a guessed folder
 
 
 def _commit_exists(sha, repo=None, runner=None):

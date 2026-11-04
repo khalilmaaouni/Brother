@@ -3,7 +3,7 @@
 This is the controlled evidence document for unit L5c. Human written text
 lives outside the two markers below and is never overwritten by the tool.
 The generated region between the markers is produced by
-`scripts/l5c_audit.render_doc` from the run ledger and must equal
+`render_doc` in `scripts/l5c_audit.py` from the run ledger and must equal
 `scripts/l5c_audit.render_region(ledger)` byte for byte; `verify_evidence`
 refuses any document where it does not.
 
@@ -764,6 +764,6 @@ L5C-REGION
 2. Run the mutation probe over the pre-registered sample.
 3. Write the run ledger to `docs/plan/l5c/run-ledger.json`.
 4. Render this document from that ledger with
-   `scripts/l5c_audit.render_doc`.
-5. Verify with `scripts/l5c_audit.verify_evidence`. An empty list is the
+   `render_doc` in `scripts/l5c_audit.py`.
+5. Verify with `verify_evidence` in `scripts/l5c_audit.py`. An empty list is the
    only approval; everything else is a named problem.

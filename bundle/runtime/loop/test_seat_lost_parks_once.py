@@ -181,6 +181,7 @@ def _load():
     module.reviewed_route = lambda ws: ""
     module.touch_conflict = lambda ts, busy, unknown: ""
     module.admissible = lambda plan, sub: ""
+    module.pass_admission = lambda unit, sub, tree=".": ""   # LOOP1.b: this suite fabricates units with no lane; admission is not what it tests
     module.finish_first_hold = lambda *a, **k: ""
     module.wip_mode = lambda value: "off"
     module.spawned = lambda proc, sub, *a, **k: ""

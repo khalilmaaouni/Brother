@@ -1279,11 +1279,16 @@ def export_rows(root, version, runner=None, checks=None, heartbeat=None,
     return ok, lines
 
 
-def reuse_record(root, version, resume_sha, runner=None):
+def reuse_record(root, version, resume_sha, runner=None, now=None):
     """(record, path, '') of the rehearsal record covering a --resume cut,
     or (None, '', reason): RC1.b2. Not a resume, a record that does not
     cover, or one that is missing, corrupt or malformed is no reuse, and the
-    cut runs every row as before."""
+    cut runs every row as before.
+    CUT2.h: the last word is the one shared evidence rule (cut_driver.
+    shared_evidence_usable) readiness, rehearsal and cut all use, over the
+    record read as its shared shape: a READY verdict, its window, the
+    scripts/cut.py it ran, the version, and a log that still hashes to its
+    log_sha256. A doubt of any kind is no reuse, and every row runs."""
     if resume_sha is None:
         return None, "", "not a --resume cut, so every row runs"
     path, why = _covering_record(root, version, resume_sha, runner)
@@ -1292,7 +1297,31 @@ def reuse_record(root, version, resume_sha, runner=None):
     record, why = CR.load_record(path)
     if record is None:
         return None, "", why
+    why = _rehearsal_unusable(record, version, path, now)
+    if why:
+        return None, "", why
     return record, path, ""
+
+
+def _rehearsal_unusable(record, version, path, now=None):
+    """'' when D.shared_evidence_usable accepts the rehearsal `record` as shared evidence for this running cut.py and
+    `version`, else why. Never raises: a record that cannot be judged is not reused."""
+    try:
+        import cut_driver as D
+        made = record["_epoch"]
+        shared = {"schema": 1, "verdict": "PASS" if record["verdict"] == "READY" else record["verdict"],
+                  "inputs": {"checker": record["cut_py_sha256"], "version": record["version"]},
+                  "created_at": made, "valid_until": made + CR.MAX_AGE_HOURS * 3600,
+                  "evidence_id": record["log_sha256"]}
+        expected = {"checker": CR.running_cut_py_sha256(), "version": version}
+        clock = time.time() if now is None else float(now)
+        if D.shared_evidence_usable(shared, expected, clock,
+                                    lambda r: CR._sha256_file(record["log_path"]) == r["evidence_id"]):
+            return ""
+        return ("the rehearsal record %s is not usable shared evidence (its verdict, window, cut.py, version or log "
+                "did not verify)" % os.path.basename(path))
+    except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a doubt runs every row, never skips one
+        return "the rehearsal record could not be checked (%s)" % type(exc).__name__
 
 
 class CheckReuse(object):
@@ -1848,6 +1877,24 @@ def reusable_preflight(root, version, runner=None, directory="", now=None):
         built, why = export_tree(root, version, runner)
         if why or built != rec["export_tree_id"]:
             return "", ("the export tree is %s, the record names %s" % (built or why, rec["export_tree_id"][:12]))
+        # CUT2.b: the last word is the one shared evidence rule readiness, rehearsal and cut use: every identity the
+        # record was made under (code, checker, policy, interpreter, environment, export, host, HOME) must equal this
+        # run's, the window must hold, and the log must still hash to the record's evidence id. A record written
+        # before the identity existed carries no inputs, so it misses and the full preflight runs.
+        import cut_driver as D
+        expected = CR.preflight_inputs(head, tree, built, version)
+        made = CR._parse_iso(rec["finished_at"])
+        shared = {"schema": 1, "verdict": rec["verdict"], "inputs": rec.get("inputs"), "created_at": made,
+                  "valid_until": made + CR.MAX_AGE_HOURS * 3600, "evidence_id": rec["log_sha256"]}
+        clock = time.time() if now is None else float(now)
+        if not D.shared_evidence_usable(shared, expected, clock,
+                                        lambda r: CR._sha256_file(rec["log_path"]) == r["evidence_id"]):
+            where = os.path.basename(rec["_path"])
+            if not isinstance(rec.get("inputs"), dict):
+                return "", "the preflight record %s names no input identity (written before CUT2.b)" % where
+            changed = sorted(k for k in set(expected) | set(rec["inputs"]) if rec["inputs"].get(k) != expected.get(k))
+            return "", "the preflight record %s is not usable shared evidence%s" % (
+                where, (": changed " + ", ".join(changed)) if changed else " (its window or its log did not verify)")
         return rec["_path"], ""
     except Exception as exc:  # noqa: BLE001  # sbe: allow-silent a doubt runs the full preflight, never a skipped one
         return "", "the preflight record could not be checked (%s)" % exc
@@ -2123,15 +2170,19 @@ def _tagging_commit(text, tag):
     return found[0] if len(found) == 1 else None
 
 
-def _write_publish(path, tag, state, commit="", note=""):
+def _write_publish(path, tag, state, commit="", note="", grant=None):
     """Atomic; '' or the reason it could not be written, naming the record.
-    `commit` is the commit this run made the tag at, '' while unknown."""
+    `commit` is the commit this run made the tag at, '' while unknown.
+    CUT2.h: every record written here is written at or after the push
+    attempt, so each carries approval_used and the `grant` of the approval
+    that was spent (None for a caller that handed none)."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = "%s.tmp-%d" % (path, os.getpid())
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"schema": PUBLISH_SCHEMA, "tag": tag, "state": state,
                        "commit": commit or "", "note": note,
+                       "approval_used": True, "grant": grant,
                        "at": time.time()}, fh, sort_keys=True)
             fh.flush()
             os.fsync(fh.fileno())
@@ -2164,7 +2215,56 @@ def _ask(reader):
     return got if isinstance(got, str) and CR.SHA_RE.fullmatch(got) else None
 
 
-def publish_tag(tag, commit, push, ls_remote, state_dir):
+def _publish_path(tag, state_dir):
+    return os.path.join(state_dir, "publish-%s.json" % tag)
+
+
+def _publication_identity_of(tag, path):
+    """CUT2.h: the one identity of a publication transaction (this tag, this record folder, which run_chain keys by
+    the candidate), for the approval that names it and the decision that checks it: a 40 hex candidate derived from
+    both, the tag as the export and the record path as the body."""
+    key = hashlib.sha1(("%s\0%s\0%s" % (PUBLISH_SCHEMA, tag, os.path.abspath(path))).encode("utf-8")).hexdigest()
+    return {"candidate": key, "export": tag, "body": path}
+
+
+def publish_approval(tag, state_dir, now=None, grant=None):
+    """CUT2.h: the owner's one use approval record for publishing `tag` under `state_dir`, {identity, expires,
+    used, grant}: unused, good for APPROVAL_MAX_AGE_S (the window the app line itself carries) from `now`, naming
+    exactly this transaction. run_chain makes it once, where the owner's y or app line was just verified and spent
+    for this commit; publish_tag judges it and marks it used. `grant` tells one owner approval from the next."""
+    clock = time.time() if now is None else float(now)
+    return {"identity": _publication_identity_of(tag, _publish_path(tag, state_dir)), "expires": clock + APPROVAL_MAX_AGE_S,
+            "used": False, "grant": grant if grant is not None else uuid.uuid4().hex}
+
+
+def _publication_action(tag, path, there, attributed, used, approval):
+    """CUT2.f: the one publication decision, cut_driver.publication_next, over what publish_tag read back: `there`
+    the commit the remote tag peels to (or None), `attributed` whether this state folder's record makes it this
+    run's. The transaction gets the identity _publication_identity_of derives, so a tag on the remote reads as that
+    identity only when the record attributes it, and any other commit there is foreign.
+    CUT2.h: `approval` is the owner's record (publish_approval) as run_chain handed it: its identity, expiry and
+    used flag are what publication_next judges, with `used` (a push attempted under it) only ever turning it
+    used. publish_tag never calls this without one (a missing approval refuses there), so nothing is conjured
+    here. A failed import or any error is REFUSE: nothing is pushed or adopted."""
+    try:
+        import cut_driver as D
+        identity = _publication_identity_of(tag, path)
+        key = identity["candidate"]
+        clock = time.time()
+        if used:
+            approval = dict(approval, used=True)
+        state = {"ready": True, "identity": identity, "approval": approval,
+                 "remote_commit": key if attributed else there,
+                 "artifacts_verified": False, "receipt_written": False}
+        got = D.publication_next(state, clock)
+        return got if isinstance(got, dict) and isinstance(got.get("action"), str) else {
+            "action": "REFUSE", "reason": "publication_next answered %r" % (got,)}
+    except Exception as exc:  # noqa: BLE001 - a decision that cannot be made publishes nothing
+        return {"action": "REFUSE", "reason": "the publication decision could not be made (%s)" % (
+            type(exc).__name__)}
+
+
+def publish_tag(tag, commit, push, ls_remote, state_dir, approval=None):
     """CUT1.e: (PUSHED | REUSED | FAIL, detail) for publishing `tag` at
     `commit`, one recorded transaction under `state_dir`. ls_remote(tag)
     answers the peeled commit the remote's tag points at, or None.
@@ -2185,7 +2285,18 @@ def publish_tag(tag, commit, push, ls_remote, state_dir):
     commit; nothing there, or a remote that cannot be read, FAILS closed with
     no retry. A pushed state that cannot be written answers FAIL naming the
     record, never PUSHED or REUSED over a record saying otherwise, and never
-    pushes again. An unreadable record is FAIL."""
+    pushes again. An unreadable record is FAIL.
+
+    CUT2.h: `approval` is the owner's one use record (publish_approval) run_chain hands over after his y or app
+    line was verified and spent. It is judged here, by publication_next: one that names another transaction, has
+    expired, or is already used refuses, nothing pushed. A push attempted under it marks it used (in the dict the
+    caller holds, and in the publish record as approval_used with its grant). A push that may have half
+    happened STOPS: any rerun that finds an intent record with no tag on the remote, under this approval or a
+    fresh one, persists the flag and refuses for the owner to reconcile, exactly as publication_next rules; the
+    owner removes the publish record once the remote is reconciled. No approval (None) refuses: publish_tag
+    never conjures one."""
+    if not isinstance(approval, dict) or not (approval.get("grant") is None or isinstance(approval["grant"], str)):
+        return "FAIL", "the owner's approval is missing or not a record with a text grant; nothing pushed"
     if not isinstance(tag, str) or not TAG_NAME_RE.fullmatch(tag) \
             or not (callable(commit) or (
                 isinstance(commit, str) and CR.SHA_RE.fullmatch(commit))) \
@@ -2194,35 +2305,58 @@ def publish_tag(tag, commit, push, ls_remote, state_dir):
         return "FAIL", ("publish_tag needs a tag name, a 40 hex commit (or "
                         "its reader), a state folder and two callables; "
                         "nothing pushed")
-    path = os.path.join(state_dir, "publish-%s.json" % tag)
+    path = _publish_path(tag, state_dir)
     record, why = _publish_record(path)
     if why:
         return "FAIL", why + "; nothing pushed until it is read"
+    grant = approval.get("grant")
+    # an intent record is a push attempted: whatever the approval handed in now reads, the attempt is unreconciled
+    # until the owner reconciles it, so no approval, fresh or not, pushes over it
+    spent = bool(record is not None and record["state"] == "intent")
     reader = commit if callable(commit) else (lambda: commit)
     there, why = _remote_commit(ls_remote, tag)
     if why:
         return "FAIL", why + "; nothing pushed"
-    if there:
-        # a tag there is this run's only by this state folder's record of the
-        # commit it pushed; a claim alone never adopts a tag, and a claim that
-        # differs from the record is another commit's
-        claim = _ask(reader)
-        mine = (record or {}).get("commit") or ""
-        if not mine or there != mine or (claim is not None and claim != mine):
-            return "FAIL", ("%s is foreign: the remote's tag points at %s, not "
-                            "this run's commit %s; it is never moved or "
-                            "adopted, nothing pushed"
-                            % (tag, there[:12], (mine or "unknown")[:12]))
+    # a tag there is this run's only by this state folder's record of the
+    # commit it pushed; a claim alone never adopts a tag, and a claim that
+    # differs from the record is another commit's. CUT2.f: what to do next is
+    # publication_next's answer over that read back, never decided here
+    claim = _ask(reader) if there else None
+    mine = (record or {}).get("commit") or ""
+    step = _publication_action(tag, path, there, bool(
+        there and mine and there == mine and (claim is None or claim == mine)),
+        used=spent, approval=approval)
+    if spent and step["action"] != "PUSH":
+        approval["used"] = True
+        if record.get("approval_used") is not True:
+            why = _write_publish(path, tag, "intent", record.get("commit"), record.get("note", ""), grant)
+            if why:
+                return "FAIL", why + "; the approval is spent but the flag is not persisted; nothing pushed"
+    if step["action"] != "PUSH":
+        if spent and not there:
+            return "FAIL", ("an earlier push of %s was attempted (intent recorded) and the remote shows no tag: it "
+                            "may have half happened, so the owner reconciles it and removes %s before any new "
+                            "push; nothing pushed (%s)" % (tag, path, step["reason"]))
+        if step["action"] != "VERIFY" or not there:
+            if there:
+                return "FAIL", ("%s is foreign: the remote's tag points at %s, "
+                                "not this run's commit %s; it is never moved or "
+                                "adopted, nothing pushed (%s)"
+                                % (tag, there[:12], (mine or "unknown")[:12],
+                                   step["reason"]))
+            return "FAIL", ("publication refused: %s; nothing pushed"
+                            % step["reason"])
         if record is None or record["state"] != "pushed" \
                 or record.get("commit") != there:
-            why = _write_publish(path, tag, "pushed", there, "already there")
+            why = _write_publish(path, tag, "pushed", there, "already there", grant)
             if why:
                 return "FAIL", why + "; the tag is not recorded as this run's"
         return "REUSED", ("%s is on the remote at this run's commit %s: not "
                           "pushed again" % (tag, there[:12]))
-    why = _write_publish(path, tag, "intent", _ask(reader) or "")
+    why = _write_publish(path, tag, "intent", _ask(reader) or "", grant=grant)
     if why:
         return "FAIL", why + "; nothing pushed"
+    approval["used"] = True
     try:
         rc = push(tag, commit if isinstance(commit, str) else None)
         failed = "" if type(rc) is int and rc == 0 else (
@@ -2231,16 +2365,24 @@ def publish_tag(tag, commit, push, ls_remote, state_dir):
         failed = "the push raised %s: %s" % (type(exc).__name__, str(exc)[:160])
     made = _ask(reader)
     if not failed:
-        why = _write_publish(path, tag, "pushed", made or "")
+        why = _write_publish(path, tag, "pushed", made or "", grant=grant)
         if why:
             return "FAIL", why + "; the push landed once and is never pushed again"
         return "PUSHED", "pushed %s at %s" % (tag, (made or "unknown")[:12])
     there, why = _remote_commit(ls_remote, tag)
-    if why or not there:
+    if why:
         return "FAIL", ("%s and %s; failed closed, never pushed a second time"
-                        % (failed, why or "the remote shows no %s" % tag))
-    if made is not None and there == made:
-        why = _write_publish(path, tag, "pushed", made, "reconciled: " + failed)
+                        % (failed, why))
+    # CUT2.f: the lost connection reconciles through the same decision, the
+    # authorization now used by the attempt, so nothing there is never a retry
+    step = _publication_action(tag, path, there, bool(
+        there and made is not None and there == made), used=True, approval=approval)
+    if not there:
+        return "FAIL", ("%s and the remote shows no %s; failed closed, never "
+                        "pushed a second time (%s)" % (failed, tag,
+                                                       step["reason"]))
+    if step["action"] == "VERIFY":
+        why = _write_publish(path, tag, "pushed", made, "reconciled: " + failed, grant)
         if why:
             return "FAIL", why + "; reconciled on the remote, never pushed again"
         return "PUSHED", ("%s, but %s is on the remote at this run's commit: "
@@ -2428,8 +2570,15 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
     # against the commit its TAGGING line named
     publish_dir = os.path.join(CR.evidence_dir(), "publish-%s-%s" % (
         version, cut_head[:12]))
+    # CUT2.h: publish_tag now needs an approval record and judges it (expiry, use, the transaction it names, an
+    # intent record over it). NAMED LIMIT, open row L1: the owner's approval step writes no record with an expiry
+    # and a used flag (the typed y writes none, the app line is spent by the external verifier, and
+    # approval-VERSION.jsonl is an audit log), so the record is minted HERE, once, right after that approval was
+    # verified and spent for exactly this commit; its expired and used refusals are dormant from this entry.
     published, detail = publish_tag("v%s" % version, tagging, push,
-                                    ls_remote, publish_dir)
+                                    ls_remote, publish_dir,
+                                    approval=publish_approval(
+                                        "v%s" % version, publish_dir))
     print("publish v%s: %s: %s" % (version, published, detail))
     if published == "REUSED":
         # CUT1.e: an earlier attempt of this cut already published the tag
@@ -2494,8 +2643,9 @@ def run_chain(root, version, bm, paths, force, yes, ask, runner=None,
                      "written to GitHub; fix what the output above names and "
                      "run the cut again; no file needs deleting")
         else:
-            after = ("a positively identified network failure: the owner "
-                     "may run the cut again from his terminal")
+            after = ("a positively identified network failure: the push may have half happened, so the owner "
+                     "reads the push output and the publish record, reconciles the remote tag, removes the "
+                     "publish record, and only then runs the cut again from his terminal")
         stop = ("STOP: export_public.py --push failed (%s); %s; the push is "
                 "not retried or routed around; %s" % (kind, where, after))
         print(stop)
@@ -4560,8 +4710,12 @@ def main(argv=None, root=None, runner=None, ask=None, terms_file=None):
     # CV1.e: a real cut takes no answer file and reads its one answer from
     # the owner's terminal; --check (the dry run) pushes nothing and never
     # asks, so the rehearsal's own --check without a terminal still runs.
+    # --finish-release asks nothing either: it pushes nothing, and its own
+    # refusals (explicit version, repeated scans, full reviewed sha256)
+    # are its gate. Asking for a terminal first made finishing v1.1.9's
+    # Release need one (A2, 2026-10-31).
     refusal = "" if args.approval is not None or args.approval_file \
-        is not None else answer_file_refusal(
+        is not None or args.finish_release is not None else answer_file_refusal(
         args.answer_file, args.check, _stdin_is_tty())
     if refusal:
         print(refusal)

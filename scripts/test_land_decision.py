@@ -43,6 +43,10 @@ def _write(path, text):
 def _new_bare_remote(d):
     remote = os.path.join(d, "remote.git")
     _git(["init", "--bare", "-q", remote])
+    # land_queue's fixture remote builds its merge commit with commit-tree inside THIS repository; under an empty
+    # HOME there is no global identity, so the remote carries its own (the work clones already do).
+    _git(["config", "user.email", "t@t"], remote)
+    _git(["config", "user.name", "t"], remote)
     return remote
 
 

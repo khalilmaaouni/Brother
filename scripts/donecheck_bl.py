@@ -175,7 +175,15 @@ def run_row(row):
         return 125, "%s: %s" % (type(exc).__name__, exc)
 
 
-def main():
+def main(argv=None):
+    # THIS CHECK TAKES NO ARGUMENTS (1.2.0, found by test_checks_carry_their_own_tolerances in the export check). It used
+    # to ignore them, so `donecheck_bl.py --selftest`, or any flag a caller thought narrowed it, ran the whole ten minute
+    # battery and answered as if asked the full question. An argument it does not know is now refused at once, NO-DATA
+    # (exit 2), and nothing runs: a caller that believes it asked a narrower question must never be handed the wide answer.
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args:
+        print("NO-DATA: donecheck_bl.py takes no arguments (got %s); run it bare for the full battery" % " ".join(args))
+        return 2
     os.chdir(ROOT)
     bad, skipped = [], []
     print("%-6s %-56s %-5s %s" % ("sub", "what it claims", "exit", "verdict"))

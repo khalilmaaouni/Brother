@@ -1,0 +1,21 @@
+{
+  "name": "brothersbe",
+  "description": "Make missing evidence visible on risky backend and data work, with PASS, FAIL, and NO-DATA kept distinct for human review.",
+  "version": "3.7.4",
+  "author": {
+    "name": "Khalil Maaouni"
+  },
+  "repository": "https://github.com/khalilmaaouni/Brother",
+  "license": "MIT",
+  "keywords": [
+    "backend",
+    "data-engineering",
+    "design-review",
+    "evidence",
+    "verification",
+    "migrations",
+    "code-review",
+    "guided",
+    "onboarding"
+  ]
+}

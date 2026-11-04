@@ -1,11 +1,15 @@
 #!/bin/sh
-# gate_merge_seq.sh [list]: gate every pinned head in list order, before the
+# gate_merge_seq.sh [list] [base]: gate every pinned head in list order, before the
 # owner arrives.
 #
 # For each "<number> <sha>" line this merges the pinned head into a scratch
 # worktree taken at hub main, runs `sh scripts/required_fast.sh` from that
 # worktree, and records ONE signed ledger row through `merge_gate.py gate`. Gating is a READ: this tool
 # never writes main.
+#
+# ONE GATE PER TRAIN (FLOW1.a): `merge_queue.py train` assembles the reviewed members into one branch and writes a
+# list of ONE line, "<number> <train head>", so this tool gates the whole train once (and again from a moved main)
+# instead of once per member. Nothing here changes for that: a train head is a pinned head like any other.
 #
 # The gate script's own hash is recorded at hub main AND at the candidate
 # tree, so a row whose gate script differs from main's can be refused later.
@@ -33,6 +37,8 @@ HERE="$(cd "$_here_dir" && pwd -P)"
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH   # every lookup below is the system's (review round 20)
 PY_GATE="$HERE/merge_gate.py"
 LIST="${1:-}"
+BASE="${2:-}"   # FLOW1.a: the base the worker gates on, an ARGUMENT (MERGE_BASE_BRANCH is a refused environment name); empty means main
+[ $# -le 2 ] || { echo "NO-DATA: more than a list and a base were given"; exit 2; }
 [ -n "$LIST" ] || { echo "NO-DATA: no list given"; exit 2; }
 [ -r "$LIST" ] || { echo "NO-DATA: no list at $LIST"; exit 2; }
 
@@ -60,4 +66,5 @@ fi
 # refused as GATE-EDITED when scripts/required_fast.sh differs from main's.
 PY_PRE="$HERE/merge_precompute.py"
 [ -r "$PY_PRE" ] || { echo "NO-DATA: no worker at $PY_PRE"; exit 2; }
+if [ -n "$BASE" ]; then exec "$PY" "$PY_PRE" worker "$CLONE" "$LIST" "$BASE"; fi
 exec "$PY" "$PY_PRE" worker "$CLONE" "$LIST"

@@ -260,6 +260,18 @@ class NoGateRowReadsTheAllowlist(unittest.TestCase):
         self.assertGreater(len(files), 30, "the guard scanned too few gate files to mean anything")
         self.assertIn(os.path.join(ROOT, "scripts", "gate_ledger.py"), files)
         hits = {os.path.relpath(f, ROOT): reads_of_allowlist(f) for f in files}
+        # ONE REVIEWED EXCEPTION (1.2.0, found red by the export check): scripts/kernel_closure.py asks whether the folder
+        # docs/plan/specs EXISTS, to SKIP only inside the public export (LR1 security review: the skip needs the export's
+        # own BROTHER_EXPORT_TREE=1, and an absent folder without it is NO-DATA). It never reads a file under it, so a
+        # docs-only delta cannot make the row stale. Exactly these three literals are allowed there; any other mention, in
+        # that file or any other, still fails this guard.
+        probe = {"scripts/kernel_closure.py": ("specs", "SKIP: this is the public export tree",
+                                                "NO-DATA: docs/plan/specs is absent")}
+        for name, allowed in probe.items():
+            rest = [h for h in hits.get(name, []) if not h[1].startswith(allowed)]
+            self.assertEqual(len(hits.get(name, [])) - len(rest), len(allowed),
+                             "kernel_closure.py's presence probe changed shape: %r" % (hits.get(name),))
+            hits[name] = rest
         self.assertEqual({k: v for k, v in hits.items() if v}, {})
 
     def test_the_guard_fires_on_a_gate_file_that_reads_the_allowlist(self):

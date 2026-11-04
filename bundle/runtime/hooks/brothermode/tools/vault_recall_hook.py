@@ -53,6 +53,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # the sibling copy must degrade to the pre-C3 literal paths, never raise a
 # traceback Claude Code would surface in front of every edit.
 sys.path.insert(0, HERE)
+# STAB1.i: the print choke point (bm_learning.say flattens the whole line), with the
+# degrade bm_vault.py already uses: an older bm_learning.py without say() prints an
+# escaped line, never a traceback and never a raw one.
+try:
+    from bm_learning import say  # noqa: E402
+except ImportError:  # pragma: no cover, exercised only by a partial deployment
+    def say(line, file=None):
+        print(ascii("%s" % (line,)), file=file)
 try:
     import brother_paths  # noqa: E402
 except ImportError:  # pragma: no cover, exercised only by a broken install
@@ -1722,9 +1730,8 @@ def cmd_check():
         key = session + ":__tool_missing__"
         if key not in _seen():
             _mark_seen(key)
-            sys.stderr.write(
-                "NO-DATA vault recall: no index tool at %s; point-of-need memory "
-                "is OFF until then.\n" % TOOL)
+            say("NO-DATA vault recall: no index tool at %s; point-of-need memory "
+                "is OFF until then." % TOOL, file=sys.stderr)
         return 0
     # Once per session, on stderr beside the unconfigured refusal above: the index's age,
     # whether or not anything is recalled below. A stale index is only fixable by someone

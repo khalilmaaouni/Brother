@@ -43,6 +43,8 @@ floor: a decayed note is reordered, never removed, and nothing here ever writes 
            --project <name> boosts notes carrying that project: (recall takes it too);
            absent, it is the project: line declared in the git root's PROJECT.md above --context, else that root's basename, else no boost at all
   status   what is indexed, how fresh, and what is missing
+  door     HANDLER, inputs as JSON on stdin: run ONE existing command above or a sibling tool for
+           scripts/door.py (OUT1.d), and answer {"verdict", "output", "evidence_refs"} as JSON
   resolve  which vault root is in force, as JSON: BROTHERMODE_VAULT_ROOT, then the aliases
            BM_VAULT_ROOT and BROTHERMODE_VAULT, then the config; two names on two folders FAIL
 
@@ -229,7 +231,7 @@ def _default_vault():
     res = resolve_vault_root(None, os.environ, _config())
     if res["verdict"] == "FAIL" and not _RESOLVE_WARNED:
         _RESOLVE_WARNED = True
-        sys.stderr.write("bm_vault: FAIL vault root: %s\n" % res["detail"])
+        say("bm_vault: FAIL vault root: %s" % res["detail"], file=sys.stderr)
     return res["root"] if res["verdict"] == "PASS" else None
 
 
@@ -270,7 +272,7 @@ def _get_bm_setup():
 
 
 def _consented():
-    """True only when scripts/setup.py's own is_consented() says so. Fails
+    """True only when setup.py's own is_consented() says so. Fails
     CLOSED (not consented) on any load error, missing config, or a corrupt
     one."""
     mod = _get_bm_setup()
@@ -1189,8 +1191,9 @@ def cmd_refresh(args):
         if _rs.hooks_off(payload=_payload):
             return 0
     if not _consented():
-        print("vault-index: NO-DATA: setup is not complete yet; run: "
-              "python3 scripts/setup.py")
+        # FRUN1: this prints at session start, so it sends a stranger to the door, which shows the notice and asks.
+        print("vault-index: NO-DATA: setup is not complete yet. To finish it, say: set up Brother "
+              "(in Claude Code: /brother set up).")
         return 0
     verbose = verbose_start(os.environ)
     vault = args.get("vault") or _default_vault()
@@ -4010,6 +4013,189 @@ _VALUE_FLAGS = {"vault", "root", "as", "policy", "identity", "query", "limit", "
                 "registry", "agent-identity", "purpose", "budget"}
 
 
+# ---------------------------------------------------------------------------
+# THE DOOR'S HANDLERS (OUT1.d). scripts/door.py's invoke_capability() runs
+# `bm_vault.py door HANDLER` with the person's typed inputs as JSON on stdin.
+# Each handler is ONE existing Vault command, run over the same interpreter:
+# nothing here re-decides recall ranking, intake gates (credentials, deny-list
+# terms), access policy, or the separation of duties bm_vault_promotions.py
+# imports from the lifecycle contract. A handler adds only the argument shape
+# and the honest reply. The verdict is read from what the command printed by
+# the reader DOOR_VERDICT_READERS declares for its handler, never from exit 0
+# alone: a run that prints its own NO-DATA (`NO-DATA: seam module
+# unavailable`) is not a pass. Only a PASS carries evidence, which names the
+# command, its exit code and the sha256 of exactly what it printed.
+# Consent is checked first and fails closed, the same gate refresh uses.
+# ---------------------------------------------------------------------------
+DOOR_TIMEOUT_S = 300
+#: handler -> (tool file, subcommand, required inputs, needs a vault root)
+DOOR_HANDLERS = {
+    "vault_existing_recall": ("bm_vault.py", "recall", ("query",), False),
+    "vault_existing_context_recall": ("bm_vault.py", "check", ("paths",), False),
+    "vault_existing_status": ("bm_vault.py", "status", (), False),
+    "vault_existing_capture": ("bm_vault_intake.py", "capture", ("text", "by"), True),
+    "vault_existing_review": ("bm_vault_promotions.py", "state", ("id",), True),
+    "vault_existing_lifecycle": ("bm_vault_lifecycle.py", "check", (), True),
+    "vault_existing_promote": ("bm_vault_promotions.py", "promote", ("id", "to", "by"), True),
+    "vault_existing_provenance": ("bm_vault_attribute_provenance.py", "history", ("note", "attribute"), True),
+    "vault_existing_asof": ("bm_vault_asof.py", "query", ("date",), True),
+    "vault_existing_retention": ("bm_vault_retention.py", "census", (), True),
+}
+#: handler -> the reader that turns what its command printed into PASS, FAIL or NO-DATA. Measured 2026-11-01 on a
+#: scratch vault: no Vault command prints a verdict of its own. recall and check print hits (exit 0) or a
+#: `NO-DATA ...` header with "Nothing ... matched" (exit 1); status, capture, state, lifecycle check, promote, asof
+#: and census print a report or a "done" line; history prints `NO-DATA: ...` at exit 2. So each handler earns PASS
+#: only from the success marker its own command prints (_DOOR_MARKERS below); exit 0 without it is NO-DATA. A
+#: handler missing here answers NO-DATA and runs nothing.
+DOOR_VERDICT_READERS = {handler: handler for handler in DOOR_HANDLERS}
+#: the same pattern as products/brotherds/bds.py's _DOOR_NOT_PASS_LINE (separate products, so a small duplicate;
+#: scripts/test_vault_door.py pins the two readers to the same answers)
+_DOOR_NOT_PASS_LINE = re.compile(r"^\s*(?:VERDICT[\s:]+)?(FAIL|NO-DATA)\b", re.M)
+_HIT = r"^\s+id: \S+\s+authority: "  # one recalled note: bm_vault.py's id line under _print_hits
+#: handler -> (patterns that must ALL match the output, a pattern that must NOT match or None)
+_DOOR_MARKERS = {
+    "vault_existing_recall": ((_HIT,), None),
+    "vault_existing_context_recall": ((_HIT,), None),
+    "vault_existing_status": ((r"^notes: [1-9][0-9]* ", r"^last indexed: [0-9]"), None),  # an empty or never indexed vault is not a pass
+    "vault_existing_capture": ((r"^CAPTURED \S+\s+id=\S+",), None),
+    "vault_existing_review": ((r"^state: (?!UNKNOWN\b)\S",), r"^FINDINGS"),
+    "vault_existing_lifecycle": ((r"^notes: [0-9]+$", r"^  legacy\s+[0-9]+"), r"^FINDINGS"),
+    "vault_existing_promote": ((r"^promoted \S+: \S+ -> \S+",), None),  # `would promote` is a dry run
+    "vault_existing_provenance": ((r"^provenance history for .+ \([1-9][0-9]* version\(s\)\):",), None),
+    "vault_existing_asof": ((r"^as of: \S+", r"^notes: [0-9]+ total"), None),
+    "vault_existing_retention": ((r"^census: [0-9]+ ", r"^clean: "), r"^STALE "),
+}
+
+
+def _door_marked(required, forbidden):
+    """A reader: a FAIL line anywhere is FAIL; else PASS only when every `required` pattern matches the output,
+    `forbidden` does not, and no NO-DATA line sits beside it; a marker missing, or no output, is NO-DATA."""
+    need = [re.compile(p, re.M) for p in required]
+    ban = re.compile(forbidden, re.M) if forbidden else None
+
+    def read(out):
+        found = _DOOR_NOT_PASS_LINE.findall(out)
+        if "FAIL" in found:
+            return "FAIL"
+        if "NO-DATA" in found or not all(r.search(out) for r in need) or (ban and ban.search(out)):
+            return "NO-DATA"
+        return "PASS"
+    return read
+
+
+DOOR_READERS = {handler: _door_marked(*marks) for handler, marks in _DOOR_MARKERS.items()}
+
+
+def _door_says_no_data(out):
+    """True when the command's own output carries a NO-DATA line and no FAIL line."""
+    found = _DOOR_NOT_PASS_LINE.findall(out)
+    return "NO-DATA" in found and "FAIL" not in found
+
+
+def _door_argv(handler, inputs, vault):
+    """The existing command's argument list for one handler. Values travel as --flag=value (argparse tools) or after
+    their flag (bm_vault's own parser takes the next word whatever it is), so a value starting with a dash is never
+    read as a flag; capture text follows `--`."""
+    i = inputs
+    if handler == "vault_existing_recall":
+        return ["--query", i["query"]]
+    if handler == "vault_existing_context_recall":
+        paths = i["paths"] if isinstance(i["paths"], list) else [i["paths"]]
+        if any(not isinstance(p, str) or not p or p.startswith("-") for p in paths):
+            raise ValueError("every path must be a plain file path")
+        return ["--paths"] + paths + (["--context", i["context"]] if i.get("context") else [])
+    if handler == "vault_existing_status":
+        return []
+    v = "--vault=%s" % vault
+    if handler == "vault_existing_capture":
+        return [v, "--by=%s" % i["by"], "--expiry-class=lesson-candidate", "--", i["text"]]
+    if handler == "vault_existing_review":
+        return [v, "--id=%s" % i["id"]]
+    if handler == "vault_existing_promote":
+        return [v, "--id=%s" % i["id"], "--to=%s" % i["to"], "--by=%s" % i["by"], "--apply"]
+    if handler == "vault_existing_provenance":
+        return [v, "--note=%s" % i["note"], "--attribute=%s" % i["attribute"]]
+    if handler == "vault_existing_asof":
+        return [v, "--date=%s" % i["date"]]
+    return [v]  # lifecycle and retention take only the vault
+
+
+def _door_run(argv):
+    """(exit code, stdout, stderr) of one existing Vault command run beside this file."""
+    proc = subprocess.run([sys.executable, os.path.join(HERE, argv[0])] + argv[1:], stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+                          timeout=DOOR_TIMEOUT_S)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def door_invoke(handler, inputs, run=None):
+    """{"verdict", "output", "evidence_refs"} for one door handler. At exit 0 the verdict is what the handler's
+    declared reader finds in the command's own output (no output, or no reader, is NO-DATA). Exit 1 with a Python
+    traceback on stderr is NO-DATA (the command crashed before judging anything); exit 1 whose own output says
+    NO-DATA (recall's "Nothing ... matched") is NO-DATA; any other exit 1 (a refusal, lifecycle findings) is FAIL.
+    Anything else (exit 2, a refusal before launch, a timeout) is NO-DATA. Only PASS carries evidence."""
+    def reply(verdict, output, evidence=()):
+        return {"verdict": verdict, "output": output, "evidence_refs": list(evidence)}
+    row = DOOR_HANDLERS.get(handler)
+    if row is None:
+        return reply("NO-DATA", "no Vault handler is named %r" % (handler,))
+    tool, sub, required, needs_vault = row
+    if not isinstance(inputs, dict):
+        return reply("NO-DATA", "the door's inputs were not a set of named values")
+    if not _consented():
+        return reply("NO-DATA", "Brother has not been given consent to use this machine's Vault; run its setup "
+                                "first. Nothing was read or written.")
+    missing = [k for k in required if not inputs.get(k)]
+    bad = [k for k in required if k != "paths" and not isinstance(inputs.get(k), str)]
+    if missing or bad:
+        return reply("NO-DATA", "missing or unreadable input: %s" % ", ".join(missing or bad))
+    vault = None
+    if needs_vault:
+        res = resolve_vault_root(inputs.get("vault") if isinstance(inputs.get("vault"), str) else None,
+                                 os.environ, _config())
+        if res["verdict"] != "PASS":
+            return reply("NO-DATA", "no Vault chosen: %s" % res["detail"])
+        vault = res["root"]
+    reader = DOOR_READERS.get(DOOR_VERDICT_READERS.get(handler))
+    if reader is None:
+        return reply("NO-DATA", "%s declares no way to read its command's verdict, so nothing was run" % handler)
+    try:
+        argv = [tool, sub] + _door_argv(handler, inputs, vault)
+        code, out, err = (run or _door_run)(argv)
+    except ValueError as exc:
+        return reply("NO-DATA", "%s" % exc)
+    except subprocess.TimeoutExpired:
+        return reply("NO-DATA", "%s %s did not finish within %d seconds" % (tool, sub, DOOR_TIMEOUT_S))
+    except OSError as exc:
+        return reply("NO-DATA", "%s %s could not start: %s" % (tool, sub, exc))
+    text = (out or "").strip() or (err or "").strip()
+    if code == 0 and (out or "").strip():
+        verdict = reader(out)
+        if verdict != "PASS":
+            return reply(verdict, text)
+        digest = hashlib.sha256(out.encode("utf-8", "replace")).hexdigest()
+        return reply("PASS", text, ["%s %s exit 0 stdout sha256:%s" % (tool, sub, digest)])
+    if code == 1 and "Traceback (most recent call last)" in (err or ""):
+        last = (err or "").strip().splitlines()[-1]
+        return reply("NO-DATA", "%s %s crashed before judging anything (%s); nothing was judged" % (tool, sub, last))
+    if code == 1 and _door_says_no_data(out or ""):
+        return reply("NO-DATA", text)
+    if code == 1:
+        return reply("FAIL", text)
+    return reply("NO-DATA", text or "%s %s exited %s with no output" % (tool, sub, code))
+
+
+def cmd_door(argv):
+    """`bm_vault.py door HANDLER`, inputs as one JSON object on stdin: the reply as one JSON line, exit 0 (the
+    verdict is in the reply)."""
+    try:
+        inputs = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        inputs = None
+    print(json.dumps(door_invoke(argv[0] if argv else None, inputs)))
+    return 0
+
+
 def _parse(argv):
     args, key = {"paths": []}, None
     for a in argv:
@@ -4032,6 +4218,8 @@ def main(argv=None):
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
         return 0
+    if argv[0] == "door":
+        return cmd_door(argv[1:])
     fns = {"index": cmd_index, "refresh": cmd_refresh, "status-line": cmd_status_line,
            "recall": cmd_recall, "check": cmd_check, "status": cmd_status,
            "resolve": cmd_resolve}

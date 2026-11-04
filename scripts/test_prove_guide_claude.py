@@ -123,13 +123,15 @@ class ExtractCommandsTest(unittest.TestCase):
                 slashes += [text for kind, text
                             in PGC.extract_commands(fh.read())
                             if kind == "slash"]
-        self.assertEqual(len(slashes), 1,
-                         "the Claude entry path documents %d slash command(s), "
-                         "not 1: %r" % (len(slashes), slashes))
-        self.assertTrue(slashes[0] == "/brother"
-                        or slashes[0].startswith("/brother "),
-                        "the one documented slash command is %r, which is not "
-                        "the Brother door" % slashes[0])
+        # The pages now show the one door several times, each with a different
+        # example outcome, so the pin is on the distinct command NAME (the
+        # first word), not on the number of lines: exactly one name, and it
+        # is the door. A second command, or none at all, still fails here.
+        names = sorted({text.split()[0] for text in slashes})
+        self.assertEqual(names, ["/brother"],
+                         "the Claude entry path documents slash command(s) "
+                         "%r, not exactly the one Brother door: %r"
+                         % (names, slashes))
 
 
 class SectionSpliceTest(unittest.TestCase):

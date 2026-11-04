@@ -42,6 +42,11 @@ GATE_STUB = ("#!/bin/sh\n"
              "if [ -f fail.txt ]; then echo 'x FAIL'; echo 'pass 0   fail 1   no-data 0'; echo 'FAILED: x'; exit 1; fi\n"
              "if [ -f slow.txt ]; then sleep 4; fi\n"
              "echo 'pass 1   fail 0   no-data 0'\n")
+# the stand-in owns check (LO1.a, 2026-10-14): merge_gate.run_gate reads scripts/test_bl_owns_complete.py in the gate
+# worktree BEFORE the gate child, and refuses the row (OWNS-NO-DATA) when it cannot run. This throwaway tree carried
+# the gate stub but never the owns check, so every gated case here was red from that landing on; it answers the one
+# line owns_verdict reads as a pass
+OWNS_STUB = "print('PASS: stand-in owns check, the throwaway tree has no scripts/loop component')\n"
 GH_STUB = r"""#!/bin/sh
 # the stand-in gh: a pull request's JSON from $FIX/pr-<n>.json, nothing else
 echo "$*" >> "$FIX/gh.log"
@@ -103,6 +108,8 @@ class Fixture(unittest.TestCase):
         os.makedirs(os.path.join(self.clone, "scripts"))
         gate = os.path.join(self.clone, "scripts", "required_fast.sh")
         open(gate, "w").write(GATE_STUB)
+        with open(os.path.join(self.clone, merge_gate.OWNS_SCRIPT), "w") as fh:
+            fh.write(OWNS_STUB)
         open(os.path.join(self.clone, "base.txt"), "w").write("base\n")
         self.git(self.clone, "add", "-A")
         self.git(self.clone, "commit", "-qm", "base")
@@ -330,6 +337,58 @@ class TestRunPrecompute(Fixture):
             merge_precompute.run_precompute(self.clone, [], "env", self.runner())
         with self.assertRaises(ValueError):
             merge_precompute.run_precompute(self.clone, [], self.env, 3)
+
+
+class TestDevLineBase(Fixture):
+    """FLOW1.a: a worker may gate on a named dev line (merge_gate.ALLOWED_BASES) instead of main, as an ARGUMENT:
+    run_precompute(branch=), `worker <clone> <list> [base]` and gate_merge_seq.sh <list> [base]. Default stays main."""
+    DEV = "plan/1.1.9-line-2026-10-25"
+
+    def dev_pin(self):
+        """A dev line one commit ahead of main, and a PR head branched from it (not from main)."""
+        self.git(self.clone, "checkout", "-q", "-B", "dev", "hub/main")
+        open(os.path.join(self.clone, "dev.txt"), "w").write("dev\n")
+        self.git(self.clone, "add", "dev.txt")
+        self.git(self.clone, "commit", "-qm", "dev line")
+        self.git(self.clone, "push", "-q", "hub", "HEAD:refs/heads/" + self.DEV)
+        devtip = self.git(self.clone, "rev-parse", "HEAD")
+        self.git(self.clone, "checkout", "-q", "-B", "pr3", devtip)
+        open(os.path.join(self.clone, "f3.txt"), "w").write("3\n")
+        self.git(self.clone, "add", "f3.txt")
+        self.git(self.clone, "commit", "-qm", "pr 3")
+        head = self.git(self.clone, "rev-parse", "HEAD")
+        self.git(self.clone, "checkout", "-q", "--detach", "hub/main")
+        open(self.list, "w").write("3 %s\n" % head)
+        return devtip, head
+
+    def test_the_chain_starts_from_the_named_dev_line_and_its_row_is_read_against_it(self):
+        devtip, head = self.dev_pin()
+        status = merge_precompute.run_precompute(self.clone, [{"pr": "3", "head": head}], self.env, self.runner(), branch=self.DEV)
+        self.assertEqual(status["status"], "DONE", status)
+        self.assertEqual(status["base"], devtip, "the worker fetched main, not the dev line")
+        self.assertEqual(status["restarts"], 0, "the worker started on another base and had to restart onto the dev line")
+        self.assertEqual(len(self.gates), 1)
+        tree = self.tree(devtip, head)
+        self.assertEqual(status["entries"][0]["tree"], tree)
+        self.assertEqual(merge_gate.verify_tree(self.clone, tree, self.env, self.runner(), base=self.DEV)[0], "PASS")
+
+    def test_a_branch_off_the_allow_list_is_refused_before_a_fetch_or_a_gate(self):
+        self.git(self.clone, "push", "-q", "hub", "%s:refs/heads/side-line" % self.main)
+        with self.assertRaises(merge_gate.MergeGateError):
+            merge_precompute.run_precompute(self.clone, self.pins(), self.env, self.runner(), branch="side-line")
+        self.assertEqual(self.gates, [])
+
+    def test_the_launcher_passes_the_base_as_an_argument_and_refuses_a_third(self):
+        devtip, head = self.dev_pin()
+        tool = os.path.join(self.clone, "scripts", "gate_merge_seq.sh")
+        r = subprocess.run(["sh", tool, self.list, self.DEV], cwd=self.clone, env=self.env, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("DONE", r.stdout)
+        self.assertEqual(merge_gate.verify_tree(self.clone, self.tree(devtip, head), self.env, self.runner(), base=self.DEV)[0], "PASS")
+        r = subprocess.run(["sh", tool, self.list, self.DEV, "extra"], cwd=self.clone, env=self.env, capture_output=True,
+                           text=True, stdin=subprocess.DEVNULL, timeout=60)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
 
 class TestWaitReady(Fixture):

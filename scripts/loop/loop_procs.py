@@ -122,11 +122,17 @@ def owned(snap, rx, only="", self_pid=None, generic=True):
     """pids the loop owns in snap (dicts with pid, ppid, pgid, command, and run_dir where snapshot() read one). rx names
     the loop tools to start from, and it is matched against programs(command) only, never against an argument. A tool
     is a root only when it belongs to a run of this loop: in loop_bin(), or carrying a run_dir under runs_root(). The
-    runs root itself, and a sibling that merely shares its prefix, name no run."""
+    runs root itself, and a sibling that merely shares its prefix, name no run.
+    None (unknown), STAB1.d: a row whose environment could not be read (run_dir None) that rx matches and `only` admits
+    may be this loop's tool, so the answer is unknown, never a set that might omit it. A row rx does not match, or
+    `only` excludes, cannot change the answer and leaves it a set."""
     rx = re.compile(rx) if isinstance(rx, str) else rx
     by_pid = {r["pid"]: r for r in snap}
     ok = lambda r: r["pid"] != self_pid and not SHELL_RX.search(r["command"]) and not SELF_RX.search(r["command"])
     bin_dir, runs = loop_bin(), runs_root()
+    if any(ok(r) and "run_dir" in r and r["run_dir"] is None and tool_word(r["command"], rx) is not None
+           and (not only or only in r["command"]) for r in snap):
+        return None
 
     def ours(r):
         w = tool_word(r["command"], rx)
@@ -161,9 +167,12 @@ def owned(snap, rx, only="", self_pid=None, generic=True):
 
 def snapshot(errors="strict"):
     """One `ps` read; None when it cannot be read (never an empty table standing in for a failed read), and None when
-    ANY row cannot be read. RR lane C, 2026-09-27: a malformed row among valid ones was skipped, so the process behind
+    a row is malformed. RR lane C, 2026-09-27: a malformed row among valid ones was skipped, so the process behind
     it vanished from the table and stop_loop.sh printed STOPPED while that runner lived. A partial table is not a
     smaller truth; it is an unknown, and an unknown never reads as nothing owned.
+    STAB1.d (2026-11-01): a row whose ENVIRONMENT cannot be read (a stranger's diag_round.py, permission refused) is one
+    unknown row, kept with run_dir None; owned() answers unknown only for a pattern that row matches. It no longer nulls
+    the whole table (that read the live runner count as unknown, loop_done said NO-DATA and a push was refused).
     errors: how an undecodable byte is decoded. The stop (main) and the count both pass "replace", since one odd byte in
     an unrelated command line is not an unreadable table (loop_done's rule since finding 9); main then refuses, NO-DATA,
     only when a row it would signal holds a replaced byte. "strict" raises on any such byte."""
@@ -188,15 +197,13 @@ def snapshot(errors="strict"):
             return None
         rows.append(dict(pid=int(f[0]), ppid=int(f[1]), pgid=int(f[2]), command=f[3].strip()))
     # A loop tool outside the loop's bin belongs to a run only by the run its environment names (owned()); read that for
-    # each such row now, in this same read. One that cannot be read makes the whole table unknown, as a bad row does.
+    # each such row now, in this same read. One that cannot be read stays as one row with run_dir None (unknown, see owned()).
     bin_dir = loop_bin()
     for row in rows:
         w = tool_word(row["command"], TOOLS_RX)
         if w is None or in_loop_bin(w, bin_dir):
             continue
         row["run_dir"] = run_dir_of(row["pid"], row["command"])
-        if row["run_dir"] is None:
-            return None
     return rows or None
 
 
@@ -226,9 +233,10 @@ def run_dir_of(pid, command):
 
 def live_runner_count(snap=None):
     """How many unit runners are alive, by the ownership rule a stop uses; None when the table cannot be read, which
-    every caller reads as NO-DATA, never as zero."""
+    every caller reads as NO-DATA, never as zero. Also None when an unreadable unit_runner.py row may be a live runner."""
     snap = snapshot(errors="replace") if snap is None else snap
-    return None if snap is None else len(owned(snap, UNIT_RUNNER_RX, generic=False))
+    mine = None if snap is None else owned(snap, UNIT_RUNNER_RX, generic=False)
+    return None if mine is None else len(mine)
 
 
 def main(argv):
@@ -256,7 +264,11 @@ def main(argv):
         print("NO-DATA: the process table could not be read", file=sys.stderr); return 2
     rx, generic = kinds[argv[0]]
     cmd = {r["pid"]: r["command"] for r in snap}
-    mine = sorted(owned(snap, rx, only=only, self_pid=self_pid, generic=generic))
+    found = owned(snap, rx, only=only, self_pid=self_pid, generic=generic)
+    if found is None:     # a row whose environment could not be read may be a tool this stop must signal: unknown, never none
+        print("NO-DATA: a loop tool's environment could not be read, so whether it belongs to this loop is unknown", file=sys.stderr)
+        return 2
+    mine = sorted(found)
     odd = [p for p in mine if "\ufffd" in cmd[p]]
     if odd:
         print("NO-DATA: %d process(es) of the loop carry a byte that is not UTF-8 in their command line (pid %s); "

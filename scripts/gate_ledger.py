@@ -88,6 +88,25 @@ def _validate(record):
         raise ValueError("prev_hash must be 64 hex")
 
 
+def peak_concurrency(intervals):
+    """The most (start, end) gate intervals open at one instant, 0 for none. Intervals are closed: at the same instant
+    starts sort before ends, so two gates that touch count as running at once (the safe over-count)."""
+    marks = sorted([(s, 0) for s, _ in intervals] + [(e, 1) for _, e in intervals])
+    depth = peak = 0
+    for _, is_end in marks:
+        depth += -1 if is_end else 1
+        peak = max(peak, depth)
+    return peak
+
+
+def concurrency_by_gate(intervals):
+    """For each (start, end) in order: the most gates open at once during its span, itself counted. It is recomputed
+    from every interval, so it never depends on the order the gates were recorded in (a stored count would undercount
+    whichever gate finished first). Only gates that touch it can matter: any two that both reach it and overlap each
+    other also overlap at its edge. ponytail: quadratic, fine for a night's gates."""
+    return [peak_concurrency([(s, e) for s, e in intervals if s <= hi and e >= lo]) for lo, hi in intervals]
+
+
 def _read_last_line(path):
     # Only a ledger that does not exist is an empty chain. Any other read error
     # raises: an unreadable ledger read as empty would fork the chain at GENESIS.
@@ -277,24 +296,60 @@ def record_whole_gate(path, repo, codes_text, start_tree, obligation, started, w
             code_hash = hashlib.sha256(handle.read()).hexdigest()
     except (TypeError, ValueError, OSError) as exc:
         return False, 'the run could not be described: %s' % exc
-    import platform
-    import time
-    ended = max(time.time(), started)
-    record = {
-        'schema': 1, 'cut_id': cut_id_or_none(os.environ),
-        'cut_version': os.environ.get('CUT_VERSION') or 'UNKNOWN', 'gate_name': WHOLE_GATE,
-        'gate_argv': ['sh', 'scripts/required_fast.sh'], 'status': 'PASS', 'exit_code': 0,
-        'started_unix': started, 'ended_unix': ended, 'duration_s': ended - started,
-        'worktree_key': worktree_key or 'UNKNOWN', 'tree_sha': start_tree, 'inputs_hash': None,
-        'code_hash': code_hash, 'tool_versions': {'python3': 'Python ' + platform.python_version()},
-        'verdict_source': 'full', 'cache_key': None, 'deadline_unix': None,
-    }
+    record = _whole_gate_record('PASS', 0, start_tree, started, worktree_key, code_hash)
     try:
         append_ledger(path, record)
     except (OSError, ValueError) as exc:
         return False, 'the ledger append was refused: %s' % exc
     return True, 'PASS record for tree %s (%d rows, %s) in %s' % (
         start_tree, len(rows), record['tool_versions']['python3'], path)
+
+
+def _whole_gate_record(status, exit_code, tree, started, worktree_key, code_hash):
+    """One whole-gate record, PASS or FAIL, in the one schema both writers share."""
+    import platform
+    import time
+    ended = max(time.time(), started)
+    return {
+        'schema': 1, 'cut_id': cut_id_or_none(os.environ),
+        'cut_version': os.environ.get('CUT_VERSION') or 'UNKNOWN', 'gate_name': WHOLE_GATE,
+        'gate_argv': ['sh', 'scripts/required_fast.sh'], 'status': status, 'exit_code': exit_code,
+        'started_unix': started, 'ended_unix': ended, 'duration_s': ended - started,
+        'worktree_key': worktree_key or 'UNKNOWN', 'tree_sha': tree, 'inputs_hash': None,
+        'code_hash': code_hash, 'tool_versions': {'python3': 'Python ' + platform.python_version()},
+        'verdict_source': 'full', 'cache_key': None, 'deadline_unix': None,
+    }
+
+
+def record_whole_gate_fail(path, repo, start_tree, refused_rows, exit_code, started, worktree_key='UNKNOWN',
+                           gate_file=None):
+    """STAB1.c: append the whole-gate FAIL record of a refused gate and return (True, sentence), or (False, why).
+
+    refused_rows names what refused (a cheap check, the battery's FAIL rows, the obligation step): a non empty list of
+    non empty strings, else nothing is written. exit_code is the gate's own non zero exit. tree_sha is start_tree, the
+    snapshot read before any check ran, or UNKNOWN when that was not a clean 40 hex tree. A FAIL record is evidence that
+    a gate refused, never a pass: every reader of this file counts only status PASS (whole_gate_pass_for_tree,
+    _newest_pass_tree, scripts/go_no_go_119.py)."""
+    if (not isinstance(refused_rows, (list, tuple)) or not refused_rows
+            or not all(isinstance(r, str) and r for r in refused_rows)):
+        return False, 'no refusing row was named (%r)' % (refused_rows,)
+    try:
+        exit_code = int(exit_code)
+        started = float(started)
+        with open(gate_file or os.path.join(repo, 'scripts', 'required_fast.sh'), 'rb') as handle:
+            code_hash = hashlib.sha256(handle.read()).hexdigest()
+    except (TypeError, ValueError, OSError) as exc:
+        return False, 'the refused run could not be described: %s' % exc
+    if exit_code == 0:
+        return False, 'a gate that exited 0 is not a refused gate'
+    tree = start_tree if _is_hex(start_tree, 40) else 'UNKNOWN'
+    record = _whole_gate_record('FAIL', exit_code, tree, started, worktree_key, code_hash)
+    record['refused_rows'] = list(refused_rows)
+    try:
+        append_ledger(path, record)
+    except (OSError, ValueError) as exc:
+        return False, 'the ledger append was refused: %s' % exc
+    return True, 'FAIL record for tree %s (refused by %s) in %s' % (tree, ' '.join(refused_rows), path)
 
 
 def whole_gate_pass_for_tree(path, tree_sha):
@@ -447,6 +502,10 @@ def _main(argv=None):
     parser.add_argument('--started', default='', help='unix seconds the run started')
     parser.add_argument('--worktree-key', default='UNKNOWN')
     parser.add_argument('--gate-file', default=None, help='the required_fast.sh that ran, when not ./scripts/required_fast.sh (A2.d)')
+    parser.add_argument('--whole-gate-fail', action='store_true',
+                        help='STAB1.c: append the whole-gate FAIL record of a refused gate (exit 0), else exit 2')
+    parser.add_argument('--refused', default='', help='the refusing row names, space separated (--whole-gate-fail)')
+    parser.add_argument('--exit-code', default='1', help="the refused gate's own exit code (--whole-gate-fail)")
     args = parser.parse_args(argv)
     if args.whole_gate_snapshot:
         tree, why = tree_snapshot('.')
@@ -468,6 +527,14 @@ def _main(argv=None):
                 written, why = record_whole_gate(shared, '.', codes_text, args.tree, args.obligation,
                                                  args.started, args.worktree_key, gate_file=args.gate_file)
         print('whole-gate: %s%s' % ('' if written else 'no PASS record: ', why))
+        return 0 if written else 2
+    if args.whole_gate_fail:
+        written = False
+        shared, why = whole_gate_ledger('.')
+        if shared is not None:
+            written, why = record_whole_gate_fail(shared, '.', args.tree, args.refused.split(), args.exit_code,
+                                                  args.started, args.worktree_key, gate_file=args.gate_file)
+        print('whole-gate: %s%s' % ('' if written else 'no FAIL record: ', why))
         return 0 if written else 2
     if args.json:
         record = json.loads(args.json)

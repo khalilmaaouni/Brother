@@ -559,6 +559,25 @@ class TestDeclaredScopeIsAllowed(ReconcileCase):
                          "a change inside this session's own live fence was refused: %s"
                          % outcome.reason)
 
+    def test_a_brothermode_label_fence_covers_the_session_it_was_minted_for(self):
+        """2026-10-31: a BrotherMode claim records a derived bm1- label, and
+        the fence hook now resolves it through BrotherMode's own read-only
+        lookup. The Stop reconciler must agree with the hook, or the owner's
+        change is allowed at write time and flagged at Stop."""
+        bm = _load("bm_fence_hook_for_reconcile", os.path.join(
+            HERE, os.pardir, os.pardir, "brothermode", "tools", "bm_fence_hook.py"))
+        label = bm.session_label(self.root, MY_SESSION)
+        write(os.path.join(self.root, "STATE.md"), FENCE_STATE.replace(MY_SESSION, label))
+        self.set_tasks([self.owning_task("docs/nothing.md")])
+        self.git("add", "-A")
+        self.commit("open a task elsewhere, fence under a derived label")
+        self.baseline()
+        self.baseline(session="someone-else-9999")
+        write(os.path.join(self.root, "docs", "fenced.md"), "changed under my labelled fence\n")
+        self.assertFalse(self.reconcile().blocked)
+        self.assertTrue(self.reconcile(session="someone-else-9999").blocked,
+                        "a derived label cleared a session it was not minted for")
+
     def test_the_same_fence_does_not_cover_another_session(self):
         self.set_tasks([self.owning_task("docs/nothing.md")])
         self.git("add", "-A")

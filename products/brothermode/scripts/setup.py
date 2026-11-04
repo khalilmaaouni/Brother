@@ -64,6 +64,7 @@ import argparse
 import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -78,7 +79,7 @@ PRIVACY_NOTICE_VERSION = "2026-08-01"
 DEFAULT_VAULT = os.path.join(os.path.expanduser("~"), "BrotherModeVault")
 
 NOTICE_LINES = (
-    "BrotherMode setup: what gets written, in plain words, before anything is written.",
+    "Brother setup: what gets written, in plain words, before anything is written.",
     "",
     "1. Your private memory (project notes, decisions, session history) is",
     "   written to one folder you choose below, called the vault (your",
@@ -114,6 +115,12 @@ def config_path():
     if override:
         return override
     return os.path.join(os.path.expanduser("~"), ".brotherme", "config.json")
+
+
+def setup_command():
+    """FRUN1.a: the command that runs THIS file, absolute and quoted, so it works from whatever folder the person
+    is in. A bare "python3 scripts/setup.py" resolves only inside a source checkout."""
+    return "python3 " + shlex.quote(os.path.abspath(__file__))
 
 
 def read_config(path=None):
@@ -488,6 +495,9 @@ def build_parser():
                         "(required, with --vault and --mode, for a scripted run)")
     p.add_argument("--reconfigure", action="store_true",
                    help="allow overwriting an existing, already-consented config")
+    p.add_argument("--notice", action="store_true",
+                   help="print the privacy notice and exit; writes nothing (FRUN1: what the door "
+                        "shows a person before asking for their yes)")
     p.add_argument("--show", action="store_true",
                    help="print current consent state and exit; writes nothing")
     p.add_argument("--consent-state", action="store_true",
@@ -505,6 +515,11 @@ def main(argv):
 
     if args.show:
         return cmd_show()
+
+    if args.notice:
+        for line in NOTICE_LINES:
+            _out(line)
+        return EXIT_OK
 
     if args.vault or args.mode or args.accept_notice:
         return run_flag_mode(args)

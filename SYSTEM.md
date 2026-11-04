@@ -13,10 +13,10 @@ to run the battery.
 
 | | |
 |---|---:|
-| Parts | 551 |
-| Parts with a purpose written in the file | 548 |
-| Parts with a suite wired into the battery | 480 |
-| Checks in the battery | 1402 |
+| Parts | 557 |
+| Parts with a purpose written in the file | 554 |
+| Parts with a suite wired into the battery | 485 |
+| Checks in the battery | 1532 |
 
 3 part(s) carry no purpose line and are listed as NO-DATA below. They are
 shown rather than omitted, because a system record that hides its
@@ -84,7 +84,7 @@ undocumented corners looks complete and is not.
 | `budget_floor` | the minimum token budget for one model call, split into the | `budget_floor-self` |
 | `build_pipeline` | M5.2 per lane pipeline. | `build-pipeline-self` |
 | `bundle_mirror` | check that bundle/runtime mirrors plugin/runtime byte for byte. | `bundle-mirror-self` |
-| `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `cut-ready-self`, `regen-generated-self`, `self-check-staged-self` |
+| `bundle_runtime` | package brother_run.py's own execution engine into | `bundle-runtime-self`, `cut-ready-self`, `export-public-self`, `regen-generated-self`, `self-check-staged-self` |
 | `burn_guard` | How many unit runners the REMAINING OpenRouter money funds until the stop hour, measured from the ledger. | `burn-guard-self` |
 | `c01_failfast_runner` | run ONE suite file exactly as `python3 <suite>` would, | `release-note-perturb`, `release-note-perturb-self` |
 | `canary_pipeline_smoke` | WBS-30.10 Canary Pipeline Smoke: prove the ten sibling mobile-path modules | `canary-pipeline-smoke-self` |
@@ -108,8 +108,8 @@ undocumented corners looks complete and is not.
 | `claude_parity` | DOM-50.04, the Claude host's own report against the | `claude_parity-self` |
 | `clerical_review_plan` | WBS-40.06 Clerical Review Sampling Plan. | `clerical-review-plan-self` |
 | `client_parity` | the Cursor adapter must stay at parity with the Codex adapter | `client-parity`, `export-public-self` |
-| `close_ceremony_check` | The closing ceremony law's enforcer (founder order 2026-08-30 at close). | `close-ceremony`, `close-ceremony-tests`, `cut-preflight-self` |
-| `close_unit` | Close a unit: run its own done_check AFTER the last edit, and mark it DONE only if that command passed. | `close-unit-self` |
+| `close_ceremony_check` | The closing ceremony law's enforcer, re-scoped by unit HO1 (owner order | `close-ceremony`, `close-ceremony-tests`, `cut-preflight-self` |
+| `close_unit` | Close a unit: run its own done_check AFTER the last edit, and mark it DONE only if that command passed. | `close-unit-self`, `door-self` |
 | `closure_integrity` | ORCH-1020: a closure is not proven by a sentence, so this refuses one. | `closure-integrity-self` |
 | `codex_battery` | X8/C7.2 Codex battery: proves the public Brother plugin works on a real | `codex-battery-self` |
 | `codex_hooks_install` | C3: wire Brother's hooks into Codex's OWN hooks configuration. | `codex-battery-self`, `codex-hooks-self`, `codex-smoke`, `codex-smoke-self`, `host-live-proof-self`, `managed-safety-self`, `release-closeout-self` |
@@ -142,6 +142,7 @@ undocumented corners looks complete and is not.
 | `council_verify` | Execute a council seat's own proof commands and keep only the blockers that survive. | `council-verify-self` |
 | `coverage_check` | Coverage checker for the unified WBS (docs/plan/UNIFIED-WBS.md), task 0. | `coverage`, `coverage-self` |
 | `credential_broker` | hand a caller the minimum credential for one stated | `credential_broker-self` |
+| `credit_marks` | the two marks no text this estate writes may carry, defined once. | **NO-DATA**, nothing in the battery runs it |
 | `cursor_battery` | Verify a released Cursor adapter in a detached clone and retain its evidence. | `cursor-battery-self` |
 | `cursor_parity` | DOM-50.06. Names every outstanding Cursor portability gap | `cursor_parity-self` |
 | `cursor_plugin_install` | Install the Brother Cursor plugin to ~/.cursor/plugins/local/brother. | `air_gapped_install-self` |
@@ -194,7 +195,7 @@ undocumented corners looks complete and is not.
 | `door` | a plain English outcome becomes a canonical Work document. | `brother-run-self`, `bundle-runtime-self`, `door-self`, `mutation-gate`, `mutation-gate-self` |
 | `door_overhead` | UX1.a: the door's overhead measured (docs/plan/specs/UX1.md). | `door-overhead-self` |
 | `dream_authorize` | D7-C execution authority boundary. | **NO-DATA**, nothing in the battery runs it |
-| `dream_bridge` | locate and load the dream recorder without importing it. | `bundle-runtime-self`, `dream-bridge-self` |
+| `dream_bridge` | locate and load the dream recorder without importing it. | `bundle-runtime-self`, `door-self`, `dream-bridge-self` |
 | `dream_gate_consult` | consult the gate ordering policy, replay recorded | **NO-DATA**, nothing in the battery runs it |
 | `dream_gate_shadow` | read-only shadow evaluation of a proposed gate order | **NO-DATA**, nothing in the battery runs it |
 | `drift_gate` | Brother's own version of a Stop-hook drift/finishing-claim | `drift-gate-self` |
@@ -232,6 +233,7 @@ undocumented corners looks complete and is not.
 | `find_out` | .py: the research step attempt_ledger's refusal names by command. | `find-out-tests` |
 | `fixture_classes` | DOM-30.02: does the acceptance fixture corpus cover its seven classes. | `fixture_classes-self` |
 | `floor_score` | is Brother behind on the ordinary mechanics, measured where anyone measured. | `floor-score-self` |
+| `flow_report` | what each delivery stage caught that no later stage would have, against what it cost (unit FLOW1.c). | `flow-report-120-py39`, `flow-report-120-self` |
 | `followup_obligation` | a follow-up obligation (a trigger, its owner, its | `followup-obligation-self` |
 | `forecast` | how long, from a base rate this estate actually produced. | `forecast-self` |
 | `gate_ledger` | Gate ledger append and chain verification for C0.3. | **NO-DATA**, nothing in the battery runs it |
@@ -263,8 +265,9 @@ undocumented corners looks complete and is not.
 | `guarded_strip` | never delete rows from a real file without counting them first. | `guarded-strip-self` |
 | `handover_ceremony` | Handover ceremony: collects a session's closing state and emits it as | `handover-ceremony` |
 | `handover_pack_scan` | the dry run the founder reads before any pack is rewritten. | `handover-pack-scan-self` |
+| `handover_record` | hand a session's work to the next session in the same | `bundle-runtime-self`, `handover-record`, `handover-record-py39` |
 | `hardening_check` | Run every declared subunit check for one hardening unit, failing closed. | `hardening-check` |
-| `heavy_slot` | heavy work waits its turn for a machine slot instead of piling on. | `heavy-slot-self` |
+| `heavy_slot` | heavy work waits its turn for a machine slot instead of piling on. | `heavy-slot-self`, `session-relay-edges-120-py39`, `session-relay-edges-120-self` |
 | `heavy_wait_report` | ACC7.a: measure the runner flip condition from the heavy_slot wait records. | `heavy-wait-report-self` |
 | `hermetic_test_check` | .py: a changed test is run where the public runner runs it. | **NO-DATA**, nothing in the battery runs it |
 | `hermetic_worker_env` | Test-owned disk premise and disposable worker coordination state. | `hermetic-worker-env-self` |
@@ -298,7 +301,7 @@ undocumented corners looks complete and is not.
 | `jev_checks` | the six Jev wave-1 seams named in the wave-1 seam brief | `jev_checks-self` |
 | `jev_compaction_advisor` | report only compaction plan and cost. | `jev-compaction-advisor-self` |
 | `jev_decide` | the one place this estate asks Jev (TypeSafe's decision | `jev_decide-self` |
-| `jev_door` | JW4.a: second opinions where you already work, the one entry the review | `bundle-runtime-self`, `jev-door-py39`, `jev-door-self` |
+| `jev_door` | JW4.a: second opinions where you already work, the one entry the review | `bundle-runtime-self`, `door-self`, `jev-door-py39`, `jev-door-self` |
 | `jev_eval` | JEV-04 of the 1.0.20 orchestration control plane: Jev (TypeSafe) versus | `jev_eval-self` |
 | `jev_frontdoor_classify` | A1.03 (J014) and A2.03 (J119), wave-1/wave-2 Jev seams: PostToolUse | **NO-DATA**, nothing in the battery runs it |
 | `jev_frontdoor_sidecar` | A1.03 (J014, wave-1 Jev seam): UserPromptSubmit half of the front-door | **NO-DATA**, nothing in the battery runs it |
@@ -307,7 +310,7 @@ undocumented corners looks complete and is not.
 | `jev_registry` | the one place this estate reads data/jev-registry.json, | `jev_registry-lint`, `jev_registry-self` |
 | `jev_seam` | A0.2/A0.6 of the 1.0.20 orchestration control plane, the one | `bundle-runtime-self`, `jev_seam-self` |
 | `jev_start_refusal` | JW2.a: a refused loop start gets one second opinion line on its refusal. | `bundle-runtime-self`, `jev-start-refusal-py39`, `jev-start-refusal-self` |
-| `jev_status` | JW1: second opinions you can read, the Jev readout. | `bundle-runtime-self`, `jev-status-py39`, `jev-status-self` |
+| `jev_status` | JW1: second opinions you can read, the Jev readout. | `bundle-runtime-self`, `door-self`, `jev-status-py39`, `jev-status-self` |
 | `jev_ticket_triage` | J1.b of the Jev use cases, ticket triage. | `jev-ticket-triage-self` |
 | `jev_tool_gate` | J1.a of unit J1, the tool call gate. | `jev-tool-gate-self` |
 | `journal` | one append-only causal log per run, fed by the writers that | `journal-self` |
@@ -359,12 +362,12 @@ undocumented corners looks complete and is not.
 | `memory_ab` | Memory ON versus OFF: the same tasks, run both ways, differences recorded. | `memory-ab`, `vault-benchmark-v2-self` |
 | `memory_ab_runner` | Runner for scripts/memory_ab.py (VB-11, D04 part B), 2026-08-30 run. | **NO-DATA**, nothing in the battery runs it |
 | `memory_lift` | did the memory fix actually change anything, measured on real work. | `memory-lift-self` |
-| `merge_gate` | The tree gate: one ledger, keyed by the tree main will have. | `merge-gate-self` |
+| `merge_gate` | The tree gate: one ledger, keyed by the tree the merge base will have. | `merge-gate-self` |
 | `merge_passport` | WBS-40.07 Merge Passport: a VIEW composing evidence that already exists | `merge-passport-self` |
 | `merge_pins` | The run line is never a PR head that moves under a pin: frozen-head pull requests, pin checks, the protection read | `merge-pins-self` |
 | `merge_precompute` | The pre-computation: every listed PR is gated in list order, in the background, as soon as pins are read (MG1.c). | `merge-precompute-self` |
 | `merge_queue` | conflict-aware batching for the one-integrator merge queue (W8). | `merge-queue`, `merge-queue-self` |
-| `merge_reach` | MG1.e: after each merge, prove reachability from main, never the state field. | `merge-reach-self` |
+| `merge_reach` | MG1.e: after each merge, prove reachability from the merge base, never the state field. | `merge-reach-self` |
 | `mobile_appium_adapter` | EPIC M3.05 Appium Driver Adapter: translates M3.02's canonical mobile | `mobile-appium-adapter-self` |
 | `mobile_canonical_action` | EPIC M3.02 Mobile Canonical Action: validate an action record against | `mobile-canonical-action-self` |
 | `mobile_design` | Search a user-curated mobile reference board and inspect creative media. | `bundle-runtime-self`, `mobile-design` |
@@ -462,6 +465,7 @@ undocumented corners looks complete and is not.
 | `provider_adapter` | ONE provider-neutral core, THIN adapters. | `provider-adapter-self` |
 | `publish_reconciliation` | WBS-40.10 Publish Reconciliation: what Brother checks AFTER an external | `publish-reconciliation-self` |
 | `rc_handover` | .py: refuse a release candidate handover that says more than its evidence. | `rc-handover-self`, `rc-handover-self-py39` |
+| `reach_check` | every registered capability is reachable from a plain ask (OUT1.a). | `reach-check`, `reach-check-py39` |
 | `readiness_gate` | the review's enterprise readiness gate as a checkable surface. | `acc6-restore-evidence-self`, `cut-preflight-self`, `export-public-self`, `readiness-gate`, `readiness-gate-self` |
 | `readme_receipt_sample` | the README's per-file receipt sample, rendered by | **NO-DATA**, nothing in the battery runs it |
 | `real_logs` | .py: nothing that runs as a test or a battery may grow a real | `real-logs-self`, `real-logs-unchanged` |
@@ -518,8 +522,10 @@ undocumented corners looks complete and is not.
 | `score_vault_recall` | Honest before/after measurement of bm_vault.py's dense/embedding signal, using the | **NO-DATA**, nothing in the battery runs it |
 | `score_vault_retrieval` | retrieval quality for the Brother Vault, measured through | `score-vault-retrieval-self` |
 | `self_check_staged` | catch a new dash or a private term before it is even | `self-check-staged-self` |
+| `session_relay` | cross-session orchestration as one ledger and a handful of refusals (unit XS1.a, owner order | `session-relay-edges-120-py39`, `session-relay-edges-120-self` |
 | `shared_config_check` | .py: the repository's SHARED config carries none of the | `shared-config-check-self` |
 | `side_effect_ledger` | DOM-40.06, a receipt for what a diff cannot show. | `side-effect-ledger-self` |
+| `sim_trial` | SIM1: simulated first-time users stand in for the human trial behind BASE1.e's release bar. | `sim-seeds`, `sim-trial`, `sim-trial-py39` |
 | `smoke_first` | Run a command over many items only after it succeeds on ONE item first. | `smoke-first-self` |
 | `spec_precheck` | ORCH-37: before a row is called new work, ask whether it already exists. | `spec-gate-conflict`, `spec-precheck-self` |
 | `split_check` | Does a train/test split leak: the same entity in both sides, or a row | `evad-score`, `evad-score-personas`, `evad-score-self`, `fault-lab-self`, `split-check-self` |
@@ -691,6 +697,7 @@ undocumented corners looks complete and is not.
 - `graph-loop-self`: `python3 scripts/test_graph_loop.py -v`
 - `graph-loop`: `python3 scripts/graph_loop.py`
 - `merge-queue-self`: `python3 scripts/test_merge_queue.py -v`
+- `train-build-self`: `python3 -B scripts/test_train_build.py`
 - `merge-verified-self`: `python3 scripts/test_merge_verified.py`
 - `merge-precompute-self`: `python3 -B scripts/test_merge_precompute.py`
 - `merge-pins-self`: `python3 -B scripts/test_merge_pins.py`
@@ -747,6 +754,7 @@ undocumented corners looks complete and is not.
 - `forecast-self`: `python3 scripts/test_forecast.py -v`
 - `work-record-self`: `python3 scripts/test_work_record.py -v`
 - `door-self`: `python3 scripts/test_door.py -v`
+- `door-publish-route-self`: `python3 scripts/test_door_publish_route.py -v`
 - `packs-self`: `python3 scripts/test_packs.py -v`
 - `door-adversarial-self`: `python3 scripts/test_door_adversarial.py -v`
 - `integrate-self`: `python3 scripts/test_integrate.py -v`
@@ -804,6 +812,8 @@ undocumented corners looks complete and is not.
 - `acceptance-compression`: `python3 scripts/test_acceptance_compression.py -v`
 - `acceptance-time`: `python3 scripts/test_acceptance_time.py -v`
 - `bundle-runtime-self`: `python3 scripts/test_bundle_runtime.py -v`
+- `ship-every-route-self`: `python3 -B scripts/test_ship_every_route.py`
+- `ship-every-route-py39`: `/usr/bin/python3 -B scripts/test_ship_every_route.py`
 - `bundle-doctor-route`: `python3 -B scripts/test_bundle_doctor_route.py`
 - `runs-root-one-rule`: `python3 -B scripts/test_runs_root_one_rule.py`
 - `cut-keeps-rehearsal`: `python3 -B scripts/test_cut_keeps_rehearsal.py`
@@ -921,6 +931,8 @@ undocumented corners looks complete and is not.
 - `check-all-merge-py39`: `/usr/bin/python3 -B scripts/test_check_all_merge.py`
 - `close-ceremony`: `python3 scripts/close_ceremony_check.py`
 - `close-ceremony-tests`: `python3 scripts/test_close_ceremony_check.py`
+- `handover-record`: `python3 -B scripts/test_handover_record.py`
+- `handover-record-py39`: `/usr/bin/python3 -B scripts/test_handover_record.py`
 - `prediction-ledger`: `python3 -B scripts/test_prediction_ledger.py`
 - `prediction-ledger-d53`: `python3 -B scripts/test_prediction_ledger_d53.py`
 - `prediction-ledger-fail-direction`: `python3 -B scripts/test_prediction_ledger_fail_direction.py`
@@ -975,12 +987,17 @@ undocumented corners looks complete and is not.
 - `deploy-canary`: `python3 -B scripts/test_deploy_canary.py -v`
 - `stop-ownership-edges`: `python3 -B scripts/test_stop_ownership_edges.py`
 - `proc-table-nodata`: `python3 -B scripts/test_proc_table_nodata.py`
+- `procs-row-unknown-self`: `python3 -B scripts/test_procs_row_unknown.py`
+- `procs-row-unknown-self-py39`: `/usr/bin/python3 -B scripts/test_procs_row_unknown.py`
+- `procs-row-unknown-edges-self`: `python3 -B scripts/test_procs_row_unknown_edges.py`
+- `procs-row-unknown-edges-self-py39`: `/usr/bin/python3 -B scripts/test_procs_row_unknown_edges.py`
 - `attacker-role-limit`: `python3 -B scripts/test_attacker_role_limit.py`
 - `bridge-spawners`: `python3 -B scripts/test_bridge_spawners.py`
 - `freeze-manifest`: `python3 -B scripts/test_freeze_manifest.py`
 - `freeze-native-closure`: `python3 -B scripts/test_freeze_native_closure.py`
 - `burn-guard-flat-bin`: `python3 -B scripts/test_burn_guard_flat_bin.py`
 - `burn-guard-refusals`: `python3 -B scripts/test_burn_guard_refusals.py`
+- `burn-guard-main-expiry-stab1g`: `python3 -B scripts/test_burn_guard_main_expiry.py`
 - `freeze-loaders`: `python3 -B scripts/test_freeze_loaders.py`
 - `freeze-namespace-parent`: `python3 -B scripts/test_freeze_namespace_parent.py`
 - `code-root`: `python3 -B scripts/test_code_root.py`
@@ -1162,6 +1179,9 @@ undocumented corners looks complete and is not.
 - `journey-harness-self`: `python3 -B scripts/journey/test_run_journey.py`
 - `journey-harness-py39`: `/usr/bin/python3 -B scripts/journey/test_run_journey.py`
 - `journey-walker-selftest`: `python3 -B scripts/journey/run_journey.py --selftest`
+- `sim-trial`: `python3 -B scripts/test_sim_trial.py`
+- `sim-trial-py39`: `/usr/bin/python3 -B scripts/test_sim_trial.py`
+- `sim-seeds`: `python3 -B scripts/sim_trial.py validate-seeds`
 - `inherited-red-self`: `python3 -B scripts/test_inherited_red.py`
 - `inherited-red-py39`: `/usr/bin/python3 -B scripts/test_inherited_red.py`
 - `land-batch-selftest`: `python3 -B scripts/loop/land_batch.py --selftest`
@@ -1188,6 +1208,8 @@ undocumented corners looks complete and is not.
 - `model-call-no-plugin`: `python3 scripts/test_model_call_no_plugin.py`
 - `model-call-ledger-rows`: `python3 -B scripts/test_model_call_ledger_rows.py`
 - `model-call-selftest-world`: `python3 -B scripts/test_model_call_selftest_world.py`
+- `hermetic-ledgers-self`: `python3 -B scripts/test_hermetic_ledgers.py`
+- `hermetic-ledgers-py39`: `/usr/bin/python3 -B scripts/test_hermetic_ledgers.py`
 - `runner-straggler-settles`: `python3 -B scripts/test_runner_straggler_settles.py`
 - `runner-one-deadline`: `python3 -B scripts/test_runner_one_deadline.py`
 - `unit-ledger-model-clock`: `python3 -B scripts/test_unit_ledger_model_clock.py`
@@ -1370,6 +1392,8 @@ undocumented corners looks complete and is not.
 - `run-journal-chain-self`: `python3 scripts/test_run_journal_chain.py -v`
 - `machine_reservation-self`: `python3 scripts/test_machine_reservation.py -v`
 - `heavy-slot-self`: `python3 scripts/test_heavy_slot.py -v`
+- `cut-resource-admission-self`: `python3 scripts/test_cut_resource_admission.py -v`
+- `cut-stop-classes-self`: `python3 scripts/test_cut_stop_classes.py -v`
 - `wip-status`: `python3 -B scripts/loop/test_wip_status.py`
 - `bridge_content_gate-self`: `python3 scripts/test_bridge_content_gate.py -v`
 - `record_distance-self`: `python3 scripts/test_record_distance.py -v`
@@ -1409,6 +1433,8 @@ undocumented corners looks complete and is not.
 - `acceptance-trial-assign-self`: `python3 scripts/test_acceptance_trial_assign.py -v`
 - `assurance-graph-self`: `python3 scripts/test_assurance_graph.py -v`
 - `benchmark-harness-self`: `python3 scripts/test_benchmark_harness.py -v`
+- `base1b-tasks-self`: `python3 scripts/test_base1b_tasks.py -v`
+- `base1b-tasks-py39`: `/usr/bin/python3 scripts/test_base1b_tasks.py -v`
 - `brother-worktree-census-self`: `python3 scripts/test_brother_worktree_census.py -v`
 - `claim-evidence-self`: `python3 scripts/test_claim_evidence.py -v`
 - `claim-lifecycle-self`: `python3 scripts/test_claim_lifecycle.py -v`
@@ -1480,6 +1506,10 @@ undocumented corners looks complete and is not.
 - `brother-pass-self`: `python3 scripts/test_brother_pass.py`
 - `probe-round-self`: `python3 scripts/test_probe_round.py`
 - `close-unit-self`: `python3 scripts/test_close_unit.py`
+- `landing-facts-self`: `python3 -B scripts/test_landing_facts.py`
+- `closure-revision-self`: `python3 -B scripts/test_closure_revision.py`
+- `closure-revision-py39`: `/usr/bin/python3 -B scripts/test_closure_revision.py`
+- `landing-contract-self`: `python3 -B scripts/test_landing_contract.py`
 - `donecheck-recon-self`: `python3 scripts/test_donecheck_recon.py`
 - `jev-checks-r41-self`: `python3 scripts/test_jev_checks_r41.py`
 - `jev-seam-wiring-self`: `python3 scripts/test_jev_seam_wiring.py`
@@ -1539,6 +1569,8 @@ undocumented corners looks complete and is not.
 - `redeploy-check-115-py39`: `/usr/bin/python3 -B scripts/loop/test_redeploy_check.py`
 - `start-run-remedy-115-self`: `python3 -B scripts/loop/test_start_run_remedy.py`
 - `start-run-remedy-115-py39`: `/usr/bin/python3 -B scripts/loop/test_start_run_remedy.py`
+- `start-run-stale-deploy-self`: `python3 -B scripts/test_start_run_stale_deploy.py`
+- `start-run-stale-deploy-py39`: `/usr/bin/python3 -B scripts/test_start_run_stale_deploy.py`
 - `land-batch-closure-115-self`: `python3 -B scripts/loop/test_land_batch_closure.py`
 - `land-batch-closure-115-py39`: `/usr/bin/python3 -B scripts/loop/test_land_batch_closure.py`
 - `diag-frozen-root-115-self`: `python3 -B scripts/loop/test_diag_frozen_root.py`
@@ -1579,6 +1611,98 @@ undocumented corners looks complete and is not.
 - `pool-why-lines-117-py39`: `/usr/bin/python3 -B scripts/loop/test_pool_why_lines.py`
 - `refill-after-quarantine-117-self`: `python3 -B scripts/loop/test_refill_after_quarantine.py`
 - `refill-after-quarantine-117-py39`: `/usr/bin/python3 -B scripts/loop/test_refill_after_quarantine.py`
+- `run-state-120-self`: `python3 -B scripts/test_run_state.py`
+- `run-state-120-py39`: `/usr/bin/python3 -B scripts/test_run_state.py`
+- `idle-with-work-stab1h-self`: `python3 -B scripts/test_stage_log_idle.py`
+- `idle-with-work-stab1h-py39`: `/usr/bin/python3 -B scripts/test_stage_log_idle.py`
+- `delivery-trace-loop1g-self`: `python3 -B scripts/test_delivery_trace.py`
+- `delivery-trace-loop1g-py39`: `/usr/bin/python3 -B scripts/test_delivery_trace.py`
+- `monitor-wired-stab1j-self`: `python3 -B scripts/test_monitor_wired.py`
+- `monitor-wired-stab1j-py39`: `/usr/bin/python3 -B scripts/test_monitor_wired.py`
+- `key-path-inventory-key1e-self`: `python3 -B scripts/test_key_path_inventory.py`
+- `key-path-inventory-key1e-py39`: `/usr/bin/python3 -B scripts/test_key_path_inventory.py`
+- `vault-notice-key1a-self`: `python3 -B scripts/test_brother_run_vault_notice.py`
+- `vault-notice-key1a-py39`: `/usr/bin/python3 -B scripts/test_brother_run_vault_notice.py`
+- `live-state-contract-120-self`: `python3 -B scripts/test_live_state.py --require-implementation`
+- `live-state-contract-120-py39`: `/usr/bin/python3 -B scripts/test_live_state.py --require-implementation`
+- `authentication-contract-120-self`: `python3 -B scripts/test_authentication_contract.py --require-implementation`
+- `authentication-contract-120-py39`: `/usr/bin/python3 -B scripts/test_authentication_contract.py --require-implementation`
+- `recovery-contract-120-self`: `python3 -B scripts/test_recovery_contract.py --require-implementation`
+- `recovery-contract-120-py39`: `/usr/bin/python3 -B scripts/test_recovery_contract.py --require-implementation`
+- `vault-access-contract-120-self`: `python3 -B scripts/test_vault_access_contract.py --require-implementation`
+- `vault-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_vault_access_contract.py --require-implementation`
+- `vault-door-120-self`: `python3 -B scripts/test_vault_door.py`
+- `vault-door-120-py39`: `/usr/bin/python3 -B scripts/test_vault_door.py`
+- `vault-default-one-reader-120-self`: `python3 -B scripts/test_vault_default_one_reader.py`
+- `vault-default-one-reader-120-py39`: `/usr/bin/python3 -B scripts/test_vault_default_one_reader.py`
+- `data-access-contract-120-self`: `python3 -B scripts/test_data_access_contract.py --require-implementation`
+- `data-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_data_access_contract.py --require-implementation`
+- `mobile-access-contract-120-self`: `python3 -B scripts/test_mobile_access_contract.py --require-implementation`
+- `mobile-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_mobile_access_contract.py --require-implementation`
+- `assurance-access-contract-120-self`: `python3 -B scripts/test_assurance_access_contract.py --require-implementation`
+- `assurance-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_assurance_access_contract.py --require-implementation`
+- `assurance-door-ops-120-self`: `python3 -B scripts/test_assurance_door_ops.py`
+- `assurance-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_assurance_door_ops.py`
+- `mobile-door-ops-120-self`: `python3 -B scripts/test_mobile_door_ops.py`
+- `mobile-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_mobile_door_ops.py`
+- `host-access-contract-120-self`: `python3 -B scripts/test_host_access_contract.py --require-implementation`
+- `host-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_host_access_contract.py --require-implementation`
+- `host-door-ops-120-self`: `python3 -B scripts/test_host_door_ops.py`
+- `host-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_host_door_ops.py`
+- `loop-access-contract-120-self`: `python3 -B scripts/test_loop_access_contract.py --require-implementation`
+- `loop-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_loop_access_contract.py --require-implementation`
+- `loop-door-ops-120-self`: `python3 -B scripts/test_loop_door_ops.py`
+- `loop-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_loop_door_ops.py`
+- `calibrated-access-contract-120-self`: `python3 -B scripts/test_calibrated_access_contract.py --require-implementation`
+- `calibrated-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_calibrated_access_contract.py --require-implementation`
+- `jev-door-ops-120-self`: `python3 -B scripts/test_jev_door_ops.py`
+- `jev-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_jev_door_ops.py`
+- `jev-door-real-120-self`: `python3 -B scripts/test_jev_door_real.py`
+- `jev-door-real-120-py39`: `/usr/bin/python3 -B scripts/test_jev_door_real.py`
+- `learning-access-contract-120-self`: `python3 -B scripts/test_learning_access_contract.py --require-implementation`
+- `learning-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_learning_access_contract.py --require-implementation`
+- `learning-door-ops-120-self`: `python3 -B scripts/test_learning_door_ops.py`
+- `learning-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_learning_door_ops.py`
+- `content-access-contract-120-self`: `python3 -B scripts/test_content_access_contract.py --require-implementation`
+- `content-access-contract-120-py39`: `/usr/bin/python3 -B scripts/test_content_access_contract.py --require-implementation`
+- `content-door-ops-120-self`: `python3 -B scripts/test_content_door_ops.py`
+- `content-door-ops-120-py39`: `/usr/bin/python3 -B scripts/test_content_door_ops.py`
+- `content-pipeline-120-self`: `python3 -B -m unittest plugin.runtime.brother.rtm.test_voice_pipeline`
+- `content-pipeline-120-py39`: `/usr/bin/python3 -B -m unittest plugin.runtime.brother.rtm.test_voice_pipeline`
+- `consumer-admission-120-self`: `python3 -B scripts/test_consumer_admission.py`
+- `consumer-admission-120-py39`: `/usr/bin/python3 -B scripts/test_consumer_admission.py`
+- `data-door-120-self`: `python3 -B scripts/test_data_door.py`
+- `data-door-120-py39`: `/usr/bin/python3 -B scripts/test_data_door.py`
+- `consumer-view-contract-120-self`: `python3 -B scripts/test_consumer_view_contract.py --require-implementation`
+- `consumer-view-contract-120-py39`: `/usr/bin/python3 -B scripts/test_consumer_view_contract.py --require-implementation`
+- `consumer-view-edges-120-self`: `python3 -B scripts/test_consumer_view_edges.py`
+- `consumer-view-edges-120-py39`: `/usr/bin/python3 -B scripts/test_consumer_view_edges.py`
+- `cut-door-contract-120-self`: `python3 -B scripts/test_cut_door_contract.py --require-implementation`
+- `cut-door-contract-120-py39`: `/usr/bin/python3 -B scripts/test_cut_door_contract.py --require-implementation`
+- `cut-door-edges-120-self`: `python3 -B scripts/test_cut_door_edges.py`
+- `cut-door-edges-120-py39`: `/usr/bin/python3 -B scripts/test_cut_door_edges.py`
+- `cut-evidence-contract-120-self`: `python3 -B scripts/test_cut_evidence_contract.py --require-implementation`
+- `cut-evidence-contract-120-py39`: `/usr/bin/python3 -B scripts/test_cut_evidence_contract.py --require-implementation`
+- `cut-evidence-edges-120-self`: `python3 -B scripts/test_cut_evidence_edges.py`
+- `cut-evidence-edges-120-py39`: `/usr/bin/python3 -B scripts/test_cut_evidence_edges.py`
+- `cut-prepare-contract-120-self`: `python3 -B scripts/test_cut_prepare_contract.py --require-implementation`
+- `cut-prepare-contract-120-py39`: `/usr/bin/python3 -B scripts/test_cut_prepare_contract.py --require-implementation`
+- `cut-prepare-edges-120-self`: `python3 -B scripts/test_cut_prepare_edges.py`
+- `cut-prepare-edges-120-py39`: `/usr/bin/python3 -B scripts/test_cut_prepare_edges.py`
+- `cut-publish-contract-120-self`: `python3 -B scripts/test_cut_publish_contract.py --require-implementation`
+- `cut-publish-contract-120-py39`: `/usr/bin/python3 -B scripts/test_cut_publish_contract.py --require-implementation`
+- `cut-publish-edges-120-self`: `python3 -B scripts/test_cut_publish_edges.py`
+- `cut-publish-edges-120-py39`: `/usr/bin/python3 -B scripts/test_cut_publish_edges.py`
+- `cut-reuse-approval-120-self`: `python3 -B scripts/test_cut_reuse_approval.py`
+- `cut-reuse-approval-120-py39`: `/usr/bin/python3 -B scripts/test_cut_reuse_approval.py`
+- `session-relay-contract-120-self`: `python3 -B scripts/test_session_relay_contract.py --require-implementation`
+- `session-relay-contract-120-py39`: `/usr/bin/python3 -B scripts/test_session_relay_contract.py --require-implementation`
+- `session-relay-edges-120-self`: `python3 -B scripts/test_session_relay.py`
+- `session-relay-edges-120-py39`: `/usr/bin/python3 -B scripts/test_session_relay.py`
+- `stage-ledger-120-self`: `python3 -B scripts/test_stage_ledger.py`
+- `stage-ledger-120-py39`: `/usr/bin/python3 -B scripts/test_stage_ledger.py`
+- `flow-report-120-self`: `python3 -B scripts/test_flow_report.py`
+- `flow-report-120-py39`: `/usr/bin/python3 -B scripts/test_flow_report.py`
 - `grade-build-guard-paths-115-self`: `python3 -B scripts/loop/test_grade_build_guard_paths_115.py`
 - `grade-build-guard-paths-115-py39`: `/usr/bin/python3 -B scripts/loop/test_grade_build_guard_paths_115.py`
 - `run-summary-115-self`: `python3 -B scripts/loop/test_run_summary.py`
@@ -1897,6 +2021,14 @@ undocumented corners looks complete and is not.
 - `program-resolution-py39`: `/usr/bin/python3 -B scripts/loop/test_program_resolution.py`
 - `reach-attack-r1`: `python3 -B scripts/loop/test_reach_attack_r1.py`
 - `reach-attack-r1-py39`: `/usr/bin/python3 -B scripts/loop/test_reach_attack_r1.py`
+- `reach-check`: `python3 -B scripts/test_reach_check.py`
+- `reach-check-py39`: `/usr/bin/python3 -B scripts/test_reach_check.py`
+- `reach-inventory`: `python3 -B scripts/test_reach_inventory.py`
+- `reach-inventory-py39`: `/usr/bin/python3 -B scripts/test_reach_inventory.py`
+- `reach-guards`: `python3 -B scripts/test_reach_guards.py`
+- `reach-guards-py39`: `/usr/bin/python3 -B scripts/test_reach_guards.py`
+- `reach-out1`: `python3 -B scripts/test_reach.py`
+- `reach-out1-py39`: `/usr/bin/python3 -B scripts/test_reach.py`
 - `ready-contract`: `python3 -B scripts/loop/test_ready_contract.py`
 - `ready-contract-py39`: `/usr/bin/python3 -B scripts/loop/test_ready_contract.py`
 - `adapter-contract-self`: `python3 scripts/loop/test_adapter_contract.py`
@@ -1959,6 +2091,10 @@ undocumented corners looks complete and is not.
 - `runner-pool-seats-self`: `python3 scripts/loop/test_runner_pool_seats.py`
 - `cut-ready-margin-self`: `python3 scripts/test_cut_ready_margin.py`
 - `runner-pool-load-self`: `python3 scripts/loop/test_runner_pool_load.py`
+- `pool-room-limits-self`: `python3 -B scripts/test_pool_room_limits.py`
+- `pool-room-limits-py39`: `/usr/bin/python3 -B scripts/test_pool_room_limits.py`
+- `loop-admission-edges-self`: `python3 -B scripts/test_loop_admission_edges.py`
+- `loop-admission-edges-py39`: `/usr/bin/python3 -B scripts/test_loop_admission_edges.py`
 - `runner-pool-after-self`: `python3 scripts/loop/test_runner_pool_after.py`
 - `builder-claim-self`: `python3 scripts/loop/test_builder_claim.py`
 - `cut-ready-power-self`: `python3 scripts/test_cut_ready_power.py`

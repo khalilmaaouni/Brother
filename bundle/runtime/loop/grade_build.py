@@ -803,6 +803,12 @@ PROTECTED_FILES = ("scripts/pre_push_hook.sh", "scripts/check_all.sh", "scripts/
                    # imported by retire_catalogs.py since OP1.e (6c02d3cc6, 2026-10-06) without its protection; found red
                    # on main by scripts/test_grade_build_guard.py on 2026-10-10 (unit U0c)
                    "scripts/donecheck_u8.py",
+                   # 1.2.0: eleven modules joined the frozen checks' import closure (found red on the line by
+                   # scripts/test_grade_build_guard.py during the 1.2.0 export check, 2026-11-03): a build never edits them
+                   "scripts/claim_store.py", "scripts/codex_hooks_install.py", "scripts/credit_marks.py", "scripts/cut_driver.py",
+                   "scripts/fault_barrier.py", "scripts/journal.py", "scripts/load_reservation.py", "scripts/loop/power_rule.py",
+                   "scripts/machine_reservation.py", "scripts/release_window_clock_rows.py",
+                   "scripts/test_readme_changed_sections.py",
                    # imported by hermetic_test_check.py since TH1.b (1.1.3): the push check's timing scan and its ratchet, and
                    # the slow host's slot reader with its own import
                    "scripts/timing_hunt.py", "scripts/timing_hunt_baseline.json", "scripts/heavy_slot.py",

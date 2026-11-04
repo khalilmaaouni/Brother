@@ -1,0 +1,11 @@
+{
+ "label": "SIMULATED",
+ "frozen_at": "2026-11-02T07:16:28Z",
+ "bar": "first-user",
+ "rubric_sha": "62c60cb56b1ca773",
+ "scenarios_sha": "9f309560c099fc0d",
+ "grader_sha": "90fbe395c893e4d1",
+ "scenario_count": 66,
+ "scored_runs_at_freeze": 0,
+ "rule": "frozen before the first scored run; the rubric, the scenarios and the grading functions are never edited after a result, and a change needs a new reason that cites no result"
+}

@@ -9,6 +9,7 @@ remove one content class's row, and watch the check fail on exactly that
 class. That proves the check reads the file's content rather than always
 agreeing with whatever is on disk.
 """
+import os
 import pathlib
 import tempfile
 import unittest
@@ -16,6 +17,9 @@ import unittest
 import check_filtering_spec as cfs
 
 
+# docs/plan is not shipped in the public export, so there the spec does not exist: the premise is absent, not the
+# behaviour broken. A tree that does carry the spec still runs every case below.
+@unittest.skipUnless(os.path.isfile(str(cfs.SPEC_PATH)), "this tree carries no privacy filtering spec")
 class Backwards(unittest.TestCase):
 
     def setUp(self):

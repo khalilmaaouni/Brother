@@ -1178,6 +1178,10 @@ def main(argv=None):
     ap.add_argument("--remote-url", default="",
                      help="git's pre-push $2: the remote URL this push "
                           "targets, fed to the edition guard")
+    ap.add_argument("--hermetic-only", action="store_true",
+                     help="STAB1.c: run only the hermetic check, the one "
+                          "the push runs, for required_fast.sh's cheap "
+                          "stage: exit 1 on a BLOCK, 2 on a NO-DATA, else 0")
     # FX-07.3: an argv this gate cannot use is REFUSED with the gate's own
     # error. A returned exit code was measured to read as an ordinary return to
     # an external probe, and a refusal that can be mistaken for a pass is not a
@@ -1199,6 +1203,19 @@ def main(argv=None):
     # (a real hook invocation, or a test piping them in); an interactive
     # terminal is never blocked on, since it has nothing queued.
     stdin_text = "" if sys.stdin.isatty() else sys.stdin.read()
+
+    if args.hermetic_only:
+        if _outgoing_ranges(args.cwd, None, stdin_text) is None:  # a detached head names no changed test to judge
+            print("%-8s %-12s %s" % (NODATA, "hermetic", "no outgoing range (detached head, no ref lines), so no "
+                                     "changed test was judged; not a pass"))
+            return EXIT_NODATA
+        found = check_hermetic_tests(args.cwd, stdin_text=stdin_text)
+        for level, family, detail in found:
+            print("%-8s %-12s %s" % (level, family, detail))
+        if any(f[0] == BLOCK for f in found):
+            print("pre-push: hermetic REFUSED")
+            return EXIT_BLOCKED
+        return EXIT_NODATA if any(f[0] == NODATA for f in found) else EXIT_OK
 
     found = gate(args.cwd, stdin_text=stdin_text,
                  remote_url=args.remote_url or None,

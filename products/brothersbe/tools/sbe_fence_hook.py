@@ -118,6 +118,7 @@ Python 3.9, standard library only, cross-platform, no network, no subprocess.
 No em or en dashes anywhere in this file, its comments, or its output.
 """
 import fnmatch
+import importlib.util
 import json
 import os
 import posixpath
@@ -841,7 +842,61 @@ def session_aliases(env=None):
     return [part.strip().lower() for part in raw.split(",") if part.strip()]
 
 
-def same_session(declared, mine, aliases=None):
+#: The prefix BrotherMode puts on a derived label (bm_fence_hook.LABEL_PREFIX).
+#: Kept here only to decide whether a fence line is worth loading the sibling
+#: for; the sibling's own constant is re-checked once it is loaded.
+_BM_LABEL_PREFIX = "bm1-"
+#: The sibling BrotherMode fence sits at the same relative place in the source
+#: tree (products/<product>/tools) and in the bundle mirror
+#: (runtime/hooks/<product>/tools).
+_SIBLING_FENCE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              os.pardir, os.pardir, "brothermode", "tools",
+                              "bm_fence_hook.py")
+
+
+def _sibling_fence_module():
+    """BrotherMode's fence module, loaded from beside this product, or None.
+    Never raises: an absent or broken sibling means no derived label, which is
+    this hook's behavior before the sibling lookup existed."""
+    try:
+        if not os.path.isfile(_SIBLING_FENCE):
+            return None
+        spec = importlib.util.spec_from_file_location("sbe_sibling_bm_fence_hook",
+                                                      _SIBLING_FENCE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module if callable(getattr(module, "existing_label", None)) else None
+    except Exception:  # noqa: BLE001 - sbe: allow-silent a broken sibling only removes the derived alias
+        return None
+
+
+def sibling_label(declared, mine, registry):
+    """The BrotherMode label `mine` (the harness session id) owns beside
+    `registry`, when `declared` is such a label; otherwise None.
+
+    The SESSION_ALIAS_ENV route below cannot reach a hook the harness spawns,
+    so a claim's owner was refused out of its own file (measured 2026-10-31).
+    This does not guess the derivation: it calls BrotherMode's read-only
+    `existing_label`, the function that owns it, against the token beside the
+    registry. The token is keyed by the harness id, which a model cannot put
+    in a payload, so copying a label out of STATE.md still buys nothing."""
+    if not (isinstance(declared, str) and isinstance(mine, str)
+            and isinstance(registry, str) and registry):
+        return None
+    if not declared.strip().lower().startswith(_BM_LABEL_PREFIX):
+        return None
+    bm = _sibling_fence_module()
+    if bm is None:
+        return None
+    try:
+        if not declared.strip().startswith(getattr(bm, "LABEL_PREFIX", _BM_LABEL_PREFIX)):
+            return None
+        return bm.existing_label(os.path.dirname(os.path.realpath(registry)), mine)
+    except Exception:  # noqa: BLE001 - sbe: allow-silent same stance as an unloadable sibling
+        return None
+
+
+def same_session(declared, mine, aliases=None, registry=None):
     """True when a fence line's declared session is this session.
 
     Prefix matching in BOTH directions, because a registry is hand-written: an
@@ -854,10 +909,17 @@ def same_session(declared, mine, aliases=None):
     `aliases` are the other identities this session answers to (see
     SESSION_ALIAS_ENV): a derived label cannot be reached by prefix from the
     raw id it was derived from, so declaring it is the only honest way this
-    hook can know the two name one session."""
+    hook can know the two name one session. `registry` is the fence line's
+    file: given, a BrotherMode label is also resolved by sibling_label and
+    compared EXACTLY, never by prefix: a fence naming the first characters of
+    a label would otherwise admit every session whose own label began with
+    them (security review, 2026-10-31)."""
     if not declared or not mine:
         return False
     d = declared.strip().lower()
+    derived = sibling_label(declared, mine, registry)
+    if derived and derived.strip().lower() == d:
+        return True
     candidates = [mine] + list(aliases if aliases is not None else session_aliases())
     for candidate in candidates:
         if not candidate:
@@ -1795,7 +1857,7 @@ def decide(payload):
                 # denied above.)
                 continue
             for fence in found.fences:
-                if same_session(fence.session, my_session):
+                if same_session(fence.session, my_session, registry=fence.registry):
                     continue
                 if not any(paths_overlap(rel, claim, root) for claim in fence.files):
                     continue

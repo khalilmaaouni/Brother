@@ -1,7 +1,15 @@
 #!/bin/sh
-# merge_verified.sh [--dry-run] [--wait SECONDS] <list>: gate and merge a pinned pull request
-# list into main, in list order. The list is the LAST argument: anything after it is refused (exit 2)
-# before anything runs, so `<list> --dry-run` is never a real run (review 2026-10-06, F7).
+# merge_verified.sh [--dry-run] [--wait SECONDS] [--base NAME] <list>: gate and merge a pinned pull request
+# list into ONE named base, main unless --base names another, in list order. The list is the LAST argument: anything
+# after it is refused (exit 2) before anything runs, so `<list> --dry-run` is never a real run (review 2026-10-06, F7).
+#
+# THE BASE (MERGE2.a, owner ruling 2026-11-01, his words "Yes, allow it"): --base NAME picks the branch every listed
+# PR must be based on and is merged into. NAME must be on merge_gate.ALLOWED_BASES (main and the named dev line),
+# the one list, in the tool's own source; any other is refused by name. It is never read from the environment:
+# MERGE_BASE_BRANCH is refused on every run, dry or real. Every check binds to it: the ref read is the full
+# refs/remotes/<remote>/<NAME>, the merged tree the gate row must name is computed on it, the gate script is compared
+# at it, its branch protection is read, the frozen pull request targets it, the re-fetch reads refs/heads/<NAME>, and
+# reachability after the merge is proven from it.
 # With --wait, a tree with no row yet is waited for (the
 # background pre-computation of MG1.c may still be gating it) up to SECONDS, through
 # merge_precompute.wait_ready, which is the same verify_tree verdict or NO-DATA at the timeout.
@@ -33,9 +41,11 @@
 #   PATH           never the caller's: the fixed system path this file spells
 #   USER, LOGNAME  never the caller's: set here from the account (/usr/bin/id), because the keychain gh reads its
 #                  login from is found by account name
-#   MERGE_CLONE, MERGE_REMOTE, MERGE_BASE_BRANCH, MERGE_REPO, MERGE_PINS_MOVING
-#                  this tool's own names. A dry run honours them as before; a real run refuses the first four by name
-#                  (merge_gate.FORBIDDEN_NAMES); the fifth can only ADD heads to freeze (merge_pins.moving_patterns)
+#   MERGE_CLONE, MERGE_REMOTE, MERGE_REPO, MERGE_PINS_MOVING
+#                  this tool's own names. A dry run honours them as before; a real run refuses the first three by name
+#                  (merge_gate.FORBIDDEN_NAMES); the fourth can only ADD heads to freeze (merge_pins.moving_patterns).
+#                  MERGE_BASE_BRANCH no longer crosses (MERGE2.a): it arrives as a caller NAME only and is refused on
+#                  every run, so the base can only be chosen by --base
 #   MERGE_VERIFIED_CALLER_PATH   DATA, never PATH: where the caller's gh is looked up, then judged by the rule below
 #                  (a system directory, or the fixture), exactly as the caller's PATH was before
 #   MERGE_VERIFIED_CALLER_NAMES  DATA: the NAMES the caller's environment carried, never a value, so a real run still
@@ -79,7 +89,7 @@ case "${MERGE_VERIFIED_CLEAN-}" in
       case "$mv_line" in
         "PATH=$MV_PATH"|MERGE_VERIFIED_CLEAN=1|MERGE_VERIFIED_CLEAN=2) : ;;
         HOME=*|TERM=*|PWD=*|OLDPWD=*|SHLVL=*|_=*) : ;;   # the last four are the shell's own
-        MERGE_CLONE=*|MERGE_REMOTE=*|MERGE_BASE_BRANCH=*|MERGE_REPO=*|MERGE_PINS_MOVING=*) : ;;
+        MERGE_CLONE=*|MERGE_REMOTE=*|MERGE_REPO=*|MERGE_PINS_MOVING=*) : ;;
         MERGE_VERIFIED_CALLER_PATH=*|MERGE_VERIFIED_CALLER_NAMES=*) : ;;
         *) mv_clean=no ;;
       esac
@@ -105,7 +115,7 @@ case "$mv_clean" in
     exec /usr/bin/env -i ${HOME+"HOME=${HOME}"} ${TERM+"TERM=${TERM}"} "PATH=$MV_PATH" \
       "MERGE_VERIFIED_CLEAN=$mv_hop" "MERGE_VERIFIED_CALLER_PATH=${PATH-}" "MERGE_VERIFIED_CALLER_NAMES=$mv_names" \
       ${MERGE_CLONE+"MERGE_CLONE=${MERGE_CLONE}"} ${MERGE_REMOTE+"MERGE_REMOTE=${MERGE_REMOTE}"} \
-      ${MERGE_BASE_BRANCH+"MERGE_BASE_BRANCH=${MERGE_BASE_BRANCH}"} ${MERGE_REPO+"MERGE_REPO=${MERGE_REPO}"} \
+      ${MERGE_REPO+"MERGE_REPO=${MERGE_REPO}"} \
       ${MERGE_PINS_MOVING+"MERGE_PINS_MOVING=${MERGE_PINS_MOVING}"} \
       /bin/sh "$0" ${1+"$@"}
     echo "STOP: the clean start could not run /usr/bin/env; nothing ran"
@@ -148,17 +158,26 @@ PY_REACH="$HERE/merge_reach.py"
 
 DRY=0
 WAIT=0
+BRANCH=main
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
     --wait) [ -n "${2:-}" ] || { echo "NO-DATA: --wait needs SECONDS"; exit 2; }; WAIT="$2"; shift 2 ;;
+    --base) [ -n "${2:-}" ] || { echo "NO-DATA: --base needs a base name"; exit 2; }; BRANCH="$2"; shift 2 ;;
     *) break ;;
   esac
 done
 case "$WAIT" in
   ''|*[!0-9]*) echo "NO-DATA: --wait SECONDS must be a whole number, not '$WAIT'"; exit 2 ;;
 esac
-USAGE="usage: merge_verified.sh [--dry-run] [--wait SECONDS] <list>"
+# MERGE2.a: the base is never the environment's, on a dry run as on a real one. The clean start no longer carries the
+# name, so it is looked for among the caller's NAMES (data, never a value).
+case " $mv_caller_names " in
+  *" MERGE_BASE_BRANCH "*)
+    echo "NO-DATA: MERGE_BASE_BRANCH is set, but the base is chosen by --base only, never by the environment; nothing ran"
+    exit 2 ;;
+esac
+USAGE="usage: merge_verified.sh [--dry-run] [--wait SECONDS] [--base NAME] <list>"
 LIST="${1:-}"
 [ -n "$LIST" ] || { echo "NO-DATA: no list given"; echo "$USAGE"; exit 2; }
 # F7, review 2026-10-06: `<list> --dry-run` read the list, never the flag, and was a REAL run. The list is the last
@@ -169,7 +188,24 @@ LIST="${1:-}"
 CLONE="${MERGE_CLONE:-$(cd "$HERE/.." && git rev-parse --show-toplevel 2>/dev/null || true)}"
 [ -n "$CLONE" ] || { echo "NO-DATA: cannot find the clone; set MERGE_CLONE"; exit 2; }
 REMOTE="${MERGE_REMOTE:-hub}"
-BRANCH="${MERGE_BASE_BRANCH:-main}"
+# the full ref of the named base, from merge_gate.base_ref (the one allow list): a base not on it stops here, before
+# the first git, gh or merge call, naming the bases that are allowed. STDOUT ALONE, and one refs/remotes/ line or
+# nothing: the interpreter shim can print its own warning on stderr first (the xcrun_db cache line under a sandboxed
+# temp folder), which, captured with 2>&1, became part of the ref and stopped every run; the reason is read from
+# stderr only when there is no ref.
+BASE_REF="$(python3 "$PY_GATE" base-ref "$REMOTE" "$BRANCH" 2>/dev/null)" || BASE_REF=""
+case "$BASE_REF" in *"$MV_NL"*|'') BASE_REF="" ;; refs/remotes/*) : ;; *) BASE_REF="" ;; esac
+[ -n "$BASE_REF" ] || {
+  why="$(python3 "$PY_GATE" base-ref "$REMOTE" "$BRANCH" 2>&1 | grep -E '^NO-DATA' | head -1)"
+  why="${why#NO-DATA: }"
+  echo "STOP: --base '$BRANCH' is refused: ${why:-merge_gate.py base-ref printed no single refs/remotes/ line}; nothing ran"
+  exit 2; }
+# the precompute worker (merge_precompute.run_precompute) gates trees on main only, so a wait on another base would
+# only ever time out: refused by name instead of left to run out the clock
+if [ "$WAIT" -gt 0 ] && [ "$BRANCH" != main ]; then
+  echo "NO-DATA: --wait reads rows the precompute worker writes, and it gates main only; gate the $BRANCH trees first, then run without --wait"
+  exit 2
+fi
 REPO="${MERGE_REPO:-$(cd "$CLONE" && git config --get "remote.$REMOTE.url" 2>/dev/null || true)}"
 case "$REPO" in
   *github.com[:/]*) REPO="${REPO#*github.com}"; REPO="${REPO#:}"; REPO="${REPO#/}"; REPO="${REPO%.git}" ;;
@@ -223,8 +259,8 @@ main_protected() {
 main_protected; mp=$?
 case "$mp" in
   0) echo "PROTECTION: $BRANCH requires a pull request" ;;
-  1) echo "PROTECTION: $BRANCH does not require a pull request, so a bare push of main is possible for anyone"
-     [ "$DRY" = 1 ] || { echo "STOP: a real run refuses while main requires no pull request"; exit 2; } ;;
+  1) echo "PROTECTION: $BRANCH does not require a pull request, so a bare push of $BRANCH is possible for anyone"
+     [ "$DRY" = 1 ] || { echo "STOP: a real run refuses while $BRANCH requires no pull request"; exit 2; } ;;
   *) echo "PROTECTION: $BRANCH's branch protection cannot be read"
      [ "$DRY" = 1 ] || { echo "STOP: a real run refuses while the protection answer is NO-DATA"; exit 2; } ;;
 esac
@@ -240,6 +276,15 @@ done 5< "$LIST"
 confirmed=0
 confirm_once() {
   [ "$confirmed" = 1 ] && return 0
+  echo "MERGING INTO: $BRANCH ($BASE_REF)"
+  # MERGE1.a round 1 (owner ruling D8): the review row of every listed PR is shown ABOVE the typed count, because that
+  # count is the control; the keyless chain in the review file is an audit of it, not a control. Display only: a line
+  # that cannot be made says so. review_ok has judged the first entry before this is reached and judges each later one
+  # in its own turn.
+  while read -r cpr csha crest <&7; do
+    case "$cpr" in ''|\#*) continue;; esac
+    python3 "$PY_GATE" review-show "$CLONE" "$cpr" "$csha" 2>&1 | grep -E '^REVIEW' || echo "REVIEW #$cpr: could not be shown"
+  done 7< "$LIST"
   python3 "$PY_PINS" confirm "$n_listed" || {
     echo "STOP: the typed count did not match the $n_listed listed PR(s), or no terminal answered; nothing was written"
     return 1; }
@@ -269,9 +314,23 @@ read_pr() {
   return 0
 }
 
-base_sha="$(cd "$CLONE" && git rev-parse "refs/remotes/$REMOTE/$BRANCH" 2>/dev/null || true)"
-[ -n "$base_sha" ] || base_sha="$(cd "$CLONE" && git rev-parse "refs/heads/$BRANCH" 2>/dev/null || true)"
-[ -n "$base_sha" ] || { echo "NO-DATA: cannot read $REMOTE/$BRANCH; fetch it first"; exit 2; }
+# MERGE1.a: a merge needs a recorded review of the EXACT head. review_ok <pr> <sha> asks merge_gate.py review-check for
+# the newest review record of that pull request at that sha (reviewer outside the builders, the head's tree, a whole gate
+# PASS of it, the release line carried by head and base). Sets rv_why. Only an exit 0 whose verdict line starts with
+# PASS is a yes: any other exit, an empty answer or a missing helper is a no.
+review_ok() {
+  rv_why="$(python3 "$PY_GATE" review-check "$CLONE" "$1" "$2" "$base_sha" 2>&1)" && rv_rc=0 || rv_rc=$?
+  rv_pick="$(printf '%s\n' "$rv_why" | grep -E '^(PASS|FAIL|NO-DATA)' | head -1)"; [ -z "$rv_pick" ] || rv_why="$rv_pick"
+  [ -n "$rv_why" ] || rv_why="NO-DATA: the review check printed nothing"
+  [ "${rv_rc:-1}" -eq 0 ] && case "$rv_why" in PASS*) return 0 ;; esac
+  rv_why="no recorded review of this exact head: $rv_why"
+  return 1
+}
+
+# the base is the remote tracking ref alone (MERGE2.a): a local branch of the same name is not what the hub holds
+base_sha="$(cd "$CLONE" && git rev-parse --verify --quiet "$BASE_REF^{commit}" 2>/dev/null || true)"
+[ -n "$base_sha" ] || { echo "NO-DATA: cannot read $BASE_REF; fetch it first"; exit 2; }
+echo "BASE: $BRANCH at $base_sha ($BASE_REF)"
 
 # check_pin: the pin check of the entry in $pr $sha $pr_head_ref $pin $frozen, through merge_pins.check_pins. Its
 # answer is read from STDOUT ALONE (a stderr line from a tool underneath, git's own cache warning in a sandbox, is
@@ -353,9 +412,9 @@ while read -r pr sha rest <&4; do
   # one definition of the gate (H4): with --wait the row is waited for through merge_precompute.wait_ready, which
   # returns verify_tree's own verdict; without it verify_tree answers at once
   if [ "$WAIT" -gt 0 ]; then
-    verdict="$(python3 "$PY_PRE" wait "$CLONE" "$tree" "$WAIT" 2>&1)" && gate_rc=0 || gate_rc=$?
+    verdict="$(python3 "$PY_PRE" wait "$CLONE" "$tree" "$WAIT" "$BRANCH" 2>&1)" && gate_rc=0 || gate_rc=$?
   else
-    verdict="$(python3 "$PY_GATE" verify "$CLONE" "$tree" 2>&1)" && gate_rc=0 || gate_rc=$?
+    verdict="$(python3 "$PY_GATE" verify --base "$BRANCH" "$CLONE" "$tree" 2>&1)" && gate_rc=0 || gate_rc=$?
   fi
   # THE VERDICT LINE, NEVER A WARNING (2026-10-05): stderr is merged so a NO-DATA reason is kept, and the interpreter
   # shim can print its own warning first ("couldn't create cache file ... xcrun_db" in a sandbox), which then stood in
@@ -367,11 +426,17 @@ while read -r pr sha rest <&4; do
     *) echo "STOP at #$pr: the tree gate is NO-DATA: $verdict"; refused=1; break ;;
   esac
 
+  # MERGE1.a, same call as the tree gate and before any write: the review of this exact head. A dry run reports it and
+  # goes on; a real run stops here.
+  if review_ok "$pr" "$sha"; then echo "REVIEW #$pr: $rv_why"
+  elif [ "$DRY" = 1 ]; then echo "REVIEW #$pr: a real run would refuse: $rv_why"
+  else echo "STOP at #$pr: $rv_why"; refused=1; break; fi
+
   if [ "$DRY" = 1 ]; then
     echo "WOULD MERGE #$pr at $sha onto $base_sha (tree $tree) [$pin_line]"
     done_=$((done_+1))
     # Chain the dry run: the next listed PR is judged on the tree this one
-    # would produce, never on bare main.
+    # would produce, never on the bare base.
     chained="$(cd "$CLONE" && git commit-tree "$tree" -p "$base_sha" -m "dry-run $pr" 2>/dev/null)" || {
       echo "STOP at #$pr: cannot chain the dry-run tree"; refused=1; break; }
     base_sha="$chained"
@@ -392,7 +457,7 @@ while read -r pr sha rest <&4; do
         python3 "$PY_PINS" note "$LIST" "$pr" "pin=$pin" >/dev/null || {
           echo "STOP at #$pr: frozen on $pin but the list line could not be rewritten"; refused=1; break; }
       fi
-      frozen="$(python3 "$PY_PINS" open ${GH:+--gh "$GH"} "$REPO" "$pr" "$sha" "$pin")" || {
+      frozen="$(python3 "$PY_PINS" open ${GH:+--gh "$GH"} "$REPO" "$pr" "$sha" "$pin" "$BRANCH")" || {
         echo "STOP at #$pr: the frozen-head pull request could not be opened"; refused=1; break; }
       python3 "$PY_PINS" note "$LIST" "$pr" "pin=$pin" "frozen=$frozen" >/dev/null || {
         echo "STOP at #$pr: pull request #$frozen opened but the list line could not be rewritten"; refused=1; break; }
@@ -401,43 +466,61 @@ while read -r pr sha rest <&4; do
       read_pr "$target" 1 || { refused=1; break; } ;;
   esac
 
-  # The base check: --match-head-commit pins the head, not the base, so hub
-  # main is re-read here and must still be the base this tree was computed on.
-  (cd "$CLONE" && git fetch --quiet "$REMOTE" "$BRANCH") || {
+  # The base check: --match-head-commit pins the head, not the base, so the
+  # base is re-read here (refs/heads/<base>, never a short name a tag could
+  # answer for) and must still be the base this tree was computed on.
+  (cd "$CLONE" && git fetch --quiet --no-tags "$REMOTE" "refs/heads/$BRANCH") || {
     echo "STOP at #$pr: cannot re-fetch $REMOTE/$BRANCH"; refused=1; break; }
   fresh="$(cd "$CLONE" && git rev-parse FETCH_HEAD)"
   [ "$fresh" = "$base_sha" ] || {
     echo "STOP at #$pr: base moved under the pin ($base_sha -> $fresh)"; refused=1; break; }
+  # MERGE2.a review: the pull request read again right before the write (state, base, mergeable, head), because the
+  # merge call pins the head only and the typed prompt can sit between the last read and here. A retarget in the
+  # seconds between this read and the merge remains possible (gh pr merge takes no base pin); TREE-DRIFT and the
+  # reachability proof below then stop the batch after that one merge.
+  read_pr "$target" 1 || { refused=1; break; }
+  # MERGE1.a round 1: the review is read AGAIN here, after the typed prompt and the last read of the pull request, so a
+  # FAIL recorded while the owner was typing is seen. This is the read the merge call follows with nothing between.
+  review_ok "$pr" "$sha" || { echo "STOP at #$pr: $rv_why"; refused=1; break; }
 
   gh pr merge "$target" -R "$REPO" --merge --match-head-commit "$sha" || {
     echo "STOP at #$pr: merge refused"; refused=1; break; }
+  # MERGE1.a: the merge record, appended only now that the merge call has succeeded (never for a refused merge). The
+  # actor is the account this tool handed gh as USER. The merge already happened, so a record that cannot be written
+  # is named loudly and stops the batch AFTER this PR has been counted, drift checked and reachability proven: the PR
+  # is merged whatever the record says.
+  record_failed=0
+  python3 "$PY_GATE" merge-record "$CLONE" "$pr" "$sha" "$tree" "$BRANCH" "$USER" >/dev/null || {
+    echo "STOP at #$pr: MERGED at $sha but the merge record could not be appended; the batch stops after this PR"
+    record_failed=1; }
   if [ "$target" = "$pr" ]; then
     echo "MERGED #$pr at $sha (tree $tree)"
   else
     echo "MERGED #$pr at $sha (tree $tree) through its frozen-head pull request #$target"
   fi
 
-  # After the merge, the tree main holds is compared with the gated tree. A
-  # mismatch is TREE-DRIFT and stops the batch.
-  (cd "$CLONE" && git fetch --quiet "$REMOTE" "$BRANCH") || {
+  # After the merge, the tree the base holds is compared with the gated tree.
+  # A mismatch is TREE-DRIFT and stops the batch.
+  (cd "$CLONE" && git fetch --quiet --no-tags "$REMOTE" "refs/heads/$BRANCH") || {
     echo "STOP at #$pr: cannot re-read $REMOTE/$BRANCH after the merge"; refused=1; break; }
   now="$(cd "$CLONE" && git rev-parse FETCH_HEAD)"
   nowtree="$(cd "$CLONE" && git rev-parse "$now^{tree}")"
   [ "$nowtree" = "$tree" ] || {
-    echo "TREE-DRIFT at #$pr: main now holds $nowtree, the gate passed $tree"; refused=1; break; }
-  # MG1.e: a PR counts as merged only when its pinned sha is PROVEN reachable from main (merge_reach.py check); the
-  # state field is read only to name a STRANDED PR (merged into a base other than main). STRANDED, TREE-DRIFT and
-  # NO-DATA stop the batch.
+    echo "TREE-DRIFT at #$pr: $BRANCH now holds $nowtree, the gate passed $tree"; refused=1; break; }
+  # MG1.e: a PR counts as merged only when its pinned sha is PROVEN reachable from the base (merge_reach.py check);
+  # the state field is read only to name a STRANDED PR (merged into another base). STRANDED, TREE-DRIFT and NO-DATA
+  # stop the batch.
   merged_state="$(gh pr view "$target" -R "$REPO" --json state -q .state 2>/dev/null || true)"
-  reach_out="$(python3 "$PY_REACH" check "$CLONE" "$REMOTE" "$pr" "$sha" "$tree" "${merged_state:-UNKNOWN}" 2>&1)" \
+  reach_out="$(python3 "$PY_REACH" check "$CLONE" "$REMOTE" "$pr" "$sha" "$tree" "${merged_state:-UNKNOWN}" "$BRANCH" 2>&1)" \
     && reach_rc=0 || reach_rc=$?
   echo "$reach_out"
   [ "${reach_rc:-0}" -eq 0 ] || {
     echo "STOP at #$pr: not proven merged from $REMOTE/$BRANCH (exit $reach_rc)"; refused=1; break; }
-  # the next listed PR is computed on the main this merge produced (review round 17: base_sha never advanced, so every
+  # the next listed PR is computed on the base this merge produced (review round 17: base_sha never advanced, so every
   # batch stopped at its second PR with "base moved under the pin")
   base_sha="$now"
   done_=$((done_+1))
+  [ "$record_failed" -eq 0 ] || { refused=1; break; }
 done 4< "$LIST"
 
 case "$DRY" in

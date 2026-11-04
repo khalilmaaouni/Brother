@@ -78,11 +78,22 @@ import subprocess
 import sys
 
 import brother_run
+import brother_state
 import pattern_note
 import receipt_door
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DELIVERIES_DIR = os.path.join(ROOT, "docs", "deliveries")
+
+
+def deliveries_dir():
+    """Where acceptances are kept when the caller names no --dir: brother_state's one rule for a tool that keeps
+    records beside itself (a checkout keeps them in its own docs/deliveries, as it always has; an install keeps them
+    per user, under BROTHER_RUNS_ROOT or ~/.claude/brother-run), never the plugin folder an update replaces. Asked
+    at call time, so a relative BROTHER_RUNS_ROOT is refused by name when a record is read or written, not at
+    import. scripts/delivery_status.py's docs/plan/delivery is a different record (the maintainer's session goal
+    file), not an acceptance, so it is not read through here."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(brother_state.state_root(here)[0], "docs", "deliveries")
 
 NODATA = "NO-DATA"
 
@@ -95,7 +106,7 @@ def slugify(ref):
 
 
 def record_path(ref, directory=None):
-    directory = directory or DELIVERIES_DIR
+    directory = directory or deliveries_dir()
     return os.path.join(directory, "%s.json" % slugify(ref))
 
 
@@ -136,7 +147,7 @@ def record(name, ref, accepted_by, accepted_at, recorded_by, delegation=None,
     `review` missing or malformed is refused here too, never only by the
     caller that derived it from --run-dir, because a run cited with no
     review value is exactly the record this seam exists to refuse."""
-    directory = directory or DELIVERIES_DIR
+    directory = directory or deliveries_dir()
     if run is not None:
         ok, reason = _validate_review(review)
         if not ok:
@@ -223,7 +234,7 @@ def reject(name, ref, rejected_by, rejected_at, recorded_by, delegation=None,
     THE SAME PERSON GATE AS record(). An agent-recorded refusal needs a named
     delegation, because refusing on somebody's behalf is as much their decision as
     accepting on it."""
-    directory = directory or DELIVERIES_DIR
+    directory = directory or deliveries_dir()
     if recorded_by not in ("person", "agent"):
         return False, "recorded_by must be 'person' or 'agent', not %r" % recorded_by
     if recorded_by == "agent" and not (delegation and str(delegation).strip()):
@@ -300,7 +311,10 @@ def write_pattern_from_acceptance(ref, accepted_by, accepted_at, words,
     except Exception as exc:  # sbe: allow-silent the pattern write is a side effect of the acceptance above, never its gate; a pattern-store crash must not read back as an acceptance failure
         return "%s: no pattern written (%s)" % (NODATA, exc)
     if not written:
-        reason = ("pattern store unavailable" if path is None
+        # no --pattern-root and no configured vault: say which setting to fix
+        # (pattern_note.vault_root, the one resolver), keeping the acceptance.
+        why = None if pattern_root else pattern_note.vault_root()[1]
+        reason = ((why or "pattern store unavailable") if path is None
                   else "already recorded: %s" % path)
         return "%s: no pattern written (%s)" % (NODATA, reason)
     return "pattern written: %s" % path
@@ -309,7 +323,7 @@ def write_pattern_from_acceptance(ref, accepted_by, accepted_at, words,
 def load_all(directory=None):
     """Every acceptance on disk, sorted by accepted_at. Skips a file that
     fails to parse rather than crashing the whole listing on one bad record."""
-    directory = directory or DELIVERIES_DIR
+    directory = directory or deliveries_dir()
     if not os.path.isdir(directory):
         return []
     out = []
@@ -681,7 +695,7 @@ def review_from_run_dir(run_dir):
 #: AC1.a: every way resolve_receipt refuses, cheapest first. The kind is
 #: the first word of the refusal so a reader (or a test) can tell them apart.
 REFUSALS = ("unreadable", "foreign-project", "other-run", "old-revision",
-            "superseded", "duplicate")
+            "superseded", "duplicate", "outcome-drift")
 _SHA_REF = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 
@@ -722,7 +736,7 @@ def scan_receipts(directory=None):
     every delivery record on disk. Unlike load_all, an unparseable record is
     reported, never skipped: a corrupt record could be the one holding a
     receipt, so resolve_receipt refuses while the list is non empty."""
-    directory = directory or DELIVERIES_DIR
+    directory = directory or deliveries_dir()
     held, bad = {}, []
     if not os.path.isdir(directory):
         return held, bad
@@ -759,17 +773,32 @@ def _git_rev(cwd, rev):
 
 
 def _run_outcome(run_dir):
-    """The outcome the run's one W-*.json Work document names, or ""."""
+    """The outcome the run's Work document names, or "" (receipt_door.outcome_of, the one rule, OUT1.b)."""
+    return receipt_door.outcome_of(run_dir)
+
+
+def outcome_drift(run_dir):
+    """OUT1.b: "" when the run's receipt carries the outcome its intake recorded (receipt_door.outcome_of), else
+    the sentence that refuses delivery. A receipt from before OUT1.b has no top-level outcome and is read through
+    its intent.outcome, which receipt_record fills from the same Work document."""
+    wanted = receipt_door.outcome_of(run_dir)
+    if not wanted:
+        return "the run's intake records no outcome, so its receipt binds nothing to accept"
     try:
-        work = sorted(n for n in os.listdir(run_dir)
-                      if n.startswith("W-") and n.endswith(".json"))
-        if len(work) != 1:
-            return ""
-        with open(os.path.join(run_dir, work[0]), encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, ValueError):
-        return ""
-    return str(doc.get("outcome") or "") if isinstance(doc, dict) else ""
+        with open(_receipt_file(run_dir), encoding="utf-8") as fh:
+            body = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return "the receipt could not be read (%s), so its outcome cannot be compared" % exc
+    body = body if isinstance(body, dict) else {}
+    if "outcome" in body:
+        have = body.get("outcome")
+    else:
+        have = (body.get("intent") or {}).get("outcome") if isinstance(body.get("intent"), dict) else None
+    if not isinstance(have, str) or not have.strip() or have == NODATA:
+        return "the receipt carries no outcome, so it cannot show it delivers %r" % wanted
+    if brother_run._normalize_outcome(have) != brother_run._normalize_outcome(wanted):
+        return "the receipt's outcome %r is not the outcome the intake recorded, %r" % (have, wanted)
+    return ""
 
 
 def _run_claims(run_dir):
@@ -874,6 +903,10 @@ def resolve_receipt(run_dir, project_cwd, ref, directory=None):
                       "for the same project holds its own receipt"
                       % (name, outcome))
 
+    drift = outcome_drift(run_dir)
+    if drift:
+        return refuse("outcome-drift", drift)
+
     digest = hashlib.sha256(blob).hexdigest()
     held, bad = scan_receipts(directory)
     if bad:
@@ -916,10 +949,11 @@ def main(argv=None):
     ap.add_argument("--words", default=None,
                     help="the acceptor's own phrasing (optional)")
     ap.add_argument("--dir", default=None,
-                    help="override docs/deliveries/, for tests")
+                    help="where to keep the record (default: docs/deliveries/ in a checkout, or per user under "
+                         "BROTHER_RUNS_ROOT or ~/.claude/brother-run on an install)")
     ap.add_argument("--pattern-root", default=None,
                     help="override the pattern store's vault root "
-                         "(pattern_note.VAULT by default), for tests")
+                         "(the configured vault by default), for tests")
     ap.add_argument("--checks-file", default=None,
                     help="path to a JSON list of per-file check entries "
                          "(E79; scripts/receipt_door.per_file_checks builds "

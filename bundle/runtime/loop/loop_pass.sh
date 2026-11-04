@@ -71,6 +71,28 @@ sentry() {   # the worktree fingerprint: the frozen code root's sentry, else the
   if [ -n "$CODE_ROOT" ]; then python3 -B "$CODE_ROOT/scripts/worktree_sentry.py" "$@"
   else python3 -B ~/.claude/bin/land_batch.py --boxed "$WT/scripts/worktree_sentry.py" "$@"; fi
 }
+# PROGRESS IS PERSISTED BEFORE A STAGE STARTS, OR THE STAGE DOES NOT START (LOOP1.f, cause RC11): a monitor read an
+# old checkpoint as current and its watcher expired while the job went on. Each launch below first appends one run
+# event (this run, the candidate tree's head, RUNNING, the stage it is about to start) through stage_log.py run-event,
+# which hands out the next sequence under a lock and answers `RUNSTATE persisted` only once the row is fsynced. Any
+# other answer, a missing tool or an unreadable head included, blocks the pass (exit 44) before that stage launches.
+# The log is the run's own, $BROTHER_RUN_DIR/run-state.jsonl, so it is as long as one run and no longer. A pass with no
+# driver run directory (BROTHER_RUN_DIR; loop_until.sh always exports one) has no run to keep a state for and says so.
+# scripts/test_run_state.py runs the real pass against this.
+# RUNSTATE BEGIN
+persist_run() {   # persist_run STAGE
+  if [ -z "${BROTHER_RUN_DIR:-}" ]; then
+    echo "RUNSTATE none: no driver run directory (BROTHER_RUN_DIR), so this pass keeps no run state"; return 0
+  fi
+  local out
+  out=$(python3 -B ~/.claude/bin/stage_log.py run-event --run "$(basename "$BROTHER_RUN_DIR")" \
+    --candidate "$(git -C "$WT" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" --state RUNNING --phase "$1" \
+    --path "$BROTHER_RUN_DIR/run-state.jsonl" 2>&1) \
+    && case "$out" in "RUNSTATE persisted "*) echo "$out"; return 0;; esac
+  echo "LOOP BLOCKED: the run state could not be persisted before ${1}, so ${1} does not start: $(printf '%s' "${out:-no answer}" | tail -1 | cut -c1-160)"
+  return 1
+}
+# RUNSTATE END
 # FROZEN BY PLAN E (step 2f, 2026-10-01): history based sizing moved the settings between passes, so two runs on the same
 # plan could behave differently. The declared launch settings hold unless BROTHER_TUNING=on.
 if python3 -B ~/.claude/bin/loop_switches.py BROTHER_TUNING >/dev/null 2>&1; then
@@ -140,6 +162,7 @@ if [ "${AHEAD:-0}" -gt 0 ] && [ "${DIRTY:-1}" -eq 0 ]; then
   # UNDER THE RUN'S OWN TMPDIR, NEVER THE HOST'S (2026-10-03): macOS `mktemp -t` puts the file in the Darwin user temp
   # folder whatever TMPDIR says, which the landing sandbox denies, so the reconcile push through the lander died with an
   # empty log path (measured under the pre-push gate: "mkstemp failed on /var/folders/...: Operation not permitted").
+  persist_run reconcile-push || exit 44
   PUSHLOG=$(mktemp "${TMPDIR:-/tmp}/brother-push.XXXXXX")
   PUSH_TRIES=0
   while :; do
@@ -170,6 +193,7 @@ if [ "${DIRTY:-0}" -gt 0 ] && ! pgrep -f "land_batch.py" >/dev/null 2>&1; then
   echo "LOOP BLOCKED: ${DIRTY} changed path(s) with no landing in flight; a landing cannot attribute them: $(git status --porcelain | head -5 | tr '\n' ' ')"
   exit 44
 fi
+persist_run done-check || exit 44
 python3 -B ~/.claude/bin/loop_done.py --scope "$BROTHER_SCOPE"; DONE=$?
 if [ $DONE -eq 0 ]; then
   echo "LOOP FINISHED: stop the loop, there is nothing left in scope"
@@ -181,6 +205,55 @@ if [ $DONE -eq 3 ]; then
   echo "LOOP STALLED: work remains but nothing is admissible. This needs a decision or a rubric change."
   exit 43
 fi
+# THE RUN MONITOR HAS ONE PRODUCTION CALLER, AND IT IS THIS PASS (STAB1.j, measured at 7e26d29ac: stage_log.monitor_step was
+# called only by stage_log's own CLI, so LOOP1.f's expiry marks and STAB1.h's idle_with_work row were a tested reader nothing
+# ran). Once per pass, after the done-check (a finished or stalled loop has already left above, so it never reports idle),
+# the pass looks at its own run: --driver-pid-file is the driver's <run dir>/driver.pid (loop_until.sh writes it beside
+# RUN PID) and --admissible is the pool's DRY look, `started N` (what the real pool below would start). A driver that is
+# provably alive needs no dry look, so that costly look is skipped and the monitor is asked for expiry marks alone. A dry look
+# that fails or prints no count is NO-DATA, never zero: the monitor then gets neither flag and writes no idle row.
+# A monitor that cannot answer is SAID and the pass goes on: it only watches, and a watcher's failure must not stop the work
+# it watches (progress persistence, persist_run above, is what blocks). loop_report.py shows the row from this line.
+# scripts/test_monitor_wired.py runs the real pass against this.
+# MONITOR BEGIN
+monitor_look() {
+  if [ -z "${BROTHER_RUN_DIR:-}" ]; then
+    echo "MONITOR none: no driver run directory (BROTHER_RUN_DIR), so this pass has no run to look at"; return 0
+  fi
+  local run pidf logf dp dry drc n out mrc mark
+  run=$(basename "$BROTHER_RUN_DIR"); pidf="$BROTHER_RUN_DIR/driver.pid"; logf="$BROTHER_RUN_DIR/run-state.jsonl"
+  n=""
+  dp=$(cat "$pidf" 2>/dev/null)
+  case "$dp" in ''|*[!0-9]*) dp="";; esac
+  [ -n "$dp" ] && [ "$((10#$dp))" -lt 1 ] && dp=""   # pid 0 would make kill -0 signal the whole group and read as alive
+  if [ -z "$dp" ] || ! kill -0 "$dp" 2>/dev/null; then
+    dry=$(perl -e 'alarm shift; exec @ARGV' 300 python3 -B ~/.claude/bin/runner_pool.py --dry 2>&1 </dev/null); drc=$?
+    n=$(printf '%s\n' "$dry" | sed -n 's/^started \([0-9][0-9]*\) |.*/\1/p' | tail -1)
+    if [ "${drc:-1}" -ne 0 ] || [ -z "$n" ]; then
+      echo "MONITOR NO-DATA: the pool's dry look gave no count (exit ${drc:-unknown}: $(printf '%s' "$dry" | tail -1 | cut -c1-100)), so whether work is admissible is unknown; no idle report this pass"
+      n=""
+    fi
+  fi
+  if [ -n "$n" ]; then
+    out=$(python3 -B ~/.claude/bin/stage_log.py monitor --run "$run" --path "$logf" --driver-pid-file "$pidf" --admissible "$n" 2>&1); mrc=$?
+  else
+    out=$(python3 -B ~/.claude/bin/stage_log.py monitor --run "$run" --path "$logf" 2>&1); mrc=$?
+  fi
+  if [ "${mrc:-1}" -ne 0 ]; then
+    echo "MONITOR NO-DATA exit=${mrc:-unknown}: $(printf '%s' "${out:-no answer}" | tail -1 | cut -c1-140); the pass goes on, a watcher's failure never stops the work it watches"
+    return 0
+  fi
+  mark=$(printf '%s' "$out" | sed -n 's/.*"appended": "\([a-z_]*\)".*/\1/p' | head -1)
+  if [ "$mark" = "idle_with_work" ]; then
+    echo "MONITOR idle_with_work: run ${run}, no driver alive and ${n} admissible unit(s); one report written"
+  elif [ -n "$mark" ]; then
+    echo "MONITOR ${mark}: run ${run}, one mark written (admissible ${n:-not read})"
+  else
+    echo "MONITOR ok: run ${run}, nothing appended (admissible ${n:-not read})"
+  fi
+}
+monitor_look
+# MONITOR END
 # FOREIGN WRITE DETECTION, and it needs nobody's cooperation. The tree's own state is fingerprinted here and
 # checked again immediately before the landing stage. A change this pass did not make is a foreign write, named
 # deterministically rather than discovered as an unattributable diff at commit time.
@@ -257,7 +330,7 @@ fi
 # and keeps the old STATUS beside it; the landing gates below still decide. It never fails the pass.
 # OFF BY PLAN E (step 2e, 2026-10-01): an old PASS promoted to READY without regrading against today's tree reached
 # landing graded on a tree that no longer exists (ACC3.b salvaged, then refused). Runs only when BROTHER_SALVAGE=on.
-if python3 -B ~/.claude/bin/loop_switches.py BROTHER_SALVAGE >/dev/null 2>&1; then
+if python3 -B ~/.claude/bin/loop_switches.py BROTHER_SALVAGE >/dev/null 2>&1 && { persist_run salvage || exit 44; }; then
   SALV=$(python3 -B ~/.claude/bin/salvage.py promote 2>&1); SRC=$?
   printf '%s\n' "$SALV" | tail -3
   [ "${SRC:-0}" -ne 0 ] && echo "SALVAGE exit=$SRC: promotion crashed; clean builds from before stay unpromoted this pass"
@@ -306,6 +379,7 @@ for p in sys.stdin.read().split():
     echo "                  Refusing to land work that cannot be attributed. Look before continuing."
     exit 44
   fi
+  persist_run land || exit 44
   LANDED_LINE=$(BROTHER_READY_COUNT="$READY_N" BROTHER_READY_LISTED="$READY_K" python3 ~/.claude/bin/land_batch.py $PICK); LB=$?
   echo "$LANDED_LINE"; echo "land_batch exit=$LB"
   # a refused landing leaves builds applied but uncommitted: a runner briefed from that tree builds on sand
@@ -367,10 +441,11 @@ fi
 # it imports) ran unsandboxed every pass, with every done check bare in the tree. land_batch.py --close runs the closer
 # from a frozen copy of hub's head, each done check under the sandbox in a disposable copy, and commits and pushes the
 # closure with the frozen checks and no hook.
+persist_run close || exit 44
 CLOSED_ALL=$(python3 ~/.claude/bin/land_batch.py --close 2>&1); CRC=$?          # 0 closed something, 1 nothing to close, 2 NO-DATA
 # EVERY verdict line, never the last six (2026-09-28: L0's "not a shape this tool will execute" refusal was the
 # seventh line from the end, so the run log never showed why a closable unit stayed open)
-CLOSED=$(printf '%s\n' "$CLOSED_ALL" | grep -E '^CLOSED|^CLOSE-RED|^CLOSE-SKIP|^CLOSE-SCOPE|DONE:|NOT CLOSED|not closable|not in the plan')
+CLOSED=$(printf '%s\n' "$CLOSED_ALL" | grep -E '^CLOSED|^CLOSE-RED|^CLOSE-SKIP|^CLOSE-SCOPE|^NEEDS-INPUT|DONE:|NOT CLOSED|not closable|not in the plan')
 case "${CRC:-0}" in 0|1) ;; *) echo "CLOSE exit=$CRC: $(printf '%s\n' "$CLOSED_ALL" | tail -1 | cut -c1-140)";; esac
 echo "$CLOSED" | cut -c1-160
 # A closure edits the plan file, so it is committed NOW rather than left dirty: the next pass lands from a
@@ -385,10 +460,12 @@ if ! PLAN_FILE=$(python3 -B ~/.claude/bin/plan_path.py 2>&1); then
   echo "LOOP BLOCKED: the plan selector refused: $(printf '%s\n' "$PLAN_FILE" | tail -1 | cut -c1-200)"; exit 44
 fi
 if ! git diff --quiet -- "$PLAN_FILE" 2>/dev/null; then
+  persist_run closure-push || exit 44
   CLOSE_PUSH=$(python3 ~/.claude/bin/land_batch.py --push 2>&1); CPRC=$?
   echo "closure $(printf '%s\n' "$CLOSE_PUSH" | tail -1 | cut -c1-160)"
   [ "${CPRC:-1}" -ne 0 ] && echo "closure did not land (lander exit ${CPRC}): the plan change stays as the closer left it and the next pass reports it"
 fi
+persist_run pool || exit 44
 POOL_ALL=$(hold_give python3 ~/.claude/bin/runner_pool.py 2>&1); PRC=$?
 POOL=$(printf '%s\n' "$POOL_ALL" | grep -E 'START|^started' | cut -c1-160)
 [ "${PRC:-0}" -ne 0 ] && echo "POOL exit=$PRC: $(printf '%s\n' "$POOL_ALL" | tail -1 | cut -c1-140)"

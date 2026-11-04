@@ -28,6 +28,8 @@ class FakeSh:
 
     def __call__(self, cmd, log, timeout=None):
         if any(str(c).endswith("close_unit.py") for c in cmd):
+            if "--needfact" in cmd:   # STAB1.f: the sweep close_unit answers with exit 0 and nothing when no sub unit needs a fact
+                return subprocess.CompletedProcess(cmd, 0, "", "")
             if "--dry" in cmd:
                 return subprocess.CompletedProcess(cmd, 1, "ACC2  running its done_check: python3 scripts/donecheck_acc2.py --correctness\nCLOSED  0 unit(s): none\n", "")
             self.runs.append(cmd[-1])
@@ -122,7 +124,15 @@ class OneClosureAttempt(unittest.TestCase):
                      "ACC2  NOT CLOSED: the done_check exited 2: NO-DATA: the done check cannot run confined on this host (no sandbox-exec); nothing ran\n",
                      "ACC2  NOT CLOSED: the done_check exited 2: NO-DATA: no disposable copy of the tree for the done check (x); nothing ran\n",
                      "Traceback (most recent call last):\nOSError: boom\n"):
-            out = LB.closing_pass(["ACC2"], FakeSh((1, said, "")), None, "hub", "b")
+            # FIXTURE ISOLATED 2026-11-01 by the integrator (assertions unchanged): each refusal kind is its own first
+            # refusal, so each gets a fresh infrastructure wait ledger; sharing one made the third refusal wait on the
+            # second one's row (LOOP1.e slice 2, InfrastructureWaitIsItsOwnLedger), which is that class's subject.
+            saved_waits = getattr(LB, "CLOSE_WAITS", None)
+            LB.CLOSE_WAITS = os.path.join(self.tmp, "waits-%d.jsonl" % len(said))
+            try:
+                out = LB.closing_pass(["ACC2"], FakeSh((1, said, "")), None, "hub", "b")
+            finally:
+                LB.CLOSE_WAITS = saved_waits
             self.assertTrue(any(l.startswith("CLOSE-RED ACC2") for l in out), out)
         self.assertFalse(os.path.exists(LB.CLOSE_ATTEMPTS))
 
@@ -242,6 +252,265 @@ class OneClosureAttempt(unittest.TestCase):
         LB.closing_pass(["ACC2"], sh, None, "hub", "b")
         self.assertEqual(sh.runs, ["ACC2"])
         self.assertFalse(os.path.exists(LB.CLOSE_ATTEMPTS))
+
+
+#: A closer that timed out before its done check started: no "running its done_check" line reached the output.
+PRE_LAUNCH = ("", "NO-DATA: timed out after 1800s\n")
+
+
+class QueueTimeoutIsNotAFailure(unittest.TestCase):
+    """LOOP1.e (RC08, 1.2.0 Recovery contract), entry point: a timeout before the check started is a queue wait, not a
+    test result. It neither holds the unit on its tree nor counts toward CLOSE_TIMEOUT_CAP, whose value stays 2. A
+    timeout after the check started keeps today's meaning (the OneClosureAttempt cases above). Frozen by the integrator
+    before the implementation; the fixture is OneClosureAttempt's own."""
+    setUp, tearDown = OneClosureAttempt.setUp, OneClosureAttempt.tearDown
+    git, plan, commit, attempts, ledger = (OneClosureAttempt.git, OneClosureAttempt.plan, OneClosureAttempt.commit,
+                                           OneClosureAttempt.attempts, OneClosureAttempt.ledger)
+
+    def test_a_timeout_before_the_check_started_reruns_on_the_same_tree(self):
+        LB.closing_pass(["ACC2"], FakeSh((124,) + PRE_LAUNCH), None, "hub", "b")
+        sh = FakeSh()
+        out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual(sh.runs, ["ACC2"], "a pre-launch timeout held the unit as if its check had run")
+        self.assertFalse(any(l.startswith("CLOSE-SKIP ACC2") for l in out), out)
+
+    def test_pre_launch_timeouts_never_reach_the_cap(self):
+        for _ in range(3):
+            sh = FakeSh((124,) + PRE_LAUNCH)
+            out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+            self.assertEqual(sh.runs, ["ACC2"], out)
+            self.assertFalse(any("waits for a person" in l for l in out), out)
+        self.assertEqual(LB.CLOSE_TIMEOUT_CAP, 2, "the existing limit is read, never raised")
+
+    def test_queue_waits_are_bounded_too(self):
+        # Recover WITHOUT endless retries: a closer that never prints its running line (an installed closer older than
+        # the flush) would otherwise read every real timeout as a queue wait and rerun it forever.
+        self.assertEqual(LB.QUEUE_WAIT_CAP, 3)
+        for _ in range(LB.QUEUE_WAIT_CAP):
+            LB.closing_pass(["ACC2"], FakeSh((124,) + PRE_LAUNCH), None, "hub", "b")
+        sh = FakeSh((124,) + PRE_LAUNCH)
+        out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual(sh.runs, [], out)
+        self.assertTrue(any("queue" in l and "waits for a person" in l for l in out), out)
+        self.commit("code.py", "a = 9\n")
+        sh = FakeSh((124,) + PRE_LAUNCH)
+        LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual(sh.runs, ["ACC2"], "the queue bound is per check and tree, like the one attempt rule")
+
+    def test_another_units_running_line_does_not_start_this_one(self):
+        said = ["ACC9  running its done_check: python3 y.py", "NO-DATA: timed out after 1800s"]
+        self.assertFalse(LB.check_started("ACC2", 124, said))
+        self.assertTrue(LB.check_started("ACC9", 124, said))
+        self.assertTrue(LB.check_started("ACC2", 1, said), "only a timeout can be a queue wait")
+
+    def test_the_closer_flushes_its_running_line_before_the_check(self):
+        import ast
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "close_unit.py")
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
+                 and "running its done_check" in ast.dump(n)]
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(any(k.arg == "flush" and getattr(k.value, "value", None) is True for k in calls[0].keywords),
+                        "close_unit's running line must be flushed, or a timeout loses it and reads as a queue wait")
+
+    def test_a_flushed_line_survives_the_timeout_kill_and_an_unflushed_one_does_not(self):
+        line = "ACC2  running its done_check: python3 x.py"
+        for flush, started in ((True, True), (False, False)):
+            child = "import time; print(%r, flush=%r); time.sleep(30)" % (line, flush)
+            r = LB.run_group([sys.executable, "-c", child], 2, dict(os.environ))
+            self.assertEqual(r.returncode, 124)
+            said = ((r.stdout or "") + (r.stderr or "")).splitlines()
+            self.assertIs(LB.check_started("ACC2", 124, said), started, (flush, said))
+
+    def test_a_pre_launch_timeout_is_kept_as_history_not_as_a_failure(self):
+        LB.closing_pass(["ACC2"], FakeSh((124,) + PRE_LAUNCH), None, "hub", "b")
+        rows = self.attempts() if os.path.exists(LB.CLOSE_ATTEMPTS) else []
+        for row in rows:
+            self.assertEqual(row.get("kind"), "queue", row)
+        out = LB.closing_pass(["ACC2"], FakeSh((124,) + PRE_LAUNCH), None, "hub", "b")
+        self.assertFalse(any("test failed" in l.lower() for l in out), out)
+
+    def test_a_started_timeout_after_queue_waits_still_counts(self):
+        LB.closing_pass(["ACC2"], FakeSh((124,) + PRE_LAUNCH), None, "hub", "b")
+        LB.closing_pass(["ACC2"], FakeSh(), None, "hub", "b")
+        sh = FakeSh()
+        out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual(sh.runs, [], "a check that started and timed out on this tree must not rerun unchanged")
+        self.assertTrue(any(l.startswith("CLOSE-SKIP ACC2") for l in out), out)
+
+
+SANDBOX_REFUSED = "ACC2  NOT CLOSED: the done_check exited 2: NO-DATA: the done check cannot run confined on this host (no sandbox-exec); nothing ran\n"
+NO_COPY = "ACC2  NOT CLOSED: the done_check exited 2: NO-DATA: no disposable copy of the tree for the done check (x); nothing ran\n"
+CLOSED_OK = "CLOSED  ACC2: ok\n"
+
+
+class FakeShutil:
+    """land_batch's view of the host: sandbox-exec present or not, and the free bytes on the volume."""
+    def __init__(self, sandbox=True, free=50 << 30):
+        self.sandbox, self.free = sandbox, free
+
+    def which(self, name):
+        return "/usr/bin/" + name if (name != "sandbox-exec" or self.sandbox) else None
+
+    def disk_usage(self, path):
+        return shutil.disk_usage(path)._replace(free=self.free)
+
+    def __getattr__(self, name):
+        return getattr(shutil, name)
+
+
+class InfrastructureWaitIsItsOwnLedger(unittest.TestCase):
+    """LOOP1.e slice 2 (RC08, RC13; class 1 decision 2026-10-31 night). A closure refused because nothing could run (no
+    sandbox, no disposable copy) still records NOTHING in close-attempts (owner rule 2026-10-03, pinned above), but its
+    environment is appended to a SEPARATE ledger, CLOSE_WAITS. The next pass asks closure_retry: an unchanged environment
+    WAITS, a recovered one RUNS, and the retries stop at CLOSE_TIMEOUT_CAP (read, never raised) for a person. Frozen by the
+    integrator before the implementation; the fixture is OneClosureAttempt's own."""
+    git, plan, commit, attempts, ledger = (OneClosureAttempt.git, OneClosureAttempt.plan, OneClosureAttempt.commit,
+                                           OneClosureAttempt.attempts, OneClosureAttempt.ledger)
+
+    def setUp(self):
+        OneClosureAttempt.setUp(self)
+        self.saved_waits = getattr(LB, "CLOSE_WAITS", None), getattr(LB, "environment_identity", None)
+        LB.CLOSE_WAITS = os.path.join(self.tmp, "waits.jsonl")
+        self.env = "env-A"
+        if self.saved_waits[1] is not None:
+            LB.environment_identity = lambda: self.env
+
+    def tearDown(self):
+        LB.CLOSE_WAITS, env_fn = self.saved_waits
+        if env_fn is not None:
+            LB.environment_identity = env_fn
+        OneClosureAttempt.tearDown(self)
+
+    def need(self):
+        self.assertIsNotNone(self.saved_waits[1], "land_batch defines no environment_identity")
+
+    def waits(self):
+        if not os.path.exists(LB.CLOSE_WAITS):
+            return []
+        with open(LB.CLOSE_WAITS, encoding="utf-8") as fh:
+            return [json.loads(l) for l in fh if l.strip()]
+
+    def test_a_sandbox_refusal_writes_one_wait_row_and_no_attempt(self):
+        self.need()
+        LB.closing_pass(["ACC2"], FakeSh((2, SANDBOX_REFUSED, "")), None, "hub", "b")
+        self.assertFalse(os.path.exists(LB.CLOSE_ATTEMPTS), "an infrastructure refusal wrote close-attempts")
+        rows = self.waits()
+        self.assertEqual(1, len(rows), rows)
+        self.assertEqual(("ACC2", "env-A"), (rows[0].get("unit"), rows[0].get("environment")))
+        self.assertTrue(rows[0].get("check") and rows[0].get("tree"), rows[0])
+
+    def test_an_unchanged_environment_waits_and_does_not_run(self):
+        self.need()
+        LB.closing_pass(["ACC2"], FakeSh((2, NO_COPY, "")), None, "hub", "b")
+        sh = FakeSh((2, NO_COPY, ""))
+        out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual([], sh.runs, "the closer ran again with nothing in its environment changed")
+        self.assertTrue(any(l.startswith("CLOSE-SKIP ACC2") and "environment" in l for l in out), out)
+
+    def test_a_recovered_environment_runs_again_on_the_same_tree(self):
+        self.need()
+        LB.closing_pass(["ACC2"], FakeSh((2, SANDBOX_REFUSED, "")), None, "hub", "b")
+        self.env = "env-B"
+        sh = FakeSh((0, CLOSED_OK, ""))
+        LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual(["ACC2"], sh.runs, "a recovered environment did not permit the retry")
+
+    def test_recovered_retries_stop_at_the_cap_for_a_person(self):
+        self.need()
+        for env in ("env-A", "env-B"):
+            self.env = env
+            LB.closing_pass(["ACC2"], FakeSh((2, SANDBOX_REFUSED, "")), None, "hub", "b")
+        self.assertEqual(LB.CLOSE_TIMEOUT_CAP, len(self.waits()))
+        self.env = "env-C"
+        sh = FakeSh((0, CLOSED_OK, ""))
+        out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual([], sh.runs, "retries passed the limit")
+        self.assertTrue(any(l.startswith("CLOSE-SKIP ACC2") and "person" in l for l in out), out)
+        self.assertEqual(2, LB.CLOSE_TIMEOUT_CAP, "the limit was raised")
+
+    def test_an_unreadable_environment_never_reads_as_recovered(self):
+        self.need()
+        LB.closing_pass(["ACC2"], FakeSh((2, SANDBOX_REFUSED, "")), None, "hub", "b")
+        self.env = ""
+        sh = FakeSh((0, CLOSED_OK, ""))
+        out = LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual([], sh.runs, "an unknown environment authorized a retry")
+        self.assertTrue(any(l.startswith("CLOSE-SKIP ACC2") for l in out), out)
+
+    def test_a_refusal_that_is_not_infrastructure_writes_no_wait(self):
+        self.need()
+        for said in ("ACC2  NOT CLOSED: its spec defines sub unit(s) the plan neither lists nor records as removed: ACC2.6\n",
+                     "Traceback (most recent call last):\nOSError: boom\n"):
+            LB.closing_pass(["ACC2"], FakeSh((1, said, "")), None, "hub", "b")
+        self.assertEqual([], self.waits())
+        self.assertFalse(os.path.exists(LB.CLOSE_ATTEMPTS))
+
+    def test_an_assertion_failure_is_not_retried_by_an_environment_change(self):
+        self.need()
+        red = "ACC2  NOT CLOSED: the done_check exited 1: FAIL test_x\n"
+        LB.closing_pass(["ACC2"], FakeSh((1, red, "")), None, "hub", "b")
+        self.env = "env-B"
+        sh = FakeSh((1, red, ""))
+        LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual([], sh.runs, "an unchanged assertion failure ran again because the environment moved")
+        self.assertEqual([], self.waits())
+
+    def test_an_unreadable_waits_ledger_runs_the_check_and_says_so(self):
+        self.need()
+        os.makedirs(LB.CLOSE_WAITS)
+        sh = FakeSh((0, CLOSED_OK, ""))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            LB.closing_pass(["ACC2"], sh, None, "hub", "b")
+        self.assertEqual(["ACC2"], sh.runs)
+        self.assertIn("NO-DATA", buf.getvalue())
+
+    def test_the_environment_reads_sandbox_and_disk_admission(self):
+        self.need()
+        fn, saved = self.saved_waits[1], LB.shutil
+        seen = {}
+        try:
+            for name, fake in (("ok", FakeShutil()), ("no-sandbox", FakeShutil(sandbox=False)), ("no-disk", FakeShutil(free=1 << 20))):
+                LB.shutil = fake
+                seen[name] = fn()
+            LB.shutil = FakeShutil()
+            again = fn()
+        finally:
+            LB.shutil = saved
+        self.assertTrue(all(isinstance(v, str) and v for v in seen.values()), seen)
+        self.assertEqual(3, len(set(seen.values())), "sandbox or disk admission does not move the environment: %r" % seen)
+        self.assertEqual(seen["ok"], again, "the environment is not stable on an unchanged host")
+
+
+class UnreadableDisk(FakeShutil):
+    def disk_usage(self, path):
+        raise OSError("volume gone")
+
+
+class InfrastructureWaitEdges(unittest.TestCase):
+    """Integrator cases for the two guards the slice 2 implementer's probe left alive: an interpreter that could not
+    start is not an infrastructure refusal (it writes no wait), and a host fact that cannot be read gives no identity."""
+    setUp, tearDown, waits, need = (InfrastructureWaitIsItsOwnLedger.setUp, InfrastructureWaitIsItsOwnLedger.tearDown,
+                                    InfrastructureWaitIsItsOwnLedger.waits, InfrastructureWaitIsItsOwnLedger.need)
+    git, plan, commit = OneClosureAttempt.git, OneClosureAttempt.plan, OneClosureAttempt.commit
+
+    def test_an_interpreter_that_could_not_start_writes_no_wait(self):
+        self.need()
+        said = "ACC2  NOT CLOSED: the done_check exited 1: python3 could not run: [Errno 2] No such file\n"
+        LB.closing_pass(["ACC2"], FakeSh((1, said, "")), None, "hub", "b")
+        self.assertEqual([], self.waits())
+
+    def test_an_unreadable_host_fact_gives_no_identity(self):
+        self.need()
+        fn, saved = self.saved_waits[1], LB.shutil
+        try:
+            LB.shutil = UnreadableDisk()
+            got = fn()
+        finally:
+            LB.shutil = saved
+        self.assertEqual("", got)
 
 
 if __name__ == "__main__":

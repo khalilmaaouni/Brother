@@ -38,6 +38,7 @@ class World:
         os.makedirs(self.runs)
         pack = os.path.join(self.handover, "2026-10-15")
         os.makedirs(pack)
+        open(os.path.join(pack, "01-START-HERE.md"), "w").close()  # HO1: a bare folder is not a close
         os.utime(pack, (T0, T0))
         with open(self.plan, "w") as fh:
             json.dump({"units": [{"id": "AA1", "sub_units": ["AA1.a", "AA1.b"]}, {"id": "BB1", "sub_units": ["BB1.a"]}]}, fh)
@@ -81,6 +82,10 @@ class TestPG1G(unittest.TestCase):
         older = os.path.join(self.w.handover, "2026-10-01")
         os.makedirs(older)
         os.utime(older, (T0 - 9999, T0 - 9999))
+        self.assertEqual(PC.close_time(self.w.handover), T0)
+        scratch = os.path.join(self.w.handover, "2026-10-31-scratch")  # HO1: newer, but not a close
+        os.makedirs(scratch)
+        os.utime(scratch, (T0 + 500, T0 + 500))
         self.assertEqual(PC.close_time(self.w.handover), T0)
         empty = os.path.join(self.w.root, "nopacks")
         os.makedirs(empty)

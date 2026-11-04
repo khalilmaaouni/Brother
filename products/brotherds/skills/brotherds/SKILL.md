@@ -10,6 +10,11 @@ Retired from the catalog in Brother 1.1.0. The one plugin, `brother`, does not c
 Every number that reaches a decision carries its proof, and is scored later
 against what actually happened.
 
+**BrotherDS is experimental.** Its gates, packs and MDM tools are real code
+with their own tests, but they have not yet been proven on enough real
+decisions to stand as a release gate. Tell the person so in plain words, and
+treat every verdict as a statement about proof, not about the world.
+
 ## When this applies
 
 The trigger is not "someone mentioned data". It is **a number is about to reach
@@ -147,12 +152,67 @@ and `upstream_check_id`. Collect `pipeline.reconciliation.system_of_record`,
 `run_id`, and `pipeline.contamination_rate` for a bulk load. These are evidence
 about the number and its run; they do not replace review of a pipeline change.
 
-The guided `author` input supports nested objects but does not parse pack lists,
-booleans or most numeric pack fields into their required types. Do not promise
-that passing those as text will produce a valid pack claim. Collect the evidence
-from the analyst's structured claim export, then use `bds.py check` and
-`bds.py receipt` on that file; name missing evidence as NO-DATA. The four pack
-examples in `examples/` show the field shapes, not proof of a real result.
+The `key=value` form of `author` keeps every value as text, so it cannot carry
+pack lists, booleans or most numeric pack fields. For a pack claim, build the
+claim from the analyst's answers as one object and send it with
+`bds.py author <dest> --json` (the Brother door's `data.author` does exactly
+this): lists stay lists, true and false stay true and false, numbers stay
+numbers. Never ask the analyst to write that object; you write it from the
+conversation or from their structured claim export. Then run `bds.py check` and
+`bds.py receipt`; name missing evidence as NO-DATA. The four pack examples in
+`examples/` show the field shapes, not proof of a real result.
+
+## Through the Brother door
+
+The Brother door runs every existing command below, and nothing else, through
+one fixed table in `bds.py` (`bds.py door HANDLER`, typed inputs as one JSON
+object on stdin). Collect the answers in conversation, then pass them to the
+door: plain text with `--input key=value`, anything that must keep its type (a
+number, a true or false, a list, a whole claim) with `--input-json key=JSON`.
+Anything that writes (a claim, a registry entry, an outcome, a review plan, a
+resolved file) needs `--allow write`. Nothing runs until Brother's setup has
+been given consent on this machine, and that check fails closed. A missing
+input or a missing file comes back as NO-DATA naming the one thing to supply;
+it never becomes a made up value. Every reply repeats that BrotherDS is
+experimental.
+
+| Capability | Runs | Inputs |
+|---|---|---|
+| `data.author` | `bds.py author --json` | `dest`, `claim` |
+| `data.check` | `bds.py check` | `claim_path` |
+| `data.receipt` | `bds.py receipt` | `claim_path` |
+| `data.register` | `bds.py register` | `claim_path` |
+| `data.score` | `bds.py score` | `claim_path`, `actual`, optional `observed_by`, `observed_on` |
+| `data.ledger` | `bds.py ledger` | `directory` |
+| `data.mdm_review` | `bds.py mdm-eval review` | `review_csv`, `merge_threshold` |
+| `data.mdm_clusters` | `bds.py mdm-eval clusters` | `gold_csv` |
+| `data.mdm_drift` | `bds.py mdm-eval drift` | `reference_csv`, `current_csv` |
+| `data.mdm_audit` | `bds.py mdm-audit audit` | `results_csv` |
+| `data.mdm_audit_plan` | `bds.py mdm-audit audit --plan` | `results_csv`, `plan` |
+| `data.mdm_evaluate` | `bds.py mdm-audit evaluate` | `labelled_csv`, optional `results_csv` |
+| `data.mdm_resolve` | `mdm_jan_lookup.py resolve` | `inputs` (one or more files), `out` |
+| `data.mdm_classify` | `mdm_jan_lookup.py classify` | `names` |
+| `data.mdm_normalize` | `mdm_normalize.py key` | `kind`, `locale`, `text` |
+| `data.mdm_validate` | `mdm_validate.py` | `kind`, `values` |
+
+Every claim type's pack runs inside `check`, `author` and `receipt` exactly as
+it does without the door. The door never reads a verdict from the exit code:
+each capability reads the command's own verdict from what it printed (the
+`VERDICT` line of `check` and `author`, every gate row of `receipt`, the
+verified claim rate of `ledger`, the `valid` field of every `mdm_validate`
+line). A reply is COMPLETE only when that verdict is PASS; a FAIL comes back
+FAILED and a NO-DATA comes back NO-DATA, whatever the exit code. The commands
+that derive, record or normalize carry no verdict of their own, so for them
+PASS means only that the command ran and printed, and any FAIL or NO-DATA line
+it printed still downgrades it. A command that crashed is NO-DATA, because
+nothing was judged. Only a PASS carries evidence, naming the command and the
+sha256 of what it printed. The door never merges
+records, never fetches data, and never fills in a field the person did not
+give. Run one by hand from this plugin's folder:
+
+```bash
+echo '{"kind": "gtin", "values": ["4901234567894"]}' | python3 bds.py door data_existing_mdm_validate
+```
 
 ## Naming a metric, and why it matters more than the number
 
@@ -259,8 +319,8 @@ is resolving or verifying a product identifier, not gating a stated number.
 Trigger on a missing or suspect Japanese retail barcode, or on identifying a
 product from a bare name, for MDM or product-master cleanup work.
 
-Full protocol, worked example, and the literal subagent brief for the web
-research steps: `docs/MDM-JAN-LOOKUP.md`. In short, in order:
+The full protocol and worked example live in the source repository, not in
+this install. In short, in order:
 
 1. Internal join first, always, before any internet call: check every other
    file or table already on hand for the missing code.
@@ -269,8 +329,7 @@ research steps: `docs/MDM-JAN-LOOKUP.md`. In short, in order:
    reimplemented): a code that fails is provably wrong, one that passes is
    only plausible.
 3. Only unresolved rows go to real web research, run by a subagent briefed
-   with the anti-fabrication and anti-delegation rules in
-   `docs/MDM-JAN-LOOKUP.md` verbatim: never invent a code or a URL, never
+   with these anti-fabrication and anti-delegation rules verbatim: never invent a code or a URL, never
    delegate the search to another agent, report NONE rather than guess.
 4. Report HIGH/MEDIUM/LOW/NONE confidence, justified in each row's own notes.
    A second-opinion LLM lane's output is a proposal only, checksum-gated

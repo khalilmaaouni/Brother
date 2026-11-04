@@ -2500,5 +2500,186 @@ class TestTheParkAndConsentFolders(unittest.TestCase):
         self.assertTrue(self.denied("find ~/.brother/park -delete"))
 
 
+class TestGeneratedBundleCopies(unittest.TestCase):
+    """GUARD2. A `git merge` that changes an owner path is allowed only when
+    every such path is a copy scripts/bundle_runtime.py writes, the merged
+    manifest lists it, and in the merged tree it is byte identical to its
+    source. Each refused branch below trips exactly one of those conditions and
+    the assertion names the clause that refused it, so deleting any one
+    condition turns exactly one case from refused to allowed."""
+
+    POLICY = "products/brothersbe/src/brothersbe/policy.py"
+    GUARD = "products/brothersbe/tools/sbe_bash_write_guard.py"
+    FENCE = "products/brothersbe/tools/sbe_fence_hook.py"
+    HOOK_COPY = "bundle/runtime/hooks/brothersbe/tools/sbe_bash_write_guard.py"
+    POLICY_COPY = "bundle/runtime/products/brothersbe/src/brothersbe/policy.py"
+    FENCE_COPY = "bundle/runtime/products/brothersbe/tools/sbe_fence_hook.py"
+    ORPHAN = "bundle/runtime/products/brothersbe/tools/sbe_old_guard.py"
+    RUNTIME = "bundle/runtime/RUNTIME-MANIFEST.json"
+    HOOKS = "bundle/runtime/hooks/HOOKS-MANIFEST.json"
+
+    @staticmethod
+    def manifest(*paths):
+        return json.dumps({"generated_by": "scripts/bundle_runtime.py",
+                           "files": [{"path": p, "sha256": "0" * 64} for p in paths]})
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = os.path.realpath(tempfile.mkdtemp(prefix="g2copy-"))
+        home = os.path.join(cls.tmp, "home")
+        os.makedirs(home)
+        cls.env = {k: v for k, v in os.environ.items()
+                   if not k.startswith(("BROTHERSBE_", "CLAUDE", "GIT_"))}
+        cls.env.update({"HOME": home, "GIT_CONFIG_NOSYSTEM": "1",
+                        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CEILING_DIRECTORIES": cls.tmp,
+                        "PYTHONDONTWRITEBYTECODE": "1", "GIT_AUTHOR_NAME": "t",
+                        "GIT_AUTHOR_EMAIL": "t@example.invalid", "GIT_COMMITTER_NAME": "t",
+                        "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+        cls.repo = os.path.join(cls.tmp, "brother")
+        os.makedirs(cls.repo)
+        cls.git("init", "-q", "-b", "main")
+        cls.commit("main", {
+            cls.POLICY: "# policy v1\n", cls.GUARD: "# guard v1\n", cls.FENCE: "# fence\n",
+            cls.HOOK_COPY: "# guard v0\n", cls.ORPHAN: "# no source\n", "lib.py": "x = 1\n",
+            cls.HOOKS: cls.manifest("brothersbe/tools/sbe_bash_write_guard.py"),
+            cls.RUNTIME: cls.manifest("products/brothersbe/src/brothersbe/policy.py",
+                                      "products/brothersbe/tools/sbe_old_guard.py")})
+        policy_copy = {cls.POLICY_COPY: "# policy v1\n"}
+        for branch, files in (
+                ("ship", policy_copy),
+                ("regen", {cls.HOOK_COPY: "# guard v1\n"}),
+                ("lib", {"lib.py": "x = 2\n"}),
+                ("source-only", {cls.GUARD: "# guard v2\n"}),
+                ("source-regen", {cls.GUARD: "# guard v2\n", cls.HOOK_COPY: "# guard v2\n"}),
+                ("drift", {cls.POLICY_COPY: "# policy, tampered\n"}),
+                ("unlisted", {cls.FENCE_COPY: "# fence\n"}),
+                ("mixed", dict(policy_copy, **{cls.FENCE_COPY: "# fence\n"})),
+                ("badmanifest", dict(policy_copy, **{cls.RUNTIME: "{not json"})),
+                ("orphan", {cls.ORPHAN: None}),
+                ("hand-edit", {cls.HOOK_COPY: "# hand edit\n"}),
+                ("newer", {cls.POLICY: "# policy v2\n"})):
+            cls.git("checkout", "-q", "-b", branch, "main")
+            cls.commit(branch, files)
+        cls.git("checkout", "-q", "main")
+        cls.git("fetch", "-q", ".", "ship")
+        # Two more working folders on the same history: HEAD at `hand-edit`
+        # (a copy changed by hand on the line) and at `newer` (the line moved
+        # the source on after `ship` branched).
+        for branch in ("hand-edit", "newer"):
+            cls.git("worktree", "add", "-q", os.path.join(cls.tmp, branch), branch)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    @classmethod
+    def git(cls, *args, cwd=None):
+        return subprocess.run(("git",) + args, cwd=cwd or cls.repo, env=cls.env, check=True,
+                              stdout=subprocess.PIPE, universal_newlines=True).stdout
+
+    @classmethod
+    def commit(cls, message, files):
+        for rel, text in files.items():
+            path = os.path.join(cls.repo, *rel.split("/"))
+            if text is None:
+                os.remove(path)
+                continue
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write(path, text)
+        cls.git("add", "-A")
+        cls.git("commit", "-q", "-m", message)
+
+    def reason(self, command, cwd=None):
+        """The guard's refusal text for `command`, or "" when it allows it."""
+        payload = {"tool_name": "Bash", "tool_input": {"command": command},
+                   "session_id": "s", "cwd": cwd or self.repo}
+        proc = subprocess.run([sys.executable, "-B", GUARD_PATH], input=json.dumps(payload),
+                              capture_output=True, text=True, cwd=cwd or self.repo,
+                              env=self.env)
+        if not proc.stdout.strip():
+            return ""
+        return json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_a_generated_copy_matching_its_source_is_allowed(self):
+        for command, cwd in (("git merge ship", None), ("git merge regen", None),
+                             ("git merge --no-ff -m msg ship", None),
+                             ("git merge --squash ship", None), ("git merge -S ship", None),
+                             ("git merge -Skey ship", None), ("git -C . merge ship", None),
+                             ("git merge ship", os.path.join(self.repo, "products"))):
+            with self.subTest(command=command, cwd=cwd):
+                self.assertEqual("", self.reason(command, cwd))
+
+    def test_the_allowed_merge_really_lands_a_copy_equal_to_its_source(self):
+        clone = os.path.join(self.tmp, "clone")
+        self.git("clone", "-q", "-b", "main", self.repo, clone, cwd=self.tmp)
+        self.git("branch", "-q", "ship", "origin/ship", cwd=clone)
+        self.assertEqual("", self.reason("git merge --no-edit ship", clone))
+        self.git("merge", "-q", "--no-edit", "ship", cwd=clone)
+        with open(os.path.join(clone, *self.POLICY_COPY.split("/")), "rb") as f:
+            copy = f.read()
+        with open(os.path.join(clone, *self.POLICY.split("/")), "rb") as f:
+            self.assertEqual(f.read(), copy)
+
+    #: (command, HEAD folder, the clause that must refuse it). Each row trips
+    #: only its own condition.
+    REFUSED = (
+        ("git merge source-only", None, "not a copy scripts/bundle_runtime.py writes"),
+        ("git merge source-regen", None, "not a copy scripts/bundle_runtime.py writes"),
+        # `-S` takes no separate word, so the branch after it is still judged.
+        ("git merge -S source-only", None, "not a copy scripts/bundle_runtime.py writes"),
+        ("git merge drift", None, "not byte identical to its source"),
+        ("git merge ship", "newer", "not byte identical to its source"),
+        ("git merge orphan", None, "not byte identical to its source"),
+        ("git merge unlisted", None, "does not list it as a generated copy"),
+        ("git merge mixed", None, "does not list it as a generated copy"),
+        ("git merge badmanifest", None, "cannot be read, so the copy is unproven: NO-DATA"),
+        ("git merge regen", "hand-edit", "the merged tree cannot be computed"),
+        ("git merge -X theirs ship", None, "a merge strategy"),
+        ("git merge -Xours ship", None, "a merge strategy"),
+        ("git merge -s ours ship", None, "a merge strategy"),
+        ("git merge --strategy=ort ship", None, "a merge strategy"),
+        ("git merge --strategy-o=theirs ship", None, "a merge strategy"),
+        ("git merge ship lib", None, "a merge strategy"),
+        ("git -c merge.renames=false merge ship", None, "a merge strategy"),
+        ("git --git-dir=.git merge ship", None, "a merge strategy"),
+        ("git --config-env=merge.renames=GUARD2_V merge ship", None, "a merge strategy"),
+        ("git --no-replace-objects merge ship", None, "a merge strategy"),
+        ("git --namespace=other merge ship", None, "a merge strategy"),
+        ("git merge FETCH_HEAD", None, "a merge strategy"),
+    )
+
+    def test_every_condition_refuses_its_own_case_and_names_it(self):
+        for command, head, clause in self.REFUSED:
+            with self.subTest(command=command, head=head):
+                why = self.reason(command, os.path.join(self.tmp, head) if head else None)
+                self.assertIn("owner files are protected", why)
+                self.assertIn(clause, why)
+
+    def test_the_other_ways_of_applying_the_copy_stay_refused(self):
+        for command in ("git cherry-pick ship", "git cherry-pick -S ship",
+                        "git diff main ship | git apply",
+                        "rm -f %s" % self.HOOK_COPY):
+            with self.subTest(command=command):
+                self.assertNotEqual("", self.reason(command))
+
+    def test_git_that_cannot_read_the_merged_tree_refuses(self):
+        """NO-DATA blocks: git answering nothing, or something that is not a tree
+        entry, for the copy is a refusal, run through decide() itself."""
+        from unittest import mock
+        common = bg.require_common_module()
+        real = common.git_output
+        payload = {"tool_name": "Bash", "tool_input": {"command": "git merge ship"},
+                   "session_id": "s", "cwd": self.repo}
+        for answer in (None, "garbage"):
+            def blind(base, args, ok=(0,)):
+                return answer if args[:1] == ["ls-tree"] else real(base, args, ok)
+            with self.subTest(answer=answer), mock.patch.dict(os.environ, self.env, clear=True), \
+                    mock.patch.object(common, "git_output", blind):
+                decision = bg.decide(payload)
+                self.assertIn("git cannot read it or its source", json.dumps(decision.payload))
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertIsNone(bg.decide(payload).payload)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

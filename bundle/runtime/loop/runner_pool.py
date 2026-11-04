@@ -915,6 +915,81 @@ def lint_refusal(unit, sub, spec_text):
     return ""
 
 
+#: The lanes a plan unit may name (LOOP1.b). Only "loop" is built by this pool; every other known lane is somebody else's
+#: route and is skipped with that route named. A lane absent from this table is refused by name, never admitted.
+LANE_ROUTE = {"loop": "", "session": "built by the session", "owner": "needs the owner's hand", "kernel": "built on the reviewed kernel route",
+              "field": "built in the field", "bootstrap": "built by the bootstrap route"}
+CLEAR_LANE = "clear it by: lane: loop and loop_gradable: true on the unit in the plan (or build it by its own route)"
+
+
+def lane_refusal(unit):
+    """'' when the unit's lane and loop_gradable let the pool build it, else why not, with 'clear it by:' (LOOP1.b)."""
+    if not isinstance(unit, dict):
+        return "NO-DATA the unit is not readable"
+    uid, lane = unit.get("id"), unit.get("lane")
+    if not isinstance(lane, str) or not lane.strip():
+        return "NO-DATA unit %s names no lane; %s" % (uid, CLEAR_LANE)
+    if lane not in LANE_ROUTE and not re.match(r"^builder-\d+$", lane):
+        return "unit %s names an unknown lane %r; %s" % (uid, lane, CLEAR_LANE)
+    if lane != "loop":
+        return "lane %s: %s; %s" % (lane, LANE_ROUTE.get(lane) or "built by a builder lane", CLEAR_LANE)
+    if unit.get("loop_gradable") is not True:
+        return "unit %s has loop_gradable %r: the grader cannot close it; %s" % (uid, unit.get("loop_gradable"), CLEAR_LANE)
+    return ""
+
+
+def admission_reason(unit, sub, tree):
+    """'' when this sub unit is work the loop can execute AND close, else ONE precise reason ending 'clear it by: <the
+    change>' (LOOP1.b). unit is the plan unit, sub {"id", "done_check", "files": [path or [path, mode]]}, tree the launch
+    tree the protected-path rule resolves against. Reuses the grader's own rules (spec_check.accepted for the done check,
+    reviewed_route for a path the landing trusts); nothing is re-implemented. FAIL DIRECTION: an unreadable shape refuses.
+    A sub dict without a "files" key leaves the path screen to the spec gates (the section names none); an explicit empty
+    list refuses."""
+    try:
+        why = lane_refusal(unit)
+        if why:
+            return why
+        if not isinstance(sub, dict) or not isinstance(sub.get("id"), str) or not sub["id"]:
+            return "NO-DATA the sub unit is not readable; clear it by: pass the sub unit as {id, done_check, files}"
+        listed = [s.get("id") if isinstance(s, dict) else s for s in unit.get("sub_units") or []]
+        if sub["id"] not in listed:
+            return "sub unit %s is not one of unit %s's sub_units; clear it by: sub_units: list %s on the unit" % (sub["id"], unit.get("id"), sub["id"])
+        if not spec_check.accepted(sub.get("done_check")):
+            return ("%s done_check %r is not one test command the grader accepts; clear it by: done_check: one "
+                    "`python3 -B scripts/test_x.py` or `python3 -B -m unittest module` line, no pipe, chain, -c or selftest"
+                    % (sub["id"], str(sub.get("done_check"))[:80]))
+        if "files" in sub:
+            files = sub["files"]
+            paths = [f[0] if isinstance(f, (list, tuple)) and f else f for f in files] if isinstance(files, list) else None
+            if not paths or any(not isinstance(p, str) or not p for p in paths):
+                return "%s names no readable file it changes; clear it by: files: name the paths it changes" % sub["id"]
+            why = reviewed_route(set(paths), tree)
+            if why:
+                return "%s; clear it by: build %s on the reviewed route (lane: session, loop_gradable: false) or move its protected path out of its files" % (why, sub["id"])
+        return ""
+    except Exception as exc:   # sbe: allow-silent an unforeseen shape is never admitted; the reason names it
+        return "NO-DATA admission could not be decided (%s: %s); clear it by: repair the unit's plan entry" % (type(exc).__name__, exc)
+
+
+def pass_admission(unit, sub, tree="."):
+    """admission_reason for a sub unit the pass is about to start: the done check and write set are read from the
+    unit's own spec section, the facts admissible() reads. An unreadable spec leaves only the lane question here;
+    admissible() names the unreadable spec itself. ONE call before any runner is spawned (LOOP1.b)."""
+    spec = unit.get("spec") if isinstance(unit, dict) else None
+    try:
+        with open(spec, encoding="utf-8") as fh: text = fh.read()
+    except (OSError, TypeError, ValueError, UnicodeDecodeError):
+        return lane_refusal(unit)
+    try:
+        ws = write_set(sub, spec)
+    except ValueError:
+        ws = None
+    facts = {"id": sub, "done_check": spec_check.done_check(text, sub)}
+    if ws:
+        facts["files"] = sorted(ws)
+    return admission_reason(unit, facts, tree)
+
+
 def admissible(plan, sub):
     """Empty only for one known, open owner and a subunit not recorded landed."""
     if not isinstance(sub, str) or not sub or not isinstance(plan, dict):
@@ -1125,6 +1200,7 @@ def sunk(rec_u):
 # deploy, traced by the freeze, and found the same way in a checkout and in a deploy.
 WIP_STATUS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wip_status.py")
 WIP_RECORD = os.path.expanduser("~/.claude/evidence/wip-status.json")
+POOL_ROOM = os.path.expanduser("~/.claude/evidence/pool-room.jsonl")   # LOOP1.a: one JSON line per pass, the room and what limits it
 WIP_MAX_AGE_S = 1800.0
 WIP_MODES = ("report", "enforce", "off")
 WIP_WORD = {0: "PASS", 1: "OVER", 2: "NO-DATA"}
@@ -1406,8 +1482,61 @@ def load_hold(reading=None) -> str:
         return "NO-DATA load reading unavailable: %s: %s" % (type(exc).__name__, exc)
 
 
-def room_of(burn_free: int, wip_free: int, seat_free: Optional[int] = None, busy: str = "") -> Tuple[int, str]:
-    """(room, why): room is the smallest of the three free counts, clamped at 0, and why names the binding
+def room_of(alive, in_progress, burn_cap=None, wip=None, seat_cap=None, busy=""):
+    """(room, limit). TWO CALL SHAPES, ONE FUNCTION (ruling 2026-10-31: two frozen harnesses pin each shape).
+    REQ-LOOP1A-01, shape A, the pass's own call by keyword: room is the smallest of burn_cap - alive, wip -
+    in_progress and seat_cap (the seat cap itself, compared directly as the pass has always passed it; None when
+    the pass has no seat cap), clamped at 0, and limit names the input that bound it: "burn", "wip" or "seats",
+    ties naming the earlier of that order. A non blank busy (the load hold's own text) answers (0, "load") before
+    any cap is compared. Counts and caps must be ints and not bool, seat_cap an int or None, busy a string;
+    anything else raises ValueError. Only these four are enforced caps; a report-only limit (the finish-first
+    gate or the plan lint under report) is never a room limit.
+    REQ-LA5-A-06, shape B, the earlier positional call room_of(burn_free, wip_free, seat_free=None, busy=""):
+    recognised by a fourth argument that is None or a string, and answered exactly as before by _room_of_free.
+    The B branch is deleted once LA5's cases migrate to shape A."""
+    if wip is None or isinstance(wip, str):
+        return _room_of_free(alive, in_progress, burn_cap, wip if isinstance(wip, str) else busy)
+    for name, value in (("alive", alive), ("in_progress", in_progress), ("burn_cap", burn_cap), ("wip", wip)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("%s must be an int, not %s" % (name, type(value).__name__))
+    if seat_cap is not None and (isinstance(seat_cap, bool) or not isinstance(seat_cap, int)):
+        raise ValueError("seat_cap must be an int or None, not %s" % type(seat_cap).__name__)
+    if not isinstance(busy, str):
+        raise ValueError("busy must be a string, not %s" % type(busy).__name__)
+    if busy:
+        return (0, "load")
+    caps = [(burn_cap - alive, "burn"), (wip - in_progress, "wip")]
+    if seat_cap is not None:
+        caps.append((seat_cap, "seats"))
+    smallest = min(value for value, _n in caps)
+    return (max(0, smallest), next(n for value, n in caps if value == smallest))
+
+
+def room_reason(room, limit, alive, in_progress, burn_cap, wip, seat_cap, busy):
+    """(binding, recovery) for a shape A answer of room_of: the binding input's values and the exact condition that
+    gives room back. An unknown limit raises ValueError: a limit nobody can explain is never printed as one."""
+    gives = "room returns" if room <= 0 else "room grows"
+    if limit == "load":
+        return busy, "%s when the one minute load reads below the core count" % gives
+    if limit == "burn":
+        return "%d alive of %d" % (alive, burn_cap), "%s when a runner ends or the money guard funds more lanes" % gives
+    if limit == "wip":
+        return "%d in progress of %d" % (in_progress, wip), "%s when a unit lands" % gives
+    if limit == "seats":
+        return "seat cap %s" % seat_cap, "%s when more native seats are set or fewer workers run per round" % gives
+    raise ValueError("room_of answered an unknown limit %r" % (limit,))
+
+
+def write_room_record(record, path=None):
+    """Append one room decision as a JSON line to `path` (POOL_ROOM by default). An OSError propagates; the pass
+    prints it and carries on, since the record explains the room and never decides it."""
+    with open(path or POOL_ROOM, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _room_of_free(burn_free: int, wip_free: int, seat_free: Optional[int] = None, busy: str = "") -> Tuple[int, str]:
+    """Shape B of room_of (REQ-LA5-A-06), unchanged.
+    (room, why): room is the smallest of the three free counts, clamped at 0, and why names the binding
     cap (REQ-LA5-A-06): one of "budget cap", "WIP cap", "no seat", ties naming the earlier of that order.
     seat_free is None when the pass has no seat cap. A non blank `busy` (the load hold's own text,
     REQ-LA5-B-01) forces room 0 and is the reason, before any cap is compared, so a busy machine admits no
@@ -1434,9 +1563,15 @@ def room_of(burn_free: int, wip_free: int, seat_free: Optional[int] = None, busy
 
 
 def main():
-    os.makedirs(RUNS, exist_ok=True)
     dry = "--dry" in sys.argv
-    write_launch_stamp()   # I3.a: the pass writes the seat root stamp before it ranks or admits any unit; a refused stamp leaves the pass as it was
+    # LOOP1.a: A DRY PASS INSPECTS, it writes only its room record. It creates no directory, so the runs root is made by a
+    # real pass only (a missing root globs as no runs). The seat stamp is refreshed only in a seat root that already
+    # exists: a knowingly partial containment, because the frozen I3.a harness (test_runner_pool_seats) pins a dry
+    # pass rewriting the stamp in an existing root, while LOOP1.a's pins a fresh home left with the room record alone.
+    if not dry:
+        os.makedirs(RUNS, exist_ok=True)
+    if not dry or os.path.isdir(seat_root()):
+        write_launch_stamp()   # I3.a: the pass writes the seat root stamp before it ranks or admits any unit; a refused stamp leaves the pass as it was
     # THE RUN'S LOGIN HOLDER (1.1.6 S2): taken from this process's environment, so only the unit runners it starts are
     # told it, each with the descriptor itself (brother_login.take_hold). Nothing changes when no holder is named.
     hold_env, hold_fds = {}, ()
@@ -1558,9 +1693,11 @@ def main():
             busy_text = load_hold()
         else:
             busy_text = load_hold(reading=lambda _raw=_load_raw: (float(_raw.strip()), os.cpu_count() or 1))
-    room, cap_why = room_of(BURN_CAP - len(alive_units), WIP - len(in_progress), _seat_cap, busy_text)
-    print("BUDGET cap %d runner(s) | WIP cap %d unit(s) | %d alive, %d READY to land | %s | room for %d"
-          % (BURN_CAP, WIP, len(alive_units), len(_ready - alive_units), _seat_word, room))
+    room, cap_why = room_of(alive=len(alive_units), in_progress=len(in_progress), burn_cap=BURN_CAP, wip=WIP,
+                            seat_cap=_seat_cap, busy=busy_text)
+    _binding, _recovery = room_reason(room, cap_why, len(alive_units), len(in_progress), BURN_CAP, WIP, _seat_cap, busy_text)
+    print("BUDGET cap %d runner(s) | WIP cap %d unit(s) | %d alive, %d READY to land | %s | room for %d | limit: %s (%s); %s"
+          % (BURN_CAP, WIP, len(alive_units), len(_ready - alive_units), _seat_word, room, cap_why, _binding, _recovery))
     # ACC3.b: the finish-first limits are read once per pass, before any unit is admitted (wiring steps 1 to 3).
     mode = wip_mode(os.environ.get("BROTHER_WIP_GATE"))
     if mode == "off":
@@ -1570,7 +1707,8 @@ def main():
         wip_rows, wip_code = wip_reading("HEAD", os.environ.get("BROTHER_WIP_MAIN_REF") or "hub/main")
         print(wip_line(wip_rows, wip_code, mode))
         try:
-            write_wip_record(wip_rows, wip_code, mode)
+            if not dry:   # LOOP1.a: a dry pass writes only its room record
+                write_wip_record(wip_rows, wip_code, mode)
         except OSError as exc:
             print("WIP     record not written: %s" % exc)
     # FX-13.6: the plan lint's mode, read once per pass. report (the default) prints a unit's findings and admits it as
@@ -1580,6 +1718,18 @@ def main():
     except ValueError as exc:
         lint_mode_now, lint_note = "block", "NO-DATA: %s" % exc
     print(("LINT    mode %s%s" % (lint_mode_now, "  (%s)" % lint_note if lint_note else "")).replace("START", "Start"))
+    # LOOP1.a: the room decision, recorded with every input, the caps that bind it (enforced) kept apart from the limits
+    # that only print (report-only: the finish-first gate and the plan lint under report), and the recovery condition.
+    _enforced = ["burn", "wip"] + (["seats"] if _seat_cap is not None else []) + (["load"] if _load_raw else [])
+    _report_only = (["finish-first limits (BROTHER_WIP_GATE=report)"] if mode == "report" else []) + \
+                   (["plan lint (mode report)"] if lint_mode_now == "report" else [])
+    try:
+        write_room_record({"at": time.time(), "dry": dry, "room": room, "limit": cap_why, "binding": _binding,
+                           "recovery": _recovery, "enforced": _enforced, "report_only": _report_only,
+                           "inputs": {"alive": len(alive_units), "in_progress": len(in_progress), "burn_cap": BURN_CAP,
+                                      "wip": WIP, "seat_cap": _seat_cap, "busy": busy_text}})
+    except OSError as exc:
+        print("ROOM    record not written: %s" % exc)
     import unit_ledger
     REC = unit_record(unit_ledger.last_rows(os.path.expanduser("~/.claude/evidence/unit-ledger.jsonl")))
     def _buildable(u):
@@ -1691,6 +1841,8 @@ def main():
         if not why and sub is not None:
             why = admissible(plan, sub)
         if not why and sub is not None:
+            why = pass_admission(u, sub)   # LOOP1.b: after admissible (its older refusals keep their words); still before any runner exists
+        if not why and sub is not None:
             lint_lines, lint_why = plan_lint.admission(plan, u, sub, ".", os.environ, council=os.path.expanduser(plan_lint.COUNCIL_PATH))
             for line in lint_lines: print(("%-5s %-8s %s" % (u["id"], sub, line)).replace("START", "Start"))
             if lint_mode_now == "block" and lint_why:
@@ -1698,10 +1850,10 @@ def main():
         if why:
             print("%-5s %-8s skip: %s" % (u["id"], sub or todo[0], why)); continue
         if started >= room:
-            if busy_text and cap_why == busy_text:
+            if cap_why == "load":
                 print("%-5s %-8s skip: %s; no new runner this pass, remedy: wait for the load to fall or stop other heavy work"
                       % (u["id"], sub, busy_text))
-            elif cap_why == "no seat":
+            elif cap_why == "seats":
                 print("%-5s %-8s skip: no seat (%d native seat(s), %d worker(s) per round, cap %d runner(s), %d alive)"
                       % (u["id"], sub, _seat_n, _seat_w, _seat_cap, len(alive_units)))
             else:

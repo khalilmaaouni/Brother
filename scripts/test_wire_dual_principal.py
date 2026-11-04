@@ -210,6 +210,18 @@ def run_wire_probe():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _can_listen_on_loopback():
+    """The probe serves over a local HTTP server. A confined run (the hermetic check's sandbox allows no network, not
+    even a loopback listener) cannot bind one: there the premise is absent, not the behaviour broken."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+    except OSError:
+        return False
+    return True
+
+
 class WireDualPrincipalProbe(unittest.TestCase):
     """This class proves the PROBE ITSELF is discriminating: it is not the
     registered battery finding (main()'s own expected failure
@@ -232,6 +244,7 @@ class WireDualPrincipalProbe(unittest.TestCase):
                             "as this file's contrast baseline:\n" + "\n".join(lines))
 
     @unittest.skipUnless(_tti._seam_present(), "bmu_vault_seam fixture is absent")
+    @unittest.skipUnless(_can_listen_on_loopback(), "NO-DATA: this run may not open a loopback listener")
     def test_wire_cannot_express_a_second_principal_today(self):
         result, lines = run_wire_probe()
         self.assertIsNotNone(result, "\n".join(lines))
@@ -262,6 +275,11 @@ def main():
               "this file's contrast baseline is broken, not just the wire -- "
               "investigate before trusting the wire verdict below")
         return 2
+
+    if not _can_listen_on_loopback():
+        print("SKIPPED (NO-DATA): this run may not open a loopback listener, so the wire half of this probe is absent "
+              "here; it runs wherever a listener may be bound")
+        return 0
 
     print("-- served HTTP wire boundary --")
     try:

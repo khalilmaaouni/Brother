@@ -350,6 +350,24 @@ class TestChecksEdited(GateCase):
         self.assertEqual(row["checks_changed"], ["scripts/test_version_truth.py"])
         self.assertRefused(self.verify(row), "CHECKS-EDITED")
 
+    def test_a_row_gated_on_another_base_is_judged_against_the_ref_merged_into(self):
+        # MERGE2.a review: the dev line edits a check, so a row for the dev line merge back into main, gated against the
+        # dev line, carries checks_changed=[]; merged into main it is still CHECKS-EDITED, merged into the dev line PASS
+        dev = dict(self.world.main)
+        dev["scripts/test_version_truth.py"] = b"changed on the dev line\n"
+        self.world.trees["dev-sha"] = dev
+        self.world.trees["refs/remotes/hub/plan/dev"] = dev
+        self.world.trees[TREE] = dict(dev)
+        row = merge_gate.record_row(self.clone, TREE, 0, self.log(), "12", "h" * 40, "dev-sha", self.env,
+                                    runner=self.world)
+        self.assertEqual(row["checks_changed"], [])
+        ok, why = merge_gate.verify_row(self.clone, row, time.time(), self.env, runner=self.world)
+        self.assertFalse(ok, why)
+        self.assertEqual(why, "CHECKS-EDITED: scripts/test_version_truth.py against refs/remotes/hub/main; "
+                              "merge it by hand")
+        self.assertTrue(merge_gate.verify_row(self.clone, row, time.time(), self.env, runner=self.world,
+                                              ref="refs/remotes/hub/plan/dev")[0])
+
     def test_an_edit_outside_the_closure_is_a_pass(self):
         row = self.edited("scripts/unrelated_tool.py")
         self.assertEqual(row["checks_changed"], [])

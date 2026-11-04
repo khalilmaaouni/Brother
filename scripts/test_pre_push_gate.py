@@ -753,5 +753,336 @@ class Night0912PrePushGate(unittest.TestCase):
             self.assertEqual(res[0][0], G.OK, err)
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# STAB1.c, frozen failing first harness. The implementer of STAB1.c may never edit anything below this line.
+#
+# CONTRACT: "The whole gate runs the hermetic, owns and silent failure checks first and exits before the 70 rows when
+# one refuses, naming the row. A refused gate appends a FAIL record to the gate ledger beside the PASS records. The
+# or-ask-self row (the bridge's own tests) joins the required fast rows, confirmed by the owner at landing."
+#
+# MEASURED (2026-11-01): the pre-push hermetic check refused three pushes only AFTER an 8 to 9 minute whole gate had
+# passed; loop-owns-complete refused a unit only at the end of a full run; the shared whole-gate ledger
+# (<git common dir>/brother-whole-gate.jsonl) holds PASS records only, so a refused gate is counted nowhere.
+#
+# HOW THE GATE IS DRIVEN, hermetically. The REAL scripts/required_fast.sh is run as `sh scripts/required_fast.sh` in a
+# throwaway git repository. Its header (everything before the first battery row, `run_check "version-truth"`) and its
+# footer (from `done / drain_checks`) are the real bytes; only the ~70 battery rows between them are replaced by a
+# tiny battery: a marker row that records that it ran, then today's loop-owns-complete and loop-silent-failure rows
+# (they sit at the END of the real battery today, which is the defect). test_whole_gate_record.py and
+# test_required_fast.py slice the gate the same way. What that freezes for the implementer:
+#   * the cheap stage lives in required_fast.sh BEFORE `run_check "version-truth"` (before the battery loop);
+#   * it calls only files this fixture carries (_CCF_COPIED, copied from THIS checkout, so the implementer's edits to
+#     them flow in): the hermetic judge is reached through scripts/pre_push_gate.py (check_hermetic_tests, the one
+#     function the pre-push hook judges with, so gate and push cannot disagree) or the hermetic_test_check.py command
+#     line (--range R, or paths); owns through `python3 scripts/test_bl_owns_complete.py` (the REAL script, against a
+#     fixture plan); silent failure through `python3 scripts/test_loop_report_run.py Lint`;
+#   * row names: hermetic, loop-owns-complete, loop-silent-failure.
+# Two stand-ins, and why. hermetic_test_check.py imports cut_preflight, export_public, timing_hunt and two loop modules
+# and builds an export tree per call, so the fixture carries a stand-in with the same module API and command line that
+# runs each changed scripts/ test under an EMPTY HOME (the class of defect it exists for). The real Lint class needs
+# products/brothersbe/tools/sbe_score.py and its telemetry closure, so the fixture's test_loop_report_run.py is a
+# stand-in whose Lint refuses a swallowed exception (an except clause whose body is a bare pass) in scripts/loop.
+# Whether those two judges are right is their own suites' business; THIS class judges the gate: what runs first, what
+# stops it, what is recorded. The fixture's branch is `feature`, with refs/remotes/origin/main, refs/remotes/hub/main
+# and origin/HEAD at the base commit, so any usual outgoing range (hub/main..HEAD, origin/main..HEAD, --not --remotes,
+# a merge base with origin/HEAD) names exactly the branch's own commit. Everything lives under one temp directory;
+# HOME and TMPDIR point inside it; no network; each fixture is its own repository, so the real ledger is never touched.
+# ---------------------------------------------------------------------------------------------------------------------
+import json as _ccf_json  # noqa: E402
+import re as _ccf_re  # noqa: E402
+import shutil as _ccf_shutil  # noqa: E402
+from unittest import mock as _ccf_mock  # noqa: E402
+import gate_ledger as _ccf_ledger  # noqa: E402
+
+_CCF_COPIED = ("gate_ledger.py", "evidence_obligation.py", "git_location_guard.py", "pre_push_gate.py",
+               "edition_guard.py", "loop/secret_scan.py", "test_bl_owns_complete.py")
+_CCF_CHECKS_START = 'run_check "version-truth"'
+_CCF_FOOTER_START = '\ndone\ndrain_checks\n'
+_CCF_PLAN = "docs/plan/BROTHER-1.1.0-LAUNCH-WBS.json"
+_CCF_BASE_OWNS = ("scripts/loop/secret_scan.py", "scripts/test_loop_report_run.py")
+_CCF_REFUSAL_WORD = _ccf_re.compile(r"\b(FAIL|FAILED|REFUSED|BLOCK|BLOCKED)\b")
+
+_CCF_STUB_HERMETIC = '''"""Fixture stand-in for scripts/hermetic_test_check.py (STAB1.c harness): the module API pre_push_gate's
+check_hermetic_tests uses, and the command line (--range R, or paths). Each changed scripts/ test runs under an EMPTY
+HOME; a red is REFUSED. Exit 0 all passed or nothing changed, 1 one refused, 2 the changed list could not be read."""
+import os, subprocess, sys, tempfile
+OK, REFUSED, NODATA = "OK", "REFUSED", "NO-DATA"
+P = None
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def tests_for(paths, root):
+    out = set()
+    for path in paths:
+        d, name = os.path.split(path.strip())
+        if d != "scripts" or not name.endswith(".py"):
+            continue
+        test = name if name.startswith("test_") else "test_" + name
+        if os.path.isfile(os.path.join(root, "scripts", test)):
+            out.add("scripts/" + test)
+    return sorted(out)
+
+
+def timing_results(paths, root):
+    return []
+
+
+def check(root, tests, runner=None, build=None, timeout=120):
+    if not tests:
+        return [(OK, "hermetic-tests", "no scripts/ test is touched by this change")]
+    out = []
+    for test in tests:
+        with tempfile.TemporaryDirectory(prefix="stab1c-empty-home-") as home:
+            proc = subprocess.run([sys.executable, os.path.join(root, test)], cwd=root, capture_output=True,
+                                  text=True, timeout=timeout, env=dict(os.environ, HOME=home))
+        out.append((OK if proc.returncode == 0 else REFUSED, test,
+                    "exit %d under an empty HOME" % proc.returncode))
+    return out
+
+
+def main(argv):
+    rng = None
+    if argv[:1] == ["--range"] and len(argv) > 1:
+        rng, argv = argv[1], argv[2:]
+    elif argv and argv[0].startswith("--range="):
+        rng, argv = argv[0].split("=", 1)[1], argv[1:]
+    if rng:
+        proc = subprocess.run(["git", "log", "--format=", "--name-only", "--diff-filter=AM", rng], cwd=ROOT,
+                              capture_output=True, text=True)
+        if proc.returncode != 0:
+            print("NO-DATA hermetic: the range %s could not be read" % rng)
+            return 2
+        paths = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+    else:
+        paths = [a for a in argv if not a.startswith("-")]
+    results = check(ROOT, tests_for(paths, ROOT))
+    for verdict, name, detail in results:
+        print("%s hermetic %s: %s" % (verdict, name, detail))
+    return 1 if any(v == REFUSED for v, _, _ in results) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+'''
+
+_CCF_STUB_SILENT = '''"""Fixture stand-in for scripts/test_loop_report_run.py (STAB1.c harness): only its Lint class, which refuses a
+swallowed exception (an except clause whose body is a bare pass) in any scripts/loop/*.py."""
+import glob, os, re, sys, unittest
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class Lint(unittest.TestCase):
+    def test_no_silent_failure_in_scripts_loop(self):
+        bad = []
+        for path in sorted(glob.glob(os.path.join(ROOT, "scripts", "loop", "*.py"))):
+            with open(path, encoding="utf-8") as handle:
+                if re.search(r"except[^\\n]*:[ \\t]*\\n[ \\t]*pass\\b", handle.read()):
+                    bad.append(os.path.relpath(path, ROOT))
+        self.assertEqual(bad, [], "silent-failure-lints FAIL: %s" % bad)
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+
+# Green on the author's machine (the gate's HOME carries the file), red under the empty HOME the public runner has.
+_CCF_NEEDS_HOME = ('import os, sys\n'
+                   'sys.exit(0 if os.path.isfile(os.path.join(os.path.expanduser("~"), ".stab1c-fixture-secret"))'
+                   ' else 1)\n')
+_CCF_FINE_TEST = 'import sys\nsys.exit(0)\n'
+
+
+class CheapChecksFirst(unittest.TestCase):
+    """STAB1.c: the cheap checks run first and stop the gate before the battery; a refused gate is recorded."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(HERE, "required_fast.sh"), encoding="utf-8") as handle:
+            cls.source = handle.read()
+        if _CCF_CHECKS_START not in cls.source or _CCF_FOOTER_START not in cls.source:
+            raise AssertionError("required_fast.sh lost an anchor this harness slices on: %r or %r"
+                                 % (_CCF_CHECKS_START, _CCF_FOOTER_START))
+        cls.header = cls.source[:cls.source.index(_CCF_CHECKS_START)]
+        cls.footer = cls.source[cls.source.index(_CCF_FOOTER_START):]
+
+    def setUp(self):
+        self.scratch = tempfile.mkdtemp(prefix="stab1c-")
+        self.addCleanup(_ccf_shutil.rmtree, self.scratch, True)
+        home = tempfile.mkdtemp(prefix="stab1c-home-", dir=self.scratch)
+        with open(os.path.join(home, ".stab1c-fixture-secret"), "w") as handle:
+            handle.write("present only on the author's machine\n")
+        self.env = {k: v for k, v in os.environ.items()
+                    if not k.startswith(("GIT_", "BROTHER_", "REQUIRED_FAST_", "CUT_", "PYTHON"))
+                    and k not in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GITHUB_ACTIONS", "GATE_LEDGER_PATH")}
+        self.env.update(HOME=home, BROTHER_HEAVY_SLOT="off", CUT_ID="",
+                        TMPDIR=tempfile.mkdtemp(prefix="stab1c-tmp-", dir=self.scratch),
+                        GIT_CONFIG_GLOBAL=os.path.join(home, "gitconfig"), GIT_CONFIG_NOSYSTEM="1")
+        self.marker = os.path.join(self.scratch, "battery-marker-ran")
+
+    # --- fixture -------------------------------------------------------------------------------------------------
+    def _git(self, repo, *args):
+        return subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True, check=True,
+                              env=self.env).stdout
+
+    def _write(self, repo, rel, text):
+        path = os.path.join(repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def _plan(self, owns):
+        return _ccf_json.dumps({"units": [{"id": "BL", "owns": sorted(owns)}]}, indent=1) + "\n"
+
+    def _build(self, branch_files, extra_owns=(), extra_rows=()):
+        """A repository whose main holds the fixture and whose `feature` branch adds branch_files in one commit."""
+        repo = tempfile.mkdtemp(prefix="stab1c-repo-", dir=self.scratch)
+        for rel in _CCF_COPIED:
+            dest = os.path.join(repo, "scripts", rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            _ccf_shutil.copyfile(os.path.join(HERE, rel), dest)
+        self._write(repo, "scripts/hermetic_test_check.py", _CCF_STUB_HERMETIC)
+        self._write(repo, "scripts/test_loop_report_run.py", _CCF_STUB_SILENT)
+        self._write(repo, "scripts/gate_obligations.json", _ccf_json.dumps(
+            {"schema": "brother.gate-obligations/v1", "default": "REQUIRED_FOR_MERGE", "checks": {}}))
+        self._write(repo, _CCF_PLAN, self._plan(_CCF_BASE_OWNS))
+        battery = (['run_check "battery-marker" sh -c \'echo ran >> "$1"\' sh %s' % shlex.quote(self.marker)]
+                   + list(extra_rows)
+                   + ['run_check "loop-owns-complete"   python3 scripts/test_bl_owns_complete.py',
+                      'run_check "loop-silent-failure"  python3 scripts/test_loop_report_run.py Lint'])
+        self._write(repo, "scripts/required_fast.sh", self.header + "\n".join(battery) + "\n" + self.footer)
+        self._write(repo, ".gitignore", "logs/\n__pycache__/\n")
+        subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, env=self.env)
+        self._git(repo, "config", "user.name", "fixture")
+        self._git(repo, "config", "user.email", "fixture@example.invalid")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", "base")
+        base = self._git(repo, "rev-parse", "HEAD").strip()
+        for ref in ("refs/remotes/origin/main", "refs/remotes/hub/main"):
+            self._git(repo, "update-ref", ref, base)
+        self._git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        self._git(repo, "checkout", "-q", "-b", "feature")
+        self._commit(repo, branch_files, extra_owns)
+        return repo
+
+    def _commit(self, repo, files, extra_owns=()):
+        for rel, text in files.items():
+            self._write(repo, rel, text)
+        if extra_owns:
+            self._write(repo, _CCF_PLAN, self._plan(set(_CCF_BASE_OWNS) | set(extra_owns)))
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", "branch change")
+
+    def _run_gate(self, repo):
+        proc = subprocess.run(["sh", os.path.join(repo, "scripts", "required_fast.sh")], capture_output=True,
+                              text=True, timeout=CALL_TIMEOUT_S, env=self.env)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def _shared(self, repo):
+        """The whole-gate file every worktree of repo shares, located from git itself, not from the code under test."""
+        common = self._git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        return os.path.join(os.path.realpath(common), "brother-whole-gate.jsonl")
+
+    def _lines(self, repo):
+        path = self._shared(repo)
+        if not os.path.exists(path):
+            return []
+        with open(path, "rb") as handle:
+            return [l for l in handle.read().splitlines() if l.strip()]
+
+    def _tree(self, repo):
+        return self._git(repo, "rev-parse", "HEAD^{tree}").strip()
+
+    def _assert_refused_before_battery(self, code, out, row):
+        self.assertNotEqual(code, 0, out)
+        self.assertFalse(os.path.exists(self.marker),
+                         "a battery row ran although the %s cheap check refuses this branch:\n%s" % (row, out))
+        # A "whole-gate:" line is the ledger writer's (gate_ledger.py prints them), so it never counts as the gate
+        # naming the row: otherwise the FAIL record guard of case 5 would mask this one.
+        named = [l for l in out.splitlines() if row in l and _CCF_REFUSAL_WORD.search(l)
+                 and not l.lstrip().startswith("whole-gate:")]
+        self.assertTrue(named, "no output line names the refusing row %s:\n%s" % (row, out))
+
+    # --- 1, 2, 3: each cheap check alone refuses, and nothing of the battery runs --------------------------------
+    def test_1_a_changed_test_red_under_an_empty_home_stops_the_gate_before_the_battery(self):
+        repo = self._build({"scripts/test_needs_home.py": _CCF_NEEDS_HOME})
+        code, out = self._run_gate(repo)
+        self._assert_refused_before_battery(code, out, "hermetic")
+
+    def test_2_an_unowned_loop_file_stops_the_gate_before_the_battery(self):
+        repo = self._build({"scripts/loop/stray.py": "def f():\n    return 1\n"})
+        code, out = self._run_gate(repo)
+        self._assert_refused_before_battery(code, out, "loop-owns-complete")
+
+    def test_3_a_silent_failure_in_scripts_loop_stops_the_gate_before_the_battery(self):
+        swallow = "def f():\n    try:\n        return 1\n    except Exception:\n        pass\n"
+        repo = self._build({"scripts/loop/swallow.py": swallow}, extra_owns=("scripts/loop/swallow.py",))
+        code, out = self._run_gate(repo)
+        self._assert_refused_before_battery(code, out, "loop-silent-failure")
+
+    # --- 4: every cheap check passes, so the battery runs -------------------------------------------------------
+    def test_4_when_every_cheap_check_passes_the_battery_runs(self):
+        repo = self._build({"scripts/test_fine.py": _CCF_FINE_TEST})
+        code, out = self._run_gate(repo)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.exists(self.marker), "the battery never ran:\n%s" % out)
+
+    # --- 5: a refused gate is recorded beside the PASS records, which stay as they were --------------------------
+    def test_5_a_refused_gate_appends_one_fail_record_and_leaves_the_pass_records_unchanged(self):
+        repo = self._build({"notes.txt": "a harmless change\n"})
+        code, out = self._run_gate(repo)
+        self.assertEqual(code, 0, out)
+        before = self._lines(repo)
+        self.assertEqual([_ccf_json.loads(l)["status"] for l in before], ["PASS"], out)
+        pass_tree = self._tree(repo)
+        self._commit(repo, {"scripts/loop/stray.py": "def f():\n    return 1\n"})
+        fail_tree = self._tree(repo)
+        os.remove(self.marker)
+        code, out = self._run_gate(repo)
+        self.assertNotEqual(code, 0, out)
+        after = self._lines(repo)
+        self.assertEqual(after[:len(before)], before, "an existing PASS record was rewritten")
+        added = after[len(before):]
+        self.assertEqual(len(added), 1, "a refused gate must append exactly one record:\n%s" % out)
+        record = _ccf_json.loads(added[0])
+        self.assertEqual(record.get("status"), "FAIL", record)
+        self.assertEqual(record.get("tree_sha"), fail_tree, record)
+        self.assertIn("loop-owns-complete", _ccf_json.dumps(record, sort_keys=True), record)
+        self.assertTrue(_ccf_ledger.verify_chain(self._shared(repo)), "the FAIL record broke the hash chain")
+        with _ccf_mock.patch.dict(os.environ, self.env, clear=True):
+            ok_fail, why_fail = _ccf_ledger.whole_gate_pass_in_repo(repo, fail_tree)
+            ok_pass, why_pass = _ccf_ledger.whole_gate_pass_in_repo(repo, pass_tree)
+        self.assertFalse(ok_fail, "a FAIL record read as a PASS for its tree: %s" % why_fail)
+        self.assertTrue(ok_pass, "the FAIL record hid the older tree's PASS: %s" % why_pass)
+
+    def test_5b_a_battery_row_refusal_also_appends_one_fail_record_naming_that_row(self):
+        repo = self._build({"notes.txt": "a harmless change\n"}, extra_rows=('run_check "battery-red" false',))
+        code, out = self._run_gate(repo)
+        self.assertNotEqual(code, 0, out)
+        records = [_ccf_json.loads(l) for l in self._lines(repo)]
+        self.assertEqual([r.get("status") for r in records], ["FAIL"], out)
+        self.assertEqual(records[0].get("tree_sha"), self._tree(repo), records[0])
+        self.assertIn("battery-red", _ccf_json.dumps(records[0], sort_keys=True), records[0])
+
+    # --- 6: pins today's behaviour: a passing gate appends exactly one PASS record ------------------------------
+    def test_6_a_passing_gate_still_appends_exactly_one_pass_record(self):
+        repo = self._build({"notes.txt": "a harmless change\n"})
+        code, out = self._run_gate(repo)
+        self.assertEqual(code, 0, out)
+        records = [_ccf_json.loads(l) for l in self._lines(repo)]
+        self.assertEqual([r.get("status") for r in records], ["PASS"], out)
+        self.assertEqual(records[0].get("tree_sha"), self._tree(repo), records[0])
+        self.assertTrue(_ccf_ledger.verify_chain(self._shared(repo)))
+
+    # --- 7: the bridge's own tests are a required fast row --------------------------------------------------------
+    def test_7_the_or_ask_self_row_runs_the_bridge_tests_in_the_battery(self):
+        bridge_tests = os.path.join(HERE, "loop", "test_or_ask.py")
+        self.assertTrue(os.path.isfile(bridge_tests), "the bridge's tests are not in this repository: %s"
+                        % bridge_tests)
+        body = self.source[self.source.index(_CCF_CHECKS_START):self.source.index(_CCF_FOOTER_START)]
+        rows = [l for l in body.splitlines() if l.strip().startswith('run_check "or-ask-self"')]
+        self.assertEqual(len(rows), 1, "required_fast.sh carries no single or-ask-self row: %r" % rows)
+        self.assertIn("scripts/loop/test_or_ask.py", rows[0])
+
+
 if __name__ == "__main__":
     unittest.main()

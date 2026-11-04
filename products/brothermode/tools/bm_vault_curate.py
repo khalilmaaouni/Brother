@@ -67,7 +67,7 @@ sys.path.insert(0, HERE)
 import brother_paths  # noqa: E402
 
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
+import pattern_note  # noqa: E402  KEY1.f: the vault default is the one resolver's answer
 DEFAULT_QUEUE = brother_paths.config_path("bm_vault_curation.json")
 
 DUP_THRESHOLD = 0.5          # scan-duplicates' own default
@@ -97,12 +97,7 @@ def _load_module(name):
 
 
 def _vault_root(cli_vault):
-    if cli_vault:
-        return cli_vault
-    env = os.environ.get("BM_VAULT_ROOT")
-    if env:
-        return env
-    return DEFAULT_VAULT
+    return pattern_note.require_vault_root(cli_vault, "bm_vault_curate")
 
 
 def _now():

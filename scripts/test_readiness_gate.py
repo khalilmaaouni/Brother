@@ -613,6 +613,67 @@ class TheGateExitsNonzeroWhileACriticalItemIsUnproven(unittest.TestCase):
         self._write_expectations(d, "fresh-x", "2027-01-01")
         self.assertEqual(_silent_main(["--root", d, "--today", "2026-06-01"]), 0)
 
+    # Owner ruling 2026-10-31 ("C3, narrowed to bump"): the declared
+    # release-invariant exception (ruling C3, scripts/open_line.py) converts
+    # the invariant's FAIL only when its SOLE broken link is the pending
+    # version bump; any other broken link stays FAIL with the entry present.
+    PENDING_BUMP = ("FAIL: shipped runtime content has changed since tag v1.1.9 but the "
+                    "version string is still 1.1.9; 6 of 522 shipped runtime file(s) differ (x)")
+
+    def _invariant(self, d, fail_lines):
+        path = os.path.join(d, "scripts", "release_invariant.py")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("import sys\nfor l in %r:\n    print(l)\nprint('release-invariant: "
+                     "%d broken link(s) in the identity chain')\nsys.exit(1)\n"
+                     % (list(fail_lines), len(fail_lines)))
+
+    def _declared(self, d, review_by="2027-01-01"):
+        self._write_expectations(d, "release-invariant", review_by)
+
+    def _row(self, d, today="2026-10-31"):
+        rows = RG.apply_valid_exceptions(RG.evaluate(d, today=today), root=d, today=today)
+        return [r for r in rows if r["id"] == "reproducible-release-artifact"][0]
+
+    def test_a_declared_pending_bump_alone_is_excepted(self):
+        d = self._all_critical_pass_root()
+        self._invariant(d, [self.PENDING_BUMP])
+        self._declared(d)
+        self.assertEqual(self._row(d)["verdict"], "EXCEPTED")
+        self.assertEqual(_silent_main(["--root", d, "--today", "2026-10-31"]), 0)
+
+    def test_a_declared_exception_never_covers_another_broken_link(self):
+        d = self._all_critical_pass_root()
+        self._invariant(d, ["FAIL: version sites disagree: bundle=1.2.0 marketplace=1.1.9"])
+        self._declared(d)
+        self.assertEqual(self._row(d)["verdict"], RG.FAIL)
+        self.assertEqual(_silent_main(["--root", d, "--today", "2026-10-31"]), 1)
+
+    def test_a_pending_bump_beside_another_broken_link_stays_fail(self):
+        d = self._all_critical_pass_root()
+        self._invariant(d, [self.PENDING_BUMP, "FAIL: no GitHub Release exists for v1.1.9"])
+        self._declared(d)
+        self.assertEqual(self._row(d)["verdict"], RG.FAIL)
+
+    def test_a_pending_bump_with_no_declaration_stays_fail(self):
+        d = self._all_critical_pass_root()
+        self._invariant(d, [self.PENDING_BUMP])
+        self.assertEqual(self._row(d)["verdict"], RG.FAIL)
+        self.assertEqual(_silent_main(["--root", d, "--today", "2026-10-31"]), 1)
+
+    def test_an_expired_declaration_does_not_cover_a_pending_bump(self):
+        d = self._all_critical_pass_root()
+        self._invariant(d, [self.PENDING_BUMP])
+        self._declared(d, review_by="2026-10-01")
+        self.assertEqual(self._row(d)["verdict"], RG.FAIL)
+
+    def test_the_covered_link_is_still_the_invariants_own_wording(self):
+        # If release_invariant.py ever rewords this link, the exception stops
+        # applying (the safe direction); this names that drift loudly.
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "release_invariant.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn(RG.PENDING_BUMP_LINK.split("FAIL: ", 1)[1].split(" since", 1)[0], src)
+
     def test_on_the_real_tree_today_the_gate_is_ready(self):
         """Calibration against the actual repository, updated when B3 and B4
         landed scripts/test_tenancy_isolation.py and

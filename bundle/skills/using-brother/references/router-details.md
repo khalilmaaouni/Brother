@@ -68,7 +68,42 @@ Commit the notes BEFORE indexing. The index reads committed state, so an
 uncommitted note is invisible to it and the resulting empty index reads
 exactly like the tool having failed.
 
-**4. Hand over one zip** holding every file it refers to.
+**4. Hand over with one record, then start the next session.** The record is
+one file that measures the state of the repository (branch, head, tree,
+dirty paths, worktrees, whether it is pushed) and names what is left. Git
+fields are read from git, never typed. It ships beside the runner (from a
+checkout of the Brother repository, run the copy in its scripts folder
+instead). The remaining work is a JSON file holding a list of
+`{order, what, done_check, owner_unit}`.
+
+```
+python3 "$BROTHER_PLUGIN_ROOT/runtime/handover_record.py" emit --repo <repo> --slug <short-name> \
+  --outcome "<what the next session should finish>" \
+  --session-log <session-log> --evidence-dir <evidence-dir> \
+  --remaining <remaining.json> --print-plan
+```
+
+`emit` writes the record under `$BROTHER_HANDOVER_ROOT` (a default folder
+when unset) and refuses, writing nothing, on empty remaining work, a missing
+log path, a private term, a dash or credit line, or a detached HEAD. Fix the
+named reason and run it again. `--owner-orders`, `--verified` and
+`--blockers` take JSON files too: the owner's words, the claims with their
+commands, and what is stopped.
+
+Then hand off. In the Claude desktop app, call the host's
+`hand_off_to_session` tool with the plan text `--print-plan` printed; its
+first line is the Brother door. On every other host, open a new session in
+the same folder.
+
+The receiving session starts through the door: in Claude Code type
+`/brother continue <outcome>`; where there are no slash commands (Codex,
+Cursor), invoke the `using-brother` skill by name and say "continue
+<outcome>". The door first validates the record against the live tree and
+refuses one that no longer matches rather than acting on it:
+
+```
+python3 "$BROTHER_PLUGIN_ROOT/runtime/handover_record.py" receive --repo <repo>
+```
 
 ## Writing the units yourself: what makes a plan schedulable
 

@@ -77,6 +77,12 @@ def _one_valid_seat(seat_id="architect"):
     })
 
 
+# docs/plan is not shipped in the public export, so there the seat registry does not exist: the premise is absent,
+# not the behaviour broken. A tree that carries the registry still runs every case that reads it.
+NEEDS_REGISTRY = unittest.skipUnless(os.path.isfile(reg.DEFAULT_REGISTRY_PATH),
+                                     "this tree carries no COE seat registry")
+
+
 class TestDefaultRegistryLoads(unittest.TestCase):
     """The shipped docs/plan/COE-SEATS.json, exactly as COE-01's brief
     names it: eight seats, the two marked outside still marked outside,
@@ -89,15 +95,18 @@ class TestDefaultRegistryLoads(unittest.TestCase):
     ))
     EXPECTED_OUTSIDE_IDS = frozenset(("adversary-outside", "bulk-classifier"))
 
+    @NEEDS_REGISTRY
     def test_loads_exactly_the_eight_named_seats(self):
         seats = reg.load_seats()
         self.assertEqual({s["id"] for s in seats}, self.EXPECTED_IDS)
 
+    @NEEDS_REGISTRY
     def test_outside_seats_are_the_two_named_and_no_others(self):
         seats = reg.load_seats()
         outside_ids = {s["id"] for s in seats if s["outside"]}
         self.assertEqual(outside_ids, self.EXPECTED_OUTSIDE_IDS)
 
+    @NEEDS_REGISTRY
     def test_seat_returns_the_named_seat(self):
         self.assertEqual(reg.seat("security")["id"], "security")
 
@@ -105,6 +114,7 @@ class TestDefaultRegistryLoads(unittest.TestCase):
         with self.assertRaises(reg.RegistryError):
             reg.seat("no-such-seat-id")
 
+    @NEEDS_REGISTRY
     def test_seats_owning_returns_the_owning_seats(self):
         owners = reg.seats_owning("privacy")
         self.assertEqual([s["id"] for s in owners], ["security"])

@@ -28,6 +28,7 @@ wait_s seconds, no file written by this module itself.
 Python 3, standard library only.
 """
 import argparse
+import json
 import math
 import os
 import re
@@ -46,6 +47,9 @@ MAX_LINES = 200
 MAX_LINE_CHARS = 400
 FLAKE_ID = "J065"
 DONE_ID = "J102"
+#: The two seams this door asks, and the verb of each. The status readout reads this to say which configured seams
+#: can be asked from here; every other configured seam is asked by its own call site inside Brother.
+DOOR_ROUTES = {FLAKE_ID: "review", DONE_ID: "deliver"}
 _ABS_PATH_RE = re.compile(r"(?<![\w.])~?/[^\s'\"`:,;()<>\[\]{}|]*")
 _ONE_LINE_RE = re.compile(r"\s+")
 
@@ -78,8 +82,12 @@ def _wait(wait_s) -> float:
 
 
 def _ask(entry_id: str, text, ask: Callable, *, max_lines, wait_s, gate_terms, ledger_dir,
-         seams_config, registry, runner) -> Tuple[str, Optional[dict], str]:
-    """(state, answered row or None, reason): the five steps both doors share."""
+         seams_config, registry, runner, trace=None) -> Tuple[str, Optional[dict], str]:
+    """(state, answered row or None, reason): the five steps both doors share. A caller that passes a dict as
+    `trace` gets the entry id, and once a call was made its attempt id, the mode it ran under and the terminal
+    phase, so a result can name the one ledger row that holds it (OUT1.h); nothing else changes."""
+    trace = trace if trace is not None else {}
+    trace["entry_id"] = entry_id
     if not isinstance(text, str) or not text.strip() or "\x00" in text:
         return NO_DATA, None, "nothing to ask: the text is empty or binary"
     reduced = reduce_text(text, max_lines)
@@ -97,6 +105,7 @@ def _ask(entry_id: str, text, ask: Callable, *, max_lines, wait_s, gate_terms, l
     result = ask(reduced, seams_config=config, registry=registry, ledger_dir=ledger,
                  runner=runner)
     attempt_id = getattr(result, "attempt_id", "")
+    trace.update(attempt_id=attempt_id, mode=getattr(result, "mode", jev_seam.OFF))
     if getattr(result, "mode", jev_seam.OFF) == jev_seam.OFF or not attempt_id:
         return NO_DATA, None, "not asked: %s" % (getattr(result, "reason", None) or "the call was not made")
     wait = _wait(wait_s)
@@ -104,6 +113,7 @@ def _ask(entry_id: str, text, ask: Callable, *, max_lines, wait_s, gate_terms, l
     row = jev_outcome.terminal_rows(jev_outcome.attempts_path(ledger), {attempt_id}).get(attempt_id)
     if row is None:
         return NO_DATA, None, "no answer within %g s; it is recorded if it lands" % wait
+    trace["phase"] = row.get("phase")
     if row.get("phase") != "answered":
         return OK, None, "no opinion: Jev was unsure or could not answer (%s)" % row.get("phase")
     return OK, row, ""
@@ -130,14 +140,15 @@ def _line(body: str) -> str:
 def ask_flake(text: str, *, max_lines: int = MAX_LINES, wait_s: float = 20.0,
               gate_terms: Optional[dict] = None, ledger_dir: Optional[str] = None,
               seams_config: Optional[dict] = None, registry: Optional[list] = None,
-              runner: Optional[Callable] = None) -> Tuple[str, Optional[bool], Optional[float], str]:
+              runner: Optional[Callable] = None,
+              trace: Optional[dict] = None) -> Tuple[str, Optional[bool], Optional[float], str]:
     """(state, said, prob, reason) for J065: said True reads as an infra flake,
     False as a real failure, None as no answer; reason is empty on an answer."""
     def ask(reduced, **kw):
         return jev_checks.check_gate_failure_flake(reduced, "none given", False, **kw)
     state, row, reason = _ask(FLAKE_ID, text, ask, max_lines=max_lines, wait_s=wait_s,
                               gate_terms=gate_terms, ledger_dir=ledger_dir,
-                              seams_config=seams_config, registry=registry, runner=runner)
+                              seams_config=seams_config, registry=registry, runner=runner, trace=trace)
     said, prob, reason = _said(row, reason)
     return state, said, prob, reason
 
@@ -146,10 +157,13 @@ def review_second_opinion(failing_output: str, *, max_lines: int = MAX_LINES,
                           wait_s: float = 20.0, gate_terms: Optional[dict] = None,
                           ledger_dir: Optional[str] = None, seams_config: Optional[dict] = None,
                           registry: Optional[list] = None,
-                          runner: Optional[Callable] = None) -> Tuple[str, str]:
+                          runner: Optional[Callable] = None,
+                          trace: Optional[dict] = None) -> Tuple[str, str]:
     state, said, prob, reason = ask_flake(
         failing_output, max_lines=max_lines, wait_s=wait_s, gate_terms=gate_terms,
-        ledger_dir=ledger_dir, seams_config=seams_config, registry=registry, runner=runner)
+        ledger_dir=ledger_dir, seams_config=seams_config, registry=registry, runner=runner, trace=trace)
+    if trace is not None:
+        trace["said"] = said
     if said is None:
         return state, _line("NO-DATA (%s)" % reason if state == NO_DATA else reason)
     kind = "an infra flake" if said else "a real failure"
@@ -168,7 +182,8 @@ _DELIVER_WORDS = {
 def deliver_second_opinion(done_note: str, quotes_verification: bool, *, wait_s: float = 20.0,
                            gate_terms: Optional[dict] = None, ledger_dir: Optional[str] = None,
                            seams_config: Optional[dict] = None, registry: Optional[list] = None,
-                           runner: Optional[Callable] = None) -> Tuple[str, str]:
+                           runner: Optional[Callable] = None,
+                           trace: Optional[dict] = None) -> Tuple[str, str]:
     if not isinstance(quotes_verification, bool):
         return NO_DATA, _line("NO-DATA (not asked: whether the note quotes a verification "
                               "must be yes or no)")
@@ -178,8 +193,10 @@ def deliver_second_opinion(done_note: str, quotes_verification: bool, *, wait_s:
             reduced, quotes_verification, not quotes_verification, **kw)
     state, row, reason = _ask(DONE_ID, done_note, ask, max_lines=MAX_LINES, wait_s=wait_s,
                               gate_terms=gate_terms, ledger_dir=ledger_dir,
-                              seams_config=seams_config, registry=registry, runner=runner)
+                              seams_config=seams_config, registry=registry, runner=runner, trace=trace)
     said, prob, reason = _said(row, reason)
+    if trace is not None:
+        trace["said"] = said
     if said is None:
         return state, _line("NO-DATA (%s)" % reason if state == NO_DATA else reason)
     return state, _line("%s (p=%.2f)" % (_DELIVER_WORDS[(said, quotes_verification)], prob))
@@ -193,30 +210,45 @@ def _read(path: str) -> Optional[str]:
         return None
 
 
+def _read_stdin() -> Optional[str]:
+    try:
+        return sys.stdin.read(coe_outside_gate.MAX_CONTENT_BYTES * 4)
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="One second opinion line; it never changes a verdict.",
                                      allow_abbrev=False)
     sub = parser.add_subparsers(dest="verb")
     sub.required = True
     review = sub.add_parser("review", allow_abbrev=False)
-    review.add_argument("--output", required=True)
+    review.add_argument("--output", required=True, help="a file, or - to read the text from standard input")
     review.add_argument("--max-lines", type=int, default=MAX_LINES)
     review.add_argument("--wait", type=float, default=20.0)
+    review.add_argument("--json", action="store_true", help="print one JSON object naming the ledger row (OUT1.h)")
     deliver = sub.add_parser("deliver", allow_abbrev=False)
-    deliver.add_argument("--note", required=True)
+    deliver.add_argument("--note", required=True, help="a file, or - to read the note from standard input")
     deliver.add_argument("--quotes", required=True, choices=("yes", "no"))
     deliver.add_argument("--wait", type=float, default=20.0)
+    deliver.add_argument("--json", action="store_true", help="print one JSON object naming the ledger row (OUT1.h)")
     args = parser.parse_args(argv)
     path = args.output if args.verb == "review" else args.note
-    text = _read(path)
+    text = _read_stdin() if path == "-" else _read(path)
+    trace = {}  # type: dict
     if text is None:
-        print(_line("NO-DATA (not asked: %s could not be read)" % os.path.basename(path)))
-        return 0
-    if args.verb == "review":
-        _, line = review_second_opinion(text, max_lines=args.max_lines, wait_s=args.wait)
+        state, line = NO_DATA, _line("NO-DATA (not asked: %s could not be read)" % os.path.basename(path))
+    elif args.verb == "review":
+        state, line = review_second_opinion(text, max_lines=args.max_lines, wait_s=args.wait, trace=trace)
     else:
-        _, line = deliver_second_opinion(text, args.quotes == "yes", wait_s=args.wait)
-    print(line)
+        state, line = deliver_second_opinion(text, args.quotes == "yes", wait_s=args.wait, trace=trace)
+    if args.json:
+        # The result names its one ledger row and nothing else: no field here is a verdict, and none can change one.
+        print(json.dumps({"verb": args.verb, "state": state, "line": line, "entry_id": trace.get("entry_id"),
+                          "attempt_id": trace.get("attempt_id") or None, "mode": trace.get("mode"),
+                          "phase": trace.get("phase"), "said": trace.get("said")}, sort_keys=True))
+    else:
+        print(line)
     return 0
 
 

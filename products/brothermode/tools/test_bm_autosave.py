@@ -1685,7 +1685,7 @@ class TestCalibratedI1PreConsentNoWrite(unittest.TestCase):
                     result = _run_precompact(repo, "s1", consented=False)
                 self.assertIsNone(
                     result, "a pre-consent precompact must not even attempt a snapshot")
-                self.assertIn("python3 scripts/setup.py", out.getvalue())
+                self.assertIn("/scripts/setup.py", out.getvalue())
                 after_refs, after_tree = self._refs(repo), self._tree(repo)
                 self.assertEqual(before_refs, after_refs,
                                  "pre-consent precompact wrote a git ref (I1)")
@@ -1744,7 +1744,7 @@ class TestCalibratedI1PreConsentNoWrite(unittest.TestCase):
                         autosave.cmd_tick()
                 finally:
                     sys.stdin = old_stdin
-                self.assertIn("python3 scripts/setup.py", out.getvalue())
+                self.assertIn("/scripts/setup.py", out.getvalue())
                 after_refs, after_tree = self._refs(repo), self._tree(repo)
                 self.assertEqual(before_refs, after_refs,
                                  "pre-consent tick wrote a git ref (I1)")

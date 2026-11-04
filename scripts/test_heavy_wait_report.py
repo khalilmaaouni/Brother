@@ -79,6 +79,13 @@ class TheMedianIsComputed(Base):
         self.record([7, 7, 7])
         self.assertEqual(hwr.wait_stats(hwr.read_waits(self.path)[0])["n"], 3)
 
+    def test_a_stale_holder_line_is_neither_a_wait_nor_a_bad_line(self):
+        """GATE1: heavy_slot writes a "stale" line (pid, age) when a holder passes its deadline."""
+        self.record([4, 6])
+        heavy_slot.record_wait(self.tmp, 0.0, "stale", 0, 0, pid=4242, age_s=5982.0)
+        rows, bad = hwr.read_waits(self.path)
+        self.assertEqual((len(rows), bad), (2, 0))
+
     def test_empty_rows_give_zero_stats(self):
         self.assertEqual(hwr.wait_stats([])["n"], 0)
         self.assertEqual(hwr.wait_stats([])["first_at"], "")

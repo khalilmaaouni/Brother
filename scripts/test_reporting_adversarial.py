@@ -74,6 +74,9 @@ def write_json(doc, tmpdir, name):
     return path
 
 
+# docs/plan is not shipped in the public export, so the board this class reads is absent there (the premise,
+# not the behaviour, is missing).
+@unittest.skipUnless(os.path.isfile(BS.SOURCE), "docs/plan is not shipped in the public export; the roadmap is the premise")
 class ADoneClaimNeverInflatesThePercentage(unittest.TestCase):
     """Cases 1 and 2. Driven against a copy of the REAL roadmap, through the
     actual board_status.py command line, backwards: start from the honest

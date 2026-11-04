@@ -249,6 +249,12 @@ def _main(argv, runner, answer="y", root="/fake/root", terms_file=None,
         return answer
 
     del C._BM_STORE_CACHE[:]
+    # CUT2.h: an intent record stops a rerun for the owner to reconcile, so the publish records of the shared
+    # module folder are cleared between runs, as each test starts from no earlier push of this version and head
+    # (a case with its own evidence folder keeps its records across its runs)
+    for name in os.listdir(EVIDENCE_TMP) if os.path.isdir(EVIDENCE_TMP) and C.CR.evidence_dir() == EVIDENCE_TMP else ():
+        if name.startswith("publish-"):
+            shutil.rmtree(os.path.join(EVIDENCE_TMP, name), ignore_errors=True)
     with mock.patch.object(C, "_load_bm_store",
                            return_value=(FakeBmStore, BM_PATH, None)), \
          mock.patch.object(C, "release_paths",
@@ -1851,8 +1857,8 @@ class TheTagPushReconcilesOnThisRunsCommit(unittest.TestCase):
         seen = []
         real = C.publish_tag
 
-        def spy(tag, commit, push, ls_remote, state_dir):
-            got = real(tag, commit, push, ls_remote, state_dir)
+        def spy(tag, commit, push, ls_remote, state_dir, **kw):
+            got = real(tag, commit, push, ls_remote, state_dir, **kw)
             seen.append((tag, commit() if callable(commit) else commit, got))
             return got
         with mock.patch.object(C, "publish_tag", side_effect=spy):
@@ -2367,6 +2373,30 @@ class TheGuardedRouteFinishesAMissingRelease(unittest.TestCase):
     def test_a_failed_release_stays_incomplete(self):
         code, r = self.finish(self.sha, r=Runner(dict(GREEN, **{"gh release create": (1, "HTTP 422\n")})))
         self.assertEqual(code, C.EXIT_INCOMPLETE)
+
+
+class FinishReleaseNeedsNoTerminal(TheGuardedRouteFinishesAMissingRelease):
+    """A2 (1.1.9 incident): --finish-release was refused NO-DATA without a
+    terminal, because main() asked for the cut's own answer channel before
+    it reached this route, so finishing v1.1.9's Release needed an unused
+    terminal. The module setUp fakes a terminal for every test, which is why
+    nothing caught it. Here there is none: the route still owns its own
+    prerequisites (explicit version, repeated scans, full reviewed sha256),
+    and every test inherited from the parent class runs again without a
+    terminal. A real cut without one still refuses (negative control)."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(C, "_stdin_is_tty", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_real_cut_without_a_terminal_is_still_refused(self):
+        r = Runner(GREEN)
+        code, _ = _main(["--version", VERSION, "--release-notes-file", self.notes], r)
+        self.assertEqual(code, C.EXIT_NODATA)
+        for never in ("gh release create", "git push"):
+            self.assertNotIn(never, r.calls)
 
 
 class MainReadsTheReleaseNotesFileExactlyOnce(unittest.TestCase):

@@ -10,6 +10,7 @@ flagged rather than trusting it. A checker that invents violations is worse than
 none: it sends somebody to fix work that was already right and teaches everyone
 to ignore the tool. So most of this file is about it staying quiet.
 """
+import json
 import os
 import subprocess
 import sys
@@ -173,6 +174,10 @@ class J029NeverChangesAFiredDriftFinding(unittest.TestCase):
 class ItRefusesToManufactureAViolation(unittest.TestCase):
     """Four classes, all of which this checker actually produced first."""
 
+    # The sibling repositories live under the real home folder; a run with an empty home (the public export check)
+    # has none, so the premise is absent there, not the behaviour broken.
+    @unittest.skipUnless(len([r for r in D.KNOWN_REPOS if os.path.isdir(os.path.join(r, ".git"))]) >= 2,
+                         "NO-DATA: fewer than two real repositories are present on this machine")
     def test_a_commit_in_a_SIBLING_repository_is_not_missing(self):
         """The first false class: it checked one repository and reported seven
         false drifts against nodes built in the others."""
@@ -213,7 +218,12 @@ class ItRefusesToManufactureAViolation(unittest.TestCase):
 
     def test_the_live_board_is_clean(self):
         """The regression that matters: this tool runs in the battery, so a
-        false positive here stops everybody's work."""
+        false positive here stops everybody's work. It reads the LIVE board,
+        which a public export does not ship: there the answer is an explicit
+        skip naming the missing input, never a pass."""
+        if not os.path.isfile(D.ROADMAP):
+            self.skipTest("NO-DATA: the live board %s is not in this tree"
+                          % os.path.relpath(D.ROADMAP, D.ROOT))
         self.assertEqual(D.main([]), 0)
 
 
@@ -446,11 +456,33 @@ class ACommitOnlyASecondKnownRepositoryHoldsStillResolves(unittest.TestCase):
         must skip it (no .git found) rather than treat its absence as a FAIL;
         a bogus sha resolved against only the vault entry (when present) or an
         empty repo set (when absent) is NO-DATA (None), never a manufactured
-        drift."""
-        vault = os.path.expanduser("~/Documents/Kay Vault")
-        self.assertIn(vault, D.KNOWN_REPOS)
+        drift.
+
+        KEY1.f: the vault entry is the one resolver's answer
+        (pattern_note.vault_root), never a guessed folder: configured, it is a
+        known repository; with nothing configured, no vault entry is added."""
+        vault = tempfile.mkdtemp(prefix="record-drift-vault-")
+        cfg = tempfile.mkdtemp(prefix="record-drift-config-")
+        names = ("BROTHERMODE_VAULT_ROOT", "BM_VAULT_ROOT", "BROTHERMODE_VAULT")
+        base = {k: v for k, v in os.environ.items() if k not in names}
+        base["BROTHER_CONFIG_DIR"] = cfg
+        code = ("import json, sys; sys.path.insert(0, %r); import record_drift as r; "
+                "print(json.dumps(list(r.KNOWN_REPOS)))"
+                % os.path.dirname(os.path.abspath(__file__)))
+
+        def repos(**extra):
+            proc = subprocess.run([sys.executable, "-c", code], env=dict(base, **extra),
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+            return json.loads(proc.stdout)
+
+        self.assertIn(vault, repos(BROTHERMODE_VAULT_ROOT=vault))
+        unconfigured = repos()
+        self.assertNotIn(vault, unconfigured)
+        self.assertFalse([r for r in unconfigured if "vault" in os.path.basename(r).lower()],
+                         "a vault folder was guessed with nothing configured")
         old = D.KNOWN_REPOS
-        D.KNOWN_REPOS = (vault,)
+        D.KNOWN_REPOS = (os.path.join(vault, "absent"),)
         try:
             result = D._commit_exists("0" * 40)
             self.assertIn(result, (None, False))

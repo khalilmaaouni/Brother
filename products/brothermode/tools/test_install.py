@@ -946,6 +946,104 @@ class DoctorCase(unittest.TestCase):
         self.assertNotIn("registered hook is dead", r.stdout)
         self.assertIn("denied a foreign write", r.stdout)
 
+    def _dispatched_plugin(self, rows, fence_class="deny"):
+        """The 1.1.x bundle shape: hooks.json names ONE dispatcher,
+        runtime/hooks/brother_hook.py, and the fence lives only in the
+        dispatch table of HOOKS-MANIFEST.json beside it. Doctor read only
+        hooks.json text for the fence's file name, so on the 1.1.9 plugin
+        cache it said NO FENCE HOOK IS WIRED over a live fence (2026-10-31).
+        `rows` picks which guards the table carries: "bm", "sbe"."""
+        repo = os.path.dirname(os.path.dirname(ROOT))
+        plugin = os.path.join(self.home, ".claude", "skills", "brother")
+        hooks_dir = os.path.join(plugin, "runtime", "hooks")
+        os.makedirs(os.path.join(plugin, "hooks"))
+        os.makedirs(hooks_dir)
+        shutil.copy2(os.path.join(repo, "scripts", "brother_hook.py"),
+                     os.path.join(hooks_dir, "brother_hook.py"))
+        os.makedirs(os.path.join(hooks_dir, "brothermode"))
+        os.symlink(self.tools, os.path.join(hooks_dir, "brothermode", "tools"))
+        sbe_src = os.path.join(repo, "products", "brothersbe", "tools")
+        sbe_dst = os.path.join(hooks_dir, "brothersbe", "tools")
+        os.makedirs(sbe_dst)
+        for name in os.listdir(sbe_src):
+            if name.endswith(".py") and not name.startswith("test_"):
+                shutil.copy2(os.path.join(sbe_src, name), sbe_dst)
+        matcher = "Edit|Write|MultiEdit|NotebookEdit|Bash"
+        table = []
+        if "bm" in rows:
+            table.append({"class": fence_class, "matcher": matcher, "timeout": 10,
+                          "product": "brothermode",
+                          "tool": "brothermode/tools/bm_fence_hook.py"})
+        if "sbe" in rows:
+            table.append({"class": "deny", "matcher": matcher, "timeout": 10,
+                          "product": "brothersbe",
+                          "tool": "brothersbe/tools/sbe_fence_hook.py"})
+        with io.open(os.path.join(hooks_dir, "HOOKS-MANIFEST.json"), "w",
+                     encoding="utf-8") as fh:
+            fh.write(json.dumps({"dispatch": {"PreToolUse": table}}))
+        with io.open(os.path.join(plugin, "hooks", "hooks.json"), "w",
+                     encoding="utf-8") as fh:
+            fh.write(json.dumps({"hooks": {"PreToolUse": [{
+                "matcher": matcher,
+                "hooks": [{
+                    "type": "command",
+                    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/"
+                               "brother_hook.py\" PreToolUse"}]}]}}))
+        self.write_settings({"hooks": {"SessionStart": []}})
+
+    def test_a_fence_reached_through_the_dispatcher_is_found_and_proven(self):
+        self._dispatched_plugin(rows=("bm",))
+        r = self.run_doctor()
+        self.assertNotIn("NO FENCE HOOK IS WIRED", r.stdout)
+        self.assertIn("auto-loaded", r.stdout)
+        self.assertIn("denied a foreign write", r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_both_fences_through_the_dispatcher_let_the_owner_write(self):
+        # The two defects of 2026-10-31 together: once doctor proves
+        # liveness through the dispatcher, the second fence must not refuse
+        # the claim owner its own file, or calibration fails.
+        self._dispatched_plugin(rows=("bm", "sbe"))
+        r = self.run_doctor()
+        self.assertNotIn("CALIBRATION FAILED", r.stdout, r.stdout)
+        self.assertIn("denied a foreign write", r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_liveness_runs_the_whole_dispatched_chain_not_the_fence_alone(self):
+        # Pins that doctor proves the chain the loader runs: a sibling deny
+        # guard that refuses everyone is a dead fence for the owner, and a
+        # check of the fence file alone would call it healthy.
+        self._dispatched_plugin(rows=("bm",))
+        hooks_dir = os.path.join(self.home, ".claude", "skills", "brother",
+                                 "runtime", "hooks")
+        with io.open(os.path.join(hooks_dir, "deny_all.py"), "w", encoding="utf-8") as fh:
+            fh.write("import json\nprint(json.dumps({'hookSpecificOutput': "
+                     "{'hookEventName': 'PreToolUse', 'permissionDecision': 'deny', "
+                     "'permissionDecisionReason': 'deny all'}}))\n")
+        manifest = os.path.join(hooks_dir, "HOOKS-MANIFEST.json")
+        with io.open(manifest, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["dispatch"]["PreToolUse"].append(
+            {"class": "deny", "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+             "timeout": 10, "product": "fixture", "tool": "deny_all.py"})
+        with io.open(manifest, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data))
+        r = self.run_doctor()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("CALIBRATION FAILED", r.stdout)
+
+    def test_a_dispatcher_whose_table_lacks_the_fence_is_not_wired(self):
+        self._dispatched_plugin(rows=("sbe",))
+        r = self.run_doctor()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("NO FENCE HOOK IS WIRED", r.stdout)
+
+    def test_an_advisory_fence_row_is_not_a_wired_fence(self):
+        self._dispatched_plugin(rows=("bm",), fence_class="advisory")
+        r = self.run_doctor()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("NO FENCE HOOK IS WIRED", r.stdout)
+
     def test_calibrated_2_missing_fence_hook_is_detected(self):
         """The required case from the loop spec: doctor notices that no fence
         is wired at all, which is exactly what every install before this one

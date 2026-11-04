@@ -155,13 +155,58 @@ class SnapshotReadsTheRunMarker(unittest.TestCase):
         self.assertEqual([r.get("run_dir") for r in snap], [""])
 
 
-    def test_an_unreadable_run_marker_read_makes_the_table_unknown(self):
-        snap, _ = self.snapshot("700 1 700 %s\n" % self.HELPER, (1, "", "ps: could not read the process table\n"))
-        self.assertIsNone(snap, "a per pid read that failed with a message read as 'no run' instead of NO-DATA")
+    # STAB1.d (2026-11-01, STABILITY-120.json): an unreadable run marker read makes that ONE ROW unknown (run_dir None),
+    # no longer the whole table (renamed from ..._makes_the_table_unknown, which now states a falsehood). What these two
+    # cases protected still holds: the row is never read as "no run", owned() for a pattern it matches answers unknown,
+    # and the stop refuses (NO-DATA, exit 2) instead of printing STOPPED or listing nothing.
 
-    def test_a_run_marker_read_that_raises_makes_the_table_unknown(self):
+    def test_an_unreadable_run_marker_read_makes_the_row_unknown(self):
+        snap, _ = self.snapshot("700 1 700 %s\n" % self.HELPER, (1, "", "ps: could not read the process table\n"))
+        self.assertEqual([(r["pid"], r.get("run_dir", "absent")) for r in snap or []], [(700, None)],
+                         "a per pid read that failed with a message must keep the row with run_dir None (unknown)")
+        env = {k: v for k, v in os.environ.items() if k not in RUN_VARS}
+        env["HOME"] = HOME
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(LP.owned(snap, LP.RUNNERS_RX, self_pid=1),
+                              "an unknown row the pattern matches read as 'not ours' instead of NO-DATA")
+        # the stop itself, over a fake ps whose per pid read fails the same way: NO-DATA, exit 2, never STOPPED
+        d = tempfile.mkdtemp(prefix="stop-run-marker-unreadable-")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, "home", ".claude", "evidence"))
+        write(os.path.join(d, "fake", "ps"),
+              "#!/usr/bin/env python3\nimport sys\na = sys.argv[1:]\n"
+              "if '-E' in a:\n    sys.stderr.write('ps: could not read the process table\\n'); sys.exit(1)\n"
+              "if '-p' in a:\n    sys.exit(1)\n"
+              "print(%r)\n" % ("700 1 700 " + self.HELPER))
+        os.chmod(os.path.join(d, "fake", "ps"), 0o755)
+        env.update(HOME=os.path.join(d, "home"), PATH=os.path.join(d, "fake") + os.pathsep + os.environ["PATH"],
+                   STOP_LOOP_ONLY=self.HELPER)
+        r = subprocess.run(["bash", STOP, "--dry"], env=env, capture_output=True, text=True, timeout=60)
+        self.assertNotIn("STOPPED", r.stdout, "the stop printed STOPPED over a row it could not judge: " + r.stdout)
+        self.assertEqual((r.returncode, "NO-DATA" in r.stdout), (2, True), r.stdout + r.stderr)
+
+    def test_a_run_marker_read_that_raises_makes_the_row_unknown(self):
         snap, _ = self.snapshot("700 1 700 %s\n" % self.HELPER, OSError("ps could not be started"))
-        self.assertIsNone(snap, "a per pid read that raised read as 'no run' instead of NO-DATA")
+        self.assertEqual([(r["pid"], r.get("run_dir", "absent")) for r in snap or []], [(700, None)],
+                         "a per pid read that raised must keep the row with run_dir None (unknown)")
+        env = {k: v for k, v in os.environ.items() if k not in RUN_VARS}
+        env["HOME"] = HOME
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(LP.owned(snap, LP.RUNNERS_RX, self_pid=1),
+                              "an unknown row the pattern matches read as 'not ours' instead of NO-DATA")
+        # the stop's own call (stop_loop.sh procs(): `<kind> --only "$ONLY" --self "$$"`) over the same raising read
+        import contextlib, io
+
+        def fake_run(argv, **kw):
+            if "-E" in argv:
+                raise OSError("ps could not be started")
+            return subprocess.CompletedProcess(argv, 0, "700 1 700 %s\n" % self.HELPER, "")
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(LP.subprocess, "run", side_effect=fake_run), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = LP.main(["all", "--only", "", "--self", "1"])
+        self.assertEqual((rc, out.getvalue()), (2, ""), "the stop listed or passed over a row it could not judge: " + err.getvalue())
+        self.assertIn("NO-DATA", err.getvalue())
 
 
 FAKE_PS = r'''#!/usr/bin/env python3
@@ -244,6 +289,18 @@ def alive(proc_or_pid):
     return r.returncode == 0 and not r.stdout.strip().startswith("Z")
 
 
+def _ps_runs():
+    """True when this host lets a test read the real process table. The public runner's sandbox refuses /bin/ps
+    ("Operation not permitted"); there the cases below have no premise, so they are skipped by name, never read green
+    from a fake table: the fake table cases above already pin the rule itself."""
+    try:
+        return subprocess.run(["ps", "-o", "pid=", "-p", str(os.getpid())], capture_output=True, text=True,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@unittest.skipUnless(_ps_runs(), "this host refuses to run ps, so real processes cannot be read here")
 class RealProcesses(unittest.TestCase):
     """The incident's own shape on real processes: a runner of the run under test and the fixture's straggler copy,
     each with the or_fanout it started in its own session, plus a code root helper with and without its run."""

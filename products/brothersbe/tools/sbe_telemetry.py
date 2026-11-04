@@ -589,7 +589,7 @@ SECRET_PATTERNS = [
     # key=value, key: value, and the natural-language "the password is hunter2".
     # Over-redaction is deliberate here: a masked non-secret costs nothing, a
     # stored secret costs a lot.
-    # Leading prefix so PROD_DB_PASSWORD= matches as well as password=. Bounded
+    # Leading prefix so a PROD_DB_PASSWORD key matches as well as the bare key. Bounded
     # to {0,40}: an unbounded [A-Za-z0-9_]* is retried at every offset of a long
     # run, which is O(n^2) (BrotherMode measured one 20 KB row at 75 seconds).
     re.compile(_BEFORE + r"[A-Za-z0-9_]{0,40}(?:pass(?:word|wd|phrase)?"
@@ -1545,7 +1545,9 @@ def cmd_check_update():
         # follow): SAY so, once, rather than return in total silence. The
         # old behavior here was indistinguishable from "everything is up to
         # date" and from "the update check never ran at all".
-        print("BROTHERSBE UPDATE: the update check is skipped: %s" % why_not)
+        # FRUN1: this prints at session start; the install folder's own path spells an internal product name.
+        print("Brother update: the update check is skipped: %s"
+              % str(why_not).replace(SKILL_DIR, "this install"))
         return
     head = _read_first_line(os.path.join(head_dir, "HEAD"))
     branch = head[5:].strip() if head.startswith("ref:") else ""
@@ -1562,7 +1564,7 @@ def cmd_check_update():
         # Direction is not knowable without reading git objects, so the message
         # and the command are both symmetric: left-right marks which side each
         # commit is on, and works whether you are behind, ahead, or diverged.
-        print("BROTHERSBE UPDATE: installed copy (%s) and fetched origin (%s) "
+        print("Brother update: installed copy (%s) and fetched origin (%s) "
               "differ. See which side each commit is on, then update:"
               % (local[:7], remote[:7]))
         print("  git -C %s log --oneline --left-right %s...%s"
@@ -1576,7 +1578,7 @@ def cmd_check_update():
         except OSError:
             age = 0
         if age > STALE_AFTER_DAYS:
-            print("BROTHERSBE UPDATE: your copy of the law is %d days old. Check "
+            print("Brother update: your copy of the law is %d days old. Check "
                   "for updates: git -C %s pull" % (age, SKILL_DIR))
 
     # (c) the law changed under you since the last session that looked: say so

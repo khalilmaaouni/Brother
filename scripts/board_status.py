@@ -255,11 +255,10 @@ USER_RUNS_ROOT = os.path.join(
     os.path.expanduser(os.path.join("~", ".claude", "brother-run")),
     "docs", "plan", "runs")
 
-#: Same resolution every products/brothermode/tools/bm_vault_*.py module
-#: uses (e.g. bm_vault_catalog.py's DEFAULT_VAULT): BROTHERMODE_VAULT, else
-#: the founder's own vault.
-VAULT_ROOT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser(
-    "~/Documents/Kay Vault")
+#: The vault the counters walk is the one resolver's answer (KEY1.f):
+#: pattern_note.vault_root, never a guessed folder.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pattern_note  # noqa: E402
 
 WEEK_DAYS = 7
 
@@ -419,11 +418,13 @@ def notes_written_this_week(vault_root=None, now=None):
     bm_vault_*.py module resolves it. A note with no `created:` line is
     skipped, not counted and not an error: most vault files are not
     notes."""
-    if vault_root is None:
-        vault_root = VAULT_ROOT
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff_date = (now - datetime.timedelta(days=WEEK_DAYS)).date()
     command = "python3 scripts/board_status.py --vault-counters"
+    if vault_root is None:
+        vault_root, why = pattern_note.vault_root()
+        if vault_root is None:
+            return None, command, why
     if not os.path.isdir(vault_root):
         return None, command, "no such directory: %s" % vault_root
     count = 0
@@ -642,6 +643,29 @@ def classify(item, *, jev_runner=None):
 #: `answer`, whatever consult() says).
 _J030_CONSULT_MEMO = set()
 
+#: JEV1.a: (attempt_id, local verdict) for every J030 consult this render,
+#: graded by label_j030_decisions() once main() ends. Reset with the memo.
+_J030_PENDING_LABELS = []
+
+
+def label_j030_decisions():
+    """Grades this render's J030 decisions from the local verdict that
+    decided them (has_evidence), through jev_outcome.label_attempt, the
+    writer loop_bridge uses. drain() first: the worker's terminal row lands
+    after consult() returns. Never raises; no pending label, no drain."""
+    if not _J030_PENDING_LABELS:
+        return
+    pending = list(_J030_PENDING_LABELS)
+    del _J030_PENDING_LABELS[:]
+    try:
+        import jev_outcome
+        import jev_seam
+        jev_seam.drain()
+        for attempt_id, verdict in pending:
+            jev_outcome.label_attempt(jev_seam.DEFAULT_LEDGER_DIR, attempt_id, verdict)
+    except Exception:
+        pass  # sbe: allow-silent a label that cannot be written never changes the board verdict
+
 
 def reset_j030_consult_memo():
     """Clears claim_supported_by_source()'s per-render J030 memo. main()
@@ -649,6 +673,7 @@ def reset_j030_consult_memo():
     reset_j025_consult_memo(); tests call it the same way they call
     jev_g1_seam_cache.reset()."""
     _J030_CONSULT_MEMO.clear()
+    del _J030_PENDING_LABELS[:]
 
 
 def claim_supported_by_source(item, *, jev_runner=None):
@@ -684,14 +709,16 @@ def claim_supported_by_source(item, *, jev_runner=None):
         import jev_g1_seam_cache
         if not jev_g1_seam_cache.is_off("J030") and memo_key not in _J030_CONSULT_MEMO:
             import jev_seam
-            jev_seam.consult(
+            res = jev_seam.consult(
                 "J030", {"claim": claim, "evidence": evidence}, answer,
                 seams_config=jev_seam.load_seams_config(),
                 registry=jev_seam.load_registry(),
                 ledger_dir=jev_seam.DEFAULT_LEDGER_DIR,
                 runner=jev_runner,
-            )  # C1: return value intentionally discarded, see docstring above
+            )  # C1: consult's answer is never returned; only its attempt id is kept, to grade it
             _J030_CONSULT_MEMO.add(memo_key)
+            if getattr(res, "attempt_id", ""):
+                _J030_PENDING_LABELS.append((res.attempt_id, answer))
     except Exception:
         pass  # sbe: allow-silent the seam is advisory only, caller keeps its own local verdict
     return answer
@@ -782,6 +809,13 @@ def bar(pct, width=28):
 
 
 def main(argv=None):
+    try:
+        return _main(argv)
+    finally:
+        label_j030_decisions()
+
+
+def _main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--source", default=SOURCE)
     ap.add_argument("--item", help="one id, e.g. F1")

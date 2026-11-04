@@ -1,55 +1,44 @@
 #!/usr/bin/env python3
-"""The closing ceremony law's enforcer (founder order 2026-08-30 at close).
+"""The closing ceremony law's enforcer, re-scoped by unit HO1 (owner order
+2026-10-31) from pack directories to declared handover records.
 
-A session close is FINISHED only when a handover pack exists that another
-account's fresh session can start from. The founder's words that night:
-"I need the MD file for handover to another session in another account and
-the zip file as well as all the learning, mistakes made to avoid, wisdom,
-and the brother readiness board html file make this the new closing
-ceremony". This script decides that mechanically, so the ceremony cannot
-be claimed from memory.
+WHY THE RE-SCOPE. This gate used to judge whatever DIRECTORY was newest
+under a shared folder by marker heuristics (a start file, a board copy, a
+session log, a zip beside it). Measured 2026-09-17 and again 2026-10-31: a
+scratch bundle in that folder became "the newest pack" and blocked every
+push on the machine. A close now DECLARES itself: a `*.handover.json` record
+written by scripts/handover_record.py emit, carrying a schema. A directory
+that is not a close is kept out of judgment by name, never judged.
 
-What a valid close pack is, checked here:
-  1. The newest pack directory under the handover root contains
-     01-START-HERE.md, a board HTML copy, and a session log.
-  2. 01-START-HERE.md carries the four load-bearing sections by heading
-     keyword: what finished, priorities, wisdom (learnings and mistakes),
-     and acceleration.
-  3. A zip sits beside the pack directory holding every file the
-     directory holds (the one-zip law: never the pack beside its parts
-     with files missing from the zip).
-  4. EVERY pack under the handover root is clean of every private term
-     (readiness row E35): file and directory names, every scanned text
-     file's content, and every zip archive's member names and text
-     members, not only the newest pack's markdown. Reuses
-     scripts/handover_pack_scan.py's scanner by import, never a second
-     copy of the matching rule.
-  5. The pack is FRESH: newer than --max-age-hours (default 24), so a
-     stale pack from last week cannot green a new close.
+What this checks, every run:
+  1. EVERY declared record under the root parses to its schema, carries
+     every required field, and is clean when its private term, dash and
+     credit scans are RE-DERIVED (handover_record.record_problems), so a
+     hand edit after emit cannot keep a PASS it no longer earns.
+  2. The WHOLE root is clean of every private term (readiness row E35):
+     records, legacy packs, their zips and every name, by
+     scripts/handover_pack_scan.py's scanner, imported, never copied.
+And with --require-current (the cut's freeze and preflight steps):
+  3. The newest close for this repository still describes HEAD: a record's
+     head_sha IS HEAD; a legacy pack (a directory carrying 01-START-HERE)
+     is either inside --max-age-hours or names HEAD (pack_describes_branch).
 
-Exit codes, this estate's convention: 0 the newest pack satisfies the law,
-1 it does not (each failure named), 2 NO-DATA (no pack root, no pack, or a
-newest directory carrying none of the pack markers, named, never a pass).
+Exit codes, this estate's convention: 0 PASS, 1 FAIL (each failure named,
+a private value never printed), 2 NO-DATA (no root, no close of either kind,
+or --require-current with no close for this repository; never a pass).
 """
 import argparse
 import os
 import re
 import sys
 import time
-import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import handover_pack_scan as hps  # noqa: E402
+import handover_record as hr  # noqa: E402
 
 ROOT = os.path.expanduser("~/Documents/BrotherModeUp-handovers")
 MAX_AGE_HOURS = 24.0
-
-SECTIONS = {
-    "finished": r"(?im)^#+ .*(finished|delivered|what you are walking into)",
-    "priorities": r"(?im)^#+ .*(priorit|order)",
-    "wisdom": r"(?im)^#+ .*(wisdom|learning|mistake|lesson)",
-    "acceleration": r"(?im)^#+ .*(acceler|first (fifteen|15) minutes|start here)",
-}
 
 
 def _boxed():
@@ -147,22 +136,63 @@ def newest_pack(root):
     return max(dirs, key=os.path.getmtime) if dirs else None
 
 
-def pack_flags(pack):
-    """(start, has_board, has_log, has_zip) of a directory under the handover root: the four markers of a close pack, by the
-    one rule main() and expiry_errors share. A directory carrying none of them is not a pack."""
-    files = sorted(os.listdir(pack))
-    start = next((f for f in files if f.upper().startswith("01-START-HERE")), None)
-    has_board = any(f.lower().endswith(".html") and "board" in f.lower() for f in files)
-    has_log = any("session-log" in f.lower() or "session_log" in f.lower()
-                  or re.search(r"session.?log", f, re.I) for f in files)
-    return start, has_board, has_log, os.path.isfile(pack + ".zip")
+def start_here(pack):
+    """The 01-START-HERE file a legacy pack directory carries, or None. That file is what makes a directory a legacy
+    close; a board copy, a session log or a zip beside it alone does not (HO1: the scratch bundle of 2026-10-31 had a
+    zip beside it and was judged as a broken pack)."""
+    try:
+        return next((f for f in sorted(os.listdir(pack)) if f.upper().startswith("01-START-HERE")), None)
+    except OSError:
+        return None
 
-def expiry_errors(root, deadline, now=None):
-    """Refusal strings for a run that ends at `deadline` (epoch seconds): [] when the newest pack under `root` is still
-    inside the freshness bar (MAX_AGE_HOURS) at that moment, else one named refusal. A clock-bound row read at the
-    deadline, never only at launch (1.1.7 LR1.b: the pack is fresh when the run starts and a gate row reads it stale at
-    the landing). `now` is accepted so a caller can pin its clock; the expiry is absolute, so it is not read. A deadline
-    that is not a finite number and a root that is not a directory raise ValueError before any file is read."""
+
+def _common_dir(path):
+    """The repository a folder belongs to, the same for every worktree of it, or None."""
+    rc, out = hr.git(path, "rev-parse", "--git-common-dir") if os.path.isdir(path) else (1, "")
+    return os.path.realpath(os.path.join(path, out.strip())) if rc == 0 and out.strip() else None
+
+
+def closes(root, repo=None):
+    """(closes, ignored): closes is [(mtime, path, kind)] newest first, kind "record" for a declared
+    *.handover.json and "pack" for a directory carrying 01-START-HERE; ignored lists every other directory, which is
+    not a close and is never judged. With `repo`, a record counts only when it was emitted from that repository
+    (any worktree of it); a legacy pack names no repository and always counts. Only a record that PARSES to its
+    schema and contract is a close: a file merely named *.handover.json is not one, so junk can never become the
+    newest close (review finding 2). main() judges every such file by name all the same."""
+    want = _common_dir(repo) if repo else None
+    found, ignored = [], []
+    for path in hr.records_in(root):
+        record, errs = hr.load_record(path)
+        if record is None or errs or hr.contract_errors(record):
+            continue
+        if want is not None and not hr.same_path(_common_dir(str(record["project"]["repo_path"])), want):
+            continue
+        found.append((os.lstat(path).st_mtime, path, "record"))
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        if os.path.isdir(path):
+            if start_here(path):
+                found.append((os.path.getmtime(path), path, "pack"))
+            else:
+                ignored.append(path)
+    found.sort(reverse=True)
+    return found, ignored
+
+
+def newest_close(root, repo=None):
+    """(path, kind) of the newest close under root (see closes), or (None, None)."""
+    found, _ = closes(root, repo)
+    return (found[0][1], found[0][2]) if found else (None, None)
+
+
+def expiry_errors(root, deadline, now=None, repo=None):
+    """Refusal strings for a run that ends at `deadline` (epoch seconds): [] when the newest close under `root` is a
+    declared record (bound to a change, never to the clock) or a legacy pack still inside the freshness bar
+    (MAX_AGE_HOURS) at that moment, else one named refusal. A clock-bound row read at the deadline, never only at
+    launch (1.1.7 LR1.b). `now` is accepted so a caller can pin its clock; the expiry is absolute, so it is not read.
+    A deadline that is not a finite number and a root that is not a directory raise ValueError before any file is
+    read. With `repo`, only that repository's records count (another project's record says nothing about this
+    run); a legacy pack names no repository and always counts."""
     if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or deadline != deadline \
             or deadline in (float("inf"), float("-inf")):
         raise ValueError("deadline must be a finite number of seconds, got %r" % (deadline,))
@@ -172,16 +202,16 @@ def expiry_errors(root, deadline, now=None):
         raise ValueError("root must be a directory, got %r" % (root,))
     fix = "refresh with python3 scripts/close_ceremony_check.py"
     try:
-        # the newest directory that IS a pack: a scratch folder with no pack marker is not judged (main() reads it as
-        # NO-DATA too), so it cannot make a stale pack look fresh
-        dirs = sorted((os.path.join(root, d) for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))),
-                      key=os.path.getmtime, reverse=True)
-        pack = next((d for d in dirs if any(pack_flags(d))), None)
-        mtime = None if pack is None else os.path.getmtime(pack)
+        # the newest CLOSE: a scratch folder with no 01-START-HERE is not judged, so it cannot make a stale pack look
+        # fresh, and a declared record is bound to its change, not to the clock
+        pack, kind = newest_close(root, repo)
+        mtime = None if pack is None else os.lstat(pack).st_mtime
     except OSError as exc:
-        return ["close ceremony: the packs under %s cannot be read (%s); %s" % (root, exc, fix)]
+        return ["close ceremony: the closes under %s cannot be read (%s); %s" % (root, exc, fix)]
     if pack is None:
-        return ["close ceremony: no pack under %s; %s" % (root, fix)]
+        return ["close ceremony: no handover record and no pack under %s; %s" % (root, fix)]
+    if kind == "record":
+        return []
     expires = mtime + MAX_AGE_HOURS * 3600.0
     if expires <= deadline:
         return ["close ceremony: newest pack %s expires before %s; %s"
@@ -190,10 +220,15 @@ def expiry_errors(root, deadline, now=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=ROOT)
-    ap.add_argument("--max-age-hours", type=float, default=MAX_AGE_HOURS)
+    ap.add_argument("--root", default=None,
+                    help="the handover root (default: $BROTHER_HANDOVER_ROOT, else %s)" % ROOT)
+    ap.add_argument("--require-current", action="store_true",
+                    help="also require the newest close for --repo to describe HEAD (the cut's freeze and "
+                         "preflight steps); without it a close's age or branch is not judged")
+    ap.add_argument("--max-age-hours", type=float, default=MAX_AGE_HOURS,
+                    help="with --require-current, a LEGACY pack inside this age counts as current")
     ap.add_argument("--repo", default=REPO,
-                    help="the repository the pack's commit shas are resolved against")
+                    help="the repository whose HEAD a close must describe, and whose records count")
     ap.add_argument("--age-binding", choices=("change", "clock"), default="change",
                     help="change (default): a pack over the age bar is stale only when the "
                          "branch has moved since the pack was written. clock: the old rule, "
@@ -205,6 +240,8 @@ def main(argv=None):
                          "persistent scan cache (default: cache on, opt out only to force-"
                          "verify or to debug a suspected stale cache)")
     args = ap.parse_args(argv)
+    # resolved HERE, not at import: the box branch below compares against ROOT as it is when main() runs
+    args.root = args.root or os.environ.get("BROTHER_HANDOVER_ROOT") or ROOT
     # Measured 2026-09-13: this scan alone took ~52s over 1,560 directories,
     # 6,321 files and 205 zips, none of which had changed since the prior
     # close. Cached and stored beside the packs themselves (a sibling
@@ -230,67 +267,35 @@ def main(argv=None):
     if not os.path.isdir(args.root):
         print("NO-DATA: handover root %s does not exist" % args.root)
         return 2
-    pack = newest_pack(args.root)
-    if pack is None:
-        print("NO-DATA: no pack directory under %s" % args.root)
-        return 2
-
+    found, ignored = closes(args.root)
+    records = hr.records_in(args.root)  # every file named a record is judged, valid or not
+    packs = [p for _m, p, k in found if k == "pack"]
     problems = []
-    age_h = (time.time() - os.path.getmtime(pack)) / 3600.0
-    files = sorted(os.listdir(pack))
-    start, has_board, has_log, has_zip = pack_flags(pack)
-    zip_path = pack + ".zip"
-    # Measured 2026-09-17: the newest directory under the real root was a
-    # release-cut handoff scratch directory (two markdown files, none of the
-    # four markers, no zip beside it), and this check judged it as a close
-    # pack failing the law, which blocked every merge on the machine. A
-    # directory carrying NONE of the four markers is not a pack the law
-    # applies to: NO-DATA, named, never a pass (a session cannot claim its
-    # close on it, and its owner is told to keep it out of the root). One
-    # marker present is a pack missing the rest, and still fails below.
-    is_pack = bool(start or has_board or has_log or has_zip)
-    not_a_pack_note = (
-        "newest directory %s under the root is not a close pack (no "
-        "01-START-HERE, no board HTML, no session log, no zip beside it): "
-        "nothing for the ceremony law to judge, never a pass; its owner "
-        "should keep it out of the handover root" % os.path.basename(pack))
 
-    if is_pack and age_h > args.max_age_hours:
-        moved, note = pack_describes_branch(pack, start, args.repo)
-        if args.age_binding == "clock" or moved is not False:
-            problems.append("pack %s is %.1f hours old, over the %.0f hour "
-                            "freshness bar: a stale pack cannot green a new close (%s)"
-                            % (os.path.basename(pack), age_h, args.max_age_hours, note))
-        else:
-            print("pack %s is %.1f hours old, over the %.0f hour bar, and is NOT counted "
-                  "stale: %s" % (os.path.basename(pack), age_h, args.max_age_hours, note))
-    if is_pack and start is None:
-        problems.append("no 01-START-HERE.md in the pack")
-    if is_pack and not has_board:
-        problems.append("no readiness board HTML copy in the pack")
-    if is_pack and not has_log:
-        problems.append("no session log in the pack")
-
-    if start:
-        with open(os.path.join(pack, start), encoding="utf-8") as fh:
-            text = fh.read()
-        for name, pat in SECTIONS.items():
-            if not re.search(pat, text):
-                problems.append("START-HERE lacks a %s section" % name)
-
-    # Terms cleanliness (readiness row E35): every pack under the root, not
-    # only the newest pack's markdown. A pack is handed to a session on
-    # ANOTHER ACCOUNT, so a private term anywhere in it (a file name, a
-    # directory name, a scanned text file's content, or a zip member) is a
-    # term leaving the machine. The 2026-09-03 audit found 24 such files
-    # sitting in OLDER packs the old newest-pack-only check never looked at.
-    # Reuses handover_pack_scan's scanner by import, never a second copy of
-    # the matching rule, so the standalone dry run and this gate agree.
+    # Terms cleanliness (readiness row E35): the WHOLE root, records and legacy
+    # packs alike, not only the newest close. A private term anywhere under it
+    # (a file name, a directory name, a scanned text file's content, or a zip
+    # member) is a term one copy away from leaving the machine. The 2026-09-03
+    # audit found 24 such files sitting in OLDER packs a newest-only check
+    # never looked at. Reuses handover_pack_scan's scanner by import, never a
+    # second copy of the matching rule, so the standalone dry run and this
+    # gate agree.
     hits, short_patterns, long_patterns, _stats, no_data_reason = hps.run_scan(
         args.root, args.terms, cache_path=cache_path)
+
+    def masked(path):
+        # escaped too: a newline or a terminal escape in a peer's file name never starts a line of its own
+        return hr.shown(hps.mask_path(os.path.basename(path), short_patterns, long_patterns), False)
+
+    for path in records:
+        record_failures, record_notes = hr.record_problems(path, args.terms)
+        problems += ["record %s: %s" % (masked(path), problem) for problem in record_failures]
+        for note in record_notes:
+            print("NO-DATA: record %s: %s" % (masked(path), note))
+
     if hits is None:
         problems.append("private terms list unreadable, could not check any "
-                        "pack (%s): a stop, not a pass" % no_data_reason)
+                        "close (%s): a stop, not a pass" % no_data_reason)
     elif hits:
         by_pack = {}
         for _kind, relpath, _n in hits:
@@ -303,50 +308,73 @@ def main(argv=None):
             pack_name = zip_relpath.split(os.sep, 1)[0]
             by_pack[pack_name] = by_pack.get(pack_name, 0) + 1
         for pack_name in sorted(by_pack):
-            # The pack NAME itself can be the offender (the audit's file-name
-            # case), so it is masked the same way handover_pack_scan.py masks
-            # every path it prints, never trusted to be clean just because it
-            # is being used as a label here rather than a scanned path.
-            masked_name = hps.mask_path(pack_name, short_patterns, long_patterns)
+            # The NAME itself can be the offender (the audit's file-name case),
+            # so it is masked the same way handover_pack_scan.py masks every
+            # path it prints, never trusted to be clean because it is a label.
             problems.append(
                 "pack %s carries %d private-term hit(s) (value not "
                 "printed; run scripts/handover_pack_scan.py for detail)"
-                % (masked_name, by_pack[pack_name]))
+                % (masked(pack_name), by_pack[pack_name]))
 
-    if is_pack and not has_zip:
-        problems.append("no zip beside the pack (%s missing)" % zip_path)
-    elif has_zip:
-        with zipfile.ZipFile(zip_path) as zf:
-            inside = {n for n in zf.namelist() if not n.endswith("/")}
-        # Full relative paths, not top-level entries, so nested files match zip
-        # members. A real zip archives the pack under its own directory name
-        # (confirmed against a real shipped pack: every member is
-        # "<pack-dir-name>/<rel>", never bare "<rel>"), so this must prefix
-        # or every real pack reads as missing every one of its own files.
-        pack_name_in_zip = os.path.basename(pack.rstrip(os.sep))
-        pack_files = []
-        for dirpath, _dirnames, filenames in os.walk(pack):
-            for fn in filenames:
-                rel = os.path.relpath(os.path.join(dirpath, fn), pack)
-                pack_files.append(pack_name_in_zip + "/" + rel.replace(os.sep, "/"))
-        missing = [f for f in sorted(pack_files) if f not in inside]
-        if missing:
-            problems.append("zip is missing pack files: %s" % ", ".join(missing))
+    current, current_note = None, ""
+    if args.require_current:
+        mine, _ = closes(args.root, args.repo)
+        current = mine[0] if mine else None
+    if current is not None and current[2] == "record":
+        path = current[1]
+        record, errs = hr.load_record(path)
+        rc, now = hr.git(args.repo, "rev-parse", "HEAD")
+        head = str(record["project"]["head_sha"]) if record is not None and not errs else None
+        if head is None:
+            pass  # already a problem above, by name
+        elif rc != 0:
+            problems.append("HEAD does not resolve in %s, so record %s cannot be checked as current"
+                            % (args.repo, masked(path)))
+        elif head == now.strip():
+            current_note = ", newest close %s names HEAD %s" % (masked(path), head[:12])
+        elif hr.git(args.repo, "merge-base", "--is-ancestor", head, "HEAD")[0] == 0:
+            _, count = hr.git(args.repo, "rev-list", "--count", "%s..HEAD" % head)
+            problems.append("record %s names %s, %s commit(s) behind HEAD: the branch moved since the close; "
+                            "emit a record for the current tip" % (masked(path), head[:12], count.strip()))
+        else:
+            problems.append("record %s names %s, which is not an ancestor of HEAD: emit a record for this branch"
+                            % (masked(path), head[:12]))
+    elif current is not None:
+        pack = current[1]
+        age_h = (time.time() - os.path.getmtime(pack)) / 3600.0
+        if age_h > args.max_age_hours:
+            moved, note = pack_describes_branch(pack, start_here(pack), args.repo)
+            if args.age_binding == "clock" or moved is not False:
+                # land_batch.PACK_OLD_RE reads this exact line: keep its shape
+                problems.append("pack %s is %.1f hours old, over the %.0f hour "
+                                "freshness bar: a stale pack cannot green a new close (%s)"
+                                % (masked(pack), age_h, args.max_age_hours, note))
+            else:
+                current_note = ", newest close %s is a legacy pack over the bar that %s" % (masked(pack), note)
+        else:
+            current_note = ", newest close %s is a legacy pack %.1f hours old" % (masked(pack), age_h)
+
+    newest = found[0][0] if found else None
+    loud = [p for p in ignored if newest is None or os.path.getmtime(p) > newest]
+    for path in sorted(loud, key=os.path.getmtime, reverse=True)[:5]:
+        print("IGNORED: %s is not a close (no handover record, no 01-START-HERE), kept out of judgment"
+              % masked(path))
 
     if problems:
-        if not is_pack:
-            problems.append(not_a_pack_note)
-        print("FAIL: the newest close pack does not satisfy the ceremony law")
+        print("FAIL: the handover root does not satisfy the closing ceremony law")
         for p in problems:
             print("  - " + p)
         return 1
-    if not is_pack:
-        print("NO-DATA: " + not_a_pack_note)
+    if not found:
+        print("NO-DATA: no handover record and no legacy pack under %s: nothing for the ceremony "
+              "law to judge, never a pass" % args.root)
         return 2
-    print("PASS: pack %s satisfies the closing ceremony law "
-          "(start-here with all four sections, board HTML, session log, "
-          "complete zip, %.1f hours old, terms clean)"
-          % (os.path.basename(pack), age_h))
+    if args.require_current and current is None:
+        print("NO-DATA: no close for %s under %s, so none describes HEAD; emit one with "
+              "python3 scripts/handover_record.py emit" % (args.repo, args.root))
+        return 2
+    print("PASS: %d handover record(s) valid and %d legacy pack(s) under the root, terms clean%s"
+          % (len(records), len(packs), current_note))
     return 0
 
 

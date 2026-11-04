@@ -27,6 +27,8 @@ decides the rest later via `score`.
     python3 bds.py passport [.sbe/passport.json]          consume BrotherMode's change passport
     python3 bds.py handoff  [.sbe/handoff.json]           consume BrotherSBE's handoff package
     python3 bds.py backlog  [docs/plan/QUEUE.json]        every item against the chain
+    python3 bds.py door     HANDLER                       one existing command for the Brother door,
+                                                          typed inputs as JSON on stdin
     python3 bds.py selftest
 
 Verdicts are PASS, FAIL, NO-DATA, matching the BrotherSBE tuple exactly.
@@ -40,6 +42,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -2625,17 +2628,22 @@ def _author_errors(claim):
     return errors
 
 
-def author(dest, stdin_text):
+def author(dest, stdin_text, as_json=False):
     """Write a claim from key=value lines on stdin: authoring a claim as a
-    side effect of doing the analysis, never by hand-editing JSON."""
+    side effect of doing the analysis, never by hand-editing JSON. With
+    as_json (`author <dest> --json`, what the Brother door sends) stdin is one
+    JSON object, so pack lists, booleans and numbers keep their types."""
     p = _expand(dest)
     if p.exists():
         print("refusing to overwrite %s" % p)
         return 1
     try:
-        claim = _parse_author_input(stdin_text)
+        claim = json.loads(stdin_text) if as_json else _parse_author_input(stdin_text)
     except ValueError as exc:
         print("REFUSED: %s" % exc)
+        return 2
+    if not isinstance(claim, dict):
+        print("REFUSED: the claim must be one JSON object")
         return 2
 
     errors = _author_errors(claim)
@@ -2941,11 +2949,416 @@ def _recurring(d, propose):
     print("")
 
 
+# ---------------------------------------------------------------------------
+# THE DOOR'S HANDLERS (OUT1.e). The Brother door's invoke_capability() runs
+# `bds.py door HANDLER` with the person's typed inputs as one JSON object on
+# stdin. Each handler is ONE existing BrotherDS or MDM command, run over the
+# same interpreter: nothing here re-decides a gate, a pack, a derivation, a
+# survivorship rule or a locale key. A handler adds only the argument shape,
+# the type check of each input, and the honest reply. The verdict is the
+# command's OWN, read from what it printed by the reader DOOR_VERDICT_READERS
+# declares for its handler, never inferred from exit 0: most of these commands
+# exit 0 whatever they found (receipt prints a FAIL gate and exits 0). Only a
+# PASS carries evidence, which names the command, its exit code and the sha256
+# of exactly what it printed. Consent is checked first and fails closed,
+# through BrotherMode's own setup.py, the same gate the Vault uses.
+# BrotherDS is experimental; the door says so in every reply.
+# ---------------------------------------------------------------------------
+DOOR_TIMEOUT_S = 300
+DOOR_HERE = os.path.dirname(os.path.abspath(__file__))
+DOOR_STATUS = "BrotherDS is experimental: a verdict here is a statement about proof, not about the world."
+#: handler -> (tool file beside this one, subcommand words, required inputs, optional inputs)
+DOOR_HANDLERS = {
+    "data_existing_author": ("bds.py", ("author",), ("dest", "claim"), ()),
+    "data_existing_check": ("bds.py", ("check",), ("claim_path",), ()),
+    "data_existing_receipt": ("bds.py", ("receipt",), ("claim_path",), ()),
+    "data_existing_register": ("bds.py", ("register",), ("claim_path",), ()),
+    "data_existing_score": ("bds.py", ("score",), ("claim_path", "actual"), ("observed_by", "observed_on")),
+    "data_existing_ledger": ("bds.py", ("ledger",), ("directory",), ()),
+    "data_existing_mdm_review": ("bds.py", ("mdm-eval", "review"), ("review_csv", "merge_threshold"), ()),
+    "data_existing_mdm_clusters": ("bds.py", ("mdm-eval", "clusters"), ("gold_csv",), ()),
+    "data_existing_mdm_drift": ("bds.py", ("mdm-eval", "drift"), ("reference_csv", "current_csv"), ()),
+    "data_existing_mdm_audit": ("bds.py", ("mdm-audit", "audit"), ("results_csv",), ()),
+    "data_existing_mdm_audit_plan": ("bds.py", ("mdm-audit", "audit"), ("results_csv", "plan"), ()),
+    "data_existing_mdm_evaluate": ("bds.py", ("mdm-audit", "evaluate"), ("labelled_csv",), ("results_csv",)),
+    "data_existing_mdm_resolve": ("mdm_jan_lookup.py", ("resolve",), ("inputs", "out"), ()),
+    "data_existing_mdm_classify": ("mdm_jan_lookup.py", ("classify",), ("names",), ()),
+    "data_existing_mdm_normalize": ("mdm_normalize.py", ("key",), ("kind", "locale", "text"), ()),
+    "data_existing_mdm_validate": ("mdm_validate.py", (), ("kind", "values"), ()),
+}
+#: handler -> the reader that turns what its command printed into PASS, FAIL or NO-DATA (measured shapes:
+#: check and author print print_check's `VERDICT X`; receipt prints gate rows and `| Verdict | **X** |`; ledger
+#: prints `VERIFIED CLAIM RATE  NO-DATA` or a percentage; mdm_validate prints one JSON object per value with a
+#: boolean "valid"; the rest derive, record or normalize and carry no verdict of their own, so each earns PASS only
+#: from the success marker its own command prints: the register line, OUTCOME HELD (MISSED is FAIL), the JSON keys of the
+#: derivation, `wrote N rows`, one classified JSON row per name, the normalizer's own key for the inputs; exit 0
+#: without that marker is NO-DATA). A handler missing here answers NO-DATA and runs nothing.
+DOOR_VERDICT_READERS = {
+    "data_existing_author": "verdict_line",
+    "data_existing_check": "verdict_line",
+    "data_existing_receipt": "gate_rows",
+    "data_existing_register": "registered",
+    "data_existing_score": "outcome",
+    "data_existing_ledger": "claim_rate",
+    "data_existing_mdm_review": "review_json",
+    "data_existing_mdm_clusters": "clusters_json",
+    "data_existing_mdm_drift": "drift_json",
+    "data_existing_mdm_audit": "audit_json",
+    "data_existing_mdm_audit_plan": "audit_plan_json",
+    "data_existing_mdm_evaluate": "evaluate_json",
+    "data_existing_mdm_resolve": "wrote_rows",
+    "data_existing_mdm_classify": "classify_lines",
+    "data_existing_mdm_normalize": "key_matches",
+    "data_existing_mdm_validate": "json_valid",
+}
+_DOOR_VERDICT_LINE = re.compile(r"^\s*VERDICT[\s:]+(PASS|FAIL|NO-DATA)\b", re.M)
+_DOOR_GATE_ROW = re.compile(r"^\s*\|?\s*(PASS|FAIL|NO-DATA)\s+\|?\s*[A-Z]+[0-9]+\.\w+", re.M)
+_DOOR_OVERALL_ROW = re.compile(r"^\|\s*Verdict\s*\|\s*\*\*(PASS|FAIL|NO-DATA)\*\*", re.M)
+_DOOR_CLAIM_RATE = re.compile(r"^VERIFIED CLAIM RATE\s+(NO-DATA|[0-9]+%)", re.M)
+_DOOR_NOT_PASS_LINE = re.compile(r"^\s*(?:VERDICT[\s:]+)?(FAIL|NO-DATA)\b", re.M)
+
+
+def _door_worst(tokens):
+    """FAIL over NO-DATA over PASS, the same order check() aggregates its gates in; nothing read is NO-DATA."""
+    tokens = list(tokens)
+    if not tokens:
+        return NODATA
+    return FAIL if FAIL in tokens else NODATA if NODATA in tokens else PASS
+
+
+def _read_verdict_line(out, inputs=None):
+    """The LAST `VERDICT X` line (an indent or a colon allowed); none is NO-DATA."""
+    found = _DOOR_VERDICT_LINE.findall(out)
+    return found[-1] if found else NODATA
+
+
+def _read_gate_rows(out, inputs=None):
+    """Every gate row (`FAIL     G5.rederivation ...`, plain or after a markdown pipe) plus the receipt's overall
+    `| Verdict | **X** |` row: any FAIL is FAIL, else any NO-DATA is NO-DATA, else PASS; no rows is NO-DATA."""
+    return _door_worst(_DOOR_GATE_ROW.findall(out) + _DOOR_OVERALL_ROW.findall(out))
+
+
+def _read_claim_rate(out, inputs=None):
+    """The ledger computed a rate (PASS) or said it could not (NO-DATA). A rate over a subset, with claim files it
+    could not read, is the ledger's own "Fix these before trusting it", so NO-DATA too."""
+    found = _DOOR_CLAIM_RATE.findall(out)
+    if not found or found[-1] == NODATA or re.search(r"^UNREADABLE\b", out, re.M):
+        return NODATA
+    return PASS
+
+
+def _read_json_valid(out, inputs=None):
+    """One JSON object per non-empty line, each with a boolean "valid": all true PASS, any false FAIL, a line of
+    any other shape (or no line) NO-DATA."""
+    seen = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            return NODATA
+        if not isinstance(row, dict) or not isinstance(row.get("valid"), bool):
+            return NODATA
+        seen.append(row["valid"])
+    if not seen:
+        return NODATA
+    return PASS if all(seen) else FAIL
+
+
+def _door_marked(marker):
+    """A reader for a command with no verdict of its own: a FAIL line (a gate row, a `VERDICT` line) is FAIL; else
+    PASS only when `marker` (a compiled pattern) finds the line the command prints on success and no NO-DATA line
+    sits beside it; no marker is NO-DATA."""
+    def read(out, inputs=None):
+        found = _DOOR_NOT_PASS_LINE.findall(out)
+        if FAIL in found:
+            return FAIL
+        return _door_worst([PASS] + found) if marker.search(out) else NODATA
+    return read
+
+
+def _door_measured(row, path):
+    """True when the value at `path` (a key, or a tuple of keys down nested objects) is a measurement. These tools
+    print None, the text NO-DATA, or a coverage_state of NO-DATA for a figure they could not compute (a header-only
+    CSV prints precision_above null and recall null), and the key being present is not the evidence."""
+    value = row
+    for key in (path,) if isinstance(path, str) else path:
+        if not isinstance(value, dict) or key not in value:
+            return False
+        value = value[key]
+    return _door_value_measured(value)
+
+
+def _door_value_measured(value):
+    """None and NO-DATA are not measurements; a non-empty object or list is one only when something inside it is
+    ({"estimate": null} or {"value": null} carries no figure), and an object whose coverage_state is NO-DATA is not
+    one whatever else it holds. An empty object or list is a measured empty result (an evaluate with no strata), a
+    number, zero included, and any text other than NO-DATA are measurements."""
+    if value is None or value == NODATA:
+        return False
+    if isinstance(value, dict):
+        if value.get("coverage_state") == NODATA:
+            return False
+        return not value or any(_door_value_measured(v) for v in value.values())
+    if isinstance(value, list):
+        return not value or any(_door_value_measured(v) for v in value)
+    return True
+
+
+def _door_count(row, path):
+    """True when the value at `path` (a key, or a tuple of keys down nested objects) is a whole count above zero.
+    A bool, a fraction, infinity or text is not a count (mdm_audit refuses bool for counts too)."""
+    value = row
+    for key in (path,) if isinstance(path, str) else path:
+        if not isinstance(value, dict) or key not in value:
+            return False
+        value = value[key]
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _door_json_keys(*paths, positive=()):
+    """A reader for a command that prints one JSON object: PASS only when the whole output parses to an object in
+    which every path in `paths` holds a measured value (see _door_measured); anything that does not parse, or has
+    a missing or unmeasured figure, is NO-DATA (unless it holds a FAIL line). Each path in `positive` must also be a
+    whole count above zero (see _door_count): an audit over no rows, or a plan with no rows, measured nothing."""
+    def read(out, inputs=None):
+        try:
+            row = json.loads(out)
+        except ValueError:
+            return FAIL if FAIL in _DOOR_NOT_PASS_LINE.findall(out) else NODATA
+        if not isinstance(row, dict) or not all(_door_measured(row, p) for p in paths):
+            return NODATA
+        return PASS if all(_door_count(row, k) for k in positive) else NODATA
+    return read
+
+
+def _read_classify_lines(out, inputs=None):
+    """One JSON object per non-empty line, each naming a `name` and a `packaging_type`; any other line, or none, is
+    NO-DATA."""
+    seen = 0
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            return NODATA
+        if not isinstance(row, dict) or not _door_measured(row, "name") or not _door_measured(row, "packaging_type"):
+            return NODATA
+        seen += 1
+    return PASS if seen else NODATA
+
+
+def _read_key_matches(out, inputs=None):
+    """The normalizer printed exactly the key mdm_normalize computes for these inputs (recomputed here, not trusted
+    from the output); a different key, an unknown kind, or an unimportable normalizer is NO-DATA."""
+    try:
+        import mdm_normalize
+        kind, locale, text = inputs["kind"], inputs["locale"], inputs["text"]
+        want = {"company": lambda: mdm_normalize.company_key(text, locale),
+                "person": lambda: mdm_normalize.person_key(text, locale),
+                "phone": lambda: mdm_normalize.phone_key(text)}[kind]()
+    except (ImportError, KeyError, TypeError, ValueError):
+        return NODATA
+    return PASS if out.strip() == want else NODATA
+
+
+def _read_outcome(out, inputs=None):
+    """score's reader: `OUTCOME HELD` is PASS (the claim's predicted outcome held), `OUTCOME MISSED` is FAIL (the
+    observation contradicts the claim), UNSCOREABLE or no OUTCOME line is NO-DATA; a FAIL line anywhere is FAIL."""
+    found = _DOOR_NOT_PASS_LINE.findall(out)
+    if FAIL in found:
+        return FAIL
+    states = re.findall(r"^OUTCOME (HELD|MISSED)\s*$", out, re.M)
+    if "MISSED" in states:
+        return FAIL
+    return _door_worst([PASS] + found) if states else NODATA
+
+
+DOOR_READERS = {"verdict_line": _read_verdict_line, "gate_rows": _read_gate_rows, "claim_rate": _read_claim_rate,
+                "json_valid": _read_json_valid,
+                "registered": _door_marked(re.compile(r"^registered .+ from claim .+ in \S", re.M)),
+                "outcome": _read_outcome,
+                "review_json": _door_json_keys("precision_above", ("recall", "recall")),
+                "clusters_json": _door_json_keys("gold_clusters", ("pairwise", "f1")),
+                "drift_json": _door_json_keys("psi", "score_drift"),
+                "audit_json": _door_json_keys("input_sha256", "n_rows", positive=("n_rows",)),
+                "audit_plan_json": _door_json_keys("input_sha256", "n_rows", "review_plan",
+                                                   positive=("n_rows", ("review_plan", "row_count"))),
+                "evaluate_json": _door_json_keys("strata", "pathway_review", "unmatched_review"),
+                "wrote_rows": _door_marked(re.compile(r"^wrote [0-9]+ rows? to \S", re.M)),
+                "classify_lines": _read_classify_lines, "key_matches": _read_key_matches}
+#: what each input must be. A path must already exist unless the command writes it (dest, plan, out).
+DOOR_READ_PATHS = ("claim_path", "directory", "review_csv", "gold_csv", "reference_csv", "current_csv",
+                   "results_csv", "labelled_csv")
+DOOR_LISTS = ("inputs", "names", "values")
+DOOR_NUMBERS = ("actual", "merge_threshold")
+
+
+def _door_consented():
+    """True only when BrotherMode's own scripts/setup.py is_consented() says so, loaded by path from beside the
+    BrotherMode tools vault_bridge already found (no second definition of consent). Fails CLOSED when BrotherMode
+    is not installed, the module cannot load, or the config is missing or corrupt."""
+    tools = getattr(vault_bridge, "_TOOLS", None)
+    if not tools:
+        return False
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bds_setup_for_door", os.path.join(os.path.dirname(tools), "scripts", "setup.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        cfg, _err = mod.read_config()
+        return bool(mod.is_consented(cfg))
+    except Exception:  # sbe: allow-silent consent load failure; fails closed
+        return False
+
+
+def _door_input_problem(key, value):
+    """None when one input has its type, else the plain reason it does not. Values never become flags: a path,
+    a name or a code starting with a dash is refused (free text and validated codes go to positional parsers)."""
+    if key == "claim":
+        return None if isinstance(value, dict) else "claim must be a set of named fields, not %s" % type(value).__name__
+    if key in DOOR_NUMBERS:
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        return None if ok else "%s must be a number, got %r" % (key, value)
+    if key in DOOR_LISTS:
+        items = value if isinstance(value, list) else [value]
+        if not items or any(not isinstance(v, str) or not v for v in items):
+            return "%s must be one or more non-empty texts" % key
+        if key != "values" and any(v.startswith("-") for v in items):
+            return "%s may not start with a dash" % key
+        if key == "inputs":
+            absent = [v for v in items if not os.path.exists(os.path.expanduser(v))]
+            if absent:
+                return "there is no file at %s: supply that file, then ask again" % absent[0]
+        return None
+    if not isinstance(value, str) or not value:
+        return "%s must be a non-empty text" % key
+    if key != "text" and value.startswith("-"):
+        return "%s may not start with a dash" % key
+    if key in DOOR_READ_PATHS and not os.path.exists(os.path.expanduser(value)):
+        return "there is no file at %s: supply that file, then ask again" % value
+    return None
+
+
+def _door_argv(handler, i):
+    """(argument list after the subcommand, stdin text) for one handler. Typed values reach the command unchanged:
+    the claim travels as JSON to `author --json`, numbers are written back exactly as given."""
+    def lst(k):
+        return i[k] if isinstance(i[k], list) else [i[k]]
+    if handler == "data_existing_author":
+        return [i["dest"], "--json"], json.dumps(i["claim"], ensure_ascii=False)
+    if handler == "data_existing_score":
+        return [i["claim_path"], json.dumps(i["actual"]), i.get("observed_by") or "not stated",
+                i.get("observed_on") or "not stated"], ""
+    if handler == "data_existing_mdm_review":
+        return [i["review_csv"], "--merge-threshold=%s" % json.dumps(i["merge_threshold"])], ""
+    if handler == "data_existing_mdm_drift":
+        return [i["reference_csv"], i["current_csv"]], ""
+    if handler == "data_existing_mdm_audit_plan":
+        return [i["results_csv"], "--plan=%s" % i["plan"]], ""
+    if handler == "data_existing_mdm_evaluate":
+        extra = ["--results=%s" % i["results_csv"]] if i.get("results_csv") else []
+        return [i["labelled_csv"]] + extra, ""
+    if handler == "data_existing_mdm_resolve":
+        return ["--input"] + lst("inputs") + ["--out=%s" % i["out"]], ""
+    if handler == "data_existing_mdm_classify":
+        return lst("names"), ""
+    if handler == "data_existing_mdm_normalize":
+        return [i["kind"], i["locale"], i["text"]], ""
+    if handler == "data_existing_mdm_validate":
+        return [i["kind"]] + lst("values"), ""
+    return [i[DOOR_HANDLERS[handler][2][0]]], ""  # check, receipt, register, ledger, clusters, audit: one path
+
+
+def _door_run(argv, stdin_text):
+    """(exit code, stdout, stderr) of one existing command run beside this file."""
+    proc = subprocess.run([sys.executable, os.path.join(DOOR_HERE, argv[0])] + argv[1:], input=stdin_text,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+                          timeout=DOOR_TIMEOUT_S)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _door_tool_present(tool):
+    """True when this edition carries the tool beside this file (the public export leaves some out)."""
+    return os.path.isfile(os.path.join(DOOR_HERE, tool))
+
+
+def door_invoke(handler, inputs, run=None):
+    """{"verdict", "output", "evidence_refs", "status"} for one door handler. At exit 0 the verdict is what the
+    handler's declared reader finds in the command's own output (no output, or no reader, is NO-DATA). Exit 1 is
+    FAIL, because every command here keeps exit 1 for a FAIL or a refusal, unless stderr carries a Python
+    traceback: then the command crashed before judging anything, which is NO-DATA. Anything else (exit 2, a
+    refusal before launch, a timeout) is NO-DATA. Only PASS carries evidence."""
+    def reply(verdict, output, evidence=()):
+        return {"verdict": verdict, "output": output, "evidence_refs": list(evidence), "status": DOOR_STATUS}
+    row = DOOR_HANDLERS.get(handler) if isinstance(handler, str) else None
+    if row is None:
+        return reply(NODATA, "no BrotherDS handler is named %r; known: %s"
+                     % (handler, ", ".join(sorted(DOOR_HANDLERS))))
+    tool, sub, required, optional = row
+    if not _door_tool_present(tool):
+        return reply(NODATA, "%s is not in this edition of BrotherDS, so %s cannot run here; nothing was run"
+                     % (tool, handler))
+    if not isinstance(inputs, dict):
+        return reply(NODATA, "the door's inputs were not a set of named values")
+    if not _door_consented():
+        return reply(NODATA, "Brother has not been given consent to use this machine; run its setup first. "
+                             "Nothing was read or written.")
+    missing = [k for k in required if inputs.get(k) is None or inputs.get(k) in ("", [], {})]
+    if missing:
+        return reply(NODATA, "missing input: %s" % ", ".join(missing))
+    for key in required + tuple(k for k in optional if inputs.get(k) not in (None, "")):
+        problem = _door_input_problem(key, inputs[key])
+        if problem:
+            return reply(NODATA, problem)
+    reader = DOOR_READERS.get(DOOR_VERDICT_READERS.get(handler))
+    if reader is None:
+        return reply(NODATA, "%s declares no way to read its command's verdict, so nothing was run" % handler)
+    args, stdin_text = _door_argv(handler, inputs)
+    label = " ".join((tool,) + sub)
+    try:
+        code, out, err = (run or _door_run)([tool] + list(sub) + args, stdin_text)
+    except subprocess.TimeoutExpired:
+        return reply(NODATA, "%s did not finish within %d seconds" % (label, DOOR_TIMEOUT_S))
+    except OSError as exc:
+        return reply(NODATA, "%s could not start: %s" % (label, exc))
+    text = (out or "").strip() or (err or "").strip()
+    if code == 0 and (out or "").strip():
+        verdict = reader(out, inputs)
+        if verdict != PASS:
+            return reply(verdict, text)
+        digest = hashlib.sha256(out.encode("utf-8", "replace")).hexdigest()
+        return reply(PASS, text, ["%s exit 0 stdout sha256:%s" % (label, digest)])
+    if code == 1 and "Traceback (most recent call last)" in (err or ""):
+        last = (err or "").strip().splitlines()[-1]
+        return reply(NODATA, "%s crashed before judging anything (%s); nothing was judged" % (label, last))
+    if code == 1:
+        return reply(FAIL, text)
+    return reply(NODATA, text or "%s exited %s with no output" % (label, code))
+
+
+def cmd_door(argv):
+    """`bds.py door HANDLER`, inputs as one JSON object on stdin: the reply as one JSON line, exit 0 (the
+    verdict is in the reply)."""
+    try:
+        inputs = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        inputs = None
+    print(json.dumps(door_invoke(argv[0] if argv else None, inputs), ensure_ascii=False))
+    return 0
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
         return 2
     cmd = argv[1]
+
+    if cmd == "door":
+        return cmd_door(argv[2:])
 
     if cmd == "selftest":
         return selftest()
@@ -2960,10 +3373,10 @@ def main(argv):
 
     if cmd == "author":
         if len(argv) < 3:
-            print("usage: python3 bds.py author <dest.json>   "
+            print("usage: python3 bds.py author <dest.json> [--json]   "
                   "(reads key=value lines from stdin)")
             return 2
-        return author(argv[2], sys.stdin.read())
+        return author(argv[2], sys.stdin.read(), as_json="--json" in argv[3:])
 
     if cmd == "mdm-eval":
         # Recompute precision and recall from a clerical review sample, so the

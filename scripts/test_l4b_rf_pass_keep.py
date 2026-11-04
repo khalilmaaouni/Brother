@@ -26,12 +26,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REQUIRED_FAST = os.path.join(HERE, "required_fast.sh")
 
 WORKTREE_KEY = 'worktree_key="$(basename "$(pwd)")-$$"'
-PASS_KEEP_PATH = 'pass_keep="${TMPDIR:-/tmp}/required-fast-pass-$name-$worktree_key.txt"'
+# GATE1 (7f60bdf2b) reads the keep folder once into keep_dir (still TMPDIR, falling back to /tmp) so a kept
+# file outlives the per check TMPDIR of the side by side rows; the keep names below follow that variable.
+KEEP_DIR = 'keep_dir="${TMPDIR:-/tmp}"'
+PASS_KEEP_PATH = 'pass_keep="$keep_dir/required-fast-pass-$name-$worktree_key.txt"'
 PASS_KEEP_WRITE = "printf '%s' \"$out\" > \"$pass_keep\""
 PASS_KEEP_HANDLE = 'last="$last  [full: $pass_keep]"'
 PASS_COUNTER = 'pass=$((pass+1));   verdict="PASS   "'
 NODATA_ARM = '2) nodata=$((nodata+1)); verdict="NO-DATA"; nodata_names="$nodata_names $name"'
-FAIL_KEEP_PATH = 'keep="${TMPDIR:-/tmp}/required-fast-fail-$name-$worktree_key.txt"'
+FAIL_KEEP_PATH = 'keep="$keep_dir/required-fast-fail-$name-$worktree_key.txt"'
 FAIL_KEEP_WRITE = "printf '%s\\n' \"$out\" > \"$keep\" || exit 1"
 FAIL_DETAIL_GUARD = 'if [ -n "$keep" ] && [ -f "$keep" ]'
 PASS_KEEP_PRINTED = 'tail -80 "$pass_keep"'
@@ -83,7 +86,7 @@ def has_required_fast_pass_keep(text):
     """True only when every L4b.1 marker is present in the script text."""
     if not isinstance(text, str):
         raise ValueError("script text must be a str, got %s" % (type(text).__name__,))
-    for marker in (WORKTREE_KEY, PASS_KEEP_PATH, PASS_KEEP_WRITE,
+    for marker in (WORKTREE_KEY, KEEP_DIR, PASS_KEEP_PATH, PASS_KEEP_WRITE,
                    PASS_KEEP_HANDLE, PASS_COUNTER, NODATA_ARM,
                    FAIL_KEEP_PATH, FAIL_KEEP_WRITE, FAIL_DETAIL_GUARD):
         if marker not in text:
@@ -116,6 +119,7 @@ class RequiredFastPassKeepTest(unittest.TestCase):
     def test_pass_keep_path_carries_worktree_key_and_pid(self):
         self.assertIn(WORKTREE_KEY, self.text)
         self.assertIn("-$$", WORKTREE_KEY)
+        self.assertIn(KEEP_DIR, self.text)
         self.assertIn(PASS_KEEP_PATH, self.text)
         self.assertNotIn("required-fast-pass-$name.txt", self.text)
 

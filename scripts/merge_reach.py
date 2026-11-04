@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""MG1.e: after each merge, prove reachability from main, never the state field.
+"""MG1.e: after each merge, prove reachability from the merge base, never the state field.
+
+The base is main unless a named one is given (MERGE2.a: one of merge_gate.ALLOWED_BASES).
 
 `is_reachable` answers `git merge-base --is-ancestor <sha> <ref>`: exit 0 is True, exit 1 is False, anything else
 (another exit, a runner that cannot run) is None, which is NO-DATA and never assumed. `prove_merged` fetches main of
@@ -16,13 +18,20 @@ STDLIB ONLY, Python 3.9 floor. A git runner is injectable: runner(argv, cwd=None
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+import merge_gate  # noqa: E402  (ALLOWED_BASES: the one list of bases a merge may target)
+
 SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 STATUSES = ("PROVEN", "STRANDED", "NOT-MERGED", "NO-DATA", "TREE-DRIFT")
-USAGE = "usage: merge_reach.py check <clone> <remote> <pr> <sha> <tree> <state>"
+USAGE = "usage: merge_reach.py check <clone> <remote> <pr> <sha> <tree> <state> [<base>]"
 
 
 class MergeReachError(ValueError):
@@ -111,9 +120,9 @@ def _row(entry, status, merge_commit, detail):
     return {"pr": entry["pr"], "sha": entry["sha"], "status": status, "merge_commit": merge_commit, "detail": detail}
 
 
-def prove_merged(clone, entries, state_of, remote="hub", runner=None):
+def prove_merged(clone, entries, state_of, remote="hub", runner=None, base="main"):
     """One row per entry: {pr, sha, status, merge_commit, detail}. Entries are dicts with pr, sha and tree (the gated
-    tree)."""
+    tree). `base` is the branch merged into, one of merge_gate.ALLOWED_BASES (refused otherwise)."""
     _str(clone, "clone")
     if not isinstance(entries, list):
         raise MergeReachError("entries must be a list")
@@ -128,16 +137,19 @@ def prove_merged(clone, entries, state_of, remote="hub", runner=None):
     if not callable(state_of):
         raise MergeReachError("state_of must be callable")
     remote = _word(remote, "remote")
+    base = _word(base, "base")
+    if base not in merge_gate.ALLOWED_BASES:
+        raise MergeReachError("base %r is not a named merge base (%s)" % (base[:60], ", ".join(merge_gate.ALLOWED_BASES)))
     run = _runner(runner)
     if not entries:
         return []
     rows = []
-    ref = "refs/remotes/%s/main" % remote   # never the short name: a tag refs/tags/<remote>/main outranks it
+    ref = "refs/remotes/%s/%s" % (remote, base)   # never the short name: a tag refs/tags/<remote>/main outranks it
     # F6, review 2026-10-06: ONLY main, into its own tracking ref, and no tag. A full `git fetch <remote>` also updates
     # every other branch and tag, so one stale ref of no interest here (a branch that became a folder of branches, a
     # moved tag) failed the fetch AFTER the merge had landed and the batch stopped on a merge that was fine. The
     # refspec is spelled, so main is read fresh whatever this clone is configured to fetch. Any failure is still NO-DATA.
-    rc, _out = _git(run, ["git", "fetch", "--quiet", "--no-tags", remote, "+refs/heads/main:" + ref], clone)
+    rc, _out = _git(run, ["git", "fetch", "--quiet", "--no-tags", remote, "+refs/heads/%s:%s" % (base, ref)], clone)
     if rc != 0:
         return [_row(e, "NO-DATA", None, "fetch of %s failed" % remote) for e in entries]
     for entry in entries:
@@ -162,7 +174,7 @@ def prove_merged(clone, entries, state_of, remote="hub", runner=None):
                 rows.append(_row(entry, "NO-DATA", commit, "the merge commit or its tree cannot be read"))
             elif tree != entry["tree"]:
                 rows.append(_row(entry, "TREE-DRIFT", commit,
-                                 "main holds %s, the gate passed %s" % (tree, entry["tree"])))
+                                 "%s holds %s, the gate passed %s" % (base, tree, entry["tree"])))
             else:
                 rows.append(_row(entry, "PROVEN", commit, "reachable from %s, tree equals the gated tree" % ref))
         if rows[-1]["status"] in ("STRANDED", "NO-DATA", "TREE-DRIFT"):
@@ -194,12 +206,13 @@ def main(argv=None):
         argv = sys.argv[1:]
     if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
         raise SystemExit(2)
-    if len(argv) != 7 or argv[0] != "check":
+    if len(argv) not in (7, 8) or argv[0] != "check":
         print(USAGE)
         return 2
-    _cmd, clone, remote, pr, sha, tree, state = argv
+    _cmd, clone, remote, pr, sha, tree, state = argv[:7]
+    base = argv[7] if len(argv) == 8 else "main"
     try:
-        rows = prove_merged(clone, [{"pr": pr, "sha": sha, "tree": tree}], lambda _pr: state, remote)
+        rows = prove_merged(clone, [{"pr": pr, "sha": sha, "tree": tree}], lambda _pr: state, remote, base=base)
     except MergeReachError as exc:
         print("NO-DATA: %s" % exc)
         return 2

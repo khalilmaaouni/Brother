@@ -1,0 +1,366 @@
+{
+ "about": "Consumer admission per capability group (OUT1.n). A group is visible to a consumer only when its admission record satisfies door.admission_gaps for the running revision and host; no record means hidden. tier MAINTAINER and PARK are never visible. Records are written only from an installed end to end run and an independent rating, never by hand from a source tree. Door capability patterns end in * to match a prefix. CORE groups (the product's own path) are admitted on installed journey rows named in journey_rows and walked by scripts/journey/run_journey.py; every other tier needs the full record door.admission_gaps checks. supported_hosts lists only hosts a journey was walked on. A journey row that is not PASS on the walked revision is never cited.",
+ "entries": {
+  "vault-recall": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.d",
+   "capabilities": [
+    "vault.recall",
+    "vault.context_recall",
+    "vault.asof"
+   ]
+  },
+  "vault-lifecycle": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.d",
+   "capabilities": [
+    "vault.capture",
+    "vault.review",
+    "vault.lifecycle",
+    "vault.promote",
+    "vault.retention"
+   ]
+  },
+  "vault-entities": {
+   "tier": "PARK",
+   "owner": "OUT1.n",
+   "capabilities": [
+    "vault.provenance"
+   ]
+  },
+  "vault-conflicts": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.d",
+   "capabilities": []
+  },
+  "vault-maintenance": {
+   "tier": "MAINTAINER",
+   "owner": "OUT1.n",
+   "capabilities": [
+    "vault.status"
+   ]
+  },
+  "claims-proof": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.e",
+   "capabilities": [
+    "data.author",
+    "data.check",
+    "data.receipt",
+    "data.register",
+    "data.score",
+    "data.ledger"
+   ]
+  },
+  "claims-packs": {
+   "tier": "PARK",
+   "owner": "OUT1.e",
+   "capabilities": []
+  },
+  "mdm-identity": {
+   "tier": "PARK",
+   "owner": "OUT1.e",
+   "capabilities": [
+    "data.mdm_resolve",
+    "data.mdm_classify",
+    "data.mdm_normalize",
+    "data.mdm_validate"
+   ]
+  },
+  "mdm-quality": {
+   "tier": "PARK",
+   "owner": "OUT1.e",
+   "capabilities": [
+    "data.mdm_review",
+    "data.mdm_clusters",
+    "data.mdm_drift",
+    "data.mdm_audit",
+    "data.mdm_audit_plan",
+    "data.mdm_evaluate"
+   ]
+  },
+  "data-connectors": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.j",
+   "capabilities": []
+  },
+  "mobile-plan": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.f",
+   "capabilities": [
+    "mobile.doctor",
+    "mobile.profile_detect",
+    "mobile.profile_init",
+    "mobile.reference_init",
+    "mobile.reference_record",
+    "mobile.reference_check",
+    "mobile.reference_lock",
+    "mobile.journey",
+    "mobile.canonical_action",
+    "mobile.plan",
+    "mobile.ownership",
+    "mobile.driver_contract",
+    "mobile.toolchain",
+    "mobile.canary"
+   ]
+  },
+  "mobile-run": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.f",
+   "capabilities": [
+    "mobile.driver_select",
+    "mobile.screen_observation",
+    "mobile.run",
+    "mobile.native_ios",
+    "mobile.appium",
+    "mobile.visual_only",
+    "mobile.test_route",
+    "mobile.state_*"
+   ]
+  },
+  "mobile-evidence": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.f",
+   "capabilities": [
+    "mobile.test_bundle_*",
+    "mobile.design_*",
+    "mobile.claims_*",
+    "mobile.release_state",
+    "mobile.passport",
+    "mobile.pack",
+    "mobile.verify_pack"
+   ]
+  },
+  "jev-observe": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.h",
+   "capabilities": [
+    "calibrated.status"
+   ]
+  },
+  "jev-review": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.h",
+   "capabilities": [
+    "calibrated.review",
+    "calibrated.deliver"
+   ],
+   "next_verification": "an installed end to end run, then an admission record that names the spend: an approved calibrated.deliver makes one real paid outside model call through the default decision bridge (J102 ships in shadow), and an approved calibrated.review does the same once J065 is switched on"
+  },
+  "jev-promotion": {
+   "tier": "MAINTAINER",
+   "owner": "OUT1.h",
+   "capabilities": []
+  },
+  "learning-lessons": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.i",
+   "capabilities": [
+    "learning.report",
+    "learning.reuse",
+    "learning.capture",
+    "learning.recurrence"
+   ]
+  },
+  "learning-replay": {
+   "tier": "PARK",
+   "owner": "OUT1.i",
+   "capabilities": [
+    "learning.decisions",
+    "learning.replay",
+    "learning.decision",
+    "learning.outcome"
+   ]
+  },
+  "learning-governance": {
+   "tier": "MAINTAINER",
+   "owner": "OUT1.i",
+   "capabilities": [
+    "learning.forget"
+   ]
+  },
+  "learning-promotion": {
+   "tier": "MAINTAINER",
+   "owner": "OUT1.i",
+   "capabilities": []
+  },
+  "execution-outcome": {
+   "tier": "CORE",
+   "owner": "OUT1.a",
+   "capabilities": [],
+   "routes": [
+    "build-outcome",
+    "resume-work",
+    "app-correction",
+    "what-next",
+    "verify-change",
+    "close-with-evidence"
+   ],
+   "admission": {
+    "basis": "journey",
+    "journey_rows": [
+     "J2/A.adopt-exits-0",
+     "J2/C.no-pass-for-unrun-check",
+     "J2/C.vacuous-single-unit-not-pass",
+     "J2/D.end-card-six-lines"
+    ],
+    "implemented": true,
+    "packaged": true,
+    "supported_hosts": [
+     "claude"
+    ],
+    "blocking_defects": [],
+    "quality_verdict": "PASS"
+   }
+  },
+  "loop-close": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.g",
+   "capabilities": [
+    "loop.start",
+    "loop.close"
+   ]
+  },
+  "loop-control": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.g",
+   "capabilities": [
+    "loop.status",
+    "loop.handoff",
+    "loop.pause",
+    "loop.resume",
+    "loop.stop"
+   ]
+  },
+  "assurance-review": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.k",
+   "capabilities": [
+    "assurance.discover",
+    "assurance.review",
+    "assurance.review_record",
+    "assurance.verify",
+    "assurance.gate",
+    "assurance.design",
+    "assurance.score",
+    "assurance.intake",
+    "assurance.impact",
+    "assurance.policy",
+    "assurance.review_route",
+    "assurance.converge",
+    "assurance.explain",
+    "assurance.status",
+    "assurance.exceptions",
+    "assurance.plan",
+    "assurance.adopt",
+    "assurance.doctor"
+   ]
+  },
+  "assurance-control": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.k",
+   "capabilities": [
+    "assurance.scope_report",
+    "assurance.scope_verify",
+    "assurance.fences",
+    "assurance.fence_audit",
+    "assurance.instruction_surface",
+    "assurance.protections_verify",
+    "assurance.pr_verify",
+    "assurance.work_start",
+    "assurance.work_finish",
+    "assurance.work_check",
+    "assurance.work_brief",
+    "assurance.task_list",
+    "assurance.task_check"
+   ]
+  },
+  "assurance-handover": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.k",
+   "capabilities": [
+    "assurance.lineage",
+    "assurance.evidence_verify",
+    "assurance.evidence_show",
+    "assurance.evidence_run",
+    "assurance.handover_show",
+    "assurance.handover_prepare",
+    "assurance.handover_acknowledge",
+    "assurance.handover_reject",
+    "assurance.program_status",
+    "assurance.program_check",
+    "assurance.program_board",
+    "assurance.map",
+    "assurance.book_check",
+    "assurance.testkit_sheet"
+   ]
+  },
+  "host-health": {
+   "tier": "CORE",
+   "owner": "OUT1.l",
+   "capabilities": [
+    "host.*"
+   ],
+   "admission": {
+    "basis": "journey",
+    "journey_rows": [
+     "J1/A.first-screen-paths-exist",
+     "J1/D.doctor-fixes-work",
+     "J1/D.readme-claims-executed",
+     "J1/D.six-verbs-only"
+    ],
+    "implemented": true,
+    "packaged": true,
+    "supported_hosts": [
+     "claude"
+    ],
+    "blocking_defects": [],
+    "quality_verdict": "PASS"
+   }
+  },
+  "authority-budget": {
+   "tier": "MAINTAINER",
+   "owner": "AUTH1.a",
+   "capabilities": []
+  },
+  "release-cut": {
+   "tier": "MAINTAINER",
+   "owner": "CUT2.a",
+   "capabilities": []
+  },
+  "status-acceptance": {
+   "tier": "CORE",
+   "owner": "UI1.a",
+   "capabilities": [],
+   "admission": {
+    "basis": "journey",
+    "journey_rows": [
+     "J4/C.one-proof-source",
+     "J4/A.accept-recorded",
+     "J4/A.reject-pushes-nothing"
+    ],
+    "implemented": true,
+    "packaged": true,
+    "supported_hosts": [
+     "claude"
+    ],
+    "blocking_defects": [],
+    "quality_verdict": "PASS"
+   }
+  },
+  "authored-content": {
+   "tier": "AMPLIFIER",
+   "owner": "OUT1.m",
+   "capabilities": [
+    "content.analyze",
+    "content.collect"
+   ],
+   "next_verification": "an installed end to end run of content.analyze over a synthetic archive outside every repository, on this revision and host, plus an independent benefit and ease rating"
+  },
+  "composition": {
+   "tier": "PARK",
+   "owner": "OUT1.a",
+   "capabilities": []
+  }
+ }
+}

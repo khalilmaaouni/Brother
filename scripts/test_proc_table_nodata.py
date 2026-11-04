@@ -130,6 +130,21 @@ class APartlyUnreadableTableIsNoData(unittest.TestCase):
         self.assertIn("NO-DATA", r.stdout)
 
 
+def _process_table_readable():
+    """True when the process table can be read here. A confined run (the hermetic check's sandbox) cannot read it, and
+    the stop then says so (NO-DATA), which is its contract: the premise of the test below is absent, not the behaviour
+    broken. Same probe as scripts/test_execution_boundary.py."""
+    import process_containment
+    try:
+        process_containment._read_process_table()
+    except process_containment.EnumerationError:
+        return False
+    return True
+
+
+NEEDS_A_READABLE_PROCESS_TABLE = unittest.skipUnless(_process_table_readable(), "the process table cannot be read in this confined run")
+
+
 class TheLoopOwnsAProcessByItsProgramOnly(unittest.TestCase):
     """...and only a program of this loop's: in the fixture home's bin, or carrying a run of this loop (a code root
     helper such as scripts/probe_round.py, which the driver starts with BROTHER_RUN_DIR exported)."""
@@ -174,6 +189,7 @@ class TheLoopOwnsAProcessByItsProgramOnly(unittest.TestCase):
         with mock.patch.dict(os.environ, fixture_env(HOME), clear=True):
             self.assertEqual(LP.owned(snap, LP.DRIVER_RX, generic=False), {1})
 
+    @NEEDS_A_READABLE_PROCESS_TABLE
     def test_a_stop_leaves_the_viewer_alive_and_stops_the_runner(self):
         d = scratch(self, "nodata-owner-")
         bindir = os.path.join(d, "fake"); os.makedirs(bindir)

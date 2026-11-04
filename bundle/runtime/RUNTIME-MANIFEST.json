@@ -3,7 +3,7 @@
  "files": [
   {
    "path": "accept_delivery.py",
-   "sha256": "60a78c7a940810b4ad4a97ea82e074ff451d2c91a3705ef6aa8de918ed578f4e"
+   "sha256": "aed514c48b0e2c3c0d9285f901975b59a4212985652b695e55e2e9c3aa601166"
   },
   {
    "path": "annotations_store.py",
@@ -14,6 +14,10 @@
    "sha256": "fcc1dc4e1b19e2b6e20802d81f48f396df6b2c541f1f037147796ba083f084eb"
   },
   {
+   "path": "board_status.py",
+   "sha256": "1ae05ce1f1dd48e0beb397a1cb9cb84a1d70db1f153540ea3946f1e5b47c0068"
+  },
+  {
    "path": "bridge_content_gate.py",
    "sha256": "25d6d2f642a8fb365712a1fc14e2214a7d61f122ee409f8d5583913f486e2a36"
   },
@@ -22,24 +26,48 @@
    "sha256": "fb8eb2629dcf0f99f5bfed15da2919e030fc97c36ebc4cf41b48aaf76bd855c0"
   },
   {
+   "path": "brother_antigravity_hook.py",
+   "sha256": "96e525f9fb4689090a96e2aca02452e80ef1d7c052c8a9d054fa795693b60a3c"
+  },
+  {
+   "path": "brother_hook.py",
+   "sha256": "3937ea7efeb2d2354b8a5f2fd9ca01aa9e43ead10125ad18afdc355c6af44271"
+  },
+  {
    "path": "brother_paths.py",
    "sha256": "adaeaa53dc746c064196d01dd257b8486232a0612b6a6a92050c9e20fe997a11"
   },
   {
    "path": "brother_run.py",
-   "sha256": "7cd6eb363918c5f68e558396cc18654def2c196b4a2ff9c22639629fa6c6d8b7"
+   "sha256": "8fed780bd814c8649f17a95fa470fe8c4350632213a87f9337f4c3f5bd7c0bc5"
   },
   {
    "path": "brother_state.py",
    "sha256": "a7093d773cd7c59367b7cdcd1d3435c44c174e5a486e4bbc74a680398fedcacd"
   },
   {
+   "path": "bundle_runtime.py",
+   "sha256": "d50a1cb02a74dd4a11060c118c97928b9bdf286dcdf3d81d32c88f8743d75de8"
+  },
+  {
+   "path": "claim_lifecycle.py",
+   "sha256": "90758163b4f9d8c1c18dbcefb6b0fc20610489b71d83a8b940ff969ce12f0c74"
+  },
+  {
    "path": "claim_store.py",
    "sha256": "7c78fe1753c0f38d02b5da23b3a61fa2be2c6ec9fc3ff4e1b8b33281df64c3fb"
   },
   {
+   "path": "close_unit.py",
+   "sha256": "58d9e752daa983bd35911cd1eb7c7a3d0b11f074f4f120b5a835c3e778c4d767"
+  },
+  {
    "path": "codex_hooks_install.py",
    "sha256": "4caa2645f0a6b435b0f02b6967d88e1dd83823d4f4ea83831435628aca9be9c4"
+  },
+  {
+   "path": "codex_skills.py",
+   "sha256": "1c925fd0166e73b73bcf3be8425daa2f2b6dc2b4392820b7f792ee7e1a8bc2a5"
   },
   {
    "path": "coe_outside_gate.py",
@@ -54,6 +82,30 @@
    "sha256": "ac7563ea29787de4d8cfa10ee886a83c6b33413bec031d006fd6f3005c5b0022"
   },
   {
+   "path": "credit_marks.py",
+   "sha256": "e971068ecab2d08779400ebcb3e6b0e854c02e0d8bb67b6b43c4a7463b50e4d6"
+  },
+  {
+   "path": "data/ADMISSION.json",
+   "sha256": "87c096014f87b2ce81a2aed28278c1f32936725db3be99ee8437473af393dc14"
+  },
+  {
+   "path": "data/JOURNEY-J1.json",
+   "sha256": "1bb1f81db9b5331177bd0690f018e6b2a60b76c0c00c1f0abf7380331363aba0"
+  },
+  {
+   "path": "data/JOURNEY-J2.json",
+   "sha256": "836da92ffd776168c77f6e682f876a82da391be6f3a2f77cd8db52f41f461144"
+  },
+  {
+   "path": "data/JOURNEY-J4.json",
+   "sha256": "6f1dc94e1d68fe65a34615c395848e1895c250d342b518b5cf2941beda79a988"
+  },
+  {
+   "path": "data/REACH.json",
+   "sha256": "86eb3daaaaf13a3f8d28c52f60ac1acd8f1eedddec5e802a07248f4b1fcff231"
+  },
+  {
    "path": "data/jev-registry.json",
    "sha256": "bbbb047e009c81ba2be2be742cb37702571ddce3dd0bb1d72ee365ae41466c05"
   },
@@ -66,16 +118,32 @@
    "sha256": "25a2530642ef59dd42498ee224b0d8693aeab3523e6f0c3e4090eee73c32e241"
   },
   {
+   "path": "delivery_status.py",
+   "sha256": "460dda1221865dbc13d2bba05767658a5ad6a17ad4a55027f1bc1516c27fd9ba"
+  },
+  {
+   "path": "device_matrix.py",
+   "sha256": "5e512443fdc08d1872df85992bdb363a50562d3a98f6b2d241aadb0f65ee2cc3"
+  },
+  {
    "path": "door.py",
-   "sha256": "a28ba56599474f0c3c144069353b7a57ac961a8cac00d0b1c57f2f6011578204"
+   "sha256": "76c2d0727dad83f08bab221fe0181a99a102c8c3bd8b878724707fe14d7fdf3d"
   },
   {
    "path": "dream_bridge.py",
-   "sha256": "7882bc8a0da5d80c706ca1514b2f0a9ed94ea10b2cd094d5eec6073214c414f9"
+   "sha256": "0fc5b8eb6a60e5831cba62f0824a136645df412f209918ed7cedb262a4827908"
   },
   {
    "path": "dream_record.py",
    "sha256": "8ccb669e1f46be0ddc0d7a6ddfd05f4e89c6954ff130e7de372279d403747bb6"
+  },
+  {
+   "path": "dream_replay.py",
+   "sha256": "0c99b39c183869c05bcebdec52816e73f019b90e1c7076c08c5082e460597268"
+  },
+  {
+   "path": "dream_report.py",
+   "sha256": "eea46303aac2e35d4677af41b40a98f3b913fca7b1e51f9b3066c82f6d168915"
   },
   {
    "path": "evidence_obligation.py",
@@ -98,12 +166,40 @@
    "sha256": "062eb0012e6ca3f950f658ddacb77f40383a6468d805961d3bcbc656b2f5f7b0"
   },
   {
+   "path": "followup_obligation.py",
+   "sha256": "1fc688cce778360444754a287828c4156cca05953987eac3ab7f026bdda01d49"
+  },
+  {
+   "path": "gen_readiness_board.py",
+   "sha256": "40e6c69b800ff3d0d1408980a112fc93538b66444b64ff3768332ce31bbafdd2"
+  },
+  {
    "path": "git_location_guard.py",
    "sha256": "9aee080020588ad36132532be53a509b1a864129966e7ee3da6ff1061a919923"
   },
   {
+   "path": "golden_master_contract.py",
+   "sha256": "15f7bdab01c328c85ae5ac000d8196536117fa9f7ce8912f1f1672015b6ee636"
+  },
+  {
    "path": "graph_loop.py",
    "sha256": "4f76bc0d2e2bfa363967f7518515f2c0915fe75638066605b4635a1400b060e4"
+  },
+  {
+   "path": "handover_ceremony.py",
+   "sha256": "39bba4c9ee8df1965f671b2f4b87b2bbf97f168bf5c84d481ee343caf6d2d5f1"
+  },
+  {
+   "path": "handover_pack_scan.py",
+   "sha256": "8aa4ca4afabde7b16a2b7cb9d44a4aa08811b25157200c44a70955ba6b75cc51"
+  },
+  {
+   "path": "handover_record.py",
+   "sha256": "ddd21bc664ab50e84ba111977a8216b7afde25f5fa0f8daadddfcacc8f8c1922"
+  },
+  {
+   "path": "hook_guard.py",
+   "sha256": "04e23816fc9070fefbab626e95ae29f54a8a2da03d125a60979676ca9c0cd416"
   },
   {
    "path": "host_capability.py",
@@ -116,6 +212,10 @@
   {
    "path": "jev_calibration.py",
    "sha256": "72b097ec67431b965c4e39cc6b685261e48e9172038bbe8ad66167ac6652ce79"
+  },
+  {
+   "path": "jev_canary.py",
+   "sha256": "e8babc82570f3fa7a09643cc000e6ee546dcfc4dbb20edf0103d494f1e3641eb"
   },
   {
    "path": "jev_cascade.py",
@@ -131,7 +231,11 @@
   },
   {
    "path": "jev_door.py",
-   "sha256": "39c2f500b2d7070fd387ea9a0bb5f11366fed001b4f5c568e80932ec1a898ebf"
+   "sha256": "2f9766e16777a2112233b7b58d5883543bf72cf4f322044118f684b081a0a0af"
+  },
+  {
+   "path": "jev_eval.py",
+   "sha256": "4ba55563fdaff8ef3325b64eb3d93a84e90055fdbf9aaefd1f0bb6829aa4e51d"
   },
   {
    "path": "jev_g1_seam_cache.py",
@@ -139,7 +243,7 @@
   },
   {
    "path": "jev_outcome.py",
-   "sha256": "48965d76cd60bda1880b82d7e4014759422ca52a63377f2e22e8d40442a6cafa"
+   "sha256": "c3015111d49917abcb6e208b45926ded8d093130a9298469cc2b7ef41d12125f"
   },
   {
    "path": "jev_registry.py",
@@ -155,7 +259,7 @@
   },
   {
    "path": "jev_status.py",
-   "sha256": "28e8041291749822715fbf02e5900fe2fefefb1d48ed359b9c8eb7df0da302ec"
+   "sha256": "47958cd4252b7cce8f4222ec2c785f963cbd13a999e38ad2e05c9d572037d051"
   },
   {
    "path": "journal.py",
@@ -166,12 +270,20 @@
    "sha256": "d4b84bbc6ffb93405c9fc3cd7e7f780701a18922f3093628adbc43efcbf710b4"
   },
   {
+   "path": "journey_passport.py",
+   "sha256": "bfcb46907ffb2864c45652bbcf9210e4c0d0f9d15b33737f3c019d05ae9d724e"
+  },
+  {
    "path": "lane_router.py",
    "sha256": "caa3e23159f0e53e089a1298e1011c90e82494962245fe39224bd072c51da4cb"
   },
   {
+   "path": "lesson_candidate.py",
+   "sha256": "7909d6296a3e92a871e5f0bcc3263605054d438bf90d98622d32142376a42572"
+  },
+  {
    "path": "load_reservation.py",
-   "sha256": "4dc22e12850d9f7e3f9fa62991814cd4f8ba276c8f13b47aeb04f79d12c8a51f"
+   "sha256": "9ba21599d3e125db3f1780d055ea82ef4101a7ea99205d3ed3df03bd1c4dca99"
   },
   {
    "path": "loom.py",
@@ -183,27 +295,103 @@
   },
   {
    "path": "machine_reservation.py",
-   "sha256": "dd5329971c6da01cd9b3fcda0f8d2c890cbe2692b5e1a7800f6dc1fae50be5b7"
+   "sha256": "1b3a58233515fe65f7bcf6bb15c82682dd60f2ba3fb28c9a21974e773520ecec"
   },
   {
    "path": "managed_safety.py",
    "sha256": "5dc9c650b6486ed4cb8376e4516fc4f8dbd3084b8129332e3a8977b8f2694069"
   },
   {
+   "path": "merge_passport.py",
+   "sha256": "8519c41fb76deb804d14858f0a3e5ba63524460cefb2ce2c0abdc162a3cd5185"
+  },
+  {
+   "path": "mobile_appium_adapter.py",
+   "sha256": "6af0215827965f6e7bb93c91e5ac7c21dbd1327cd67182d59e458f281df4352f"
+  },
+  {
+   "path": "mobile_canonical_action.py",
+   "sha256": "f2c446e59bbb43b4af850240375d4989f03d2e682b7cbbab016d0b2f6f114af1"
+  },
+  {
    "path": "mobile_design.py",
    "sha256": "2a6d45e650865ed58c5469f0872c34221df8c9535c2e9bc6d2fa49c0e677d8e1"
+  },
+  {
+   "path": "mobile_deterministic_hooks.py",
+   "sha256": "786a310df6536d96d49786f775257965e026f78e97e29bd02dfa985ef3b7741f"
+  },
+  {
+   "path": "mobile_driver_contract.py",
+   "sha256": "5059b76708ec22b9cc07af853520498ac7cc28619e2c26ca73617606b2b4d6de"
+  },
+  {
+   "path": "mobile_hybrid_action_router.py",
+   "sha256": "ad06965a6913b416a64d4a9b9fb00ae08a0dd01738bbee7ea9f9e48f03d4f40b"
+  },
+  {
+   "path": "mobile_journey_contract.py",
+   "sha256": "42e760db799e41e68485a052c8b458938e4ab57a01c175f1a09f70e6d6534e5c"
+  },
+  {
+   "path": "mobile_native_ios_adapter.py",
+   "sha256": "62e4a3f041d03be4014745d011db213312eb681f065bbe5ee3471e357acc3faf"
+  },
+  {
+   "path": "mobile_ownership_resolver.py",
+   "sha256": "0c2397a667995b0bb566e33eb0dc61f9a22956bd1bb0f372529b0c4299d7ad35"
+  },
+  {
+   "path": "mobile_plan_compiler.py",
+   "sha256": "c3be223725dcbb346fa9a8557b13d63e3b4f05309c0fb9d29285f8b140f34db2"
+  },
+  {
+   "path": "mobile_product_claims.py",
+   "sha256": "4e881cf15acc48b34f98695f6907dc959915a471cb36e09d58a7efce9a284420"
   },
   {
    "path": "mobile_project_profile.py",
    "sha256": "6d4875df7404d251bbf2c17515e056e926a6dc7fa3799c865ce8a3a03c4e016e"
   },
   {
+   "path": "mobile_reference_lock.py",
+   "sha256": "a4b1f350f5de6666282aa516943d222ff7af4549df8c405904f34a53dac88336"
+  },
+  {
+   "path": "mobile_screen_observation.py",
+   "sha256": "369231c43e9970ad0d83abbb719b52d5433867db010e0f8a46ca9f02b0c21f95"
+  },
+  {
    "path": "mobile_simulator_pool.py",
    "sha256": "b58c037e0eb9ab770922ffff73951a70c2701fb2b00d04905d0ded00a20c4fbf"
   },
   {
+   "path": "mobile_state_fixture.py",
+   "sha256": "7b5a1387de8acf00c5fbfc8a3c651394b841d66b9375e2717daefa0745c4c725"
+  },
+  {
+   "path": "mobile_state_reset.py",
+   "sha256": "973ae12eea327a945793ab8b36c6ad4a146f8d241b955333053df798025124a9"
+  },
+  {
+   "path": "mobile_test_route.py",
+   "sha256": "4cb9272044a72b9bfb6c080d09a7709450c62671fa29b618762d1ff5f916f2b2"
+  },
+  {
+   "path": "mobile_toolchain_probe.py",
+   "sha256": "b0a61759ca8cf62ec9cbae086e150eab3b94fe12633b1fafe8f877971a2e4156"
+  },
+  {
+   "path": "mobile_visual_fallback_adapter.py",
+   "sha256": "3ec52f46c1351165e3eb63cba1036209f01f91aaf03091c6c2bd8354138316aa"
+  },
+  {
    "path": "mobile_workflow.py",
    "sha256": "54f3651f0c6f47a491421a9edc40ae781020566f0ac434ca61240aabe6a980a9"
+  },
+  {
+   "path": "mobile_xcode_canary_local.py",
+   "sha256": "d4eedeade95255a1c83e0648482c9b36d0dbc1e409d973251ba1ab34c8ba5b94"
   },
   {
    "path": "model_worker.py",
@@ -212,6 +400,10 @@
   {
    "path": "native_evidence.py",
    "sha256": "33304685b0ae23226f2b152f5447bcb9e5ded92b7fcfa48d487e8c871bd3dc4e"
+  },
+  {
+   "path": "native_evidence_v2.py",
+   "sha256": "f22b76248cf1012e2774c5383310887adc4229ce02e23f24d75b8a5c8d556c8a"
   },
   {
    "path": "orchestrator_invariants.py",
@@ -274,32 +466,404 @@
    "sha256": "58baac9bc39a52944ce7efabf99b3777ec18c2567a305c4dc3e26627050880c8"
   },
   {
+   "path": "parity_gate.py",
+   "sha256": "abb5d80d70544b65e5201309d761f98b7bd076e3bd38e52910412ee50877667f"
+  },
+  {
    "path": "park_sidecar.py",
    "sha256": "d55b0981b76b6bcb73acc617ed2be596429761143e2a2de09e96b6cd5b6e8cd3"
   },
   {
    "path": "pattern_note.py",
-   "sha256": "465aecff29fa92d4de104b38639b7575c8ee03ca0b00d41caaa757f53aea8fc9"
+   "sha256": "77ab950e0d7c7fdff4ca886f90b5d0e48769d407122bf19b0fe7f064dfce850f"
+  },
+  {
+   "path": "plan_seed.py",
+   "sha256": "30d92de16fdbd09c6d093c2175eb6c382a4717d5921c9afaf7b694acc81d98d2"
   },
   {
    "path": "preflight_snapshot.py",
    "sha256": "5fa9917c7c65d01b83d6c29ed3013e6d9967849aa46283e624c75d0d56d05ac3"
   },
   {
+   "path": "products/brotherds/audit_provenance.py",
+   "sha256": "cae6078af48503cda1689fee8b1d4c8c40007907df3a28e603803ed9204a0bc0"
+  },
+  {
+   "path": "products/brotherds/bds.py",
+   "sha256": "d9e805d81e59509981a459b208b9f96a4eeaceb2225a85c7adc126bb7e5ce0c2"
+  },
+  {
+   "path": "products/brotherds/docs/TRIUMVIRATE-INTEGRATION.md",
+   "sha256": "1974d96393847f83632fd7d264e2ae999b5b5b1f8ce138c93366f6a42bc6514d"
+  },
+  {
+   "path": "products/brotherds/examples/change-passport.v1.canonical.json",
+   "sha256": "e6d68b7622379d5c5c33beb567e1f1901850409cb3daaa9a45cb2825bba377e8"
+  },
+  {
+   "path": "products/brotherds/examples/change-passport.v1.canonical.sha256",
+   "sha256": "8548fe92c0fed93f1320294e5628c7f6a78fa6a62bb3a01936f81f1eec716480"
+  },
+  {
+   "path": "products/brotherds/forecast_score.py",
+   "sha256": "99d64d487fd2f5504e1a35add98038418ae5dc043dc2eb874813e6c21d45636c"
+  },
+  {
+   "path": "products/brotherds/lessons.py",
+   "sha256": "3ef52cc5ce8e17f18c12d0181ecb212e00ab361878c7b40583a319346fd8cd83"
+  },
+  {
+   "path": "products/brotherds/mdm_audit.py",
+   "sha256": "6c469507b092263e966e40a2f8b7c81864f06f56ec0a07df01ffed741d486875"
+  },
+  {
+   "path": "products/brotherds/mdm_derive.py",
+   "sha256": "240979666530811dc892b449bbcbbc6eef27bd75deb8baedbdff93717f58410b"
+  },
+  {
+   "path": "products/brotherds/mdm_eval.py",
+   "sha256": "960c5b8e714eb2456b9c3ae029450e3cc917a9fa33d3dfbb969942f658282052"
+  },
+  {
+   "path": "products/brotherds/mdm_normalize.py",
+   "sha256": "0b5629996cd8eb8c717355ef0ee4fe7a93bde3e2845e6e3135d7686328946457"
+  },
+  {
+   "path": "products/brotherds/mdm_validate.py",
+   "sha256": "7005dd038cee5e271db09463e4e37d227e51c3a4814086e6b1d64191e9d46e62"
+  },
+  {
+   "path": "products/brotherds/pack_mdm_calibration.py",
+   "sha256": "0795a6d0845024ba11bbab49addc21afff69c28ea88138c3461c1b5bb554bdb6"
+  },
+  {
+   "path": "products/brotherds/pack_mdm_coverage.py",
+   "sha256": "979fa231154a79422a672a5911c72e1f5eb52872f60b679c7208298f948f2869"
+  },
+  {
+   "path": "products/brotherds/pack_mdm_decision.py",
+   "sha256": "0ff99d1da099d09c38c07810f576485e900e96e8113f22cc1c74197b18602a6b"
+  },
+  {
+   "path": "products/brotherds/pack_mdm_identity.py",
+   "sha256": "01d4d244d67efc816a150d835b25861edf399e78c9bc754f24e6c8046a83a9f1"
+  },
+  {
+   "path": "products/brotherds/pack_mdm_locale.py",
+   "sha256": "3bd0bd27f0c5eddfc541839abbe97e880e5ad8c8b4aa9c8ab901095a21df7438"
+  },
+  {
+   "path": "products/brotherds/pack_mdm_science.py",
+   "sha256": "5e2aa0f1c51d41ebc1b626d745e463fc1bfba2319a24ff5bc428343c86868ce2"
+  },
+  {
+   "path": "products/brotherds/packs.py",
+   "sha256": "8e8929a1e4b225b06109532d3d91d7f47b856a1e731be924c38a39de1d02f703"
+  },
+  {
+   "path": "products/brotherds/vault_bridge.py",
+   "sha256": "6ada2e84cda3858fccc033281ae708cc9b5156a8b9874208ef6b3e01dbf176cf"
+  },
+  {
+   "path": "products/brothersbe/.claude-plugin/plugin.json",
+   "sha256": "c99d12f8468ed27363eb0339925cbf58bcb64b823cbb557c2ba21348b97e4edb"
+  },
+  {
+   "path": "products/brothersbe/.cursor-plugin/plugin.json",
+   "sha256": "b7dd8be4dbd24753a0045249de4a257023b02d41d4bc9e2ecfe8550eaaef8008"
+  },
+  {
+   "path": "products/brothersbe/CHECKSUMS.sha256",
+   "sha256": "060dd213fdb5952e5d3b40f9a6d60daeebbe367c40662e601889ffbe7e322a36"
+  },
+  {
+   "path": "products/brothersbe/DIGEST.md",
+   "sha256": "7ce00d94a943b79205b029d6183f9f81099205bf25d2716bff59b0f645619a3d"
+  },
+  {
+   "path": "products/brothersbe/SKILL.md",
+   "sha256": "338045e1fe58cfeab2d53636fb00327f83adf1307818154c144269bcb8248de9"
+  },
+  {
+   "path": "products/brothersbe/VERSION",
+   "sha256": "ca55f5e83e89fc12dca7a46e705a708a050d83ec4a0567fab5e647bc39236b79"
+  },
+  {
+   "path": "products/brothersbe/bin/sbe",
+   "sha256": "f13902b7c64f2282f6103a6dd110bee118cb1c34b5257a33de0c4d1f290666a9"
+  },
+  {
+   "path": "products/brothersbe/docs/CITATIONS.md",
+   "sha256": "66abddc8e6328a1d036379bbc57b850c856a9153d7bd66cfaa08b5276b9b76ff"
+  },
+  {
+   "path": "products/brothersbe/docs/ECOSYSTEM.md",
+   "sha256": "caa72a1888a7ff26f1a30705a6b74119f11b37336d1c854cae4657725d65b323"
+  },
+  {
+   "path": "products/brothersbe/docs/KNOWN-LIMITS.md",
+   "sha256": "d2e1e11149a812b4c4d131680e4d51cdca142ee55e82d587fe43951773b3c5a8"
+  },
+  {
+   "path": "products/brothersbe/hooks/hooks.json",
+   "sha256": "f4f92100cdc99a4c360155db2297a43cdd69d512048cb231c3ebee58f7a29776"
+  },
+  {
+   "path": "products/brothersbe/references/modules.md",
+   "sha256": "5ca8db9c38a6b394c97698ce2a19fec1e27dc268d7e445cc7e04a1c454b7268e"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/__init__.py",
+   "sha256": "6cc1b2a0b9d6bc8715fa7397a4b42e65fee29bbfad43997de552408e84d237cb"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/_jevpath.py",
+   "sha256": "1b352119bd7decbc89097567d8b64adad8ee0768996f3bb1d7a21fa566839246"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/_toolspath.py",
+   "sha256": "c1749340770828a0ef5fcc7401ff0415386923bf4a97c32621f8ee5efee534d0"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/adopt.py",
+   "sha256": "4c5d37c4057411044b04d5745857f2934dab5456cf8fd5b734bcb4f259303db5"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/bbprverify.py",
+   "sha256": "5a67511fd7c534c0c18422f5e40af7b649e6f2a8ad41fcb0f1f62cb9c0fa24b8"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/book.py",
+   "sha256": "13f4cbfcf1e4ca3884b099554c970dd6e06f1f9d2171f7da1f08251aa4ac3475"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/checks.py",
+   "sha256": "952df73d0157a63fb9483795d433f5c41194e2249b7e5cb59f0274f5e8bbcc0a"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/cli.py",
+   "sha256": "bacca6fc5654baa5d4e3c64030107b478440288635a7fdcc9f70b77deabb7860"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/content_binding.py",
+   "sha256": "f93fec72e66c4e14db2aee73c65d583d20fb4e1ffd7fdff2d4828f7f8061cd43"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/contracts.py",
+   "sha256": "97e05debfcb2cbd5e6ed4c659ed19c4271a570458da170e011cd7b08c203e642"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/converge.py",
+   "sha256": "cfbccd6a3712f385e02a4e67f20dbe49b40297ea90f89f5b6711f773fff693dc"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/cwd.py",
+   "sha256": "07bab90b0c83098d7fad0eded1624a92d266377d62826af2cf21f084386d1ceb"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/decisions.py",
+   "sha256": "0a47468acd7934f59716e62dd36dfac3b5f052742e8a64c4a09502e6e84e883a"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/evidence.py",
+   "sha256": "e6a2f85194939c934ab1d227316874011ede20cf15afa0b1bab974456d8ffad8"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/handover.py",
+   "sha256": "3175189b95fb4769ea53d917d6b991bbece91bc95a5579de02a675ca9fcddad9"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/impact.py",
+   "sha256": "c8493e971d32e3f1819ab46074cbbf35d3592211c9e30a5fd501f7a6494ef50b"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/initcmd.py",
+   "sha256": "fdbfaa8e99ee511bd4d506ea8f1f1ab22f1dc49ad4106c22f089fa3efbf69576"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/lifecycle.py",
+   "sha256": "3cfeaca62759775d854895b6599d29ea41b4fb8df08716ffd46d12d261a49497"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/mapgen.py",
+   "sha256": "7fe5bb986dae4659f153b04154f30f08562bd147cc608716d04c2fd8022e67f8"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/markdown.py",
+   "sha256": "b8e65946e3abba6231550b656219d8e1bf7b2517f2ae055d541b888df4b04a88"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/policy.py",
+   "sha256": "6b02d860a798aac79072af3712be4c6b9a2023d383da9d8409ab2f8c4879e492"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/program.py",
+   "sha256": "2541e58146505e50908f1437729a827718faf995e0902095c44248d531ca84e7"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/protections.py",
+   "sha256": "db7ee885b8e81832573ed434c36687cd05c327dcbb1606af4d1fac5c27f4f47c"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/prverify.py",
+   "sha256": "ff22e613391f2405079b2aaf92b32dfb93b19d707d75c5228bc4a1659f7ebc49"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/reviewroute.py",
+   "sha256": "471160de0174aa66a40732712600220ddad46b53b8aa9863169964b515810ce1"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/status.py",
+   "sha256": "eded69bf4ac393ad8737a962a2eb4c5613a09462c1302c1fbe7d6b37dc250c86"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/tasks.py",
+   "sha256": "10a03472479b5b2e378830f47b8a7bc71107d639bf8b3bbb8784171fa29f580c"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/versionbump.py",
+   "sha256": "f563d6b187c29cf8d189fe947ac95fae66c04ace6653f43246a5a08d888017a6"
+  },
+  {
+   "path": "products/brothersbe/src/brothersbe/work.py",
+   "sha256": "8c13a38f95df134dedad783606b1f2ed37fa5f3361073dae887d6d75309aa727"
+  },
+  {
+   "path": "products/brothersbe/tables/architecture.json",
+   "sha256": "99b0abc292302527a4dba66308ede22407a6a2ecf7cd764bd154bf22830ac768"
+  },
+  {
+   "path": "products/brothersbe/tools/brother_paths.py",
+   "sha256": "4a05c0d5ed92311f4f5caf02008295bc76d2c0a227fa3dfd144a3c42212926c1"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_authority_hook.py",
+   "sha256": "56b79253bfef4d77a66525f1fb506db1a107641c7f5ca75cd3168c0434fd3a50"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_autosave.py",
+   "sha256": "27a48503df7fba3d14202dbe3f134fdd348780040ab3df645678b18353be798c"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_bash_write_guard.py",
+   "sha256": "42e334e64f0f31332e38253b7d0f9aa01503946bf2cb978f0066bd952f389d06"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_checks.py",
+   "sha256": "ed63d1f61a8f559348ec56e71bb4ab776572d3a5b3b77ee5b5d19fa971e73af2"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_decide.py",
+   "sha256": "132623e2e1c0bf1c9050a7b800eb4556e7543edd69ca6f9c1759750f8e8bd8de"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_decision_record.py",
+   "sha256": "c659627e8bdc7790205e026b0e058b857d5cb5489d368c38975c500ca814e52f"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_design.py",
+   "sha256": "e615296489e19af84593d8426adb51f1184b64d957a9de9f31e7a4b3a8366552"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_fence_hook.py",
+   "sha256": "744f430c9ef8e26a1c1a3ba056d2142bd4839b4888d4474b7b2a0aa1147dc2bb"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_gate.py",
+   "sha256": "16bc79865d83cc25f370395ab8405b9cabffe4a281d0e9e1be373ff9f7543a1c"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_guard_common.py",
+   "sha256": "aad05b387c9e329adc317abc5ed2469a3c1de31709fa8382dde904277b845a25"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_hooks_wiring.py",
+   "sha256": "44ab76c017c4a607b099e95edffbef7909d7392599d67e212a6f314e0f1d9ea0"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_instruction_surface.py",
+   "sha256": "35bf0a7297b9b558834e353d869e54d61133362c6fd02aa2a23a6d9b75efbe46"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_intake.py",
+   "sha256": "f62435cd9ddc46039dc703d928bafe9cc8f2db83710a6e4361d48cb4f8de951e"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_onepager.py",
+   "sha256": "d3c2d7d26115682c679cee4f69f194a106937b1c91c46d9b30d54b42cb237726"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_passport.py",
+   "sha256": "51cda437adef67b1814c130494babbf83064bf3489a37b868a8d9d3c5e8f465f"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_plan.py",
+   "sha256": "dbd15c30bb6f02f8c2ef80996c932da8b77b72000934e480af73e334e2767b20"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_profile.py",
+   "sha256": "c52693d81fcd9a3454e737418a6b62b0c1f68c93f7bd2f9b347524c939cb393e"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_release_invariant.py",
+   "sha256": "bafa90df522981415b6d72779539c7fec33a0bc9477d29e5bb84ff841901070e"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_repo_scope.py",
+   "sha256": "2df13de181ea467f3f4abcc50a1c199228594920a25c9d40c5f9cbb8f541ccfd"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_score.py",
+   "sha256": "3f8816feb5054973bea7d9c3ab448642f4d14a219ba296e450c89cf8dc7d9882"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_session_baseline.py",
+   "sha256": "fdc4144c2a19713a54a2550e7866c5114a7007520c7f7a4ba624c08a3fd8f542"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_session_reconcile.py",
+   "sha256": "c3b07c39cc23f4652ff18616a4855e346b268284c24aa5dca80b9ba03c86cb16"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_sessionstart.py",
+   "sha256": "4f10181bc7af10fa7f31edfe8f8ba53e709f22db700636838e8a9fdee5e41c82"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_telemetry.py",
+   "sha256": "7fc5adb6ce531f364d01d014963b352c3ca0dcf2aa7cb9e1c6cdc8bfc215b625"
+  },
+  {
+   "path": "products/brothersbe/tools/sbe_testkit.py",
+   "sha256": "1c2a362d67010bde84e16cc8276e0e2b904bf5dda9ea5d4a3f4271f4a6aad32f"
+  },
+  {
    "path": "proof_card.py",
-   "sha256": "b1eeb6add676fe6d173431eca7d8816f5262fb0819f2277be89f68dba9be0667"
+   "sha256": "f36e7fd9b852f45c1fa0b81f32ea23b76dd021a1a284a2ed1214ede0ce8cc9fb"
   },
   {
    "path": "receipt_door.py",
-   "sha256": "3e49ca29cad3761a87f6a777384d38aef33cdd71f80d1a742007a20551399efc"
+   "sha256": "33ecad1f2c5b72d50f26f113c034306682671cc64a1f8fb251049d3cd27bcfdd"
+  },
+  {
+   "path": "release_state_tracker.py",
+   "sha256": "417bc14ed8d61ed9b6ab19ea90909a4ce5965dc4957a6fda5a232c99b69d776c"
   },
   {
    "path": "resource_gate.py",
    "sha256": "6285a4671bfa7419e3670a5837824cb2ef1ea585a3cd9e6749690f4b3ee77704"
   },
   {
+   "path": "reversibility_gate.py",
+   "sha256": "b313539ab0270f3ca0099a3a3f5ed73eeea9625d6372bb4da1ba7001dff774f5"
+  },
+  {
    "path": "review_pass.py",
    "sha256": "e79f9f6a930a867702a9f5ad20178235637a3df278f0501dfb04a21d0d1ec30c"
+  },
+  {
+   "path": "ruling_ledger.py",
+   "sha256": "d7530240c084ce3e8187273bdb347f9188d87d31289bebdd83975aaa80a81ed1"
   },
   {
    "path": "run_heartbeat.py",
@@ -314,6 +878,10 @@
    "sha256": "6fcc04cda788a2a6eea232b96734368c61d0f8e8a639af74158015822aab7239"
   },
   {
+   "path": "task_watchdog.py",
+   "sha256": "2ee8bc37105ff36e97bfa4a52abf2d872dfb1b5b2be04ea6624cb9bfed4b119b"
+  },
+  {
    "path": "tmp_sandbox.py",
    "sha256": "43f65a69fbd2ba840929d4cb88274a2933678cdbe21851809646a95f5e8bae37"
   },
@@ -326,6 +894,10 @@
    "sha256": "66ef423585b3e1d0242acf8c68834cc7857388e3ddef7e6c6d87e8e1608e41e4"
   },
   {
+   "path": "voice_pipeline.py",
+   "sha256": "540dfbdfb8a8fc50e19ad131b086b238571e596da9566201e730879734380750"
+  },
+  {
    "path": "work_record.py",
    "sha256": "9b4ea5a55de961721fa287fbc0f9c4cee7e6018d6a9788b6f3bcf8df0d6283eb"
   },
@@ -335,6 +907,6 @@
   }
  ],
  "generated_by": "scripts/bundle_runtime.py",
- "source_describe": "v1.0.17-4224-g6882fd169-dirty",
- "source_revision": "6882fd16941ce24c2a2ad3609b03c3b13dcfe8fb"
+ "source_describe": "v1.0.17-4710-gb914bf074-dirty",
+ "source_revision": "b914bf0743c1565177e4baa749333389fbeacd88"
 }

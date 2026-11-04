@@ -902,7 +902,7 @@ class PoolTest(_Fixture):
         spec = "docs/plan/specs/%s.md" % uid
         self.write(spec, "# %s\n\n### %s the one sub unit\nIt changes `scripts/%s_1.py`.\nDone check: `python3 -B %s`\n"
                    % (uid, sub, uid.lower(), test))
-        return {"id": uid, "state": "OPEN", "done_check": check or "python3 -B %s" % test, "spec": spec,
+        return {"id": uid, "state": "OPEN", "lane": "loop", "loop_gradable": True, "done_check": check or "python3 -B %s" % test, "spec": spec,
                 "sub_units": [sub], "evidence": "", "owns": ["scripts/%s_1.py" % uid.lower(), test]}
 
     def verdict(self, uid, state, claims=()):

@@ -1,0 +1,242 @@
+{
+  "label": "SIMULATED trial population: the frozen key marking's groups and named operations, as grid rows",
+  "source": {
+    "file": "PLAN-120-DELIVERY-PACK/KEY-MARKING.json",
+    "sha256_16": "8fafeff15c8875e3",
+    "status": "FROZEN 2026-11-01 after one independent review round; a marking change needs a new reason that does not cite a failing run (HUMAN-TRIAL-GATE.md rule 3)",
+    "key_groups": [
+      "execution-outcome",
+      "status-acceptance",
+      "host-health",
+      "authority-budget",
+      "assurance-review",
+      "assurance-control",
+      "loop-control",
+      "learning-lessons",
+      "vault-recall",
+      "vault-lifecycle",
+      "vault-conflicts",
+      "jev-review"
+    ],
+    "file_in_repo": "benchmarks/sim-users/key-marking.json"
+  },
+  "rule": "SIM1 never marks, re-marks or narrows a group; a failing row stays a row. Hints are in our own words.",
+  "rows": [
+    {
+      "id": "execution-outcome/deliver",
+      "group": "execution-outcome",
+      "sessions": 1,
+      "hint": "carry a plain-language change through to an accepted, proven result",
+      "covers": [
+        "deliver"
+      ]
+    },
+    {
+      "id": "execution-outcome/resume",
+      "group": "execution-outcome",
+      "sessions": 2,
+      "hint": "resume, continue or finish work left unfinished in an earlier session",
+      "covers": [
+        "resume",
+        "continue",
+        "unfinished"
+      ]
+    },
+    {
+      "id": "execution-outcome/stop",
+      "group": "execution-outcome",
+      "sessions": 1,
+      "hint": "stop a delivery that is running without losing what was already done",
+      "covers": [
+        "stop"
+      ]
+    },
+    {
+      "id": "status-acceptance/state",
+      "group": "status-acceptance",
+      "sessions": 1,
+      "hint": "find out where the work stands",
+      "covers": [
+        "state"
+      ]
+    },
+    {
+      "id": "status-acceptance/next-step",
+      "group": "status-acceptance",
+      "sessions": 1,
+      "hint": "learn the one next step to take",
+      "covers": [
+        "next step"
+      ]
+    },
+    {
+      "id": "status-acceptance/accept-reject",
+      "group": "status-acceptance",
+      "sessions": 1,
+      "hint": "accept or reject a delivered result, on the record",
+      "covers": [
+        "accept",
+        "reject"
+      ]
+    },
+    {
+      "id": "host-health/install",
+      "group": "host-health",
+      "sessions": 1,
+      "hint": "install the assistant's plugin and get it working",
+      "covers": [
+        "install"
+      ]
+    },
+    {
+      "id": "host-health/update",
+      "group": "host-health",
+      "sessions": 1,
+      "hint": "update the plugin and keep the project working",
+      "covers": [
+        "update"
+      ]
+    },
+    {
+      "id": "host-health/recover",
+      "group": "host-health",
+      "sessions": 1,
+      "hint": "recover a broken or half installed plugin",
+      "covers": [
+        "recover"
+      ]
+    },
+    {
+      "id": "authority-budget/spend",
+      "group": "authority-budget",
+      "sessions": 1,
+      "hint": "keep paid or unattended work inside the spending limit and the authority the person granted",
+      "covers": [
+        "spend"
+      ]
+    },
+    {
+      "id": "assurance-review/gates",
+      "group": "assurance-review",
+      "sessions": 1,
+      "hint": "check that a change is verified: its numbers, migration, approval, the checks that ran, and its proof",
+      "covers": [
+        "gates"
+      ]
+    },
+    {
+      "id": "assurance-control/scope",
+      "group": "assurance-control",
+      "sessions": 1,
+      "hint": "keep a change inside the scope and approvals the person agreed to",
+      "covers": [
+        "scope"
+      ]
+    },
+    {
+      "id": "loop-control/launch-safety",
+      "group": "loop-control",
+      "sessions": 1,
+      "hint": "start unattended work safely, with its write scope claimed before any worker runs",
+      "covers": [
+        "safety floor",
+        "claim write scope before worker"
+      ]
+    },
+    {
+      "id": "loop-control/probe",
+      "group": "loop-control",
+      "sessions": 1,
+      "hint": "check that unattended work can start here at all, and say plainly what stops it",
+      "covers": [
+        "probe"
+      ]
+    },
+    {
+      "id": "loop-control/adopt",
+      "group": "loop-control",
+      "sessions": 1,
+      "hint": "take over work an earlier unattended run left behind, without redoing or losing it",
+      "covers": [
+        "adopt"
+      ]
+    },
+    {
+      "id": "learning-lessons/capture",
+      "group": "learning-lessons",
+      "sessions": 2,
+      "hint": "capture a lesson from a mistake so that it is kept",
+      "covers": [
+        "capture lesson"
+      ]
+    },
+    {
+      "id": "learning-lessons/recurrence",
+      "group": "learning-lessons",
+      "sessions": 2,
+      "hint": "have an earlier lesson applied when the same situation comes back",
+      "covers": [
+        "recurrence"
+      ]
+    },
+    {
+      "id": "vault-recall/search",
+      "group": "vault-recall",
+      "sessions": 2,
+      "hint": "search what was learned earlier in the project",
+      "covers": [
+        "search"
+      ]
+    },
+    {
+      "id": "vault-recall/contextual",
+      "group": "vault-recall",
+      "sessions": 2,
+      "hint": "have earlier knowledge recalled at the moment it matters",
+      "covers": [
+        "contextual recall"
+      ]
+    },
+    {
+      "id": "vault-lifecycle/intake",
+      "group": "vault-lifecycle",
+      "sessions": 2,
+      "hint": "take a new note or decision into the project's memory",
+      "covers": [
+        "intake"
+      ]
+    },
+    {
+      "id": "vault-conflicts/triage",
+      "group": "vault-conflicts",
+      "sessions": 2,
+      "hint": "notice and settle a contradiction between earlier notes",
+      "covers": [
+        "contradiction triage"
+      ]
+    },
+    {
+      "id": "jev-review/delivery-note",
+      "group": "jev-review",
+      "sessions": 1,
+      "hint": "have a delivery's done note checked before it is believed",
+      "covers": [
+        "delivery-note verification"
+      ]
+    }
+  ],
+  "path_rule_modules": [
+    "loop_bridge",
+    "model_worker",
+    "receipt_door",
+    "continuity",
+    "handover_record",
+    "bm_controller",
+    "bm_fence_hook",
+    "sbe_authority_hook",
+    "sbe_fence_hook",
+    "sbe_bash_write_guard",
+    "vault_recall_hook",
+    "bm_vault_contradiction"
+  ]
+}

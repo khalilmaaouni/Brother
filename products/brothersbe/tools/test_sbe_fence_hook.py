@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # E100: one sandbox for every temp tree this process makes, removed at exit.
 import os as _e100_os, sys as _e100_sys  # noqa: E402
@@ -1624,6 +1625,85 @@ class TestDeclaredSessionAliases(FenceCase):
         self.assertIsNone(
             self.decide(self.payload(target, session=RAW_HARNESS_ID)).payload,
             "an ordinary same-session match broke when aliases were added")
+
+
+class TestASiblingLabelIsResolvedByItsOwnDerivation(FenceCase):
+    """The declared route above cannot work under Claude Code: hooks are
+    spawned by the harness, so a session has no way to export
+    SBE_SESSION_ALIASES into them. Measured 2026-10-31 under the bundle
+    dispatcher: a BrotherMode claim's owner was DENIED its own file by this
+    hook while a foreign session was correctly denied too. So for a bm1-
+    fence this hook asks BrotherMode's own read-only `existing_label`, the
+    function that owns the derivation, instead of guessing it."""
+
+    RAW = "5d94151e-07ec-4197-8430-5dce907e547c"
+    FOREIGN = "99999999-aaaa-bbbb-cccc-dddddddddddd"
+
+    def setUp(self):
+        super().setUp()
+        self.bm = fh._sibling_fence_module()
+        self.assertIsNotNone(self.bm, "the sibling BrotherMode fence did not load")
+
+    def _fenced(self, owner):
+        write(self.registry,
+              "# State\n\n## Live fences\n"
+              "- a6 (abc123, version 1, ephemeral) [T2] owner-session: %s, "
+              "agent: (no owner) objective: x files: docs/SETUP.md |\n" % owner)
+        return os.path.join(self.root, "docs", "SETUP.md")
+
+    def _tokens(self):
+        d = self.bm.fence_dir(os.path.realpath(self.root))
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    def test_the_claim_owner_is_allowed_with_no_alias_declared(self):
+        target = self._fenced(self.bm.session_label(os.path.realpath(self.root), self.RAW))
+        self.assertIsNone(
+            self.decide(self.payload(target, session=self.RAW)).payload,
+            "the owner of a BrotherMode claim was refused out of its own file")
+
+    def test_a_foreign_session_is_still_refused_and_gets_no_token(self):
+        target = self._fenced(self.bm.session_label(os.path.realpath(self.root), self.RAW))
+        before = self._tokens()
+        self.assertDenied(self.decide(self.payload(target, session=self.FOREIGN)),
+                          "a session that owns nothing here")
+        self.assertEqual(self._tokens(), before,
+                         "judging a write minted an identity for the writer")
+
+    def test_presenting_the_label_itself_as_a_session_id_is_not_the_owner(self):
+        # Same forgery bm's own CalibratedIdentity 3a pins, from this side:
+        # the label is public in STATE.md, the token behind it is not.
+        label = self.bm.session_label(os.path.realpath(self.root), self.RAW)
+        target = self._fenced(label)
+        self.assertDenied(self.decide(self.payload(target, session=self.FOREIGN)),
+                          "foreign")
+        self.assertFalse(fh.same_session(label, self.FOREIGN, aliases=[],
+                                         registry=self.registry))
+
+    def test_a_shortened_label_never_matches_through_the_derivation(self):
+        # Security review 2026-10-31: the derived label went through the
+        # prefix loop, so a fence naming only the first characters of a bm1-
+        # label admitted every session whose own label began with them. The
+        # derived label is compared exactly; abbreviation stays a raw id
+        # convenience only.
+        mine = self.bm.session_label(os.path.realpath(self.root), self.RAW)
+        target = self._fenced(mine[:len("bm1-") + 6])
+        self.assertDenied(self.decide(self.payload(target, session=self.RAW)),
+                          "a six character label prefix matched a full label")
+        self.assertFalse(fh.same_session(mine[:12], self.RAW, aliases=[],
+                                         registry=self.registry))
+
+    def test_an_unloadable_sibling_keeps_the_old_refusal(self):
+        target = self._fenced(self.bm.session_label(os.path.realpath(self.root), self.RAW))
+        with mock.patch.object(fh, "_sibling_fence_module", lambda: None):
+            self.assertDenied(self.decide(self.payload(target, session=self.RAW)),
+                              "no sibling, no derivation: unchanged behavior")
+
+    def test_a_non_bm_fence_never_consults_the_sibling(self):
+        target = self._fenced(self.FOREIGN)
+        with mock.patch.object(fh, "_sibling_fence_module",
+                               side_effect=AssertionError("consulted")):
+            self.assertDenied(self.decide(self.payload(target, session=self.RAW)),
+                              "plain foreign fence")
 
 
 class TestALongFenceProtectsEveryPathItNames(FenceCase):

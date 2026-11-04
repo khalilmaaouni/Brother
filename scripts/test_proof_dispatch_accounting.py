@@ -98,9 +98,13 @@ class ProofDispatch(unittest.TestCase):
  def test_partial_configuration_cannot_fall_back_to_legacy(self):
   with mock.patch.dict(os.environ,BROTHER_PROOF_PHASE=''):
    with self.assertRaises((ValueError,L.LedgerError,OSError)):self.reserve()
- def test_duplicate_dispatch_refuses_without_appending(self):
+ def test_duplicate_dispatch_is_a_no_op_without_appending(self):
+  # D2.2 REQ-LEDGER-4: mark_dispatched's second call for one id is a no op, never a second marker and never an error
+  # (the earlier expectation, a LedgerError, predates that contract). An unknown id still raises, below.
   rid=self.reserve();self.marker(rid);before=self.ledger.read_bytes()
-  with self.assertRaises(L.LedgerError):self.marker(rid)
+  self.assertIsNone(self.marker(rid))
+  self.assertEqual(self.ledger.read_bytes(),before)
+  with self.assertRaises(L.LedgerError):self.marker('no-such-reservation')
   self.assertEqual(self.ledger.read_bytes(),before)
  def test_dispatch_checks_holder(self):
   rid=self.reserve()

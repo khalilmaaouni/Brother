@@ -42,6 +42,20 @@ def _wait_for(predicate, timeout=5.0, interval=0.02):
     return ok
 
 
+def _process_table_readable():
+    """True when the process table can be read here. A confined run (the hermetic check's sandbox) cannot read it, and
+    process_containment then says so (verified False), which is its contract: the premise of the tests below is absent,
+    not the behaviour broken. Same probe as scripts/test_execution_boundary.py."""
+    try:
+        pc._read_process_table()
+    except pc.EnumerationError:
+        return False
+    return True
+
+
+NEEDS_A_READABLE_PROCESS_TABLE = unittest.skipUnless(_process_table_readable(), "the process table cannot be read in this confined run")
+
+
 class DescendantWalkTests(unittest.TestCase):
     """Pure functions, no real processes: the graph logic on its own."""
 
@@ -63,6 +77,7 @@ class DescendantWalkTests(unittest.TestCase):
 
 class ReadProcessTableTests(unittest.TestCase):
 
+    @NEEDS_A_READABLE_PROCESS_TABLE
     def test_real_table_contains_this_process(self):
         rows = pc._read_process_table()
         pids = {pid for pid, _ppid, _pgid in rows}
@@ -119,6 +134,7 @@ class GuardTests(unittest.TestCase):
             proc.wait(timeout=5)
 
 
+@NEEDS_A_READABLE_PROCESS_TABLE
 class CancelSimpleTreeTests(unittest.TestCase):
     """A plain two-generation tree with no detachment: the case every
     killpg-based approach already handles, kept as a baseline."""
@@ -146,6 +162,7 @@ class CancelSimpleTreeTests(unittest.TestCase):
                 root.wait(timeout=5)
 
 
+@NEEDS_A_READABLE_PROCESS_TABLE
 class CancelDetachedGrandchildTests(unittest.TestCase):
     """The deciding property: a detached (setsid) grandchild dies too."""
 

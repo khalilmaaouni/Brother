@@ -79,6 +79,22 @@ except ImportError:
         % _e100_os.path.basename(__file__))
 
 
+def _can_listen_on_loopback():
+    """The stub provider is a local HTTP server. A confined run (the hermetic check's sandbox allows no network, not
+    even a loopback listener) cannot bind one: there the premise is absent, not the behaviour broken."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+    except OSError:
+        return False
+    return True
+
+
+NEEDS_A_LOOPBACK_LISTENER = unittest.skipUnless(_can_listen_on_loopback(), "NO-DATA: this run may not open a loopback listener")
+
+
+@NEEDS_A_LOOPBACK_LISTENER
 class StubWaitsForRunningCommand(unittest.TestCase):
     """The local provider must finish the tool, not just its first yield."""
 
@@ -280,6 +296,7 @@ class TheReceiptReader(unittest.TestCase):
         self.assertIn("unreadable", why)
 
 
+@NEEDS_A_LOOPBACK_LISTENER
 class TheDocumentedCommand(unittest.TestCase):
     """The runbook's own step 6, run for real against the Codex binary with
     the stub provider substituted for the model, in both sandbox directions.

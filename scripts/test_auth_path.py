@@ -93,5 +93,51 @@ class Dollars(unittest.TestCase):
         self.assertTrue(BG.read_cap(path).get("expired"))
 
 
+class DollarsEdges(unittest.TestCase):
+    """AUTH1.c, integrator cases beside the frozen Dollars class: each refusal on its own, and every reading of a cap
+    that cannot be trusted answers zero dollars and expired, so it never funds a lane."""
+
+    def write(self, data):
+        d = tempfile.mkdtemp(prefix="cap-edge-")
+        path = os.path.join(d, "cap-grant.json")
+        with open(path, "w") as fh:
+            fh.write(data if isinstance(data, str) else json.dumps(data))
+        return path
+
+    def test_cap_block_refuses_each_bad_input(self):
+        import loop_budget_grant as G
+        import datetime
+        naive = datetime.datetime.now().replace(microsecond=0) + datetime.timedelta(days=3)
+        for dollars, until, words in ((15.0, FUTURE, ""), (15.0, FUTURE, "   "), (0, FUTURE, "w"), (-1.0, FUTURE, "w"),
+                                      (float("inf"), FUTURE, "w"), (float("nan"), FUTURE, "w"), (True, FUTURE, "w"),
+                                      ("15", FUTURE, "w"), (15.0, naive.isoformat(), "w")):
+            with self.assertRaises(G.GrantRefused, msg=repr((dollars, until, words))):
+                G.cap_block(dollars, until, words)
+
+    def test_an_untrusted_cap_never_funds_a_lane(self):
+        import burn_guard as BG
+        import datetime
+        naive = (datetime.datetime.now().replace(microsecond=0) + datetime.timedelta(days=3)).isoformat()
+        bad = ({"dollars": 15.0, "until": naive}, "not json {", "[1]", {"until": FUTURE}, {"dollars": 15.0}, {"dollars": 0, "until": FUTURE},
+               {"dollars": -3, "until": FUTURE}, {"dollars": True, "until": FUTURE}, {"dollars": "15", "until": FUTURE},
+               {"dollars": 15.0, "until": "not a time"}, {"dollars": 15.0, "until": 12})
+        for data in bad:
+            got = BG.read_cap(self.write(data))
+            self.assertEqual("NO-DATA", got.get("verdict"), data)
+            self.assertEqual((0.0, True), (got.get("dollars"), got.get("expired")), data)
+        got = BG.read_cap(os.path.join(tempfile.mkdtemp(prefix="cap-edge-"), "absent.json"))
+        self.assertEqual(("NO-DATA", 0.0, True), (got.get("verdict"), got.get("dollars"), got.get("expired")))
+
+    def test_an_expired_cap_fails_and_funds_nothing(self):
+        import burn_guard as BG
+        got = BG.read_cap(self.write({"dollars": 15.0, "until": PAST, "reason": "w"}))
+        self.assertEqual(("FAIL", 0.0, True), (got.get("verdict"), got.get("dollars"), got.get("expired")))
+
+    def test_a_good_cap_passes_with_its_amount(self):
+        import burn_guard as BG
+        got = BG.read_cap(self.write({"dollars": 15.0, "until": FUTURE, "reason": "w"}))
+        self.assertEqual(("PASS", 15.0, False), (got.get("verdict"), got.get("dollars"), got.get("expired")))
+
+
 if __name__ == "__main__":
     unittest.main()

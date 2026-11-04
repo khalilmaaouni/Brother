@@ -193,6 +193,7 @@ def _load_pool():
     module = importlib.util.module_from_spec(spec)
     sys.modules["runner_pool_under_test"] = module
     spec.loader.exec_module(module)
+    module.pass_admission = lambda unit, sub, tree=".": ""   # LOOP1.b: this suite fabricates units with no lane; admission is not what it tests
     return module
 
 

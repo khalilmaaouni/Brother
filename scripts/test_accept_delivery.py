@@ -50,6 +50,8 @@ def bind_receipt(run_dir, project):
     body = {k: "x" for k in _br.RECEIPT_REQUIRED_FIELDS}
     body.update(scope={"changed": [{"unit": "guard", "file": "mathlib.py"}]},
                 evidence=[{"id": "guard", "state": "verified"}], unproven=[],
+                # OUT1.b: a real receipt's intent.outcome is its run's own (receipt_record reads the Work document)
+                intent={"outcome": __import__("receipt_door").outcome_of(run_dir), "units": []},
                 host_capability={"receipt_path": path})
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(body, fh)

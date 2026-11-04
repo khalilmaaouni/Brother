@@ -134,6 +134,21 @@ def inputs_identity(root, candidate, version, env=None):
             "interpreter": interpreter_identity(), "environment": environment_identity(env)}
 
 
+def preflight_inputs(candidate, tree, export_tree_id, version, env=None):
+    """CUT2.b: the identity a preflight verdict stands on, ONE function for the writer (record_preflight) and the
+    reader (cut.reusable_preflight), so the two can never key it differently. The checker and policy digests read
+    the judging scripts this process runs (ROOT), the code is the candidate commit and tree, the export is the export
+    tree id, and host and HOME are named on their own beside the environment. An unset HOME or an unread export id
+    is '' and so never matches (cut_driver.shared_evidence_usable refuses empty identity)."""
+    import platform
+    env = os.environ if env is None else env
+    ident = inputs_identity(ROOT, candidate, version, env)
+    return {"code": "%s %s" % (candidate, tree), "checker": ident["checker"], "policy": ident["policy"],
+            "interpreter": ident["interpreter"], "environment": ident["environment"], "export": export_tree_id,
+            "host": "%s %s %s" % (platform.system(), platform.machine(), platform.release()),
+            "home": env.get("HOME", "")}
+
+
 def row_inputs_key(export_tree_id, env=None):
     """The key a rehearsal row carries: its export tree id is its candidate (a cut's bump commits move the commit,
     not the export), with the interpreter and the environment beside it."""
@@ -1567,7 +1582,8 @@ def record_preflight(version, candidate, tree, export_tree_id, verdict, log_path
     record = {"schema": PREFLIGHT_SCHEMA, "version": version, "candidate_sha": candidate, "candidate_tree": tree,
               "export_tree_id": export_tree_id, "verdict": verdict, "rows": rows, "log_path": log_path,
               "log_sha256": hashlib.sha256(raw).hexdigest(), "interpreter": _interpreter(),
-              "seconds": float(seconds), "finished_at": _iso(stamp)}
+              "seconds": float(seconds), "finished_at": _iso(stamp),
+              "inputs": preflight_inputs(candidate, tree, export_tree_id, version)}
     path = os.path.join(directory, "preflight-%s-%s-%d.json" % (version, candidate[:12], int(stamp)))
     tmp = "%s.tmp-%d-%s" % (path, os.getpid(), uuid.uuid4().hex[:6])
     with open(tmp, "w", encoding="utf-8") as fh:

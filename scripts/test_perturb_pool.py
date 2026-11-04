@@ -1,6 +1,7 @@
 """perturb_pool.py driven both ways. The copy rules run against a real, tiny
 git repository this file makes for itself; the pool runs on fakes so each
 NO-DATA rule is shown without a minutes long suite."""
+import atexit
 import contextlib
 import io
 import json
@@ -14,8 +15,19 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# 1.2.0: an operator's disk floor override (BROTHER_DISK_FLOOR_GIB, read once when perturb_pool is imported) must not
+# change what these tests assert about the 15 GiB default; a test that needs another floor passes its own env dict.
+os.environ.pop("BROTHER_DISK_FLOOR_GIB", None)
 import export_public  # noqa: E402
 import perturb_pool as PP  # noqa: E402
+
+# CUT2.e: the pool leases from a machine ledger; these tests use a ledger of their own, never the real one
+_LEDGER = tempfile.mkdtemp(prefix="pool-ledger-", dir=export_public.scratch_root())
+os.environ[PP.LEASE_ENV] = os.path.join(_LEDGER, "leases.json")
+atexit.register(shutil.rmtree, _LEDGER, True)
+# and a machine that is always roomy: these tests are about the pool, not about how much disk the host has left (the
+# lease arithmetic is test_cut_resource_admission.py)
+PP.default_leases = lambda: PP.Leases(path=os.environ[PP.LEASE_ENV], ncpu=64, mem_gib=1024.0, free=lambda p: 1000.0)
 
 ENV = PP.clean_env({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
 
@@ -153,9 +165,11 @@ class ThePool(Base):
     def run_pool(self, answer, copier=None, workers=2):
         """`answer(argv)` plays the worker: returns the rows it writes, or None."""
         seen = []
+        self.scratch_at_spawn = []
 
         def spawn(argv, env):
             seen.append((argv, env))
+            self.scratch_at_spawn.append(os.path.isdir(env["TMPDIR"]))
             rows = json.load(open(argv[4]))
             wrote = answer(rows)
             if wrote is not None:
@@ -228,7 +242,9 @@ class ThePool(Base):
         for argv, env in seen:
             self.assertFalse([k for k in env if k.startswith("GIT_")])
             self.assertNotIn(PP.FORBIDDEN_PATH_TEXT, env["TMPDIR"])
-            self.assertTrue(os.path.isdir(env["TMPDIR"]))
+            # CUT2.e: it is there while its worker runs and reclaimed when the worker ends
+            self.assertFalse(os.path.exists(env["TMPDIR"]))
+        self.assertEqual(self.scratch_at_spawn, [True] * len(seen))
 
     def test_every_copy_is_removed_and_the_source_is_untouched(self):
         self.run_pool(lambda rows: [[f, s, True, "red"] for f, s in rows])

@@ -28,7 +28,7 @@ always wins over both the raw latest value and a promoted default, checked last
 in both read() and promoted() below.
 
 Python 3.9, standard library only, no network. Mirrors tools/bm_vault_promote.py's
-own shape: a DEFAULT_VAULT constant, an explicit-failure _read(), an argparse CLI
+own shape: the vault from pattern_note.require_vault_root, an explicit-failure _read(), an argparse CLI
 over one small set of module functions a caller can also import directly.
 """
 import argparse
@@ -52,7 +52,7 @@ def _load(name):
 
 L = _load("bm_learning")
 
-DEFAULT_VAULT = os.environ.get("BROTHERMODE_VAULT") or os.path.expanduser("~/Documents/Kay Vault")
+P = _load("pattern_note")  # KEY1.f: the vault default is the one resolver's answer
 PROMOTE_AFTER = 3
 CORRECT_PREFIX = "correct: "
 
@@ -282,7 +282,7 @@ def _build_parser():
 
     def add_common(sp):
         sp.add_argument("--profile", default=None, help="direct path to Profile.md")
-        sp.add_argument("--vault", default=None, help="vault root, default the Kay Vault")
+        sp.add_argument("--vault", default=None, help="vault root, default the configured vault (BROTHERMODE_VAULT_ROOT)")
         sp.add_argument("--project", default=None, help="project slug under 10-Projects/")
 
     pr = sub.add_parser("read", help="print the current effective profile")
@@ -302,8 +302,8 @@ def _build_parser():
 
 def main(argv=None):
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    if not args.vault:
-        args.vault = DEFAULT_VAULT
+    if args.project and not args.profile:
+        args.vault = P.require_vault_root(args.vault, "bm_profile")
     return {"read": cmd_read, "record": cmd_record, "promoted": cmd_promoted}[args.cmd](args)
 
 

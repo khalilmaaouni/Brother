@@ -25,6 +25,7 @@ ALLOWED = {
     "scripts/loop/model_call.py": "BRIDGE definition; call_one asks assert_may_send at the wire",
     "scripts/loop/grade_build.py": "names the bridge only in the protected path list a build may not edit; not a model call",
     "scripts/loop/tool_stamp.py": "stamps the deployed tools by path; never runs the bridge",
+    "scripts/sim_trial.py": "the simulated user trial: or_ask runs the estate's one outbound content gate (bridge_content_gate.decide) before anything leaves and a refusal raises; a trial tool, off every pass",
 }
 
 

@@ -65,7 +65,7 @@ class CommitHook(unittest.TestCase):
                         SP7_COUNTER=os.path.join(self.tmp, "counter"))
         for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
             self.env.pop(k, None)
-        for name in ("system_doc.py", "self_check_staged.py", "private_terms_scan.py"):
+        for name in ("system_doc.py", "self_check_staged.py", "private_terms_scan.py", "credit_marks.py"):
             shutil.copy(os.path.join(HERE, name), os.path.join(self.repo, "scripts", name))
         self.write("scripts/check_all.sh", 'run_check "alpha" python3 scripts/test_alpha.py\n')
         self.write("scripts/alpha.py", '"""alpha: the one described part of this fixture."""\n')

@@ -42,6 +42,7 @@ EXIT 0 PASS, 1 FAIL, 2 NO-DATA.
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -61,73 +62,117 @@ def installed_tool(config):
     return None
 
 
-#: The receipt fields accept_delivery refuses a run directory for lacking, discovered by
-#: running it against a synthetic run on 2026-10-29 and reading each refusal in turn.
-#: Kept here rather than rediscovered: five invocations bought this list.
-_RECEIPT_NODATA_FIELDS = ("intent", "repair_history",
-                          "attention", "containment", "continuity",
-                          "harness_version", "harness_revision", "report")
+#: The engine and the intake a stranger's run goes through, found BY NAME under the install.
+ENGINE = "brother_run.py"
+INTAKE = "bm_project.py"
+OUTCOME = "the greeting file exists and its test passes"
+#: The machine refusal that means the run could not be attempted here, so the row is NO-DATA, never a FAIL of the
+#: product: the engine's own disk admission, matched on its own words. (A wait under the load ceiling is not a
+#: refusal: the run goes on once a slot frees, so it is not listed.)
+MACHINE_REFUSALS = ("under the refuse floor",)
+#: The worker the run is given: it writes each file its prompt declares, so the run reaches a real integration and
+#: a real receipt without a model call. The same shape scripts/test_brother_run_plan.py's WRITER_MODEL uses.
+WRITER = ("import re, sys\n"
+          "p = sys.argv[-1] if len(sys.argv) > 1 else ''\n"
+          "m = re.search(r'Declared write scope: ([^\\n]+)', p)\n"
+          "for path in (x.strip() for x in (m.group(1).split(',') if m else [])):\n"
+          "    if path:\n"
+          "        with open(path, 'w') as fh:\n"
+          "            fh.write('hello from the journey\\n')\n"
+          "print('wrote', m.group(1) if m else 'nothing')\n")
+#: The project's own test: it FAILS (an assertion, not a crash) until the file exists, so the run's self revert
+#: reads a real failure and the unit can be proven rather than read as passing anyway.
+TEST = ("import os, unittest\n"
+        "class Greeting(unittest.TestCase):\n"
+        "    def test_the_greeting_exists(self):\n"
+        "        self.assertTrue(os.path.isfile('greeting.txt'), 'no greeting file')\n"
+        "if __name__ == '__main__':\n"
+        "    unittest.main()\n")
 
 
-def _run_dir(home):
-    """A run directory built up to the last requirement this check has verified.
+def _beside(config, name):
+    """The installed file `name`, found BY NAME under the sandbox's config dir, or None."""
+    for base, dirs, files in os.walk(config or ""):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        if name in files:
+            return os.path.join(base, name)
+    return None
 
-    WHAT THE TOOL ASKS FOR, in the order it asked, each one a real refusal read off a
-    real run: a single W-*.json Work document; a claims.json beside it; a review, or an
-    explicit review_skip naming a reason and who skipped it (passed as flags, not here);
-    receipt/receipt.json; twelve further receipt fields; per-file checks under
-    scope.changed; and then per-unit verdicts, which is where this stops.
 
-    EVERY ONE OF THOSE WAS READ OFF A REAL REFUSAL, never guessed, and the last two
-    arrived when ACC1 was built: per unit verdicts (`evidence` and `unproven`, each a
-    list of {id, state}), a `host_capability.receipt_path` naming the receipt's own
-    path, and a `target.json` naming the project the run is FOR, which the caller
-    passes back as --project-cwd so the tool can bind the run to a project rather than
-    record an acceptance against somebody else's work.
+def _git(args, cwd, env):
+    return subprocess.run(["git"] + args, cwd=cwd, env=env, capture_output=True, text=True, timeout=60)
 
-    The fixture is now complete and the accept route records through it. The judging
-    logic is proven in BOTH directions by the selftest's injected seams, and the live
-    path can only fail, never pass, on a fixture the tool refuses."""
-    d = os.path.join(home, "journey-run")
-    os.makedirs(os.path.join(d, "receipt"), exist_ok=True)
-    with open(os.path.join(d, "W-journey.json"), "w", encoding="utf-8") as fh:
-        json.dump({"rows": [{"id": "U1", "done_check": "python3 -B t.py",
-                             "files_changed_by_unit": ["t.py"]}]}, fh)
-    with open(os.path.join(d, "claims.json"), "w", encoding="utf-8") as fh:
-        json.dump({"U1": {"evidence": {"check_command": "python3 -B t.py",
-                                       "exit_code": 0}}}, fh)
-    checks = [{"file": "t.py", "unit": "U1", "check_command": "python3 -B t.py",
-               "exit_code": 0, "output_location": "NO-DATA",
-               "state": "verified", "reason": ""}]
-    # The run names the project it is FOR, and the caller passes that same path as
-    # --project-cwd: the tool refuses a run it cannot bind to a project, which is how
-    # it stops an acceptance being recorded against somebody else's work.
+
+def real_run(config, home, env=None, timeout=900):
+    """(run directory, project, "") from a run made THROUGH THE INSTALLED ENGINE, or (None, None, why).
+
+    WHY IT IS NOT HAND BUILT ANY MORE. Until 2026-11-01 this file wrote a run directory itself, field by field, each
+    field read off one refusal of accept_delivery. Every refusal the tool learned made that fixture stale: on
+    2026-11-01 OUT1.b's outcome_drift refused it (the hand built receipt carried no outcome), and the row read FAIL
+    while the product was right. A fixture that imitates the engine is always one refusal behind it, so the run now
+    comes from the engine a stranger has: the installed intake writes the outcome contract from the project, the
+    installed brother_run.py runs one unit against it (a writer worker, no model call), and its receipt is what the
+    accept route is asked to bind.
+
+    why starts with "NO-DATA" when the machine refused the run (disk floor, load ceiling): that is not a product
+    answer either way."""
+    env = dict(os.environ if env is None else env)
+    engine, intake = _beside(config, ENGINE), _beside(config, INTAKE)
+    if not engine or not intake:
+        return None, None, "no installed %s" % (ENGINE if not engine else INTAKE)
     project = os.path.join(home, "journey-project")
     os.makedirs(project, exist_ok=True)
-    subprocess.run(["git", "init", "-q", project], capture_output=True, timeout=60)
-    with open(os.path.join(d, "target.json"), "w", encoding="utf-8") as fh:
-        json.dump({"cwd": project}, fh)
-    receipt_path = os.path.join(d, "receipt", "receipt.json")
-    receipt = {
-        "receipts": [{"id": "U1", "objective": "a journey unit",
-                      "command": "python3 -B t.py", "exit_code": 0,
-                      "output_location": "NO-DATA", "reason": "",
-                      "state": "verified"}],
-        "checks": checks,
-        "scope": {"changed": checks},
-        # Per unit verdicts: each a list of {id, state}. `unproven` is empty on
-        # purpose, which the reader accepts, since all() over nothing is true.
-        "evidence": [{"id": "U1", "state": "verified"}],
-        "unproven": [],
-        # The receipt names its own path, which is how the reader refuses a receipt
-        # copied in from somewhere else.
-        "host_capability": {"receipt_path": receipt_path},
-    }
-    for field in _RECEIPT_NODATA_FIELDS:
-        receipt.setdefault(field, "NO-DATA")
-    with open(receipt_path, "w", encoding="utf-8") as fh:
-        json.dump(receipt, fh)
-    return d
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "journey@example.invalid"],
+                 ["config", "user.name", "a journey walker"]):
+        _git(args, project, env)
+    with open(os.path.join(project, "test_greeting.py"), "w", encoding="utf-8") as fh:
+        fh.write(TEST)
+    _git(["add", "-A"], project, env)
+    _git(["commit", "-q", "-m", "the project before the run"], project, env)
+    contract = os.path.join(home, "journey-contract.json")
+    try:
+        got = subprocess.run([sys.executable, "-B", intake, "adopt", "--ask", OUTCOME, "--out", contract],
+                             cwd=project, env=env, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, None, "the installed intake could not run: %r" % exc
+    try:
+        with open(contract, encoding="utf-8") as fh:
+            checks = [c["command"] for c in json.load(fh)["success_checks"] if c.get("command")]
+    except (OSError, ValueError, KeyError, TypeError):
+        checks = []
+    if got.returncode or not checks:
+        return None, None, "the installed intake wrote no commanded check (exit %d)" % got.returncode
+    plan = os.path.join(home, "journey-plan.json")
+    with open(plan, "w", encoding="utf-8") as fh:
+        json.dump([{"id": "G1", "objective": "write the greeting file", "done_check": checks[0],
+                    "writes": ["greeting.txt"], "deps": []}], fh)
+    writer = os.path.join(home, "journey-writer.py")
+    with open(writer, "w", encoding="utf-8") as fh:
+        fh.write(WRITER)
+    env["MODEL_WORKER_CMD"] = "%s %s" % (shlex.quote(sys.executable), shlex.quote(writer))
+    runs = os.path.join(home, "journey-runs")
+    try:
+        done = subprocess.run([sys.executable, "-B", engine, OUTCOME, "--cwd", project, "--runs-root", runs,
+                               "--plan", plan, "--contract", contract, "--quiet"],
+                              cwd=home, env=env, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, None, "NO-DATA: the installed engine could not run: %r" % exc
+    said = done.stdout + done.stderr
+    receipts = [ln.split("receipt: ", 1)[1].strip() for ln in said.splitlines()
+                if ln.startswith("brother_run: receipt: ")]
+    log = os.path.join(os.path.dirname(os.path.dirname(receipts[-1])), "run.log") if receipts else ""
+    try:
+        with open(log, encoding="utf-8", errors="replace") as fh:
+            said += fh.read()   # the engine's verbatim record names an admission refusal --quiet does not print
+    except OSError:
+        pass
+    refused = [m for m in MACHINE_REFUSALS if m in said]
+    if refused:
+        return None, None, "NO-DATA: this machine refused the run (%s), so it was not a product answer" % refused[0]
+    if not receipts or not os.path.isfile(receipts[-1]):
+        tail = (said.strip().splitlines() or [""])[-1][:140]
+        return None, None, "the installed engine wrote no receipt (exit %d): %s" % (done.returncode, tail)
+    return os.path.dirname(os.path.dirname(receipts[-1])), project, ""
 
 
 def judge_accept(tool, accept):
@@ -172,12 +217,14 @@ def judge_reject(tool, offer_reject, pushed):
     return 0, "PASS: the reject route ran and pushed nothing to the remote"
 
 
-def _accept_for_real(tool):
+def _accept_for_real(tool, config=None, env=None):
     home = os.environ.get("HOME") or tempfile.mkdtemp(prefix="accept-home-")
     records = os.path.join(home, "journey-deliveries")
     os.makedirs(records, exist_ok=True)
-    run_dir = _run_dir(home)
-    project = os.path.join(home, "journey-project")
+    run_dir, project, why = real_run(config or os.environ.get("CLAUDE_CONFIG_DIR", ""), home, env)
+    if run_dir is None:
+        # A machine refusal is NO-DATA (None); an engine that could not make a run is a FAIL (no record).
+        return (None if why.startswith("NO-DATA") else []), why
     cmd = [sys.executable, "-B", tool, "--name", "journey acceptance",
            "--project-cwd", project,
            "--ref", REF, "--accepted-by", "a journey walker",
@@ -190,7 +237,7 @@ def _accept_for_real(tool):
            "--review-skip-by", "a journey walker",
            "--review-skip-at", "2026-10-29"]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, repr(exc)
     try:
@@ -284,7 +331,7 @@ def main(argv=None):
         return 2
     tool = installed_tool(args.config)
     if args.row == "accept":
-        code, line = judge_accept(tool, _accept_for_real)
+        code, line = judge_accept(tool, lambda t: _accept_for_real(t, args.config))
     else:
         code, line = judge_reject(tool, _offer_reject, _pushed_for_real)
     print(line)

@@ -33,11 +33,13 @@ REQUIRED = ("name", "symptom", "description", "body")
 
 
 def vault_root(explicit=None):
-    """The vault, from the flag, then the environment, then the documented default."""
+    """The vault, from the flag, then BROTHERSBE_VAULT, then the one resolver (KEY1.f)."""
     for candidate in (explicit, os.environ.get("BROTHERSBE_VAULT")):
         if candidate:
             return pathlib.Path(os.path.expanduser(candidate))
-    return pathlib.Path(os.path.expanduser("~/Documents/Kay Vault"))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import pattern_note
+    return pathlib.Path(pattern_note.require_vault_root(None, "wisdom_capture"))
 
 
 def render(lesson, created, project):

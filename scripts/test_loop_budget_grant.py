@@ -429,6 +429,236 @@ class TheKeysAreTheDeployedReaders(unittest.TestCase):
         self.assertEqual(sorted(live), sorted(self.PIN), "the deployed reader's LIMIT_KEYS moved; move the pin and the block with it")
 
 
+#: The deployed reader's load_config in shape (~/.claude/hooks/spend_guard.py, read 2026-10-31): defaults, the default
+#: block, the project block kept only for numeric LIMIT_KEYS, a raise with no future until falls back to the baseline,
+#: and the override answered separately. %(keys)s is the LIMIT_KEYS literal; selftest always passes, so in every case
+#: below the readback is the only guard that can refuse (one condition per fixture).
+READER = '''import datetime, json
+CONFIG = None
+LIMIT_KEYS = %(keys)s
+DEFAULTS = {"soft_out": 400000, "hard_out": 600000, "daily_soft_out": 1600000, "daily_hard_out": 2000000}
+def _future(value, now):
+    text = str(value or "")
+    try:
+        t = datetime.datetime.fromisoformat(text[:-1] if text.endswith("Z") else text)
+    except Exception:
+        return False
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=datetime.timezone.utc)
+    return t > (now or datetime.datetime.now(datetime.timezone.utc))
+def _numeric(block):
+    return {k: block[k] for k in LIMIT_KEYS if k in block and isinstance(block[k], (int, float))
+            and not isinstance(block[k], bool)}
+def load_config(project_slug, now=None):
+    with open(CONFIG) as f:
+        cfg = json.load(f)
+    limits = dict(DEFAULTS)
+    limits.update(_numeric(cfg.get("default") or {}))
+    base = dict(limits)
+    proj = (cfg.get("projects") or {}).get(project_slug) or {}
+    granted = _numeric(proj)
+    limits.update(granted)
+    raised = [k for k in granted if granted[k] > base.get(k, 0)]
+    if raised and not _future(proj.get("until"), now):
+        for k in raised:
+            limits[k] = base[k]
+    override = cfg.get("override") or {}
+    active = None
+    if override and _future(override.get("until"), now):
+        active = {"until": override.get("until"), "reason": override.get("reason", "")}
+    return limits, active
+def selftest():
+    return 0
+'''
+GOOD_KEYS = '("soft_out", "hard_out", "daily_soft_out", "daily_hard_out")'
+#: THE JOURNEY (RC10): the historical producer/reader mismatch, a reader keyed on the names this tool used to write.
+OLD_KEYS = '("session_soft", "session_hard", "daily_soft", "daily_hard")'
+SECRET_SLUG = "Other-Project-Not-Granted"
+
+
+class EffectiveReadback(_Scratch):
+    """AUTH1.a: a grant is applied only when the deployed reader, asked through its own load_config, enforces it.
+
+    A generic guard selftest PASS says the guard works, not that THIS slug reads THIS block. Each case asks the
+    reader what it will enforce and compares the four limits with the block. Frozen by the integrator before the
+    implementation (red first: effective_grant does not exist on 03d90d279)."""
+
+    LIMITS = ("hard_out", "soft_out", "daily_hard_out", "daily_soft_out")
+    FIELDS = {"verdict", "slug", "hard_out", "soft_out", "daily_hard_out", "daily_soft_out", "override_active", "reason"}
+
+    def setUp(self):
+        super().setUp()
+        self.home = os.path.join(self.root, "home")
+        os.makedirs(os.path.join(self.home, ".claude", "hooks"))
+        patcher = mock.patch.dict(os.environ, {"HOME": self.home})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.os_env = dict(os.environ)
+        self.os_env.pop("BROTHER_RUN_DIR", None)
+        self.guard = os.path.join(self.home, ".claude", "hooks", "spend_guard.py")
+        self.write_config(json.dumps({"override": None, "projects": {SECRET_SLUG: {"hard_out": 1}}}))
+
+    def write_guard(self, body):
+        with open(self.guard, "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+    def rendered(self, block=None):
+        return grant.render_config(self.config, ["Brother"], block or self.block())
+
+    def run_main(self, *extra):
+        argv = ["--words", WORDS, "--tokens", "3000000", "--until", FUTURE,
+                "--spent", "100", "--config", self.config, "--project-slug", "Brother"] + list(extra)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = grant.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def run_entry(self):
+        import subprocess
+        tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop_budget_grant.py")
+        return subprocess.run([sys.executable, "-B", tool, "--words", WORDS, "--tokens", "3000000", "--until", FUTURE,
+                               "--project-slug", "Brother", "--spent", "0", "--config", self.config],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              universal_newlines=True, timeout=120, env=self.os_env)
+
+    def test_effective_matches_block(self):
+        self.write_guard(READER % {"keys": GOOD_KEYS})
+        block = self.block()
+        got = grant.effective_grant(self.rendered(block), "Brother", guard_path=self.guard)
+        self.assertEqual(got["verdict"], "PASS", got)
+        for key in self.LIMITS:
+            self.assertEqual(got[key], block[key], key)
+        self.assertIs(got["override_active"], False)
+        code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertIn("effective: PASS", out)
+        self.assertEqual(json.loads(self.read_config())["projects"]["Brother"]["hard_out"], 3000100)
+
+    def test_misnamed_key_reads_default_and_refuses(self):
+        self.write_guard(READER % {"keys": OLD_KEYS})
+        got = grant.effective_grant(self.rendered(), "Brother", guard_path=self.guard)
+        self.assertEqual(got["verdict"], "FAIL", got)
+        self.assertEqual(got["hard_out"], 600000)
+        self.assertEqual(got["soft_out"], 400000)
+        before = self.read_config()
+        code, out, err = self.run_main()
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.read_config(), before, "a grant the reader does not enforce must write nothing")
+        self.assertIn(self.guard, err)
+        self.assertIn("hard_out", err)
+        self.assertIn("REFUSED", err)
+
+    def test_soft_limit_alone_differing_refuses(self):
+        # The reader enforces hard_out as granted and reads the soft limits under other names: comparing hard_out
+        # alone would call this a grant.
+        self.write_guard(READER % {"keys": '("hard_out", "daily_hard_out", "session_soft", "daily_soft")'})
+        block = self.block()
+        got = grant.effective_grant(self.rendered(block), "Brother", guard_path=self.guard)
+        self.assertEqual(got["hard_out"], block["hard_out"])
+        self.assertEqual(got["verdict"], "FAIL", got)
+        self.assertEqual(self.run_main()[0], 2)
+
+    def test_active_override_is_not_a_grant(self):
+        self.write_guard(READER % {"keys": GOOD_KEYS})
+        self.write_config(json.dumps({"override": {"until": FUTURE, "reason": "suspended"}, "projects": {}}))
+        got = grant.effective_grant(self.rendered(), "Brother", guard_path=self.guard)
+        self.assertIs(got["override_active"], True)
+        self.assertEqual(got["verdict"], "FAIL", got)
+        before = self.read_config()
+        self.assertEqual(self.run_main()[0], 2)
+        self.assertEqual(self.read_config(), before)
+
+    def test_incompatible_reader_refuses(self):
+        bodies = (
+            "CONFIG = None\ndef load_config(a, b, c):\n    return {}, None\ndef selftest():\n    return 0\n",
+            "CONFIG = None\ndef load_config(slug, now=None):\n    raise TypeError('new schema')\n"
+            "def selftest():\n    return 0\n",
+            "CONFIG = None\ndef load_config(slug, now=None):\n    return 'limits'\ndef selftest():\n    return 0\n",
+            "CONFIG = None\ndef load_config(slug, now=None):\n    return {'hard_out': '3000100'}, None\n"
+            "def selftest():\n    return 0\n",
+        )
+        for body in bodies:
+            self.write_guard(body)
+            got = grant.effective_grant(self.rendered(), "Brother", guard_path=self.guard)
+            self.assertEqual(got["verdict"], "FAIL", body)
+            before = self.read_config()
+            code, _, err = self.run_main()
+            self.assertEqual(code, 2, body)
+            self.assertEqual(self.read_config(), before, body)
+            self.assertIn("REFUSED", err)
+
+    def test_reader_without_load_config_is_no_data(self):
+        # Integrator ruling 2026-10-31: a guard with no load_config cannot be read back. It is NO-DATA, never PASS,
+        # and does not refuse here, so the frozen selftest-only cases above keep their meaning; LOOP1.b's admission
+        # refuses paid work on a NO-DATA readback.
+        self.write_guard("CONFIG = None\ndef selftest():\n    return 0\n")
+        got = grant.effective_grant(self.rendered(), "Brother", guard_path=self.guard)
+        self.assertEqual(got["verdict"], "NO-DATA", got)
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("effective: NO-DATA", out)
+        self.assertNotIn("effective: PASS", out)
+
+    def test_absent_reader_is_no_data(self):
+        got = grant.effective_grant(self.rendered(), "Brother", guard_path=self.guard)
+        self.assertEqual(got["verdict"], "NO-DATA", got)
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("effective: NO-DATA", out)
+        self.assertNotIn("effective: PASS", out)
+
+    def test_readback_is_sanitized(self):
+        for body in (READER % {"keys": GOOD_KEYS}, READER % {"keys": OLD_KEYS}):
+            self.write_guard(body)
+            got = grant.effective_grant(self.rendered(), "Brother", guard_path=self.guard)
+            self.assertEqual(set(got), self.FIELDS)
+            text = json.dumps(got)
+            self.assertNotIn(WORDS, text)
+            self.assertNotIn(SECRET_SLUG, text)
+            code, out, err = self.run_main()
+            self.assertNotIn(WORDS, out + err)
+            self.assertNotIn(SECRET_SLUG, out + err)
+
+    def test_every_slug_is_read_back(self):
+        # A reader that enforces the block for the first slug only: checking one slug would call this a grant.
+        self.write_guard((READER % {"keys": GOOD_KEYS}).replace(
+            "    granted = _numeric(proj)\n",
+            "    granted = _numeric(proj) if project_slug == \"Brother\" else {}\n"))
+        before = self.read_config()
+        code, _, err = self.run_main("--project-slug", "Two")
+        self.assertEqual(code, 2, err)
+        self.assertIn("Two", err)
+        self.assertEqual(self.read_config(), before)
+
+    def test_after_write_readback_failing_is_loud(self):
+        # A reader that enforces the block on its first read and the defaults afterwards (state kept on disk, since
+        # the module is loaded fresh each time): the pre-write readback passes, the post-write one must not.
+        marker = os.path.join(self.root, "read-once")
+        self.write_guard((READER % {"keys": GOOD_KEYS}).replace(
+            "    granted = _numeric(proj)\n",
+            "    import os\n    granted = {} if os.path.exists(%r) else _numeric(proj)\n    open(%r, 'w').close()\n"
+            % (marker, marker)))
+        code, out, err = self.run_main()
+        self.assertEqual(code, 2, out)
+        self.assertIn("NOT EFFECTIVE", err)
+        self.assertNotIn("effective: PASS", out)
+        self.assertEqual(json.loads(self.read_config())["projects"]["Brother"]["hard_out"], 3000100,
+                         "the file is written before the second read; the message must say so")
+
+    def test_entry_start_run_refuses_on_fail(self):
+        # ENTRY POINT: start_run.sh step 4c runs this file as a subprocess with this argv shape and refuses the
+        # launch on a nonzero exit. Run the real file the same way, the reader installed under HOME.
+        self.write_guard(READER % {"keys": OLD_KEYS})
+        before = self.read_config()
+        r = self.run_entry()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("REFUSED", r.stdout)
+        self.assertEqual(self.read_config(), before)
+        self.write_guard(READER % {"keys": GOOD_KEYS})
+        r = self.run_entry()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("effective: PASS", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

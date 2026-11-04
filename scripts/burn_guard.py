@@ -59,6 +59,34 @@ def headroom(rows, ceiling):
     funded lanes past money the ledger had already committed to a dead holder's unknown cost."""
     return ceiling - spend(rows) - abandoned_liability(rows)
 
+def read_cap(path, now=None):
+    """AUTH1.c: the dollar cap, the live grant {daily_cap, until, grant_note} or loop_budget_grant.cap_block's {dollars,
+    until, reason}, one validation for both. The cap lapses with
+    the grant's own until. Missing, unreadable or malformed reads NO-DATA and an expired cap reads FAIL; both
+    answer dollars 0.0 and expired True, so no reading of a cap that cannot be trusted ever funds a lane."""
+    now = datetime.datetime.now().timestamp() if now is None else now
+    try:
+        with open(path, encoding="utf-8") as f: g = json.load(f)
+        # STAB1.g: the live grant (loop_intake.write_grant) names its amount daily_cap and its words grant_note; the
+        # older cap_block shape names them dollars and reason. One validation for both, so neither can fund on less.
+        live = "daily_cap" in g
+        dollars, until = g["daily_cap" if live else "dollars"], g["until"]
+        if not isinstance(dollars, (int, float)) or isinstance(dollars, bool) or not 0 < dollars < float("inf"):
+            raise ValueError("dollars is not a positive finite number: %r" % (dollars,))
+        # the same rule as loop_budget_grant._until_stamp: an offset is required, a trailing Z means UTC
+        text = until.strip()
+        zulu = text.endswith(("Z", "z"))
+        moment = datetime.datetime.fromisoformat(text[:-1] if zulu else text)
+        if zulu and moment.tzinfo is None: moment = moment.replace(tzinfo=datetime.timezone.utc)
+        elif zulu or moment.utcoffset() is None: raise ValueError("until carries no single offset: %r" % until)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return {"verdict": "NO-DATA", "dollars": 0.0, "until": None, "expired": True,
+                "reason": "cap unreadable (%s); no lane is funded until it can be read" % exc}
+    if moment.timestamp() <= now:
+        return {"verdict": "FAIL", "dollars": 0.0, "until": until, "expired": True,
+                "reason": "the cap lapsed with its grant at %s" % until}
+    return {"verdict": "PASS", "dollars": float(dollars), "until": until, "expired": False, "reason": g.get("grant_note" if live else "reason", "")}
+
 def hours_left(now, stop_hour, tz=None):
     """Hours until the next stop_hour o'clock. Always positive; a stop hour that already passed means tomorrow."""
     dt = datetime.datetime.fromtimestamp(now, tz)
@@ -152,10 +180,12 @@ def main():
             rows = [json.loads(l) for l in f if l.strip()]
     except (OSError, ValueError) as exc:
         print("NO-DATA: ledger unreadable (%s); no lane is funded until it can be read" % exc); print(0); return 3
-    try:
-        with open(GRANT, encoding="utf-8") as f: ceiling = float(json.load(f)["daily_cap"])
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        print("NO-DATA: cap grant unreadable (%s); no lane is funded until it can be read" % exc); print(0); return 3
+    grant = read_cap(GRANT)  # the one cap reader: an expired, malformed or unreadable grant funds no lane (STAB1.g)
+    if grant["verdict"] != "PASS":
+        print("%s: cap grant %s (%s); no lane is funded until a live grant is read"
+              % (grant["verdict"], "expired" if grant["verdict"] == "FAIL" else "unreadable", grant.get("reason") or GRANT))
+        print(0); return 3
+    ceiling = grant["dollars"]
     now = datetime.datetime.now().timestamp()
     total = spend(rows)
     liability = abandoned_liability(rows)

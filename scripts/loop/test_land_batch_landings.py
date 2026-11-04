@@ -446,7 +446,7 @@ class Landings(unittest.TestCase):
         # ONE CONDITION: the REAL pre-commit check and the module it imports, with a HOME that holds no term list; its own
         # NO-DATA (exit 2) refuses the landing, named as the pre-commit check's, and nothing is committed or pushed
         real = {}
-        for name in ("self_check_staged.py", "private_terms_scan.py"):
+        for name in ("self_check_staged.py", "private_terms_scan.py", "credit_marks.py"):
             with open(os.path.join(REPO, "scripts", name), encoding="utf-8") as fh:
                 real["scripts/" + name] = fh.read()
         f = self.fixture(tree_files=real)

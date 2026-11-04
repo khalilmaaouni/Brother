@@ -50,7 +50,7 @@ def unit(uid, subs, evidence=""):
             raise ValueError("sub unit id must be a non-empty string")
     if not isinstance(evidence, str):
         raise ValueError("evidence must be a string")
-    return {"id": uid, "state": "OPEN", "spec": "docs/plan/specs/%s.md" % uid,
+    return {"id": uid, "state": "OPEN", "lane": "loop", "loop_gradable": True, "spec": "docs/plan/specs/%s.md" % uid,
             "sub_units": list(subs), "evidence": evidence}
 
 
@@ -948,7 +948,7 @@ class RunnerPoolAdmission(unittest.TestCase):
         return p
 
     def pool_pass(self, units: list, wip_status: str, env: Optional[dict] = None,
-                  scores: Optional[dict] = None) -> str:
+                  scores: Optional[dict] = None, dry: bool = True) -> str:
         """One --dry pass IN PROCESS, with the pool's limits reader pointed at `wip_status` (a fixture path).
 
         The entry cases for the finish-first limits need the module constant WIP_STATUS moved, and a process cannot
@@ -970,7 +970,7 @@ class RunnerPoolAdmission(unittest.TestCase):
             for k, v in (env or {}).items():
                 os.environ[k] = v
             os.chdir(self.dir)
-            sys.argv = [POOL, "--dry"]
+            sys.argv = [POOL, "--dry"] if dry else [POOL]
             with contextlib.redirect_stdout(buf):
                 spec = importlib.util.spec_from_file_location("runner_pool_acc3b_%d" % id(self), POOL)
                 mod = importlib.util.module_from_spec(spec)
@@ -1069,7 +1069,10 @@ class RunnerPoolAdmission(unittest.TestCase):
     def test_each_pass_leaves_one_dated_reading_the_report_can_read(self):
         """R-WIP-8: one pass under report writes the complete, dated record; read_wip_record reads it back and no
         temporary sibling is left behind."""
-        out = self.pool_pass([unit("D3", ["D3.1"])], self.wip_fixture(code=1), scores={"D3.1": 10})
+        # LOOP1.a REQ-LOOP1A-02: a dry pass writes only the room record, so this reading comes from a real pass over an
+        # empty plan, which admits and launches nothing and writes only under the fixture HOME.
+        out = self.pool_pass([], self.wip_fixture(code=1), dry=False)
+        self.assertNotIn("START", out, out)
         self.assertIn("WIP     OVER gate report", out)
         record = os.path.join(self.home, ".claude", "evidence", "wip-status.json")
         self.assertTrue(os.path.isfile(record), out)

@@ -235,6 +235,16 @@ def show(pair):
     return "NO-DATA" if pair is None else "%d/%d" % pair
 
 
+def checker_text(f):
+    """The checker lane for the PULSE line. STAB1.f: "0/0" read as a lane that is alive and about to rule. RETIRED instead when
+    work reached its stage (a probe approved a build) and the lane gave no verdict and lost no call (no answer 0): it ruled on
+    nothing while its input arrived. Only the checker is renamed: loop_watch reads the grade pair of the same line by regex."""
+    pair, ready = f["checker"], f.get("ready_seen")
+    if pair == (0, 0) and not f["checker_nodata"] and ready:
+        return "RETIRED"
+    return show(pair)
+
+
 USD_PER_LANDING_CAP = float(os.environ.get("BROTHER_USD_PER_LANDING_CAP", "2.00"))   # the owner's bar, 2026-09-24
 COST_MIN_LANDINGS = 3   # a ratio over fewer landings is noise
 
@@ -308,7 +318,7 @@ def pulse(start, passes, log, spent=None):
     if cost_warn: warns = list(warns) + [cost_warn]
     line = ("PULSE pass %s | %.1f h | landed %s | grade ok %s | probe ok %s | checker LAND %s (no answer %d) | parked %d of %d | running %d | %s | %s"
             % (passes, f["hours"], "NO-DATA" if f["landed"] is None else f["landed"], show(f["grade"]), show(f["probe"]),
-               show(f["checker"]), f["checker_nodata"], f["parked"], f["touched"], f["running"], cost_text,
+               checker_text(f), f["checker_nodata"], f["parked"], f["touched"], f["running"], cost_text,
                "PRODUCING" if f["landed"] and not cost_warn else ("%d WARNING(S)" % len(warns) if warns else "no landing yet")))
     print(line)
     try:

@@ -99,7 +99,7 @@ class EmptyOrNoHolder(unittest.TestCase):
         claims, problem = L.acquire(p, root, "session-a")
         self.assertEqual(problem, "")
         self.assertEqual(len(claims), 1, claims)
-        self.assertIn(L.ROOT_PREFIX + os.path.realpath(root), claims)
+        self.assertIn(L.root_key(os.path.realpath(root)), claims)
 
     def test_a_git_root_with_no_prior_claim_gets_both_targets(self):
         p, root = store(), a_repo()
@@ -160,7 +160,7 @@ class ASecondConcurrentActorIsRefusedByName(unittest.TestCase):
         # left dangling in the store for a key that was never touched.
         with open(p, encoding="utf-8") as fh:
             data = json.load(fh)
-        wt_b_key = L.ROOT_PREFIX + os.path.realpath(wt_b)
+        wt_b_key = L.root_key(os.path.realpath(wt_b))
         self.assertNotIn(wt_b_key, data)
 
 
@@ -173,7 +173,7 @@ class AcquireIsAllOrNothing(unittest.TestCase):
         this very call took must not survive the call failing."""
         repo = a_repo()
         p = store()
-        root_key = L.ROOT_PREFIX + os.path.realpath(repo)
+        root_key = L.root_key(os.path.realpath(repo))
         seeded, problem = C.acquire(p, root_key, "other-owner")
         self.assertEqual(problem, "", problem)
 
@@ -183,7 +183,7 @@ class AcquireIsAllOrNothing(unittest.TestCase):
 
         with open(p, encoding="utf-8") as fh:
             data = json.load(fh)
-        common_key = L.COMMON_PREFIX + L.common_git_dir(repo)
+        common_key = L.common_key(L.common_git_dir(repo))
         self.assertNotEqual(data[common_key]["state"], "claimed",
                             "the common target this call itself took must "
                             "be released again once the root target lost")

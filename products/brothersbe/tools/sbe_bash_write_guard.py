@@ -1491,6 +1491,106 @@ def _commit_paths(common, base, sub, target):
     return None if out is None else out.split()
 
 
+# ---------------------------------------------------------------------------
+# Generated bundle copies (GUARD2).
+#
+# scripts/bundle_runtime.py writes byte copies of product files into bundle/,
+# and some of those copies match an owner pattern (the guard itself, policy.py).
+# A `git merge` bringing such copies in is allowed when each can be no more
+# than its source: every owner path the merge changes is a copy in a folder the
+# generator writes, the merged manifest lists it, and in the merged tree it is
+# byte identical to its source, a source the merge itself does not change (a
+# changed source is an owner path outside those folders, still refused). The
+# source is read off the copy's own path, never off the manifest, so a branch
+# cannot point a copy at a source of its choosing. The merged tree is computed
+# by `git merge-tree --write-tree` (renames and edits on both sides included)
+# and read with fixed git commands. Nothing from the branch is run, which is
+# why this is not the branch's own `bundle_runtime.py --check`: a branch
+# controls that file. Any answer git cannot give keeps the refusal. Cost: one
+# merge-tree, only for a merge that already touched an owner path; it writes
+# the merged objects to the object store unreferenced (no ref, index or file
+# changes), where git's own gc removes them.
+# ---------------------------------------------------------------------------
+
+#: (folder the generator writes copies into, the manifest listing them, what
+#: that manifest calls a copy's tail). A copy <folder><tail> has the source
+#: products/<tail>.
+_GENERATED_COPIES = (
+    ("bundle/runtime/products/", "bundle/runtime/RUNTIME-MANIFEST.json", "products/"),
+    ("bundle/runtime/hooks/", "bundle/runtime/hooks/HOOKS-MANIFEST.json", ""),
+)
+
+
+def _tree_entry(common, base, tree, path):
+    """(mode, type, object id) of `path` in `tree`, ("", "", "") when `tree`
+    has no such path, or None when git cannot answer."""
+    out = common.git_output(base, ["ls-tree", "-z", "--full-tree", tree, "--", path])
+    if out == "":
+        return ("", "", "")
+    parts = (out or "").split("\t")[0].split()
+    return tuple(parts) if len(parts) == 3 else None
+
+
+def _manifest_lists(common, base, tree, manifest, listed):
+    """True when the manifest in `tree` lists `listed` in its "files", False
+    when it does not, None when it cannot be read as one."""
+    out = common.git_output(base, ["cat-file", "blob", "%s:%s" % (tree, manifest)])
+    try:
+        files = json.loads(out)["files"]
+        return any(isinstance(f, dict) and f.get("path") == listed for f in files)
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def _reshapes_merge(word):
+    """True when the merge option `word` picks a strategy or a strategy option
+    (`-s`, `-X`, either inside a cluster of short options, or any spelling of
+    `--strategy` and `--strategy-option` git accepts)."""
+    if word.startswith("--"):
+        return _abbreviates(word.split("=")[0], "--strategy-option", "--str")
+    return "s" in word[1:] or "X" in word[1:]
+
+
+def _ungenerated_owner_change(common, base, call, targets, target, paths, owner):
+    """"" when every owner path in `paths` (what `git merge <target>` changes) is
+    a generated bundle copy the merge leaves byte identical to its source;
+    otherwise the first path that is not, with why, for the refusal text."""
+    owned = [p for p in paths if _owner_touch([p], owner)]
+    # FETCH_HEAD can name several fetched branches and git merges them all, while
+    # merge-tree below would read only the first. Any git option before the
+    # subcommand except `-C <dir>` (`-c`, `--config-env`, `--git-dir`, `--namespace`,
+    # `--no-replace-objects`) can change what the real merge reads or runs, unseen
+    # by merge-tree.
+    options = [w for k, w in enumerate(call.globals)
+               if w != "-C" and not (k and call.globals[k - 1] == "-C")]
+    if options or len(targets) != 1 or target == "FETCH_HEAD" or any(
+            _reshapes_merge(w) for w in call.rest if _is_flag(w)):
+        return ("%s (a merge strategy, its options, git settings on the command or a "
+                "second branch decide the merged bytes)" % owned[0])
+    out = common.git_output(base, ["merge-tree", "--write-tree", "HEAD", target])
+    tree = (out or "").split("\n")[0].strip()
+    for path in owned:
+        spot = next((s for s in _GENERATED_COPIES if path.startswith(s[0])), None)
+        if spot is None:
+            return "%s (not a copy scripts/bundle_runtime.py writes)" % path
+        if not tree:
+            return ("%s (the merged tree cannot be computed before the merge runs: it "
+                    "conflicts, or git cannot answer: NO-DATA)" % path)
+        tail = path[len(spot[0]):]
+        source = "products/" + tail
+        listed = _manifest_lists(common, base, tree, spot[1], spot[2] + tail)
+        if listed is None:
+            return "%s (%s cannot be read, so the copy is unproven: NO-DATA)" % (path, spot[1])
+        if listed is False:
+            return "%s (%s does not list it as a generated copy)" % (path, spot[1])
+        copy, src = _tree_entry(common, base, tree, path), _tree_entry(common, base, tree, source)
+        if copy is None or src is None:
+            return "%s (git cannot read it or its source %s: NO-DATA)" % (path, source)
+        if copy[1] != "blob" or copy[2] != src[2]:
+            return "%s (not byte identical to its source %s after the merge)" % (path, source)
+    return ""
+
+
 def _words_without(rest, value_flags):
     """The non-flag words of `rest`, skipping the value of each option in
     `value_flags`."""
@@ -1998,7 +2098,9 @@ def content_apply_effect(entries, i, root, common):
         else:
             touched = _owner_touch(out.split(), owner)
     else:
-        words = _words_without(call.rest, {"-m", "-s", "-X", "-F", "--strategy", "-S"})
+        # `-S` takes its key id attached (`-S<keyid>`), never the next word, which
+        # is the commit to merge or pick.
+        words = _words_without(call.rest, {"-m", "-s", "-X", "-F", "--strategy"})
         if sub == "pull":
             targets = ["%s/%s" % (words[0], r) for r in words[1:]] if words else []
             if not words:
@@ -2016,6 +2118,9 @@ def content_apply_effect(entries, i, root, common):
                 unreadable = "%s cannot be resolved, so what it brings in is unknown" % target
                 break
             touched = _owner_touch(paths, owner)
+            if touched and sub == "merge":
+                touched = _ungenerated_owner_change(common, base, call, targets, target,
+                                                    paths, owner)
             if touched:
                 break
     if not touched and not unreadable:
